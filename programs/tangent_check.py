@@ -129,8 +129,8 @@ lang_check.py, whose helpers this reuses), with tangents:
      rounding). The compiler carries the six since M1's build, item 4,
      and its committed references holding them are legs G, H and J's;
      compiled images of generated sources holding them, a marked lane
-     replayed, are leg N's; the three's compiled forms are not this
-     leg's. The nine golden functions need mpmath, so on a host without it
+     replayed, are leg N's; the three's compiled forms are leg T's. The
+     nine golden functions need mpmath, so on a host without it
      this leg is skipped by name, as are legs G and H's references holding
      the six and leg N; legs A to L never need it otherwise
   N  the math library's six compiled, with tangent vectors (M1's build,
@@ -151,6 +151,25 @@ lang_check.py, whose helpers this reuses), with tangents:
      whose guess is wrong and whose tangent, r * da with r the guess, is
      wrong with it - show the replay whole and a fault planted in an
      unmarked lane's tangent red. Skipped by name without mpmath
+  T  sin, cos and tan compiled, with tangent vectors (M2's build, wave 4):
+     leg M's written shapes and generated systems and lang_check's g_three
+     sources (calls to the three beside three of the six - exp, log1p and
+     expm1 - division and the root), one vector or two, run as leg N runs the six; the families'
+     centres in the primal, every lane the theory demands marked asserted
+     marked in the sources whose calls are known, and lanes at 2^2048 and
+     past at fp128 and fp256, marked whatever the test says, some of whose
+     guesses are wrong in the state and, sin's tangent reading cos(a), in
+     the tangent - which ones is mathlib's and is not asserted, only a
+     count of each, nonzero at both formats, so that a marked lane's
+     tangents left unreplayed is red on a real lane and not on the controls
+     alone. Controls with a tangent vector: cos(2^-26) under rtz at fp64
+     (marked, the guess right); a lane at 2^4096 at fp256 (marked, wrong in
+     state and tangent), with an unmarked lane's tangent flipped and the
+     wrong-guess lane unmarked, both red; and the pendulum's shape under
+     rdn at fp64 at a cos centre, a lane that only the tangent's cos(a)
+     marks - R23's byte is one a lane, so the mark excuses the lane's
+     primal state as well, and a flip in it is replayed, not red.
+     Skipped by name without mpmath
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -2764,6 +2783,277 @@ def leg_six(count, rng, everything=False):
           f"{len(wrong)} otherwise; seen {seen}")
 
 
+# ---- T: sin, cos and tan compiled, with tangent vectors (M2's build, wave 4) -
+#
+# Leg M holds the three's rules golden-only; this leg compiles systems that
+# call them - leg M's written shapes (M2_SHAPES) and generated systems
+# (_m2_expr, through m1_texts), and lang_check's g_three sources - with one
+# tangent vector and two, and runs them on seq.py under the rule. Structured
+# centres of the families (python/tests/mathlib_trig_family.py) are put in the
+# primal, and at fp128 and fp256 lanes past the range, which are marked
+# whatever the test says and whose guesses are wrong far enough out: sin's
+# tangent reads cos(a), a second call whose guess is wrong there too, so a
+# marked lane's tangents, replayed whole, are counted wrong in a real lane
+# and M1's plant P6 (a marked lane's tangents left unreplayed) has a lane to
+# be red on besides the controls.
+#
+# A LANE MARKED BY THE TANGENT'S COS ALONE (control T0c). The pendulum's
+# primal holds sin and its tangent cos: at a cos centre that is not a sin
+# centre only cos(theta), the tangent's call, marks. R23's byte is one a lane,
+# so the mark excuses the lane's primal state as well as its tangents: the
+# lane is replayed whole.
+
+def three_controls():
+    """T0a to T0d, the rule's controls with a tangent vector for the three
+    (lang_check's leg O has the rest): each fault planted in a copy of the
+    runs and judged by the rule."""
+    f64, f256 = FORMATS["fp64"], FORMATS["fp256"]
+    tf, _th = LC.trig()
+
+    def d(F, q):
+        return K.round_once(F, sf.RND_RNE, Fraction(q))[0]
+
+    def tans_of(F, qs):
+        return [[[d(F, q)]] for q in qs]
+    # T0a: cos(2^-26) under rtz at fp64, marked, the guess right
+    c = cftc.compile_text("system te\nformat fp64\nround rtz\nstate x\n"
+                          "tangent v\nnext x = cos(x)\nstep map\n", 5,
+                          source="three controls a", stem="t")
+    states = [[tf.argument(f64, (1, 26))], [d(f64, Fraction(3, 10))],
+              [d(f64, Fraction(-7, 10))]]
+    fx = LC.Fixture(c, states, 2, tans=tans_of(
+        f64, (Fraction(3, 2), Fraction(-5, 4), Fraction(1, 3))))
+    v = fx.verdict()
+    LC.check(not v.failing and v.flags_ok and v.per[1].marked == [0] and
+             v.per[1].wrong == [] and v.per[1].wrong_tangents == [] and
+             v.first is None,
+             "T0a. cos at fp64 under rtz with a tangent vector, x = 2^-26 "
+             "(a cos centre: marked, the guess right in its state and its "
+             "tangent), the ordinary lanes bit for bit, FLAGS and STATUS "
+             "fine", v.describe())
+    # T0b: sin at fp256, a lane far past the range: marked, wrong in its
+    # state and in its tangent (cos(a) is wrong there too)
+    c = cftc.compile_text("system te\nformat fp256\nround rne\nstate x\n"
+                          "tangent v\nnext x = sin(x)\nstep map\n", 5,
+                          source="three controls b", stem="t")
+    far = dict((r, b) for b, r in LC.range_lanes(f256))
+    states = [[far["range 2^4096"]], [far["range 2^R successor"]],
+              [d(f256, Fraction(3, 10))], [d(f256, Fraction(-7, 10))]]
+    fx = LC.Fixture(c, states, 2, tans=tans_of(
+        f256, (Fraction(3, 2), Fraction(-5, 4), Fraction(1, 3),
+               Fraction(7, 5))))
+    m = c.ir.m
+    v = fx.verdict()
+    LC.check(not v.failing and v.flags_ok and v.per[1].marked == [0, 1] and
+             v.per[1].wrong == [0] and v.per[1].wrong_tangents == [0] and
+             v.first is None,
+             "T0b. sin at fp256 under rne with a tangent vector, x = 2^4096 "
+             "and 2^1024's successor (both past the range, so both marked "
+             "whatever the test says): the first's guess wrong in its state "
+             "and in its tangent, cos(a) being wrong there too, the second's "
+             "right; both replayed whole, the ordinary lanes bit for bit",
+             v.describe())
+    v = fx.verdict(LC.at_step(2, LC.value_edit(3, m, 1, 0)))
+    LC.check(v.failing == {3} and "lane-value" in v.broken and v.first == 2
+             and "tangents" in " ".join(v.per[2].why) and v.flags_ok,
+             "T0b'. a bit flipped in an unmarked lane's tangent (lane 3 at 2 "
+             "steps) is red there - lane-value, in its tangents",
+             v.describe())
+    v = fx.verdict(LC.at_step(1, LC.byte_edit(0, clear=LC.LANE_MARKED),
+                              onward=True))
+    LC.check(0 in v.failing and "lane-value" in v.broken and v.first == 1,
+             "T0d. the wrong-guess lane past the range with its mark "
+             "silenced (lane 0, from 1 step) is a fault - its state and its "
+             "tangent are wrong and unmarked: lane-value", v.describe())
+    # T0c: the pendulum's shape at a cos centre under a directed attribute
+    # at fp64: only the tangent's cos(theta) marks the lane
+    head = ("system pend\nformat fp64\nround rdn\nstate theta, omega\n")
+    body = ("param g = 9.81\nparam len = 1.5\nd/dt theta = omega\n"
+            "d/dt omega = -(g / len) * sin(theta)\nstep rk4, h = 1/64\n")
+    c = cftc.compile_text(head + "tangent v\n" + body, 5,
+                          source="three controls c", stem="t")
+    c0 = cftc.compile_text(head + body, 5, source="three controls c0",
+                           stem="t")
+    states = [[tf.argument(f64, (1, 26)), d(f64, Fraction(1, 5))],
+              [d(f64, Fraction(3, 10)), d(f64, Fraction(1, 5))],
+              [d(f64, Fraction(-7, 10)), d(f64, Fraction(-1, 3))]]
+    tans = [[[d(f64, q1), d(f64, q2)]] for q1, q2 in
+            ((Fraction(3, 2), Fraction(1, 7)), (Fraction(-5, 4), Fraction(2)),
+             (Fraction(1, 3), Fraction(-3, 4)))]
+    fx = LC.Fixture(c, states, 2, tans=tans)
+    m = c.ir.m
+    v = fx.verdict()
+    alone = LC.rule_compare(c0, states, 2, tally=False)
+    LC.check(not v.failing and v.flags_ok and v.per[1].marked == [0] and
+             alone.marked == [] and not alone.failing,
+             "T0c. the pendulum's shape under rdn at fp64, theta = 2^-26 (a "
+             "cos centre): the lane is marked with the tangent vector, "
+             "and not marked without it - sin(theta) alone does not mark it, "
+             "so the tangent's cos does", f"{v.describe()}; marked "
+             f"{v.per[1].marked}, without the tangent {alone.marked}")
+    v = fx.verdict(LC.at_step(1, LC.value_edit(0, m, 0, 40)))
+    w = fx.verdict(LC.at_step(1, LC.value_edit(1, m, 0, 40)))
+    LC.check(not v.failing and v.flags_ok and 0 in v.per[1].wrong and
+             w.failing == {1} and "lane-value" in w.broken,
+             "T0c'. R23 is one byte a lane, so that mark excuses the lane's "
+             "primal state too: a bit flipped in the marked lane's theta "
+             "(lane 0, 1 step) is replayed and counted wrong, not red; the "
+             "same flip in the unmarked lane 1 is red - lane-value",
+             f"{v.describe()}; {w.describe()}")
+
+
+def leg_three(count, rng, everything=False):
+    section(f"T. sin, cos and tan compiled, with tangent vectors (M2's "
+            f"build, wave 4): leg M's written shapes and generated systems "
+            f"and {count} of lang_check's sources that call them, one "
+            f"vector and two, run on seq.py against the interpreter - "
+            f"states, every tangent and FLAGS - with marked lanes replayed "
+            f"whole")
+    if not LC.have_mpmath():
+        skip("T: sin, cos and tan compiled with tangent vectors",
+             "python has no mpmath module, which their golden functions and "
+             "their routines' generator need (leg M, G and H skip by name "
+             "with it)")
+        return
+    tf, _th = LC.trig()
+    t0 = time.perf_counter()
+    three_controls()
+    texts = [(t, w, None) for t, w in m1_texts(max(1, count // 2),
+                                               "tangent three", M2_SHAPES,
+                                               _m2_expr)]
+    for k in range(count):
+        t, direct, comps = LC.g_three(random.Random(f"tangent three {k}"), k,
+                                      tangent=True)
+        texts.append((t, f"tangent three {k}", (direct, comps, k)))
+    wrong, internal, tally = [], [], {}
+    held = marked = guess = gtan = demanded = refused = flags = 0
+    by_fmt = {f: [0, 0, 0] for f in LC.FORMATS4}      # marked, wrong, tangents
+    seen = {"formats": set(), "rounds": set(), "integrators": set(),
+            "vectors": set(), "three": set()}
+    t_compile = t_run = 0.0
+    for text, what, known in texts:
+        try:
+            g = lang.compile_text(text, what).graph
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name not in LC.SIX_ARTIFACTS:
+                wrong.append(f"{what}: the language refused {e}")
+            continue
+        used = {op for op in g.op_counts("step") if op in LC.THREE}
+        # a generated system of leg M's may draw none of the three; the
+        # sources of lang_check's g_three always call one
+        if not g.tangent or (known is not None and not used):
+            wrong.append(f"{what}: no tangent vector, or none of the three")
+        try:
+            t1 = time.perf_counter()
+            c = cftc.compile_text(text, 5, source=what, stem="t")
+            t_compile += time.perf_counter() - t1
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            wrong.append(f"{what}: refused {e.name}: {e.sentence[:100]}")
+            continue
+        except cftc.InternalError as e:
+            internal.append(f"{what}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+            continue
+        n, T = g.n_state, len(g.tangent)
+        if known is not None:
+            direct, comps, k = known
+            lanes, roles = LC.three_source_lanes(g, rng, direct, comps, k,
+                                                 everything, far_wrong=True)
+        else:
+            lanes = LC.lanes_for(g.fmt, n, rng, 3)
+            lanes += LC.special_lanes(g.fmt, n, lanes[0], rng)
+            lanes.append([0] * n)
+            roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+            far = [b for b, _r in LC.range_lanes(g.fmt)][4:]
+            for j in range(n):
+                fn = LC.THREE[(len(what) + j) % 3]
+                cs = [x for x in LC.trig_centres(fn, g.fmt.name,
+                                                 g.round_name) if x[0] != "m"]
+                if cs:
+                    lane = list(lanes[j % 3])
+                    lane[j] = tf.argument(g.fmt, cs[(len(what) + j) % len(cs)])
+                    lanes.append(lane)
+                    roles.append("structured")
+                if far:
+                    lane = list(lanes[j % 3])
+                    lane[j] = far[(len(what) + j) % len(far)]
+                    lanes.append(lane)
+                    roles.append("range")
+        tans = [[LC.lanes_for(g.fmt, n, rng, 1)[0] for _ in g.tangent]
+                for _ in lanes]
+        # the three lanes whose tangents are special, on the first lane's
+        # state, as leg N has them
+        tspec = tangent_specials(g.fmt, n, T, tans[0])
+        lanes += [list(lanes[0]) for _ in tspec]
+        tans += tspec
+        roles += ["special tangent"] * 3
+        t1 = time.perf_counter()
+        v = LC.rule_compare(c, lanes, 5, tans=tans, tally=False)
+        t_run += time.perf_counter() - t1
+        flags |= v.ref.flags
+        must = [i for i, r in enumerate(roles) if isinstance(r, tuple) and
+                LC.trig_demand(r[1], g.fmt, g.round_name, lanes[i][r[3]])]
+        lost = [roles[i][1:3] for i in must if i not in v.per[1].marked]
+        marked += len(v.marked)
+        guess += len(v.wrong)
+        gtan += len(v.wrong_tangents)
+        demanded += len(must)
+        b = by_fmt[g.fmt.name]
+        b[0] += len(v.marked)
+        b[1] += len(v.wrong)
+        b[2] += len(v.wrong_tangents)
+        seen["formats"].add(g.fmt.name)
+        seen["rounds"].add(g.round_name)
+        seen["integrators"].add(g.integrator[0])
+        seen["vectors"].add(T)
+        seen["three"] |= used
+        if v.failing or not v.flags_ok:
+            wrong.append(f"{what}: {len(v.failing)} unmarked lanes differ; "
+                         f"{v.describe()}")
+        elif lost:
+            wrong.append(f"{what}: demanded and not marked: {lost[:3]}")
+        else:
+            held += 1
+        if what.endswith("three 0"):
+            refused += LC.check_refused_rev7(text, what, wrong, internal, 5,
+                                             cover=LC.TCOVER)
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    fmt_line = ", ".join(f"{f}: {a} marked, {b} wrong, {c} in the tangents"
+                         for f, (a, b, c) in by_fmt.items())
+    print(f"  outcomes: {dict(sorted(tally.items())) or 'none refused'}; "
+          f"compile {t_compile:.1f} s, run under the rule {t_run:.1f} s; "
+          f"FLAGS over the {held} systems held: {flags:#x}; {fmt_line}")
+    check(not internal, f"no InternalError: {len(texts)} systems that call "
+          f"the three with tangent vectors",
+          f"{len(internal)} stopped the compiler with an internal error, "
+          f"exit 70")
+    far_wrong = all(by_fmt[f][1] > 0 and by_fmt[f][2] > 0
+                    for f in ("fp128", "fp256"))
+    check(not wrong and held >= len(texts) // 2 and far_wrong and
+          seen["formats"] == {"fp32", "fp64", "fp128", "fp256"} and
+          seen["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"} and
+          seen["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"}
+          and seen["vectors"] == {1, 2} and seen["three"] == set(LC.THREE),
+          f"T. {held} of {len(texts)} systems holding sin, cos and tan, with "
+          f"one tangent vector and with two, at every format, under every "
+          f"attribute and under {', '.join(sorted(seen['integrators']))}, "
+          f"compiled for sw and run on seq.py at 1, 2 and 5 steps equal to "
+          f"the interpreter, states, every tangent and FLAGS, under the "
+          f"marked-lane rule: structured centres and lanes past the range in "
+          f"the primal ({demanded} demanded marked in the sources whose "
+          f"calls are known, every one marked), {marked} lanes marked and "
+          f"replayed whole, {guess} guesses wrong in their states and "
+          f"{gtan} of them in their tangents too, a nonzero count of both "
+          f"at fp128 and at fp256 ({fmt_line}); the first source refused "
+          f"`target-feature`, naming FLAG_CONTROL, by revision 7's "
+          f"{len(LC.REV7_TARGETS)} targets ({refused}) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise; seen {seen}; {fmt_line}")
+
+
 # ---- the committed references ---------------------------------------------
 
 def write_references():
@@ -2800,10 +3090,21 @@ def main(argv=None):
                          "structured family and both neighbours of each in "
                          "the lanes (minutes more; the default is "
                          "gate-sized)")
+    ap.add_argument("--three", type=int, default=12,
+                    help="generated systems that call sin, cos and tan, "
+                         "compiled and run with tangent vectors in leg T "
+                         "(default 12; half as many beside leg M's written "
+                         "shapes and generated systems)")
+    ap.add_argument("--three-all", action="store_true",
+                    help="the larger draw of leg T: up to twelve centres of "
+                         "each family for each distinct (component, function) "
+                         "pair of a source's direct calls, in the lanes of "
+                         "lang_check's sources (minutes more; the "
+                         "default is gate-sized)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,derivative,"
                          "lyapunov,certified,libcft,determinism,refusals,"
-                         "plants,routines,math,six")
+                         "plants,routines,math,six,three")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled-tangent/ and exit")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
@@ -2836,7 +3137,9 @@ def main(argv=None):
             ("routines", lambda: leg_routines(a.routines,
                                               rng("routines"))),
             ("math", lambda: leg_math(a.math, rng("math"))),
-            ("six", lambda: leg_six(a.six, rng("six"), a.six_all))]
+            ("six", lambda: leg_six(a.six, rng("six"), a.six_all)),
+            ("three", lambda: leg_three(a.three, rng("three"),
+                                        a.three_all))]
     try:
         for name, fn in legs:
             if only and name not in only:

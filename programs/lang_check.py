@@ -168,15 +168,35 @@ besides.
      with structured arguments in the components the calls read; (N3) the
      call loop over batches of the six, the constant lowered as leg L
      lowers it
+  T  sin, cos and tan, compiled and run (M2's build, wave 4; needs mpmath,
+     else skipped by name), each leg with its own generator so that none
+     of the six's lanes or lines moves: (T1) each alone, at every format
+     and attribute, each integrator among the twenty, on ordinary, large,
+     special, gate-edge, range and structured-family arguments (the
+     centres of python/tests/mathlib_trig_family.py, the minimisers'
+     neighbours among them); at fp128 and fp256 the lanes at and past 2^R
+     (R = mathlib.TRIG_RANGE) are marked whatever the test says, which the
+     theory calls "gated" and never demands, so they are demanded by
+     mathlib_trig_harness.past_range; every lane the theory demands marked,
+     and every lane past the range, marked; on the map configurations the
+     rule's count of wrong guesses at the first checkpoint is equal to the
+     count against routines.GOLDEN (transcend.py) of each marked lane's own
+     argument, nonzero at fp128 and fp256 - which lanes are wrong is
+     mathlib's and is not asserted; and each refused `target-feature` on
+     revision 7's four targets; (T2) generated sources that call them
+     beside three of the six (exp, log1p and expm1), division, the root and
+     the other operations, as N2; (T3) the call loop over batches of the three, the constant
+     lowered, as N3
 
 The legs come in two groups, each with its tally (GROUPS, below): core,
 legs A to H and J with I its tally, which is the `lang` stage, in the
-quick budget; and routines, legs K, K2, L, O and N with I2 its tally, the
-`lang-routines` stage, in the gate budget (verify/run.sh). `--group`
+quick budget; and routines, legs K, K2, L, O, N and T with I2 its tally,
+the `lang-routines` stage, in the gate budget (verify/run.sh). `--group`
 runs a group; with no selection both run. `--six N` is the number of
 generated sources in leg N2, and `--six-all` the larger draw of N1 and N2
 (every centre of each family, both neighbours, twelve ordinary lanes, every
-edge), minutes more than the gate-sized default. A tally runs when every leg
+edge), minutes more than the gate-sized default; `--three N` and
+`--three-all` are T2's number and the larger draw of T1 to T3. A tally runs when every leg
 of its group ran; where `--only` ran part of a group, its tally is a
 SKIP line.
 
@@ -3593,7 +3613,7 @@ def scover(c, v, demanded=0):
 
 
 def check_refused_rev7(text, what, wrong, internal, steps=2,
-                       targets=REV7_TARGETS):
+                       targets=REV7_TARGETS, cover=None):
     """Each of revision 7's four targets refuses the source `target-feature`,
     naming FLAG_CONTROL (CAPS2[14]). -> how many refused."""
     n = 0
@@ -3612,7 +3632,7 @@ def check_refused_rev7(text, what, wrong, internal, steps=2,
         except cftc.InternalError as e:
             internal.append(f"{what} on {t}: internal error (exit 70): "
                             f"{str(e)[:120]}")
-    SCOVER["refusals"] += n
+    (SCOVER if cover is None else cover)["refusals"] += n
     return n
 
 
@@ -3713,7 +3733,7 @@ def leg_six_alone(rng, everything=False, fns=None):
 
 # ---- N2: generated sources that call the six -------------------------------
 
-def g_six(rng, k, tangent=None):
+def g_six(rng, k, tangent=None, fns=SIX, name="sx"):
     """(text, direct, components): a system the language takes that calls
     the math library's six beside division, the root and the other
     operations - in equations and, one time in three, in a let - under the
@@ -3724,14 +3744,16 @@ def g_six(rng, k, tangent=None):
     component as it is at the first step - a structured argument put in
     that component marks that call. Under Stormer-Verlet only the position
     equations' calls do (they are evaluated at the momenta before the half
-    drift); a momentum equation's calls read the drifted position."""
+    drift); a momentum equation's calls read the drifted position. `fns`
+    are the functions the calls are drawn from and `name` the system's
+    (the six by default; T2 draws from THREE_MIX)."""
     shape = SHAPES5[k % 5]
     fmt = FORMATS4[(k // 5 + k) % 4]
     rnd = ATTRS5[(k + k // 5) % 5]
     sv = shape == "sv"
     comps = ["q0", "q1", "m0", "m1"] if sv else \
         rng.choice([["x", "y"], ["x", "y", "z"]])
-    lines = [f"system sx{k}", f"format {fmt}", f"round {rnd}",
+    lines = [f"system {name}{k}", f"format {fmt}", f"round {rnd}",
              "state " + ", ".join(comps)]
     if tangent:
         lines.append("tangent v" + (", w" if k % 3 == 2 else ""))
@@ -3744,7 +3766,7 @@ def g_six(rng, k, tangent=None):
     direct, count = [], [0]
 
     def six_term(pool, allow_direct, force=False):
-        fn = SIX[(k + count[0]) % 6]
+        fn = fns[(k + count[0]) % len(fns)]
         count[0] += 1
         s, t = rng.choice(pool), rng.choice(pool)
         lit = rng.choice(LITS[:6])
@@ -4116,6 +4138,684 @@ def leg_six_loops(rng, everything=False):
           f"{len(wrong) + len(internal)} otherwise")
 
 
+# ---- T1 to T3: sin, cos and tan, compiled and run (M2's build, wave 4) -------
+#
+# The radian routines (python/cft_golden/mathlib.py, compiled by cftc since
+# parcel M2C) run here under the same marked-lane rule as the six in N1 to N3,
+# each leg with its own generator, so that no lane, count or check line of the
+# six's moves. What is not the six's:
+#   - the structured families are python/tests/mathlib_trig_family.py's:
+#     TRIG_FAMILY holds compact entries, expand() turns them into centres,
+#     the minimisers' neighbours ("m", v, j) among them (argument() of one
+#     searches its binade through host/tools/pi_worstcase), and classify()
+#     takes its arguments in the six's order;
+#   - at fp128 and fp256 a lane at or past 2^R, R = mathlib.TRIG_RANGE, is
+#     marked whatever the test says (Logan's answer 2, docs/ROADMAP.md, M2's
+#     block). The theory calls such a lane "gated", the class it never
+#     demands, so a demand by classify() alone would never demand one: the
+#     legs demand it by mathlib_trig_harness.past_range;
+#   - every guess measured in range is right, so the replay's values half
+#     (judge counts a marked lane's differing values and requires nothing)
+#     has no wrong guess to count there. Far past the range there are wrong
+#     ones, and T1 asserts a count of them, independent of the rule (below).
+
+THREE = ("sin", "cos", "tan")
+# the functions T2's calls are drawn from: the three beside three of the six
+# (exp, log1p and expm1)
+# at the (k + count) places g_six indexes, so every source of 12 meets each
+THREE_MIX = ("sin", "cos", "tan", "exp", "tan", "cos", "sin", "log1p", "sin",
+             "tan", "cos", "expm1")
+_TRIG = []
+
+
+def trig():
+    """(mathlib_trig_family, mathlib_trig_harness): the three's committed
+    centres and theory, and the range test."""
+    if not _TRIG:
+        sys.path.insert(0, str(ROOT / "python" / "tests"))
+        try:
+            import mathlib_trig_family
+            import mathlib_trig_harness
+        finally:
+            sys.path.remove(str(ROOT / "python" / "tests"))
+        _TRIG.append((mathlib_trig_family, mathlib_trig_harness))
+    return _TRIG[0]
+
+
+def trig_centres(fn, fmtname, rnd):
+    """TRIG_FAMILY's centres for (fn, format, attribute), expanded: (c, e)
+    and ("m", v, j), in the list's order."""
+    tf, _th = trig()
+    return tf.expand(tf.TRIG_FAMILY.get(fn, {}).get(fmtname, {}).get(rnd, []))
+
+
+def range_lanes(F):
+    """[(bits, role)]: the arguments beside and past the stated range at
+    fp128 and fp256 (none at fp32 and fp64, where TRIG_RANGE is None): 2^R's
+    predecessor (decided), 2^R and its successor (marked, the guess right as
+    far as measured), 2^1536, 2^2048, 2^4096 and the largest finite and its
+    negation (marked; the guess is wrong in some of these - which ones is
+    mathlib's, never pinned here)."""
+    tf, _th = trig()
+    R = tf.ml.TRIG_RANGE[F.name]
+    if R is None:
+        return []
+    p2 = tf.ml._pow2
+    return [(p2(F, R) - 1, "range 2^R predecessor"), (p2(F, R), "range 2^R"),
+            (p2(F, R) + 1, "range 2^R successor"),
+            (p2(F, 3 * R // 2), "range 2^1536"),
+            (p2(F, 2 * R), "range 2^2048"), (p2(F, 4 * R), "range 2^4096"),
+            (sf.max_normal_bits(F), "range greatest finite"),
+            (sf.max_normal_bits(F, 1), "range -greatest finite")]
+
+
+def trig_demand(fn, F, rnd, bits):
+    """What the theory demands of the lane: "range" where it is at or past
+    the range (past_range; classify calls it gated), "mark" where classify
+    says so, else None."""
+    tf, th = trig()
+    if th.past_range(F, bits):
+        return "range"
+    return "mark" if tf.classify(F, RND_CODE[rnd], bits, None, fn) == "mark" \
+        else None
+
+
+def three_lanes(fn, fmtname, rnd, rng, everything=False):
+    """[(bits, role)]: the arguments one of the three is run on at one format
+    and attribute - ordinary ones and large ones, the specials, the tiny
+    gate's edge, the range lanes, the TRIG_FAMILY centres (sample_centres of
+    the tiny ones, each with its neighbour a unit in the last place above and
+    for the first three the one below; the first centre's window
+    neighbours, and with `everything` the first eight centres'; and a few
+    minimisers' neighbours where the list has them). A role
+    beginning `structured` or `range` is one the theory may demand marked
+    (trig_demand)."""
+    tf, _th = trig()
+    F = FORMATS[fmtname]
+    sign, one = F.sign_mask, sf.one_bits(F)
+    lanes, seen = [], set()
+
+    def add(bits, role):
+        if bits not in seen:
+            seen.add(bits)
+            lanes.append((bits, role))
+    for _ in range(12 if everything else 3):
+        add(full_value(F, rng, -8, 8), "ordinary")
+    for _ in range(4 if everything else 2):
+        add(full_value(F, rng, 1024, 1 << 30), "ordinary")
+    for bits, role in ((0, "+0"), (sign, "-0"), (sf.inf_bits(F), "+inf"),
+                       (sf.inf_bits(F, 1), "-inf"), (sf.qnan_bits(F), "qNaN"),
+                       (sf.snan_bits(F), "sNaN"), (one, "1"),
+                       (one | sign, "-1"), (1, "least subnormal"),
+                       (F.man_mask, "greatest subnormal"),
+                       (1 << F.man_w, "least normal"),
+                       (sf.max_normal_bits(F), "greatest normal"),
+                       (sf.max_normal_bits(F, 1), "-greatest normal")):
+        add(bits, role)
+    gs, gc = tf.ml.trig_gates(F)
+    gate = tf.ml._pow2(F, gs if fn == "sin" else gc)
+    for d, tag in ((0, "gate"), (-1, "gate -1 ulp"), (1, "gate +1 ulp")):
+        add(ulp_away(F, gate, d), f"edge {tag}")
+    for bits, role in range_lanes(F):
+        add(bits, role)
+    cs = trig_centres(fn, fmtname, rnd)
+    tiny = [c for c in cs if c[0] != "m"]
+    mins = [c for c in cs if c[0] == "m"]
+    if everything:          # up to 150 spread centres, not the whole list
+        tiny = tiny[::max(1, len(tiny) // 150)]
+    for i, centre in enumerate(sample_centres(tiny, fn, F, everything)):
+        x = tf.argument(F, centre)
+        for d, tag in ((0, "centre"), (1, "+1 ulp"), (-1, "-1 ulp")):
+            if d >= 0 or i < 3 or everything:
+                add(ulp_away(F, x, d), f"structured {centre} {tag}")
+        if i == 0:
+            add(x | sign, f"structured {centre} negated")
+        if i == 0 or (everything and i < 8):
+            for bits, lab in tf.neighbours(F, fn, centre):
+                add(bits, f"structured {centre} window {lab}")
+    if mins:
+        step = max(1, len(mins) // 60) if everything else None
+        pick = mins[::step] if everything else \
+            [mins[i * (len(mins) - 1) // 3] for i in range(4)]
+        for centre in pick:
+            add(tf.argument(F, centre), f"structured {centre} minimiser")
+    return lanes
+
+
+# The three's own tally (the routines group's I2, from these legs alone): the
+# SCOVER of the six with the range lanes and the guess tally beside the
+# marks. `tally[format]` is [marked, wrong by the rule, wrong by the oracle]
+# at one step on T1's one-call images.
+TCOVER = {"images": 0, "flags": 0, "loops": 0, "looped_calls": 0,
+          "looped_ops": set(), "refusals": 0, "comparisons": 0, "lanes": 0,
+          "marked": 0, "wrong": 0, "wrong_flags": 0,
+          "by_op": {fn: {"formats": set(), "rounds": set(),
+                         "integrators": set(), "images": 0, "marked": 0,
+                         "wrong": 0, "wrong_flags": 0, "demanded": 0,
+                         "range_demanded": 0, "marked_formats": set(),
+                         "range_formats": set(), "tally": {}}
+                    for fn in THREE}}
+
+
+def tcover(c, v, demanded=0, range_demanded=0):
+    """Count one image of the three run under the rule (as scover does for
+    the six): `v` its Verdict, `demanded` the lanes the theory demands marked
+    and `range_demanded` the lanes past the range, which are demanded too."""
+    T = TCOVER
+    T["images"] += 1
+    T["flags"] |= v.ref.flags
+    T["comparisons"] += 1
+    T["lanes"] += len(v.ref.lanes)
+    T["marked"] += len(v.marked)
+    T["wrong"] += len(v.wrong)
+    T["wrong_flags"] += len(v.wrong_flags)
+    ops = c.ir.op_counts()
+    present = [f for f in R.ROUTINES if ops.get(f)]
+    for fn, d in T["by_op"].items():
+        if ops.get(fn):
+            d["images"] += 1
+            d["formats"].add(c.ir.fmt_name)
+            d["rounds"].add(c.ir.rnd_name)
+            d["integrators"].add(c.ir.integrator[0])
+            if present == [fn]:
+                # one function alone: its marks are its own
+                d["marked"] += len(v.marked)
+                d["wrong"] += len(v.wrong)
+                d["wrong_flags"] += len(v.wrong_flags)
+                d["demanded"] += demanded
+                d["range_demanded"] += range_demanded
+                if v.marked:
+                    d["marked_formats"].add(c.ir.fmt_name)
+                if range_demanded:
+                    d["range_formats"].add(c.ir.fmt_name)
+    for b in getattr(c, "looped", ()):
+        if b.op in THREE:
+            T["loops"] += 1
+            T["looped_calls"] += len(b.calls)
+            T["looped_ops"].add(b.op)
+
+
+def leg_three_alone(rng, everything=False):
+    section("T1. each of sin, cos and tan alone, at every format and "
+            "attribute and each integrator: the families' centres, the "
+            "minimisers' neighbours and the lanes past the range put in "
+            "the lanes on purpose, the marks replayed, and the guesses of "
+            "the one-call images counted against the definition "
+            "(M2's build, wave 4)")
+    if not have_mpmath():
+        skip("T1: sin, cos and tan alone", "python has no mpmath module, "
+             "which their golden functions (python/cft_golden/transcend.py) "
+             "and their routines' generator (python/cft_golden/mathlib.py) "
+             "need (pip install mpmath)")
+        return
+    tf, _th = trig()
+    t0 = time.perf_counter()
+    steps = 2
+    for fn in THREE:
+        wrong, internal, notmarked = [], [], []
+        configs = lanes_n = marked = guess = gflags = demanded = 0
+        refused = rdemanded = 0
+        by_fmt, shapes = {}, set()
+        t1 = time.perf_counter()
+        for fi, fmtname in enumerate(FORMATS4):
+            F = FORMATS[fmtname]
+            for ri, rnd in enumerate(ATTRS5):
+                shape = ALONE_SHAPES[(fi * 5 + ri) % 10]
+                shapes.add(shape)
+                text = alone_text(fn, fmtname, rnd, shape)
+                what = f"{fn} {fmtname} {rnd} {shape}"
+                lanes = three_lanes(fn, fmtname, rnd, rng, everything)
+                # Stormer-Verlet drifts q by h/2 p before the force is
+                # called: the call's operand is q itself where p is zero
+                states = [[b] if shape != "sv" else
+                          [b, full_value(F, rng, -1, 1)
+                           if role == "ordinary" else 0]
+                          for b, role in lanes]
+                try:
+                    c = cftc.compile_text(text, steps, source=what, stem="n")
+                except lang.Refusal as e:
+                    wrong.append(f"{what}: refused {e.name}: "
+                                 f"{e.sentence[:80]}")
+                    continue
+                except cftc.InternalError as e:
+                    internal.append(f"{what}: internal error (exit 70): "
+                                    f"{str(e)[:120]}")
+                    continue
+                first, runner = [], None
+                if shape == "map":
+                    block = c.scratch_block(states, None, None)
+
+                    def runner(s, c=c, states=states, block=block,
+                               first=first):
+                        r = run_image(image_at(c.image, s), c, states, None,
+                                      None, block=block)
+                        if s == 1:
+                            first.append(r)
+                        return r
+                v = rule_compare(c, states, steps, width=c.ir.n_state,
+                                 runner=runner, tally=False)
+                dem = [trig_demand(fn, F, rnd, b) for b, _r in lanes]
+                must = [i for i, d in enumerate(dem) if d == "mark"]
+                rmust = [i for i, d in enumerate(dem) if d == "range"]
+                tcover(c, v, len(must), len(rmust))
+                configs += 1
+                lanes_n += len(lanes)
+                marked += len(v.marked)
+                guess += len(v.wrong)
+                gflags += len(v.wrong_flags)
+                demanded += len(must)
+                rdemanded += len(rmust)
+                d = by_fmt.setdefault(fmtname, [0, 0, 0, 0])
+                d[0] += len(v.marked)
+                d[1] += len(v.wrong)
+                d[2] += len(must)
+                d[3] += len(rmust)
+                if first:
+                    # the guess tally: at one step of `next x = fn(x)` the
+                    # image's state is the guess itself. The oracle is
+                    # routines.GOLDEN (transcend.py), not Ref: each marked
+                    # lane's guess against the golden function of its own
+                    # argument. The rule's count must be it
+                    r, m = first[0], c.ir.m
+                    mk = [k for k in range(len(lanes))
+                          if r.lane_flags[k] & LANE_MARKED]
+                    gw = [k for k in mk if r.scratch_out[k * m] !=
+                          R.GOLDEN[fn](F, states[k][0], RND_CODE[rnd])[0]]
+                    tl = TCOVER["by_op"][fn]["tally"].setdefault(
+                        fmtname, [0, 0, 0])
+                    tl[0] += len(mk)
+                    tl[1] += len(v.per[1].wrong)
+                    tl[2] += len(gw)
+                    if v.per[1].marked != mk or v.per[1].wrong != gw:
+                        wrong.append(f"{what}: at 1 step the rule counts "
+                                     f"{len(v.per[1].wrong)} guesses wrong, "
+                                     f"the golden function {len(gw)} "
+                                     f"(lanes {v.per[1].wrong[:4]} against "
+                                     f"{gw[:4]})")
+                if v.failing or not v.flags_ok:
+                    wrong.append(f"{what}: {len(v.failing)} unmarked lanes "
+                                 f"differ; {v.describe()}")
+                lost = [lanes[i][1] for i in must + rmust
+                        if i not in v.per[1].marked]
+                if lost:
+                    notmarked.append(f"{what}: demanded and not marked: "
+                                     f"{lost[:3]}")
+            # the revision-7 refusals, once a function: at the format its
+            # place among the three decides
+            if fmtname == FORMATS4[THREE.index(fn) % 4]:
+                refused += check_refused_rev7(
+                    alone_text(fn, fmtname, "rne", "map"), f"{fn} {fmtname}",
+                    wrong, internal, cover=TCOVER)
+        tl = TCOVER["by_op"][fn]["tally"]
+        for f in (internal + wrong + notmarked)[:8]:
+            print(f"        {f}")
+        fmt_line = ", ".join(f"{f}: {a} marked, {b} wrong, {m}+{r} demanded"
+                             for f, (a, b, m, r) in by_fmt.items())
+        tally_line = ", ".join(f"{f}: {x[1]} by the rule, {x[2]} by the "
+                               f"golden function of {x[0]} marked"
+                               for f, x in tl.items())
+        print(f"  {fn}: {configs} configurations, {lanes_n} lanes; marked "
+              f"{marked}, guesses wrong in value {guess}, in flags {gflags} "
+              f"({fmt_line}) [{time.perf_counter() - t1:.1f} s]")
+        print(f"    guess tally at 1 step, the map configurations: "
+              f"{tally_line}")
+        far = all(tl.get(f, [0, 0, 0])[2] > 0 for f in ("fp128", "fp256"))
+        at = " and ".join(str(s) for s in checkpoints(steps))
+        check(not internal and not wrong and not notmarked and far and
+              configs == 20 and refused == len(REV7_TARGETS),
+              f"T1. {fn}: 20 configurations (4 formats x 5 attributes, "
+              f"{', '.join(sorted(shapes))}), {lanes_n} lanes at {at} steps "
+              f"- ordinary, special, edge, structured and, at fp128 and "
+              f"fp256, past the range ({demanded} the theory demands marked "
+              f"and {rdemanded} past the range, every one marked) - equal the "
+              f"interpreter under the marked-lane rule: {marked} lanes "
+              f"marked and replayed, {guess} guesses wrong in their value, "
+              f"{gflags} in their flags; at 1 step of the map configurations "
+              f"the rule's wrong count equals the golden function's count "
+              f"({tally_line}), nonzero at fp128 and fp256; refused "
+              f"`target-feature`, naming FLAG_CONTROL, on revision 7's "
+              f"{len(REV7_TARGETS)} targets ({refused})",
+              f"{len(wrong) + len(internal) + len(notmarked)} otherwise; "
+              f"far lanes wrong by the golden function: "
+              f"{ {f: tl.get(f, [0, 0, 0])[2] for f in ('fp128', 'fp256')} }")
+    print(f"  ({time.perf_counter() - t0:.1f} s)")
+
+
+# ---- T2: generated sources that call sin, cos and tan -----------------------
+
+def g_three(rng, k, tangent=None):
+    """g_six's sources with their calls drawn from THREE_MIX: the three
+    beside three of the six (exp, log1p and expm1), division, the root and
+    the other operations."""
+    return g_six(rng, k, tangent, fns=THREE_MIX, name="tx")
+
+
+def three_source_lanes(g, rng, direct, comps, k, everything=False,
+                       far_wrong=False):
+    """The lanes a generated source of the three runs on: ordinary ones, the
+    primal's three special lanes, a zero lane, and for each distinct
+    (component, function) pair of the direct calls of the three, lanes with
+    the family's centres put in the component (two, twelve with
+    `everything`), a minimiser's neighbour where the list
+    has one, and two lanes past the range at fp128 and fp256 (the others
+    ordinary); with `far_wrong` those are 2^2048 and past, the lanes whose
+    guesses are wrong as far as measured (T). -> (lanes, roles); a role is
+    "ordinary", "special", "zero" or (kind, function, label, component)."""
+    tf, _th = trig()
+    fmt, n = g.fmt, g.n_state
+    lanes = lanes_for(fmt, n, rng, 3)
+    lanes += special_lanes(fmt, n, lanes[0], rng)
+    lanes.append([0] * n)
+    roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+    far = [b for b, _r in range_lanes(fmt)][4 if far_wrong else 1:]
+    for s, fn in sorted({(s, f) for s, f in direct if f in THREE},
+                        key=lambda sf_: (comps.index(sf_[0]), sf_[1])):
+        cs = trig_centres(fn, fmt.name, g.round_name)
+        picks = sample_centres([c for c in cs if c[0] != "m"], fn, fmt,
+                               everything)
+        mins = [c for c in cs if c[0] == "m"]
+        xs = [("structured", tf.argument(fmt, picks[(k + j) % len(picks)]),
+               picks[(k + j) % len(picks)])
+              for j in range(min(12 if everything else 2, len(picks)))]
+        if mins:
+            m = mins[(7 * k) % len(mins)]
+            xs.append(("structured", tf.argument(fmt, m), m))
+        xs += [("range", far[(k + j) % len(far)], f"far {j}")
+               for j in range(2 if far else 0)]
+        for j, (kind, bits, label) in enumerate(xs):
+            lane = list(lanes[j % 3])
+            lane[comps.index(s)] = bits
+            lanes.append(lane)
+            roles.append((kind, fn, label, comps.index(s)))
+    return lanes, roles
+
+
+def leg_three_generated(count, rng, everything=False):
+    section(f"T2. {count} generated sources that call sin, cos and tan "
+            f"beside division, the root, the six and the other operations, "
+            f"compiled for the software targets and run against the "
+            f"interpreter under the marked-lane rule, and refused "
+            f"`target-feature` on revision 7's (M2's build, wave 4)")
+    if not have_mpmath():
+        skip("T2: generated sources that call sin, cos and tan",
+             "python has no mpmath module (see T1)")
+        return
+    t0 = time.perf_counter()
+    tally, wrong, internal = {}, [], []
+    held = marked = guess = gtan = demanded = flags = refused = 0
+    threes, kinds, cli = set(), set(), []
+    t_compile = t_run = t_refuse = 0.0
+    for k in range(count):
+        text, direct, comps = g_three(random.Random(f"lang three {k}"), k)
+        what = f"three {k}"
+        try:
+            g = lang.compile_text(text, what).graph
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name not in SIX_ARTIFACTS:
+                wrong.append(f"{what}: the language refused {e}")
+            continue
+        used = {op for op in g.op_counts("step") if op in THREE}
+        if not used:
+            wrong.append(f"{what}: none of the three in its step")
+        canon = lang.render_canonical(g)
+        if lang.compile_text(canon, "canonical").graph.to_bytes() != \
+                g.to_bytes():
+            wrong.append(f"{what}: its canonical form reads back as "
+                         f"another graph")
+        lang.render_math(g)
+        try:
+            t1 = time.perf_counter()
+            images, c = {}, None
+            for t in (SW_TARGETS if k < SIX_ALL_TARGETS else SW_TARGETS[:1]):
+                ct = cftc.compile_text(text, 5, target=t, source=what,
+                                       stem="n")
+                images[t] = ct.image
+                c = c or ct             # the run is sw's, at its own depth
+            t_compile += time.perf_counter() - t1
+            if len(set(images.values())) != 1:
+                wrong.append(f"{what}: the software targets' images differ")
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            wrong.append(f"{what}: refused {e.name} on the software "
+                         f"targets: {e.sentence[:100]}")
+            continue
+        except cftc.InternalError as e:
+            internal.append(f"{what}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+            continue
+        lanes, roles = three_source_lanes(g, rng, direct, comps, k,
+                                          everything)
+        tans = None
+        if g.tangent:
+            tans = [[lanes_for(g.fmt, g.n_state, rng, 1)[0]
+                     for _ in g.tangent] for _ in lanes]
+        t1 = time.perf_counter()
+        v = rule_compare(c, lanes, 5, tans=tans, width=c.ir.n_state,
+                         tally=False)
+        t_run += time.perf_counter() - t1
+        flags |= v.ref.flags
+        must = [i for i, r in enumerate(roles) if isinstance(r, tuple) and
+                trig_demand(r[1], g.fmt, g.round_name, lanes[i][r[3]])]
+        tcover(c, v, len(must))
+        lost = [roles[i][1:3] for i in must if i not in v.per[1].marked]
+        marked += len(v.marked)
+        guess += len(v.wrong)
+        gtan += len(v.wrong_tangents)
+        demanded += len(must)
+        threes |= used
+        kinds.add(g.integrator[0])
+        if v.failing or not v.flags_ok:
+            wrong.append(f"{what}: {len(v.failing)} unmarked lanes differ; "
+                         f"{v.describe()}")
+        elif lost:
+            wrong.append(f"{what}: demanded and not marked: {lost[:3]}")
+        else:
+            held += 1
+        t1 = time.perf_counter()
+        refused += check_refused_rev7(
+            text, what, wrong, internal, 5,
+            REV7_TARGETS if k < SIX_ALL_TARGETS else REV7_TARGETS[:1],
+            cover=TCOVER)
+        t_refuse += time.perf_counter() - t1
+        if not cli:
+            cli.append((k, text))
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, text in cli:
+            src = Path(tmp) / f"three{k}.cftl"
+            src.write_bytes(text.encode("ascii"))
+            out = Path(tmp) / f"sw{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                                     str(out)], capture_output=True,
+                               text=True)
+            if p.returncode != 0 or not (out / f"three{k}.cfta").is_file():
+                wrong.append(f"three {k} through the command line on sw: rc "
+                             f"{p.returncode}, {p.stderr.strip()[:120]}")
+            out = Path(tmp) / f"quad{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                     "u50-rev7-quad", "--out", str(out)],
+                               capture_output=True, text=True)
+            if p.returncode != 3 or not p.stderr.startswith(
+                    "cftc: refused target-feature: ") or out.exists():
+                wrong.append(f"three {k} through the command line on "
+                             f"u50-rev7-quad: rc {p.returncode}, "
+                             f"{p.stderr.strip()[:120]}")
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    print(f"  outcomes: {dict(sorted(tally.items()))}; the three used: "
+          f"{sorted(threes)}; integrators {sorted(kinds)}; FLAGS over the "
+          f"{held} sources held: {flags:#x}")
+    print(f"  compile {t_compile:.1f} s, run under the rule {t_run:.1f} s, "
+          f"the refusals {t_refuse:.1f} s")
+    check(not internal, f"no InternalError: {count} generated sources that "
+          f"call the three, on {len(SW_TARGETS) + len(REV7_TARGETS)} targets "
+          f"each", f"{len(internal)} stopped the compiler with an internal "
+          f"error, exit 70")
+    check(not wrong and held >= count // 2 and threes == set(THREE),
+          f"T2. {held} sources accepted by the language read back, compiled "
+          f"for sw - the first {SIX_ALL_TARGETS} for sw:4096 and sw:32768 "
+          f"too, one image for the three - and run on seq.py equal to the "
+          f"interpreter at 1, 2 and 5 steps, states, tangents and FLAGS, "
+          f"under the marked-lane rule: structured and far arguments in the "
+          f"lanes ({demanded} demanded marked, every one marked), {marked} "
+          f"lanes marked and replayed, {guess} guesses wrong in their values "
+          f"({gtan} in their tangents too); sin, cos and tan among them, "
+          f"under {', '.join(sorted(kinds))}; each refused `target-feature`, "
+          f"naming FLAG_CONTROL, by u50-rev7, the first {SIX_ALL_TARGETS} by "
+          f"all {len(REV7_TARGETS)} of revision 7's targets ({refused} "
+          f"refusals), and {len(cli)} through the command line (exit 0 on "
+          f"sw, exit 3 on u50-rev7-quad, nothing written) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise")
+
+
+# ---- T3: the call loop over a batch of the three ----------------------------
+#
+# As N3 for the six (python/cftc/callloop.py): the constant lowered, every
+# batch looped and the largest alone. The batches come by routine depth and
+# then in callloop.ORDER, the order of cft_golden/routines.py's ROUTINES
+# (sin, cos, tan), and the largest is the one of most instructions, ties to
+# the shallower and then by ORDER (callloop.by_size) - which the legs mirror
+# from the code, not from a document.
+
+THREE_LOOPS = {
+    "A": ("system threeloopa\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = sin(a) + b * 0.125\n"
+          "next b = sin(b) - cos(a)\n"
+          "next c = cos(c) + tan(d)\n"
+          "next d = tan(c) * (1/3)\nstep map\n",
+          (("a", "sin"), ("a", "cos"), ("b", "sin"), ("c", "cos"),
+           ("c", "tan"), ("d", "tan")),
+          [("cos", 1, 2), ("sin", 1, 2), ("tan", 1, 2)]),
+    "B": ("system threeloopb\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = tan(sin(a))\nnext b = tan(sin(b)) * 0.5\n"
+          "next c = cos(c)\nnext d = cos(d) - 0.25\nstep map\n",
+          (("a", "sin"), ("b", "sin"), ("c", "cos"), ("d", "cos")),
+          [("cos", 1, 2), ("sin", 1, 2), ("tan", 2, 2)]),
+}
+# source, format, attribute: A at fp64 under rdn (cos at 2^-26 and sin at
+# 3 2^-25 are centres there), A at fp256 under rne (sin's and tan's centres),
+# B at fp128 under rup (the directed lists, the range lanes) and B at fp256
+# under rdn (the long lists and the minimisers' neighbours)
+THREE_LOOP_CASES = (("A", "fp64", "rdn"), ("A", "fp256", "rne"),
+                    ("B", "fp128", "rup"), ("B", "fp256", "rdn"))
+
+
+def leg_three_loops(rng, everything=False):
+    from cftc import callloop
+    above = callloop.CALL_LOOP_ABOVE
+    section("T3. the call loop over a batch of sin, cos and tan (M2's "
+            "build, wave 4): the constant lowered as leg L lowers it for "
+            "Kepler, every batch looped and the largest alone, run against "
+            "the interpreter under the marked-lane rule")
+    if not have_mpmath():
+        skip("T3: the call loop over a batch of the three", "python has no "
+             "mpmath module (see T1)")
+        return
+    tf, _th = trig()
+    t0 = time.perf_counter()
+    wrong, internal = [], []
+    marked = guess = demanded = images = 0
+    for name, fmtname, rnd in THREE_LOOP_CASES:
+        template, places, want_all = THREE_LOOPS[name]
+        text = template.format(fmt=fmtname, rnd=rnd)
+        F = FORMATS[fmtname]
+        size = len(cftc.compile_text(text, 5, source=f"threeloop{name}")
+                   .program.body) + 1
+        try:
+            for low_to, what in ((0, "every batch"),
+                                 (size - 1, "the largest batch alone")):
+                callloop.CALL_LOOP_ABOVE = low_to
+                tag = f"three loop {name} {fmtname} {rnd}, {what}"
+                try:
+                    c = cftc.compile_text(text, 5, source=tag, stem="n")
+                except cftc.InternalError as e:
+                    internal.append(f"{tag}: internal error (exit 70): "
+                                    f"{str(e)[:120]}")
+                    continue
+                looped = sorted((b.op, b.depth, len(b.calls))
+                                for b in c.looped)
+                if low_to == 0:
+                    ok_loops = looped == want_all
+                else:
+                    fsize = {op: len(R.fragment(op, F, RND_CODE[rnd]))
+                             for op, _d, _n in want_all}
+                    best = min(want_all, key=lambda b: (
+                        -b[2] * fsize[b[0]], b[1], callloop.ORDER[b[0]]))
+                    ok_loops = looped == [best]
+                if not ok_loops:
+                    wrong.append(f"{tag}: looped {looped}")
+                g = c.ir
+                lanes = lanes_for(g.fmt, g.n_state, rng, 3, (-2, 2))
+                lanes += special_lanes(g.fmt, g.n_state, lanes[0], rng)
+                lanes.append([0] * g.n_state)
+                roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+                comps = ["a", "b", "c", "d"]
+                for comp, fn in places:
+                    cs = [x for x in trig_centres(fn, fmtname, rnd)
+                          if x[0] != "m"]
+                    for j, centre in enumerate(cs[:6 if everything else 2]):
+                        lane = list(lanes[j % 3])
+                        lane[comps.index(comp)] = tf.argument(F, centre)
+                        lanes.append(lane)
+                        roles.append((fn, comp, centre))
+                far = [b for b, _r in range_lanes(F)][1:]
+                for b in (far[0], far[-3]) if far else ():
+                    # every component past the range at once
+                    lanes.append([b] * 4)
+                    roles.append(("far", "abcd", b))
+                v = rule_compare(c, lanes, 5, width=c.ir.n_state,
+                                 tally=False)
+                tcover(c, v)
+                must = []
+                for i, r in enumerate(roles):
+                    if not isinstance(r, tuple):
+                        continue
+                    for comp, fn in ([(r[1], r[0])] if r[0] != "far" else
+                                     places):
+                        if trig_demand(fn, F, rnd,
+                                       lanes[i][comps.index(comp)]):
+                            must.append((i, fn, comp))
+                marked += len(v.marked)
+                guess += len(v.wrong)
+                demanded += len(must)
+                images += 1
+                lost = [m for m in must if m[0] not in v.per[1].marked]
+                if v.failing or not v.flags_ok:
+                    wrong.append(f"{tag}: {len(v.failing)} unmarked lanes "
+                                 f"differ; {v.describe()}")
+                if lost:
+                    wrong.append(f"{tag}: demanded and not marked: "
+                                 f"{lost[:3]}")
+        finally:
+            callloop.CALL_LOOP_ABOVE = above
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    cases = ", ".join(f"{n} at {f} under {r}" for n, f, r in THREE_LOOP_CASES)
+    check(not internal and not wrong and images == 2 * len(THREE_LOOP_CASES),
+          f"T3. a step of the three looped, the constant lowered: {images} "
+          f"images - source A (a sin, a cos and a tan batch of two calls, "
+          f"all at depth 1) and source B (a tan batch at depth 2, reading "
+          f"the sin calls): {cases}; each with every batch looped and with "
+          f"the largest alone - run on seq.py at 1, 2 and 5 steps equal to "
+          f"the interpreter under the marked-lane rule, FLAGS included: "
+          f"structured and far arguments in the components the calls read "
+          f"({demanded} (lane, call) pairs demanded marked, every lane "
+          f"marked, {marked} lanes marked and replayed, in the loops' "
+          f"iterations and out, {guess} guesses wrong) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong) + len(internal)} otherwise")
+
+
+def leg_three(count, rng_for, everything=False):
+    """T1 to T3, sin, cos and tan compiled and run (each with its own
+    generator, so that one's lanes do not move another's)."""
+    leg_three_alone(rng_for("three alone"), everything)
+    leg_three_generated(count, rng_for("three generated"), everything)
+    leg_three_loops(rng_for("three loops"), everything)
+
+
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage():
@@ -4184,10 +4884,13 @@ def leg_routine_coverage():
           f"{RCOVER['loops']} loops, of {sorted(RCOVER['looped_ops'])}")
     if have_mpmath():
         six_coverage()
+        three_coverage()
     else:
         skip("I2: the math library's six", "python has no mpmath module, "
              "which their legs (N1 to N3) need; the tally of div and sqrt "
              "above stands alone")
+        skip("I2: sin, cos and tan", "python has no mpmath module, which "
+             "their legs (T1 to T3) need")
 
 
 def six_coverage():
@@ -4244,6 +4947,69 @@ def six_coverage():
           f"{SCOVER['refusals']} refusals, {MARKS['marked']} lanes marked")
 
 
+def three_coverage():
+    """The routines tally's third part (M2's build, wave 4), from legs T1 to
+    T3: each of sin, cos and tan compiled and run at every format, under
+    every attribute and integrator; the five flags those runs raised; the
+    marks seen and replayed, at fp64, fp128 and fp256 (fp32 has no family at
+    the decided G = 40, and so none is demanded there); the lanes past the
+    range at fp128 and fp256, demanded marked, and the guess tally against
+    the golden function there; the call loops, run; and the refusals on
+    revision 7."""
+    section("I2 (sin, cos and tan). what legs T1 to T3 covered")
+    T = TCOVER
+    for fn, d in T["by_op"].items():
+        tl = ", ".join(f"{f}: {x[1]} by the rule, {x[2]} by the golden "
+                       f"function" for f, x in sorted(d["tally"].items()))
+        print(f"  {fn}: {d['images']} images; formats {sorted(d['formats'])}; "
+              f"attributes {sorted(d['rounds'])}; integrators "
+              f"{sorted(d['integrators'])}; alone, {d['marked']} lanes "
+              f"marked and replayed ({d['demanded']} demanded, "
+              f"{d['range_demanded']} of them past the range), {d['wrong']} "
+              f"guesses wrong in value, {d['wrong_flags']} in flags; marks "
+              f"at {sorted(d['marked_formats'])}; guess tally ({tl})")
+        check(d["images"] and d["formats"] == set(FORMATS4),
+              f"{fn}, a routine: compiled and run at every format",
+              f"{d['images']} images, at {sorted(d['formats'])}")
+        check(d["rounds"] == set(ATTRS5),
+              f"{fn}: under every attribute, the routine specialised at "
+              f"each", f"{sorted(d['rounds'])}")
+        check(d["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"},
+              f"{fn}: under every integrator", f"{sorted(d['integrators'])}")
+        check(d["marked_formats"] == {"fp64", "fp128", "fp256"} and
+              d["marked"] >= d["demanded"] + d["range_demanded"] > 0,
+              f"{fn}: marks seen and replayed at fp64, fp128 and fp256 "
+              f"- every format where it has a centre or a range - "
+              f"{d['marked']} lanes, {d['demanded']} demanded by the theory "
+              f"and {d['range_demanded']} past the range",
+              f"marks at {sorted(d['marked_formats'])}: {d['marked']} lanes "
+              f"of {d['demanded']} + {d['range_demanded']} demanded")
+        check(d["range_formats"] == {"fp128", "fp256"} and
+              all(d["tally"].get(f, [0, 0, 0])[2] > 0 and
+                  d["tally"][f][1] == d["tally"][f][2]
+                  for f in ("fp128", "fp256")),
+              f"{fn}: the lanes past the range demanded marked at fp128 and "
+              f"fp256, and at each a nonzero count of guesses wrong by the "
+              f"golden function, the rule's count equal to it",
+              f"range at {sorted(d['range_formats'])}; tally {d['tally']}")
+    for flag, word in ((sf.FLAG_INVALID, "invalid"),
+                       (sf.FLAG_DIVZERO, "divideByZero"),
+                       (sf.FLAG_OVERFLOW, "overflow"),
+                       (sf.FLAG_UNDERFLOW, "underflow"),
+                       (sf.FLAG_INEXACT, "inexact")):
+        check(T["flags"] & flag, f"an image of the three's run raised {word}")
+    check(T["loops"] and T["looped_ops"] == set(THREE),
+          f"call loops of the three compiled and run: {T['loops']} loops of "
+          f"{T['looped_calls']} calls, {', '.join(sorted(T['looped_ops']))}",
+          f"{T['loops']} loops, of {sorted(T['looped_ops'])}")
+    check(T["refusals"] > 0 and T["marked"] > 0,
+          f"{T['refusals']} refusals `target-feature` on revision 7's "
+          f"targets; the rule saw {T['marked']} lanes marked and replayed in "
+          f"{T['comparisons']} comparisons of {T['lanes']} lanes, "
+          f"{T['wrong']} guesses wrong in value, {T['wrong_flags']} in flags",
+          f"{T['refusals']} refusals, {T['marked']} lanes marked")
+
+
 # The legs in their two groups, each with its tally: `core` the `lang`
 # stage's, in the quick budget, and `routines` the `lang-routines` stage's,
 # in the gate budget (verify/run.sh; the lead's split, 2026-10-02, when
@@ -4254,7 +5020,8 @@ def six_coverage():
 GROUPS = (("core", ("refs", "corpus", "letmaps", "banks", "libcft",
                     "determinism", "refusals", "plants", "readback"),
            "I, the core tally"),
-          ("routines", ("routines", "pools", "loops", "rule", "six"),
+          ("routines", ("routines", "pools", "loops", "rule", "six",
+                         "three"),
            "I2, the routines' tally"))
 
 
@@ -4309,18 +5076,31 @@ def main(argv=None):
                          "twelve ordinary lanes and every edge a function "
                          "has, in N1 and N2 (minutes more; the default is "
                          "gate-sized)")
+    ap.add_argument("--three", type=int, default=12,
+                    help="generated sources that call sin, cos and tan in "
+                         "leg T2 (default 12)")
+    ap.add_argument("--three-all", action="store_true",
+                    help="the larger draw of the three's legs. T1: up to "
+                         "150 spread centres of the tiny family a "
+                         "configuration, the first eight with their "
+                         "windows' neighbours, twelve ordinary lanes and up "
+                         "to 60 minimisers' neighbours. T2: up to twelve "
+                         "centres for each distinct (component, function) pair "
+                         "of a source's direct calls. T3: six centres a call's component. "
+                         "(Minutes more; the default is gate-sized)")
     ap.add_argument("--group", default="",
                     help="a comma list of groups, each its legs and its tally: "
                          "core (refs, corpus, letmaps, banks, libcft, "
                          "determinism, refusals, plants, readback; the lang "
                          "stage) and routines (routines, pools, loops, rule, "
-                         "six; the lang-routines stage). With neither "
+                         "six, three; the lang-routines stage). With neither "
                          "--group nor --only, both")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs, corpus, letmaps, banks, "
                          "libcft, determinism, refusals, plants, readback "
                          "(the core group), routines, pools, loops, rule, "
-                         "six (the routines group); a group's tally runs "
+                         "six, three (the routines group); a group's tally "
+                         "runs "
                          "only when all its legs ran, and is a SKIP line "
                          "otherwise")
     ap.add_argument("--write", action="store_true",
@@ -4375,7 +5155,8 @@ def main(argv=None):
             ("loops", lambda: leg_call_loops(rng("loops"), a.segrun,
                                              a.audit, work)),
             ("rule", leg_rule),
-            ("six", lambda: leg_six(a.six, rng, a.six_all))]
+            ("six", lambda: leg_six(a.six, rng, a.six_all)),
+            ("three", lambda: leg_three(a.three, rng, a.three_all))]
     if sorted(name for name, _fn in legs) != sorted(known):
         raise AssertionError("a leg is in no group, or a group names a leg "
                              "there is not")
