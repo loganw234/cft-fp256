@@ -385,17 +385,23 @@ one-step vector. On the software backend all ten are the
 `acceptance-rev8` runner stage, in the full census only (until 2026-10-16
 the eight whose compiles take minutes).
 
-Six routine entries follow the ten (parcel MA, M1's build, item 6): the
-committed variational references that hold the math library's six rules -
-Lotka-Volterra in logarithmic variables (exp), two diodes and a source
-(expm1, log1p) and a self-heating culture (exp2, log, log2), each at fp64
-and fp256, in `programs/systems/compiled-tangent/`. A routine needs flag
+Ten routine entries follow the ten (the first six parcel MA's, M1's build,
+item 6; the last four parcel M2A's, M2's build, wave 4): the committed
+variational references that hold the math library's rules, each at fp64
+and fp256, in `programs/systems/compiled-tangent/` - Lotka-Volterra in
+logarithmic variables (exp), two diodes and a source (expm1, log1p) and a
+self-heating culture (exp2, log, log2), then the pendulum (sin, and cos in
+its tangent) and the attitude (sin, cos and tan). A routine needs flag
 control, which no revision-7 target publishes, so they are this set's
-alone; the rule puts all six on the quad, from the images' own words, and
-they need no compile and no mpmath. Each has a structured lane a tile: an
-argument at a centre of the function's structured family, where the
-routine's in-lane test cannot decide the last bit and marks the lane - bit
-7 of its byte and STATUS[6]. A version-1 certificate carries no per-lane
+alone; the rule puts all ten on the quad, from the images' own words, and
+they need no compile and no mpmath. Each has a structured lane a tile (the
+pendulum at fp64 has none, by name: the committed trig families have no
+sin or cos centre at fp64 under rne): an argument at a centre of the
+function's structured family, where the routine's in-lane test cannot
+decide the last bit and marks the lane - bit 7 of its byte and STATUS[6].
+At fp256 the radian entries also declare a RANGE LANE, the recipe's
+overflow lane (2^131081, past 2^1024), an expected mark in each segment it
+marks in. A version-1 certificate carries no per-lane
 block, so the driver reads the blocks itself, through libcft's shared
 library by ctypes (`--lib`, which defaults to the one `make -C host`
 builds, and which a card needs built with XRT=1):

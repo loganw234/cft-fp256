@@ -7,8 +7,9 @@ device, and the `acceptance` and `acceptance-rev8` runner stages on
 libcft's software backend. Two sets: the acceptance set, everything that
 runs on revision 7's quad and so on every card; and the revision-8 set,
 the hard workloads that missed revision 7 and a revision-8 image holds,
-and the math library's routine references, which only revision 8's images
-can run (below).
+and the math library's routine references - the six of M1 and, since
+parcel M2A, the radian case of sin, cos and tan - which only revision 8's
+images can run (below).
 
     python programs/acceptance.py [--set rev7|rev8]
                                   [--device sw|<xclbin>|cft://host:port]
@@ -112,9 +113,10 @@ Each leg's controls: a state bit and a lane's FLAGS planted in a copy of
 its first program's vector, each caught.
 
 THE REVISION-8 SET (`--set rev8`; REV8 and REV8_ROUTINES below;
-programs/acceptance-rev8.json holds what each entry must give): sixteen
-entries of two kinds - the ten hard workloads, and, since parcel MA (M1's
-build, item 6; the last section here), six routine references. THE
+programs/acceptance-rev8.json holds what each entry must give): twenty
+entries of two kinds - the ten hard workloads, and ten routine references:
+six since parcel MA (M1's build, item 6; the last section here) and four
+since parcel M2A (M2's build, wave 4). THE
 WORKLOADS: the hard workloads that missed
 u50-rev7-quad and a revision-8 image holds, measured by parcel W8
 (2026-10-12; docs/VALIDATION.md), each compiled here for the image the
@@ -170,38 +172,57 @@ there. Two of these compile for 40 minutes and 2.2 hours (the REV8 note),
 so a card day compiles once and reads them back. The routine entries read
 the committed files and ignore it.
 
-THE ROUTINE ENTRIES (parcel MA, M1's build, item 6; REV8_ROUTINES, after
-the ten workloads in entries() and the record): the three committed
-variational references that hold the math library's six rules between
-them - Lotka-Volterra in logarithmic variables (exp), two diodes and a
-source (expm1, log1p) and a self-heating culture (exp2, log, log2) - each
-at fp64 and fp256, as programs/systems/compiled-tangent/ holds them. Their
-image and bank are those committed files, held byte for byte to the
-record's digests: no compile, and no mpmath, which only the compiler's
-build of the six needs.
+THE ROUTINE ENTRIES (REV8_ROUTINES, after the ten workloads in entries() and
+the record): ten committed variational references. Parcel MA (M1's build,
+item 6) put in the first six, which hold the math library's six rules between
+them - Lotka-Volterra in logarithmic variables (exp), two diodes and a source
+(expm1, log1p) and a self-heating culture (exp2, log, log2); parcel M2A
+(M2's build, wave 4; the software side of the study's section 10 item 7)
+added the radian case, the pendulum (sin in the step, cos in its tangent)
+and the attitude (sin and cos of phi, tan of theta). Each is at fp64 and
+fp256, as programs/systems/compiled-tangent/ holds it. Their image and bank
+are those committed files, held byte for byte to the record's digests: no
+compile, and no mpmath, which only the compiler's build of the routines
+needs.
   - The image: a routine needs flag control (FLAG_CONTROL, CAPS2[14]),
     which no revision-7 target publishes (python/cftc/targets.py; the
     manifests' accepted_by lists no revision-7 target), so these entries
     can enter this set alone and never the acceptance set, whose record
-    stays as it was. The rule puts all six on the quad, from each image's
-    own words: 1,537 to 3,642 instructions (a tile holds 4,096), 256
-    scratch slots declared, no R21.
+    stays as it was. The rule puts all ten on the quad, from each image's
+    own words (rule_target; the manifests give 1,537 to 3,642 instructions,
+    a tile holds 4,096, 256 scratch slots declared, no R21).
   - The lanes: the references' recipe (SHAKE-256 lanes in the system's box,
     the special lanes on tiles 1 to 3, the special tangents) on one block a
     tile of the quad, and a STRUCTURED lane on each tile (STRUCTURED): the
     tile's fourth lane, one state component set to a centre of a structured
     family of a function the reference holds - python/tests/
-    mathlib_family.py's FAMILY at rne, the arguments next to an exact case
-    where the routine's in-lane test cannot decide the last bit (the
-    study's section 3.5; docs/LANGUAGE.md, "A marked lane") - and the
-    recipe's tangent. That argument is the one the first stage of the
-    first step meets, so the lane marks in segment 0 and nowhere else:
+    mathlib_family.py's FAMILY at rne for the six; python/tests/
+    mathlib_trig_family.py's TRIG_FAMILY at the entry's own attribute for
+    the radian case, the pendulum's rne and the attitude's rdn - the
+    arguments next to an exact case where the routine's in-lane test
+    cannot decide the last bit (the study's section 3.5; docs/LANGUAGE.md,
+    "A marked lane") - and the recipe's tangent. That argument is the one
+    the first stage of the first step meets, so the lane marks in segment 0:
     bit 7 of its byte (R23; 0x90, the mark and INEXACT) and STATUS[6]
-    (0x40) of the segment.
-    All six entries can mark. exp2 and log2 have no family (parcel VMP):
-    the culture's lanes mark through log alone, and its eight exp2 and
-    log2 calls (nor its divisions) never mark. Every other lane of every
-    segment carries no mark.
+    (0x40) of the segment. The six can all mark. exp2 and log2 have no
+    family (parcel VMP): the culture's lanes mark through log alone, and its
+    eight exp2 and log2 calls (nor its divisions) never mark.
+    The pendulum at fp64 has NO structured lane, accepted by name
+    (NO_STRUCTURED, the reason kept in the record): TRIG_FAMILY has no sin or
+    cos centre at fp64 under rne. Its lanes run all the same, and no lane of
+    any segment marks.
+  - THE RANGE LANE (RANGE_LANES; Logan's answer 2, docs/ROADMAP.md's M2
+    block): at fp128 and fp256 a lane past 2^1024 marks whatever the
+    routine's test says. The recipe's first special lane, tile 1's last
+    (lane 31 at fp256), holds 2^(emax/2 + 10) = 2^131081 in its first two
+    components, so at the two fp256 radian entries it marks, and is DECLARED
+    an expected mark in each segment RANGE_LANES lists, held by name apart
+    from the structured lanes (mark_problems, golden_marks and the record's
+    `range`). The segments are measured, not assumed: on the software
+    backend (2026-11-04) lane 31 carried byte 0x90 in segments 0 to 3 of both
+    entries, with STATUS 0x40 in each. At fp64 TRIG_RANGE is None, and the
+    six's fragments carry no range: no other entry has one. Every other lane
+    of every segment carries no mark.
   - The segments: the set's four, of the image's own ten steps.
   - A version-1 certificate carries no per-lane block: cft-segrun asks the
     library for R23's byte a lane only at format version 2 (host/tools/
@@ -215,29 +236,39 @@ build of the six needs.
     to R23's identities (the lanes' bytes OR to the flag word, their [6:5]
     to STATUS[5:4], their [7] to STATUS[6]).
   - The marks are checked by name, not implied by a hash: bit 7 is set on
-    the four structured lanes in segment 0 and on no other lane of any
-    segment, and STATUS[6] on segment 0 and on no other segment; and the
-    golden half, seq.py re-running segment 0 for the spot lanes (the
-    structured ones among them), gives the probe's bytes, bit 7 on the
-    structured lanes alone, STATUS[6], and the certified end states.
-  - The record keeps the recipe (`structured`), the marked lanes with their
-    bytes (`marked`, a segment each) and each segment's block hash
+    the structured lanes in segment 0 and on the declared range lane in its
+    segments, and on no other lane of any segment, and STATUS[6] on those
+    segments and no other; and the golden half, seq.py re-running each such
+    segment for the spot lanes (the structured and range lanes among them),
+    gives the probe's bytes, bit 7 on those lanes alone, STATUS[6], and the
+    certified end states. The golden spot check of the last segment expects
+    STATUS[6] there where a range lane marks in it.
+  - The record keeps the recipe (`structured`, and `no_structured` and
+    `range` where an entry has them), the marked lanes with their bytes
+    (`marked`, a segment each) and each segment's block hash
     (`lane_flags_sha256`, certificate version 2's open hash of the block),
-    and holds a device to them as to the digests. It REQUIRES both keys of
-    every entry in REV8_ROUTINES, by name (KL-345, parcel P4): a record that
-    lacks one fails, naming the entry and the key, where until then the
-    comparison was skipped for want of the key and the verdict line still
-    said the marks and hashes were the set's. The line names only what was
-    compared (marks_compared).
-  - The controls, on the first routine entry: the marked lane's byte with
-    bit 7 cleared, STATUS[6] cleared, a lane marked that the recipe does not
-    mark, STATUS[6] in a segment with no marked lane, a flag word the lanes
-    do not OR to, a probe whose end state or STATUS is not the
-    certificate's, a probe on another backend, tile count, image or depth,
-    the record's marks, hashes and recipe edited, each of the record's two
-    keys deleted in turn, a committed image with a word changed and a bank
-    with a bit flipped (their digests), and the structured lane moved off
-    its centre, which no longer marks.
+    and holds a device to them as to the digests. It REQUIRES both of the
+    last two keys of every entry in REV8_ROUTINES, by name (KL-345, parcel
+    P4): a record that lacks one fails, naming the entry and the key, where
+    until then the comparison was skipped for want of the key and the
+    verdict line still said the marks and hashes were the set's. The line
+    names only what was compared (marks_compared).
+  - The controls, on the first routine entry that has a structured lane (an
+    entry without one is named, with "no mark control was possible"): the
+    marked lane's byte with bit 7 cleared, STATUS[6] cleared, a lane marked
+    that the recipe does not mark, STATUS[6] in a segment with no marked
+    lane, a flag word the lanes do not OR to, a probe whose end state or
+    STATUS is not the certificate's, a probe on another backend, tile count,
+    image or depth, the record's marks, hashes and recipe edited, each of the
+    record's two keys deleted in turn, a committed image with a word changed
+    and a bank with a bit flipped (their digests), and the structured lane
+    moved off its centre, which no longer marks (for a trig centre by a step
+    and a dense tail, off_centre_dense). And the range lane's, on the first
+    entry that declares one: the lane undeclared (named by lane), bit 7
+    cleared in a segment where it is expected, STATUS[6] cleared in segment 2,
+    its argument put under 2^1024 (an expected mark gone missing), the golden
+    half's byte for it changed, and the declaration edited or deleted in the
+    record.
 
 One verdict line an entry and a program, and a total. Every check prints
 `ok` or `FAIL`, and none is skipped: without cft-segrun or cft-audit the
@@ -305,14 +336,17 @@ REFERENCES = (
     ("lorenz96-rk4-tangent-fp256", "compiled-tangent", "lorenz96-rk4", ()),
 )
 # lang_check's boxes, written here so that the set is its own. The last
-# three are the routine references' (programs/tangent_check.py's MATH_BOX):
-# boxes that keep the logarithms in their domains.
+# five are the routine references' (programs/tangent_check.py's MATH_BOX):
+# boxes that keep the logarithms in their domains and the angles away from
+# tan's poles.
 BOX = {"lorenz63-rk4": [(-20, 20), (-25, 25), (5, 45)],
        "lorenz96-rk4": None,                      # every component (-3, 3)
        "henonheiles-lf": [(Fraction(-2, 5), Fraction(2, 5))] * 4,
        "lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
        "diode-rk4": [(0, 4), (0, 4)],
-       "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)]}
+       "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)],
+       "pendulum-rk4": [(-1, 1), (-1, 1)],
+       "attitude-rk4": [(-1, 1), (-1, 1)]}
 TANGENT_BOX = (-2, 2)
 
 # The workloads that fit u50-rev7-quad, and their steps a segment, the same
@@ -359,26 +393,35 @@ REV8_STEPS = 2
 REV8_ORDER = ("u50-rev8-quad", "u50-rev8", "u50-rev8-deep")
 REV8_TILES = {"u50-rev8-quad": 4, "u50-rev8": 1, "u50-rev8-deep": 1}
 
-# The revision-8 set's routine entries (parcel MA, M1's build, item 6): the
-# three committed variational references that hold the math library's six
-# between them - Lotka-Volterra in logarithmic variables (exp), two diodes
-# and a source (expm1, log1p) and a self-heating culture (exp2, log, log2) -
-# each at fp64 and fp256: their images and banks are the committed
-# programs/systems/compiled-tangent/ files, held byte for byte to the
-# record's digests, so the entries need no compile and no mpmath. A routine
-# needs flag control (FLAG_CONTROL, CAPS2[14]), which no revision-7 target
-# publishes (python/cftc/targets.py), so these can enter the revision-8 set
-# alone, on the image the rule picks - read from each image's own words, as the
-# workloads' is: the quad, for all six (instructions 1,537 to 3,642 a tile
-# holds, 256 scratch slots declared, no R21). Each is (name, system, the
-# target the rule must give).
+# The revision-8 set's routine entries: ten committed variational
+# references, each at fp64 and fp256, as programs/systems/compiled-tangent/
+# holds them. Parcel MA (M1's build, item 6) put in the first six, which hold
+# the math library's six between them - Lotka-Volterra in logarithmic
+# variables (exp), two diodes and a source (expm1, log1p) and a self-heating
+# culture (exp2, log, log2); parcel M2A (M2's build, wave 4, the software
+# side of the study's section 10 item 7) added the last four, the radian
+# case: the pendulum (sin in the step, cos in its tangent) and the attitude
+# (sin and cos of phi, tan of theta). Their images and banks are the
+# committed files, held byte for byte to the record's digests, so the entries
+# need no compile and no mpmath. A routine needs flag control (FLAG_CONTROL,
+# CAPS2[14]), which no revision-7 target publishes (python/cftc/targets.py),
+# so these can enter the revision-8 set alone, on the image the rule picks -
+# read from each image's own words, as the workloads' is: the quad, for all
+# ten (1,537 to 3,642 instructions, a tile holds 4,096; 256 scratch slots
+# declared; no R21; rule_target answered u50-rev8-quad for each of the last
+# four on 2026-11-04). Each is (name, system, the target the rule must
+# give), one entry to a line: hw/test_card_stress.py reads them by line.
 REV8_ROUTINES = (
     ("lotkavolterra-rk4-tangent-fp64", "lotkavolterra-rk4", "u50-rev8-quad"),
     ("lotkavolterra-rk4-tangent-fp256", "lotkavolterra-rk4", "u50-rev8-quad"),
     ("diode-rk4-tangent-fp64", "diode-rk4", "u50-rev8-quad"),
     ("diode-rk4-tangent-fp256", "diode-rk4", "u50-rev8-quad"),
     ("culture-rk4-tangent-fp64", "culture-rk4", "u50-rev8-quad"),
-    ("culture-rk4-tangent-fp256", "culture-rk4", "u50-rev8-quad"))
+    ("culture-rk4-tangent-fp256", "culture-rk4", "u50-rev8-quad"),
+    ("pendulum-rk4-tangent-fp64", "pendulum-rk4", "u50-rev8-quad"),
+    ("pendulum-rk4-tangent-fp256", "pendulum-rk4", "u50-rev8-quad"),
+    ("attitude-rk4-tangent-fp64", "attitude-rk4", "u50-rev8-quad"),
+    ("attitude-rk4-tangent-fp256", "attitude-rk4", "u50-rev8-quad"))
 
 # The structured lanes: a lane on purpose whose argument sits at the centre
 # of a function's structured family (python/tests/mathlib_family.py, the
@@ -386,15 +429,29 @@ REV8_ROUTINES = (
 # cannot decide the last bit, and marks the lane - bit 7 of R23's byte,
 # STATUS[6]). One a tile, the tile's fourth lane, one state component of it
 # set to the centre: the argument the first stage of the first step meets,
-# so the lane marks in segment 0 and only there. Per entry, in tile order:
+# so the lane marks in segment 0 (the structured lanes carry "segment": 0;
+# whether a lane marks in a later segment is the range lane's question,
+# below). Per entry, in tile order:
 # (the function, the state component its argument is, the centre). The
-# centres are FAMILY's at rne, the references' attribute: exp's
-# c 2^-53 / c 2^-54 (c 2^-237 and c 2^-238 at fp256), expm1's and log1p's
-# (log1p's anchors, clear themselves, are left out), log's 1 + 6 eps,
-# 1 - 2 (eps/2) and 1 - 12 (eps/2). exp2 and log2 have no family (parcel
-# VMP; the theory, at every format and attribute): the culture's lanes mark
-# through log alone, and its exp2 and log2 calls never mark. python/tests/
-# test_acceptance_marks.py holds each centre to FAMILY and to the theory.
+# six's centres (the first six entries) are mathlib_family.FAMILY's at rne,
+# the references' attribute: exp's c 2^-53 / c 2^-54 (c 2^-237 and c 2^-238
+# at fp256), expm1's and log1p's (log1p's anchors, clear themselves, are
+# left out), log's 1 + 6 eps, 1 - 2 (eps/2) and 1 - 12 (eps/2). exp2 and
+# log2 have no family (parcel VMP; the theory, at every format and
+# attribute): the culture's lanes mark through log alone, and its exp2 and
+# log2 calls never mark. python/tests/test_acceptance_marks.py holds each
+# of those to FAMILY and to the theory.
+# The radian case's (parcel M2A) are python/tests/mathlib_trig_family.py's
+# TRIG_FAMILY at the entry's own attribute - the pendulum's rne, the
+# attitude's rdn - read from the committed lists, and built here by
+# softfloat alone like the others: sin (21, 116) and (27, 116) at fp256
+# under rne; at fp64 under rdn cos 2^-26 (the study's card case's
+# argument, at a directed attribute), 2^-25, 3 2^-26 and 3 2^-25, and at
+# fp256 under rdn cos 2^-70, tan 3 2^-72 and 3 2^-73 (component 1, theta:
+# the attitude's phi is component 0) and sin 3 2^-71. The pendulum at fp64
+# has none: TRIG_FAMILY has no sin or cos centre at fp64 under rne (NO_
+# STRUCTURED). python/tests/test_acceptance_trig.py holds each centre to
+# TRIG_FAMILY and to the trig theory (classify).
 STRUCTURED = {
     "lotkavolterra-rk4-tangent-fp64": (
         ("exp", 1, (1, 53)), ("exp", 0, (3, 53)),
@@ -413,17 +470,54 @@ STRUCTURED = {
         ("log", 0, ("d", 12)), ("log", 0, ("u", 6))),
     "culture-rk4-tangent-fp256": (
         ("log", 0, ("u", 6)), ("log", 0, ("d", 2)),
-        ("log", 0, ("d", 12)), ("log", 0, ("u", 6)))}
+        ("log", 0, ("d", 12)), ("log", 0, ("u", 6))),
+    "pendulum-rk4-tangent-fp64": (),
+    "pendulum-rk4-tangent-fp256": (
+        ("sin", 0, (21, 116)), ("sin", 0, (27, 116)),
+        ("sin", 0, (21, 116)), ("sin", 0, (27, 116))),
+    "attitude-rk4-tangent-fp64": (
+        ("cos", 0, (1, 26)), ("cos", 0, (1, 25)),
+        ("cos", 0, (3, 26)), ("cos", 0, (3, 25))),
+    "attitude-rk4-tangent-fp256": (
+        ("cos", 0, (1, 70)), ("tan", 1, (3, 72)),
+        ("sin", 0, (3, 71)), ("tan", 1, (3, 73)))}
 # the structured lane of tile t is lane t * BLOCK + this: past the spot
 # check's ordinary lanes 0 to 2 and clear of the special lanes at the end of
 # tiles 1 to 3
 STRUCTURED_LANE = 3
+# An entry whose recipe holds NO structured lane is accepted by name, with
+# its reason, which the record keeps: an empty recipe for any other entry is
+# refused (structured_lanes), as it was before parcel M2A. Its lanes run all
+# the same, and the mark probe holds that no lane of any segment marks.
+NO_STRUCTURED = {
+    "pendulum-rk4-tangent-fp64":
+        "the committed trig families (python/tests/mathlib_trig_family.py, "
+        "TRIG_FAMILY) hold no sin and no cos centre at fp64 under rne, "
+        "the pendulum's attribute: sin has centres at fp64 under the "
+        "directed three alone, cos too, and fp64 has no stated range, so "
+        "no lane of this entry is expected to mark"}
+# The RANGE LANE (parcel M2A; Logan's answer 2, docs/ROADMAP.md's M2 block):
+# at fp128 and fp256 a lane past 2^1024 is marked whatever the routine's
+# test says (python/cft_golden/mathlib.py, TRIG_RANGE). The recipe's first
+# special lane - the last lane of tile 1, holding 2^(emax/2 + 10) in its
+# first two components (primal_specials) - is that lane at fp256, 2^131081,
+# for the trig fragments. It is declared an EXPECTED mark in each segment
+# listed, apart from the structured lanes: mark_problems, golden_marks and
+# the record (`range`) hold it by name. Per entry: the segments it marks in,
+# MEASURED on the software backend (2026-11-04; the record keeps them and
+# the marked lanes' bytes). Only the trig entries at fp256 have one: at fp64
+# TRIG_RANGE is None, and the six's fragments carry no range.
+RANGE_LANES = {
+    "pendulum-rk4-tangent-fp256": (0, 1, 2, 3),
+    "attitude-rk4-tangent-fp256": (0, 1, 2, 3)}
 
 
 def entries(which="rev7"):
     """A set, in order: each entry's parameters. The revision-8 set's
     carry their image's scratch depth and tiles besides; its routine
-    entries (REV8_ROUTINES, after the workloads) their structured lanes."""
+    entries (REV8_ROUTINES, after the workloads) their structured lanes,
+    the reason an empty recipe is accepted (NO_STRUCTURED) and the segments
+    their range lane marks in (RANGE_LANES), where they have them."""
     if which == "rev8":
         out = [{"name": wid, "kind": "workload", "image": None,
                 "bank": None, "source": f"{PACK_REL}/programs/{wid}.cftl",
@@ -434,6 +528,11 @@ def entries(which="rev7"):
                for wid, target in REV8]
         for name, system, target in REV8_ROUTINES:
             sub = "programs/systems/compiled-tangent"
+            extra = {}
+            if name in NO_STRUCTURED:
+                extra["no_structured"] = NO_STRUCTURED[name]
+            if name in RANGE_LANES:
+                extra["range_segments"] = RANGE_LANES[name]
             out.append({"name": name, "kind": "variational",
                         "image": f"{sub}/{name}.cftp",
                         "bank": f"{sub}/{name}.bank",
@@ -442,7 +541,7 @@ def entries(which="rev7"):
                         "segments": SEGMENTS, "golden": [],
                         "depth": cftc.get_target(target).scratch_depth,
                         "tiles": REV8_TILES[target],
-                        "structured": STRUCTURED[name]})
+                        "structured": STRUCTURED[name], **extra})
         return out
     out = []
     for name, sub, system, golden in REFERENCES:
@@ -611,8 +710,18 @@ def structured_lanes(entry, fmt, block, slots, tiles):
     """Set the entry's structured lanes in `block`, in place: one a tile,
     the tile's lane STRUCTURED_LANE, its state component the centre's
     encoding and everything else the recipe's - the tangent too. -> the
-    record's descriptors, a tile each; the lane marks in segment 0."""
+    record's descriptors, a tile each; the lane marks in segment 0. An empty
+    recipe is accepted for an entry that names its reason (NO_STRUCTURED) -
+    -> [] - and refused for any other, as is a reason beside lanes."""
     recipe = entry["structured"]
+    if not recipe and entry.get("no_structured"):
+        return []
+    if not recipe:
+        raise ValueError(f"{entry['name']}: an empty structured recipe, and "
+                         f"no reason for it in NO_STRUCTURED")
+    if entry.get("no_structured"):
+        raise ValueError(f"{entry['name']}: structured lanes, and a reason "
+                         f"in NO_STRUCTURED for having none")
     if len(recipe) != tiles:
         raise ValueError(f"{len(recipe)} structured lanes for {tiles} tiles")
     blk = BLOCK[fmt.name]
@@ -626,6 +735,24 @@ def structured_lanes(entry, fmt, block, slots, tiles):
                     "centre": list(centre),
                     "argument": f"{bits:#0{2 + fmt.width // 4}x}"})
     return out
+
+
+def range_lane(entry, fmt, special):
+    """The entry's range lane (RANGE_LANES), declared: -> [the record's
+    descriptor] - the lane, its tile, the segments it is expected to mark
+    in and its argument - or [] for an entry without one. The lane is the
+    first special lane of reference_lanes: the last of tile 1, holding
+    2^(emax/2 + 10) in its first two components."""
+    segs = entry.get("range_segments")
+    if not segs:
+        return []
+    lane = 2 * BLOCK[fmt.name] - 1
+    if lane not in special:
+        raise ValueError(f"{entry['name']}: lane {lane} is not a special lane")
+    huge = sf.round_pack(fmt, 0, 1, fmt.emax // 2 + 10)[0]
+    return [{"lane": lane, "tile": 1, "segments": list(segs),
+             "function": "range", "components": [0, 1],
+             "argument": f"{huge:#0{2 + fmt.width // 4}x}"}]
 
 
 def workload_lanes(case, c, tiles=TILES):
@@ -811,8 +938,11 @@ def identity_problems(tiles, depth, target, software):
 PARAMS = ("name", "kind", "image", "bank", "source", "target", "format",
           "lanes", "slots", "steps", "segments", "golden", "special", "spot")
 # the revision-8 set's: its image's scratch depth and tiles besides, and
-# the routine entries' structured lanes (the other entries have none)
-PARAMS_REV8 = PARAMS + ("depth", "tiles", "structured")
+# the routine entries' structured lanes, the reason an entry has none
+# (`no_structured`) and its declared range lane (`range`); the other
+# entries have none of the three
+PARAMS_REV8 = PARAMS + ("depth", "tiles", "structured", "no_structured",
+                        "range")
 # the two keys the record holds of a routine entry, and what each is: the
 # marked lanes with their bytes, and each segment's per-lane block hash
 # (KL-345, parcel P4: outcome_problems requires both of every entry in
@@ -956,14 +1086,18 @@ def block_problems(blocks, flags, status):
     return out
 
 
-def mark_problems(structured, blocks, status):
+def mark_problems(structured, blocks, status, ranged=()):
     """The item's own claim, held by name rather than implied by a hash:
     each structured lane's byte carries bit 7 in the segment it marks in
-    and that segment's STATUS carries STATUS[6]; bit 7 is set on those
-    lanes exactly - on no other lane of any segment - and STATUS[6] in no
-    other segment."""
+    and that segment's STATUS carries STATUS[6]; so does each declared
+    range lane's, in each segment its descriptor lists (`ranged`, the
+    record's `range`: a lane past 2^1024 at fp128 and fp256 marks whatever
+    the routine's test says); bit 7 is set on those lanes exactly - on no
+    other lane of any segment - and STATUS[6] in no other segment. A lane
+    that marks and is declared by neither is named with the segment."""
     out = []
     marks = {(s["segment"], s["lane"]) for s in structured}
+    marks |= {(k, r["lane"]) for r in ranged for k in r["segments"]}
     for s in structured:
         seg, lane = s["segment"], s["lane"]
         who = (f"lane {lane} (tile {s['tile']}, {s['function']} at "
@@ -974,13 +1108,24 @@ def mark_problems(structured, blocks, status):
         if not status[seg] & seq.STATUS_MARKED:
             out.append(f"segment {seg}'s STATUS {status[seg]:#x} lacks "
                        f"STATUS[6] where {who} marks")
+    for r in ranged:
+        lane = r["lane"]
+        who = (f"range lane {lane} (tile {r['tile']}, components "
+               f"{r['components']} = {r['argument']}, past 2^1024)")
+        for seg in r["segments"]:
+            if not blocks[seg][lane] & seq.LANE_MARKED:
+                out.append(f"{who} has byte {blocks[seg][lane]:#04x} in "
+                           f"segment {seg}, without bit 7")
+            if not status[seg] & seq.STATUS_MARKED:
+                out.append(f"segment {seg}'s STATUS {status[seg]:#x} lacks "
+                           f"STATUS[6] where {who} marks")
     for k, blk in enumerate(blocks):
         extra = [i for i, b in enumerate(blk)
                  if b & seq.LANE_MARKED and (k, i) not in marks]
         if extra:
             out.append(f"segment {k}: lanes {extra} carry bit 7, and the "
                        f"recipe marks none of them")
-    segs = {s["segment"] for s in structured}
+    segs = {k for k, _l in marks}
     for k, st in enumerate(status):
         if st & seq.STATUS_MARKED and k not in segs:
             out.append(f"segment {k}'s STATUS {st:#x} carries STATUS[6], and "
@@ -1370,6 +1515,7 @@ def prepare(entry, images=None):
     secs = 0.0
     special = []
     structured = None
+    ranged = []
     first3 = None
     how = None
     if entry["kind"] == "workload":
@@ -1391,17 +1537,23 @@ def prepare(entry, images=None):
             structured = structured_lanes(
                 entry, fmt, block, seq.Program.from_bytes(
                     image, scratch_depth=depth).n_scratch_in, tiles)
+            ranged = range_lane(entry, fmt, special)
     slots = seq.Program.from_bytes(image, scratch_depth=depth).n_scratch_in
     blk = BLOCK[fmt.name]
     rec.update(format=fmt.name, lanes=len(block) // slots, slots=slots,
                steps=repeat_count(image), special=special,
                spot=sorted({0, 1, 2} | {t * blk for t in range(1, tiles)}
                            | set(special)
-                           | {s["lane"] for s in structured or ()}))
+                           | {s["lane"] for s in structured or ()}
+                           | {r["lane"] for r in ranged}))
     if rev8:
         rec.update(depth=depth, tiles=tiles)
     if structured is not None:
         rec["structured"] = structured
+    if entry.get("no_structured"):
+        rec["no_structured"] = entry["no_structured"]
+    if ranged:
+        rec["range"] = ranged
     init = cert.state_bytes(fmt, block)
     rec.update(image_sha256=sha(image), bank_sha256=sha(bank),
                init_sha256=sha(init))
@@ -1461,14 +1613,30 @@ def mark_probe(args, rec, ident, depth, image, bank, files, failed):
                  f"STATUS[6]", "; ".join(probs)):
         failed.append("R23's identities")
     marked = [s["lane"] for s in rec["structured"]]
-    probs = mark_problems(rec["structured"], blocks, rec["status"])
+    ranged = rec.get("range", [])
+    probs = mark_problems(rec["structured"], blocks, rec["status"], ranged)
     byte = {blocks[s["segment"]][s["lane"]] for s in rec["structured"]}
-    if not check(not probs, f"{name}: the structured lanes mark: lanes "
-                 f"{marked} carry bit 7 of their byte "
-                 f"({', '.join(f'{b:#04x}' for b in sorted(byte))}) in "
-                 f"segment 0 and its STATUS {rec['status'][0]:#x} carries "
-                 f"STATUS[6]; bit 7 is set on no other lane of any "
-                 f"segment, STATUS[6] in no other segment", "; ".join(probs)):
+    if not marked:
+        # an entry that names its reason for having no structured lane
+        # (NO_STRUCTURED): the claim is that no lane of any segment marks
+        what = (f"{name}: no lane marks: its recipe has no structured lane "
+                f"({rec['no_structured'][:60]}...), and bit 7 is set on no "
+                f"lane of any segment, STATUS[6] in no segment")
+    else:
+        what = (f"{name}: the structured lanes mark: lanes {marked} carry "
+                f"bit 7 of their byte "
+                f"({', '.join(f'{b:#04x}' for b in sorted(byte))}) in "
+                f"segment 0 and its STATUS {rec['status'][0]:#x} carries "
+                f"STATUS[6]")
+        for r in ranged:
+            rb = {blocks[k][r["lane"]] for k in r["segments"]}
+            what += (f"; so does the declared range lane {r['lane']} (past "
+                     f"2^1024: "
+                     f"{', '.join(f'{b:#04x}' for b in sorted(rb))}) in "
+                     f"segments {', '.join(str(k) for k in r['segments'])}")
+        what += ("; bit 7 is set on no other lane of any segment, STATUS[6] "
+                 "in no other segment")
+    if not check(not probs, what, "; ".join(probs)):
         failed.append("the marks")
     rec["marked"], rec["lane_flags_sha256"] = marked_record(blocks)
     return {"blocks": blocks, "probed": probed, "info": info}
@@ -1501,7 +1669,9 @@ def golden_mark_problems(rec, image, bank, files, blocks, depth, k,
     slots, lanes = rec["slots"], rec["spot"]
     r = golden or golden_segment(rec, image, bank, files, depth, k)
     b = cert.state_values(fmt, files[k + 1])
-    want = sorted(s["lane"] for s in rec["structured"] if s["segment"] == k)
+    want = sorted([s["lane"] for s in rec["structured"] if s["segment"] == k]
+                  + [r["lane"] for r in rec.get("range", ())
+                     if k in r["segments"]])
     probs = []
     for i, lane in enumerate(lanes):
         mine = r.scratch_out[i * slots:(i + 1) * slots]
@@ -1522,15 +1692,21 @@ def golden_mark_problems(rec, image, bank, files, blocks, depth, k,
 
 
 def golden_marks(rec, image, bank, files, blocks, depth, failed):
-    """The golden half of the marks, in each segment the recipe marks in
-    (the first): golden_mark_problems, as a check."""
+    """The golden half of the marks, in each segment the recipe marks in -
+    the structured lanes' (the first) and the range lane's, when declared:
+    golden_mark_problems, as a check. -> the segments it re-ran."""
     name = rec["name"]
-    for k in sorted({s["segment"] for s in rec["structured"]}):
+    done = []
+    for k in sorted({s["segment"] for s in rec["structured"]}
+                    | {k for r in rec.get("range", ())
+                       for k in r["segments"]}):
         t0 = time.perf_counter()
         probs = golden_mark_problems(rec, image, bank, files, blocks, depth,
                                      k)
-        want = sorted(s["lane"] for s in rec["structured"]
-                      if s["segment"] == k)
+        want = sorted([s["lane"] for s in rec["structured"]
+                       if s["segment"] == k]
+                      + [r["lane"] for r in rec.get("range", ())
+                         if k in r["segments"]])
         if not check(not probs, f"{name}: the golden mark check - segment "
                      f"{k} re-run on seq.py for lanes {rec['spot']}: each "
                      f"end the certified one, each lane's byte the probe's, "
@@ -1538,6 +1714,8 @@ def golden_marks(rec, image, bank, files, blocks, depth, failed):
                      f"STATUS[6] set ({time.perf_counter() - t0:.1f} s)",
                      "; ".join(probs)):
             failed.append("the golden mark check")
+        done.append(k)
+    return done
 
 
 def run_entry(entry, want, args, work):
@@ -1679,14 +1857,33 @@ def run_entry(entry, want, args, work):
     t0 = time.perf_counter()
     wrong, st = spot_check(image, bank, FORMATS[rec["format"]], rec["slots"],
                            files[last], files[last + 1], rec["spot"], depth)
-    if not check(not wrong and st == 0,
+    # STATUS of the spot lanes' re-run: 0, or STATUS[6] alone where the recipe
+    # declares a range lane marking in the last segment (every declared lane
+    # is a spot lane); parcel M2A - the six's last segment marks no lane
+    want_st = seq.STATUS_MARKED if any(
+        last in r["segments"] for r in rec.get("range", ())) else 0
+    if not check(not wrong and st == want_st,
                  f"{name}: the golden spot check - segment {last} re-run on "
                  f"seq.py for lanes {rec['spot']}, each equal to its "
-                 f"certified end ({time.perf_counter() - t0:.1f} s)",
-                 f"lanes {wrong} differ, STATUS {st:#x}"):
+                 f"certified end"
+                 + (", STATUS[6] set by the declared range lane"
+                    if want_st else "")
+                 + f" ({time.perf_counter() - t0:.1f} s)",
+                 f"lanes {wrong} differ, STATUS {st:#x} where {want_st:#x}"):
         failed.append("the golden spot check")
     if probe is not None:
-        golden_marks(rec, image, bank, files, probe["blocks"], depth, failed)
+        done = golden_marks(rec, image, bank, files, probe["blocks"], depth,
+                            failed)
+        # the segments the probe SAW a lane mark in (the record's `marked`,
+        # observed, not the recipe's declaration) are each re-run by the
+        # golden mark check: a check that skipped a declared segment would
+        # otherwise be silent
+        seen = [k for k, m in enumerate(rec["marked"]) if m]
+        if not check(done == seen, f"{name}: the golden mark check re-ran "
+                     f"every segment the probe saw a lane mark in: "
+                     f"{seen if seen else 'none'}",
+                     f"it re-ran {done}"):
+            failed.append("the golden mark check's segments")
     secs = time.perf_counter() - t_entry
     if not segs:
         golden = "no golden audit here (seq.py's cost)"
@@ -1703,7 +1900,13 @@ def run_entry(entry, want, args, work):
             probe)
     marks = "" if probe is None else (
         f", {len(rec['structured'])} structured lanes mark (bit 7, "
-        f"STATUS[6])")
+        f"STATUS[6])" if rec["structured"] else
+        ", no lane marks (no structured lane, by name)")
+    if probe is not None and rec.get("range"):
+        marks += "".join(
+            f", range lane {r['lane']} marks in segments "
+            f"{', '.join(str(k) for k in r['segments'])}"
+            for r in rec["range"])
     if failed:
         return f"FAIL  {line}{'; '.join(failed)} ({secs:.1f} s)", rec, kept
     if want is None:
@@ -1903,9 +2106,26 @@ def off_centre(fmt, bits):
     return bits + (1 << (fmt.man_w - 20))
 
 
+TRIG_FUNCTIONS = ("sin", "cos", "tan")
+
+
+def off_centre_dense(fmt, bits):
+    """The trig centres' off-centre argument (parcel M2A): off_centre's step
+    plus a dense, fixed tail below it. A few-bit step is not enough for the
+    trig functions: a centre x = c 2^-e has an exact x^2, so a step of 2^-20
+    of x leaves x^2/2 a few-bit dyadic, again on the result's grid, and the
+    cos of 2^-70 (1 + 2^-20) at fp256 still marked (measured, 2026-11-04,
+    byte 0x90 at the attitude's lane 3). With the dense tail the square
+    fills the significand and the lane is an ordinary one;
+    test_acceptance_trig.py holds the theory's answer, clear, for every
+    trig centre of the recipe."""
+    return bits + (1 << (fmt.man_w - 20)) +         (drawn("off-centre tail", fmt.man_w - 24) | 1)
+
+
 def mark_controls(args, kept):
-    """The marks' checks, each watched failing on the first routine
-    entry's own artifacts - its blocks, statuses, probe runs and record -
+    """The marks' checks, each watched failing on the first routine entry
+    that has a structured lane (leg_set picks it: an entry whose recipe
+    names its reason for having none cannot be planted in) - its blocks, statuses, probe runs and record -
     with a plant in a copy: a structured lane's byte with bit 7 cleared,
     STATUS[6] cleared in a segment's STATUS, a lane that marks where the
     recipe marks none, a segment with STATUS[6] and no lane, a probe whose
@@ -1918,6 +2138,7 @@ def mark_controls(args, kept):
     base = want if want is not None else rec
     fmt = FORMATS[rec["format"]]
     st, flags, status = rec["structured"], rec["flags"], rec["status"]
+    rng = rec.get("range", [])
     blocks, probed, info = probe["blocks"], probe["probed"], probe["info"]
     ident = cert.parse(data).identity
     print(f"-- the marks' controls, on {name}", flush=True)
@@ -1932,12 +2153,12 @@ def mark_controls(args, kept):
     cut = copy_blocks()
     cut[seg][lane] &= 0xFF & ~seq.LANE_MARKED
     check(any(f"lane {lane} " in p and "without bit 7" in p
-              for p in mark_problems(st, frozen(cut), status)),
+              for p in mark_problems(st, frozen(cut), status, rng)),
           f"control: lane {lane}'s byte with bit 7 cleared, in a copy of "
           f"segment {seg}'s block, is caught by the mark check")
     cs = list(status)
     cs[seg] &= ~seq.STATUS_MARKED
-    check(any("lacks STATUS[6]" in p for p in mark_problems(st, blocks, cs)),
+    check(any("lacks STATUS[6]" in p for p in mark_problems(st, blocks, cs, rng)),
           f"control: STATUS[6] cleared in segment {seg}'s STATUS is caught "
           f"by the mark check")
     check(any("lacks STATUS[6]" in p for p in block_problems(blocks, flags,
@@ -1946,13 +2167,18 @@ def mark_controls(args, kept):
     more = copy_blocks()
     more[0][0] |= seq.LANE_MARKED
     check(any("lanes [0] carry bit 7" in p
-              for p in mark_problems(st, frozen(more), status)),
+              for p in mark_problems(st, frozen(more), status, rng)),
           "control: bit 7 set on a lane the recipe does not mark is caught")
     cs = list(status)
     cs[1] |= seq.STATUS_MARKED
+    # segment 1 as a segment the recipe marks no lane in: where a range lane
+    # is declared there, the declaration is left out of this one check
+    rng1 = [dict(r, segments=[k for k in r["segments"] if k != 1])
+            for r in rng]
     check(any("marks no lane in it" in p
-              for p in mark_problems(st, blocks, cs)),
-          "control: STATUS[6] in a segment where no lane marks is caught")
+              for p in mark_problems(st, blocks, cs, rng1)),
+          "control: STATUS[6] in a segment where the recipe marks no lane "
+          "is caught")
     fw = list(flags)
     fw[0] ^= sf.FLAG_INEXACT
     check(any("OR to" in p for p in block_problems(blocks, fw, status)),
@@ -2020,18 +2246,20 @@ def mark_controls(args, kept):
     slots = rec["slots"]
     start = cert.state_values(fmt, files[seg])[lane * slots:
                                                (lane + 1) * slots]
-    start[s0["component"]] = off_centre(fmt, start[s0["component"]])
+    move = off_centre_dense if s0["function"] in TRIG_FUNCTIONS         else off_centre
+    start[s0["component"]] = move(fmt, start[s0["component"]])
     prog = seq.Program.from_bytes(image, scratch_depth=depth)
     r = seq.run(prog, [0], [0], [0], bank=bank_values(prog, bank),
                 scratch_in=start, scratch_depth=depth)
     check(not r.lane_flags[0] & seq.LANE_MARKED,
           f"control: lane {lane}'s argument moved off its centre "
-          f"({s0['centre']}, {s0['argument']}, by a relative 2^-20) no "
+          f"({s0['centre']}, {s0['argument']}, by a relative 2^-20"
+          f"{', and a dense tail' if move is off_centre_dense else ''}) no "
           f"longer marks on seq.py (byte {r.lane_flags[0]:#04x})")
     gone = copy_blocks()
     gone[seg][lane] = r.lane_flags[0]
     check(any(f"lane {lane} " in p and "without bit 7" in p
-              for p in mark_problems(st, frozen(gone), status)),
+              for p in mark_problems(st, frozen(gone), status, rng)),
           "control: the mark check is red on that lane's byte")
     # a probe byte that is not seq.py's: seq.py's own byte for the lane with
     # bit 7 flipped, whatever the probe gave
@@ -2045,6 +2273,96 @@ def mark_controls(args, kept):
                                             golden=gold)),
           f"control: lane {lane}'s byte, seq.py's with bit 7 flipped, in a "
           f"copy of the probe's block is caught by the golden mark check")
+
+
+def range_controls(args, kept):
+    """The range lane's checks, each watched failing on the first routine
+    entry that declares one, in a copy of its own blocks, statuses and
+    record: the lane undeclared (named by lane), bit 7 cleared in a segment
+    where it is expected, STATUS[6] cleared in segment 2 (the segment only
+    the range lane marks in, where it is declared there), its argument put
+    under 2^1024 (run alone on seq.py from the segment's start: an expected
+    mark goes missing), the golden half's byte for it changed, and the
+    declaration edited in the record."""
+    name, rec, want, image, bank, init, files, data, d, run0, depth, probe \
+        = kept
+    fmt = FORMATS[rec["format"]]
+    st, status, rng = rec["structured"], rec["status"], rec["range"]
+    blocks = probe["blocks"]
+    r0 = rng[0]
+    lane, segs = r0["lane"], r0["segments"]
+    print(f"-- the range lane's controls, on {name} (lane {lane}, segments "
+          f"{', '.join(str(k) for k in segs)})", flush=True)
+
+    def copy_blocks():
+        return [bytearray(b) for b in blocks]
+
+    def frozen(bl):
+        return [bytes(b) for b in bl]
+    check(any(f"lanes [{lane}] carry bit 7" in p
+              for p in mark_problems(st, blocks, status, [])),
+          f"control: range lane {lane} left undeclared is named by the mark "
+          f"check (it carries bit 7 and the recipe marks it in no segment)")
+    seg = segs[-1]
+    cut = copy_blocks()
+    cut[seg][lane] &= 0xFF & ~seq.LANE_MARKED
+    check(any(f"range lane {lane} " in p and "without bit 7" in p
+              and f"segment {seg}" in p
+              for p in mark_problems(st, frozen(cut), status, rng)),
+          f"control: range lane {lane}'s byte with bit 7 cleared, in a copy "
+          f"of segment {seg}'s block, is caught by the mark check")
+    k2 = 2 if 2 in segs else seg
+    cs = list(status)
+    cs[k2] &= ~seq.STATUS_MARKED
+    check(any(f"segment {k2}'s STATUS" in p and "lacks STATUS[6]" in p
+              for p in mark_problems(st, blocks, cs, rng)),
+          f"control: STATUS[6] cleared in segment {k2}'s STATUS is caught "
+          f"by the mark check, where the range lane marks")
+    # the lane's argument under 2^1024: its two huge components replaced by
+    # 2^1000, the lane run alone on seq.py from the segment's start
+    seg0 = segs[0]
+    slots = rec["slots"]
+    start = cert.state_values(fmt, files[seg0])[lane * slots:
+                                               (lane + 1) * slots]
+    small = sf.round_pack(fmt, 0, 1, 1000)[0]
+    for c in r0["components"]:
+        start[c] = small
+    prog = seq.Program.from_bytes(image, scratch_depth=depth)
+    r = seq.run(prog, [0], [0], [0], bank=bank_values(prog, bank),
+                scratch_in=start, scratch_depth=depth)
+    check(not r.lane_flags[0] & seq.LANE_MARKED,
+          f"control: lane {lane}'s components {r0['components']} put at "
+          f"2^1000, under 2^1024, no longer mark on seq.py in segment "
+          f"{seg0} (byte {r.lane_flags[0]:#04x})")
+    gone = copy_blocks()
+    gone[seg0][lane] = r.lane_flags[0]
+    check(any(f"range lane {lane} " in p and "without bit 7" in p
+              and f"segment {seg0}" in p
+              for p in mark_problems(st, frozen(gone), status, rng)),
+          f"control: the mark check is red on that lane's byte, an expected "
+          f"mark gone missing")
+    gold = golden_segment(rec, image, bank, files, depth, seg0)
+    other = copy_blocks()
+    other[seg0][lane] = gold.lane_flags[rec["spot"].index(lane)] \
+        ^ seq.LANE_MARKED
+    check(any(f"lane {lane} has byte" in p
+              for p in golden_mark_problems(rec, image, bank, files,
+                                            frozen(other), depth, seg0,
+                                            golden=gold)),
+          f"control: range lane {lane}'s byte, seq.py's with bit 7 flipped, "
+          f"in a copy of the probe's block is caught by the golden mark "
+          f"check")
+    w = copy.deepcopy(rec)
+    w["range"][0]["segments"] = segs[:-1]
+    check(any("other parameters (range)" in p for p in
+              committed_problems(rec, w, PARAMS_REV8, "rev8")),
+          "control: the range lane's segments changed in the record are "
+          "caught")
+    w = copy.deepcopy(rec)
+    del w["range"]
+    check(any("other parameters (range)" in p for p in
+              committed_problems(rec, w, PARAMS_REV8, "rev8")),
+          "control: the range declaration deleted from the record is caught")
 
 
 # ---- the set -------------------------------------------------------------------
@@ -2072,6 +2390,7 @@ def leg_set(args, work, selected):
                 f"{sorted(set(want) ^ set(have))}")
             return [f"FAIL  the set: {record.name}'s entries differ"]
     verdicts, records, kept, first, routine = [], [], None, None, None
+    ranged, unmarked = None, []
     for e in entries(args.set):
         if selected and e["name"] not in selected:
             continue
@@ -2084,14 +2403,30 @@ def leg_set(args, work, selected):
         records.append(rec)
         if kept is None and art:
             kept, first = art, e
-        if routine is None and art and art[11] is not None:
-            routine = art               # the first routine entry's
+        if art and art[11] is not None:
+            # the routine entries (a probe ran): the first with a structured
+            # lane takes the marks' controls, the first with a range lane the
+            # range's; one with neither is named
+            if art[1]["structured"] and routine is None:
+                routine = art
+            if art[1].get("range") and ranged is None:
+                ranged = art
+            if not art[1]["structured"]:
+                unmarked.append(art[1])
     if kept:
         set_controls(args, kept)
         if rev8:
             rev8_controls(args, kept, first)
     if routine:
         mark_controls(args, routine)
+    if ranged:
+        range_controls(args, ranged)
+    for rec in unmarked:
+        print(f"  note  no mark control was possible on {rec['name']}: its "
+              f"recipe has no structured lane ({rec['no_structured'][:70]}"
+              f"...); the marks' controls run on "
+              f"{routine[0] if routine else 'no entry of this run'}",
+              flush=True)
     if rev8 and not verdicts:
         what = (f"{'of --only ' if selected else ''}on "
                 f"{args.target or 'any target'}")

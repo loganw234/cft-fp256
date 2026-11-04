@@ -61,6 +61,13 @@ TEN = ("gray_scott_hard_fp64", "gray_scott_wide_fp256",
        "phi4_extended_fp64", "kuramoto_sivashinsky_extended_fp64",
        "reservoir_extended_fp64", "riccati_extended_fp64")
 ROUTINES = tuple(n for n, _s, _t in A.REV8_ROUTINES)
+# the six of parcel MA, by name: the entries this file's family tests hold to
+# python/tests/mathlib_family.py's FAMILY at rne. The four of parcel M2A (the
+# pendulum and the attitude) are python/tests/test_acceptance_trig.py's, held
+# to mathlib_trig_family.py's TRIG_FAMILY at their own attribute.
+SIX = ("lotkavolterra-rk4-tangent-fp64", "lotkavolterra-rk4-tangent-fp256",
+       "diode-rk4-tangent-fp64", "diode-rk4-tangent-fp256",
+       "culture-rk4-tangent-fp64", "culture-rk4-tangent-fp256")
 SYSTEMS = ROOT / "programs" / "systems"
 
 
@@ -109,8 +116,8 @@ def test_the_acceptance_sets_references_build_the_same_lanes():
 
 def test_one_structured_lane_a_tile_clear_of_the_special_lanes():
     for e in A.entries("rev8"):
-        if e["kind"] == "workload":
-            continue
+        if e["kind"] == "workload" or not e["structured"]:
+            continue         # the pendulum at fp64 has none, by name (M2A)
         fmt = fmt_of(e["name"])
         blk = A.BLOCK[fmt.name]
         _i, _b, _init, rec, _f3, _s, _h = A.prepare(e)
@@ -150,7 +157,7 @@ def test_centre_bits_known_values():
 def test_the_centres_are_the_family_at_rne_and_the_theory_marks_them():
     pytest.importorskip("mpmath")
     import mathlib_family as F
-    for name in ROUTINES:
+    for name in SIX:
         fmt = fmt_of(name)
         for fn, _comp, centre in A.STRUCTURED[name]:
             assert centre in F.FAMILY[fn][fmt.name]["rne"], (name, centre)
@@ -165,7 +172,7 @@ def test_the_off_centre_argument_is_clear_by_the_theory():
     marked'."""
     pytest.importorskip("mpmath")
     import mathlib_family as F
-    for name in ROUTINES:
+    for name in SIX:
         fmt = fmt_of(name)
         for fn, _comp, centre in A.STRUCTURED[name]:
             bits = A.off_centre(fmt, A.centre_bits(fmt, centre))

@@ -229,7 +229,7 @@ make verify         # the full census, hours: adds the cocotb suites,
                     # on the four images past revision 7's card
                     # and Lorenz-tangent extended's, and all ten
                     # of the revision-8 set's workloads with its
-                    # six routine references
+                    # ten routine references
 ```
 
 Every stage names itself, logs itself and writes a `.ok` or `.fail`
@@ -298,7 +298,10 @@ runs that failed stay in the record. The load-bearing ones:
   bit for bit. The card ran the six routine references on the quad
   image on 2026-10-19: 6 of 6 passed, 118 checks, none failed
   (`docs/VALIDATION.md`, "M1's build, seventh wave, closed";
-  `docs/LANGUAGE.md`, "The operations"). The host operations are
+  `docs/LANGUAGE.md`, "The operations"). Since 2026-11-04 the
+  revision-8 set holds four routine references more, the pendulum and
+  the attitude at fp64 and fp256 (sin, cos and tan), run on the
+  software backend; their card leg has not run. The host operations are
   unchanged: `cft_exp` still issues no `cft_run` pass, and a routine is
   reached by compiling a program, not by that call.
 - **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
