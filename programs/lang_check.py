@@ -184,8 +184,8 @@ besides.
      argument, nonzero at fp128 and fp256 - which lanes are wrong is
      mathlib's and is not asserted; and each refused `target-feature` on
      revision 7's four targets; (T2) generated sources that call them
-     beside two of the six, division, the root and the other operations,
-     as N2; (T3) the call loop over batches of the three, the constant
+     beside three of the six (exp, log1p and expm1), division, the root and
+     the other operations, as N2; (T3) the call loop over batches of the three, the constant
      lowered, as N3
 
 The legs come in two groups, each with its tally (GROUPS, below): core,
@@ -4160,7 +4160,8 @@ def leg_six_loops(rng, everything=False):
 #     ones, and T1 asserts a count of them, independent of the rule (below).
 
 THREE = ("sin", "cos", "tan")
-# the functions T2's calls are drawn from: the three beside two of the six
+# the functions T2's calls are drawn from: the three beside three of the six
+# (exp, log1p and expm1)
 # at the (k + count) places g_six indexes, so every source of 12 meets each
 THREE_MIX = ("sin", "cos", "tan", "exp", "tan", "cos", "sin", "log1p", "sin",
              "tan", "cos", "expm1")
@@ -4224,9 +4225,9 @@ def three_lanes(fn, fmtname, rnd, rng, everything=False):
     and attribute - ordinary ones and large ones, the specials, the tiny
     gate's edge, the range lanes, the TRIG_FAMILY centres (sample_centres of
     the tiny ones, each with its neighbour a unit in the last place above and
-    for the first three the one below, the first centre's window neighbours (the first eight with
-    `everything`),
-    and a few minimisers' neighbours where the list has them). A role
+    for the first three the one below; the first centre's window
+    neighbours, and with `everything` the first eight centres'; and a few
+    minimisers' neighbours where the list has them). A role
     beginning `structured` or `range` is one the theory may demand marked
     (trig_demand)."""
     tf, _th = trig()
@@ -4484,7 +4485,8 @@ def leg_three_alone(rng, everything=False):
 
 def g_three(rng, k, tangent=None):
     """g_six's sources with their calls drawn from THREE_MIX: the three
-    beside two of the six, division, the root and the other operations."""
+    beside three of the six (exp, log1p and expm1), division, the root and
+    the other operations."""
     return g_six(rng, k, tangent, fns=THREE_MIX, name="tx")
 
 
@@ -5077,13 +5079,13 @@ def main(argv=None):
                     help="generated sources that call sin, cos and tan in "
                          "leg T2 (default 12)")
     ap.add_argument("--three-all", action="store_true",
-                    help="the larger draw of the three's legs: twelve "
-                         "centres of each family a call reads, up to "
-                         "150 spread centres of the tiny family, the "
-                         "first eight with their windows' neighbours, "
-                         "twelve ordinary lanes and the "
-                         "minimisers' neighbours (up to 60) in T1, T2 and "
-                         "T3 (minutes more; the default is gate-sized)")
+                    help="the larger draw of the three's legs. T1: up to "
+                         "150 spread centres of the tiny family a "
+                         "configuration, the first eight with their "
+                         "windows' neighbours, twelve ordinary lanes and up "
+                         "to 60 minimisers' neighbours. T2: up to twelve "
+                         "centres for each direct call of a source. T3: six centres a call's component. "
+                         "(Minutes more; the default is gate-sized)")
     ap.add_argument("--group", default="",
                     help="a comma list of groups, each its legs and its tally: "
                          "core (refs, corpus, letmaps, banks, libcft, "

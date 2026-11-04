@@ -153,8 +153,8 @@ lang_check.py, whose helpers this reuses), with tangents:
      unmarked lane's tangent red. Skipped by name without mpmath
   T  sin, cos and tan compiled, with tangent vectors (M2's build, wave 4):
      leg M's written shapes and generated systems and lang_check's g_three
-     sources (calls to the three beside two of the six, division and the
-     root), one vector or two, run as leg N runs the six; the families'
+     sources (calls to the three beside three of the six - exp, log1p and
+     expm1 - division and the root), one vector or two, run as leg N runs the six; the families'
      centres in the primal, every lane the theory demands marked asserted
      marked in the sources whose calls are known, and lanes at 2^2048 and
      past at fp128 and fp256, marked whatever the test says, some of whose
@@ -3096,10 +3096,10 @@ def main(argv=None):
                          "(default 12; half as many beside leg M's written "
                          "shapes and generated systems)")
     ap.add_argument("--three-all", action="store_true",
-                    help="the larger draw of leg T: twelve centres of each "
-                         "family a call reads in the lanes of lang_check's "
-                         "sources (minutes more; the default is "
-                         "gate-sized)")
+                    help="the larger draw of leg T: up to twelve centres of "
+                         "each family a direct call reads, in the lanes of "
+                         "each of lang_check's sources (minutes more; the "
+                         "default is gate-sized)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,derivative,"
                          "lyapunov,certified,libcft,determinism,refusals,"

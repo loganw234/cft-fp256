@@ -540,10 +540,12 @@ nine, named as `python/cft_golden/transcend.py` names the functions.
       proof is the rule's own controls (leg O's markstep, whose guess
       raises invalid where the definition raises inexact). In the legs of
       sin, cos and tan as drawn, a guess's [4:0] differ from the
-      definition's in two lanes in all (one each in sin's and cos's T1: an
-      Euler step at fp128 under rup from the largest finite state, where
-      the definition raises overflow too); everywhere else they are equal,
-      so the trig legs hold this half only through those two lanes;
+      definition's in two lanes in all of T1 to T3 (counted there: one each in sin's
+      and cos's T1; leg T does not count them): an Euler step at fp128 under rup from the largest finite state, where
+      the definition raises overflow too; everywhere else in T1 to T3 they
+      are equal,
+      so the `lang-routines` legs of the three hold this half only through those
+      two lanes;
     - *the values half is a count:* a marked lane's differing values add to
       the stage's counts of wrong guesses and to nothing else, and a guess
       is never required. For sin, cos and tan one check reads that count:
