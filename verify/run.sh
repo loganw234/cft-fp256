@@ -1191,8 +1191,13 @@ stage lang "the language's compiler held to its interpreter: every image on seq.
 # the definition and its guess counted, every other lane bit for bit with
 # its byte's flags, FLAGS and STATUS held to the bytes), the structured
 # families' arguments in the lanes; the rule's own controls on a hand-written
-# image that marks lanes; the six's part of the tally. Those legs skip by
-# name without mpmath. In the gate budget, not quick (the lead's split,
+# image that marks lanes; the six's part of the tally. Since M2's build,
+# wave 4 (parcel M2SL, 2026-11-04) sin, cos and tan have legs of their own
+# beside the six's: each alone (T1, with the families' centres, the
+# minimisers' neighbours, the lanes past 2^1024 at fp128 and fp256, and a
+# count of the one-call images' wrong guesses against the golden function),
+# generated sources (T2), a call loop (T3) and a third part of the tally.
+# Those legs skip by name without mpmath. In the gate budget, not quick (the lead's split,
 # 2026-10-02: these legs took `lang` to 276 s through the runner on
 # amd-arc-box, past quick's three minutes): about two and a half minutes
 # run directly on a quiet desktop (147 s of the 296 s at 370e0b2 - leg K
@@ -1204,7 +1209,7 @@ do_lang_routines() {
      --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
 }
 need host-cc python
-stage lang-routines "the language's run-time division and square root, compiled as routines: every flag of both through the interpreter; Kepler and generated sources that divide or take a root, at every format, attribute and integrator, on seq.py against lang.run bit for bit with FLAGS and tangents, refused by name on revision 7's targets; the 40 routines against softfloat on their full pools; the call loop past 32,768 instructions, held, certified and audited; the math library's six compiled and run the same way, alone at every format and attribute and in generated sources and a call loop, with structured-family arguments in the lanes and every marked lane replayed by the definition, and the marked-lane rule's own controls; its tally" -- do_lang_routines
+stage lang-routines "the language's run-time division and square root, compiled as routines: every flag of both through the interpreter; Kepler and generated sources that divide or take a root, at every format, attribute and integrator, on seq.py against lang.run bit for bit with FLAGS and tangents, refused by name on revision 7's targets; the 40 routines against softfloat on their full pools; the call loop past 32,768 instructions, held, certified and audited; the math library's six, and sin, cos and tan, compiled and run the same way, alone at every format and attribute and in generated sources and a call loop, with structured-family arguments and lanes past the range in the lanes and every marked lane replayed by the definition (the sin, cos and tan alone legs also count the one-call images' wrong guesses against the golden function), and the marked-lane rule's own controls; its tally" -- do_lang_routines
 
 # The language's variational equations held (docs/LANGUAGE.md, "The
 # variational equations"; programs/tangent_check.py's docstring names the
@@ -1233,7 +1238,10 @@ stage lang-routines "the language's run-time division and square root, compiled 
 # and since M1's build, item 5 (2026-10-19), the math library's six compiled
 # with one tangent vector or two and run on seq.py against lang.run under the
 # marked-lane rule that programs/lang_check.py states, a marked lane replayed
-# whole, its states and its tangents the definition's (leg N).
+# whole, its states and its tangents the definition's (leg N); and since M2's
+# build, wave 4 (parcel M2SL), sin, cos and tan compiled the same way (leg T),
+# with lanes past 2^1024 at fp128 and fp256 whose guesses and tangents are
+# wrong, and controls with a tangent vector.
 # In the gate budget: 196 s run directly and 346 s
 # through the runner on the desktop, niced and in use, and past 13
 # minutes, unfinished, beside another process holding it at 100% (L3,
@@ -1244,7 +1252,7 @@ do_tangent() {
      --audit "$ROOT/host/cft-audit$EXE"
 }
 need host-cc python
-stage tangent "the language's variational equations: every image with tangent vectors on seq.py against lang.run bit for bit with FLAGS, states and tangents (references, written shapes and a generated corpus at every format), the primal unchanged, the tangent equal to exact dual numbers; Lorenz-63's largest Lyapunov exponent through cft-segrun, and at fp256 from a certified chain both auditors accept; the compiled references certified, deterministic, committed; refusals by name, its plants red; and the math library's six compiled with one tangent vector or two and run the same way, marked lanes replayed whole" -- do_tangent
+stage tangent "the language's variational equations: every image with tangent vectors on seq.py against lang.run bit for bit with FLAGS, states and tangents (references, written shapes and a generated corpus at every format), the primal unchanged, the tangent equal to exact dual numbers; Lorenz-63's largest Lyapunov exponent through cft-segrun, and at fp256 from a certified chain both auditors accept; the compiled references certified, deterministic, committed; refusals by name, its plants red; and the math library's six, and sin, cos and tan, compiled with one tangent vector or two and run the same way, marked lanes replayed whole" -- do_tangent
 
 # The acceptance set (programs/acceptance.py, whose docstring is the
 # definition; the step-6 round's parcel A1, 2026-10-02): everything that

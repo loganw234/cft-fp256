@@ -432,6 +432,18 @@ says of the study:
 - Not in this note: the stages' legs with marked lanes replayed (parcel M2S's),
   the acceptance set's radian case (M2A's), the card.
 
+**2026-11-04, M2's build, wave 4: the stages' legs (parcel M2SL).** The
+`lang-routines` stage gained legs T1 to T3 for sin, cos and tan and the
+`tangent` stage a leg T, under the marked-lane rule of M1's build, with lanes
+past 2^1024 at fp128 and fp256 put in on purpose (Logan's answer 2) and a count
+of the one-call images' wrong guesses asserted against the golden function
+(`routines.GOLDEN`). Measured on T1's lanes (a probe over its 60 configurations, the
+gate-sized draw): every wrong guess is past 2^1024 (67 lanes at fp128, 60 at
+fp256, counted across configurations), none in range; which lanes past it are
+wrong is not asserted, being mathlib's.
+The wave's record is in docs/VALIDATION.md, "M2's build, wave 4: the stages'
+legs (parcel M2SL)".
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

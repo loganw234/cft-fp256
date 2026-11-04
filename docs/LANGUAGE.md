@@ -476,11 +476,15 @@ nine, named as `python/cft_golden/transcend.py` names the functions.
     folded by the language, `sin(0)` and `tan(0)` to 0 and `cos(0)` to 1,
     and compiles as the constant it is, with no mpmath.
   - **A marked lane** (the structured families; M1's question 4). A
-    compiled routine of the six decides its last bit in the lane, and
+    compiled routine of the six, and since M2's build of sin, cos and tan,
+    decides its last bit in the lane, and
     where its in-lane test cannot decide it - where the true value lies
     within the routine's error bound of a rounding boundary - it marks
     the lane (bit 7 of its raised word; R24 and R23's lane byte, and
-    STATUS[6]). The language's definition is unchanged by a mark: a
+    STATUS[6]). The three also mark, at fp128 and fp256, every lane at or
+    past 2^1024 whatever the test says, and there the guess is wrong in
+    some lanes (the study, docs/studies/M2-trig.md; the stages' T legs
+    hold such lanes). The language's definition is unchanged by a mark: a
     marked lane is replayed by the definition, `lang.run`, and the
     image's guess is compared only as a guess. Next to an exact case -
     exp near 0, log near 1, the arguments x = c 2^-e and 1 + c ulp the
@@ -525,8 +529,38 @@ nine, named as `python/cft_golden/transcend.py` names the functions.
     replays only by an image of the source that decides the lane
     (`replay-missing` without one, `replay-undecided` where the replay
     image marks the lane too; docs/CERTIFICATES.md, "A marked lane"),
-    which no image of the six is. So a segment that marks a lane still
-    fails the `tangent` stage's certificate leg by name.
+    which no image of the six or of the three is. So a segment that marks
+    a lane still fails the `tangent` stage's certificate leg by name.
+
+    **Which half of the replay a check reads** (M2's build, wave 4). A
+    marked lane's replay has two halves, and "replayed" is a statement of
+    the rule's bookkeeping, not of a computation every check holds:
+    - *the flags half is held by a check:* the definition's flags enter
+      FLAGS after the replay and the run's FLAGS must be `lang.run`'s. Its
+      proof is the rule's own controls (leg O's markstep, whose guess
+      raises invalid where the definition raises inexact). In the legs of
+      sin, cos and tan as drawn, a guess's [4:0] differ from the
+      definition's in two lanes in all (one each in sin's and cos's T1: an
+      Euler step at fp128 under rup from the largest finite state, where
+      the definition raises overflow too); everywhere else they are equal,
+      so the trig legs hold this half only through those two lanes;
+    - *the values half is a count:* a marked lane's differing values add to
+      the stage's counts of wrong guesses and to nothing else, and a guess
+      is never required. For sin, cos and tan one check reads that count:
+      the `lang-routines` stage's leg T1, on a one-call image
+      (`next x = f(x)`, at the first checkpoint, where the image's state is
+      the guess itself), asserts that the rule's count of wrong guesses is
+      the count of marked lanes whose guess differs from the golden
+      function of the lane's own argument (`routines.GOLDEN`, transcend.py,
+      not the rule's definition), and that the count is nonzero at fp128
+      and at fp256, where lanes far past 2^1024 hold wrong guesses. Which
+      lanes are wrong is not asserted, and the check cannot cover an
+      image where a sum can absorb a wrong guess (Runge-Kutta, Euler,
+      Stormer-Verlet, a map with h), only the one-call image. The
+      `tangent` stage's leg T counts wrong guesses in tangents as well,
+      and asserts that count nonzero at fp128 and fp256 and its controls
+      with a tangent vector, among them a lane that only the tangent's
+      cos(a) marks, whose mark excuses the lane's primal state too.
 - **sin, cos and tan** (M2's build, 2026-11-02; the language at 1.2) are
   three more of the math library's, each one correctly rounded operation
   of a radian argument, under the program's attribute, with exactly the
@@ -2926,7 +2960,12 @@ the constant lowered; and its leg O holds the rule itself with controls,
 on a hand-written image that marks lanes on purpose. The `tangent`
 stage's leg N compiles generated systems that call the six with one
 tangent vector or two and runs them the same way, tangents replayed
-whole. The routines themselves are held to softfloat by
+whole. Since M2's build, wave 4, sin, cos and tan have legs of their own
+beside those: the `lang-routines` stage's T1 (each alone, with the
+families' centres, the minimisers' neighbours and the lanes past the
+range, and the guess tally above), T2 (generated sources) and T3 (the call
+loop), and the `tangent` stage's leg T, with one tangent vector and two;
+each is skipped by name without mpmath. The routines themselves are held to softfloat by
 python/tests/test_routines.py and the `lang-routines` stage's leg K2,
 and their inlining and their loops by `python/tests/test_cftc.py`.
 
