@@ -432,6 +432,13 @@ says of the study:
 - Not in this note: the stages' legs with marked lanes replayed (parcel M2S's),
   the acceptance set's radian case (M2A's), the card.
 
+**A dated note, 2026-11-04 (parcel M2A, M2's build, wave 4): the radian case in the acceptance sets, the software side of section 10 item 7.**
+- The revision-8 set (`programs/acceptance-rev8.json`; never the acceptance set, since a routine needs flag control) gained four routine entries after M1's six: the pendulum and the attitude at fp64 and fp256, on the quad by the rule. Run on the software backend, MEASURED: STATUS by segment is [0, 0, 0, 0] for the pendulum at fp64, [64, 0, 0, 0] for the attitude at fp64 and [64, 64, 64, 64] for both fp256 entries; the flag words are [29, 24, 24, 24] for all four.
+- The structured lanes are centres of TRIG_FAMILY at each entry's own attribute (the pendulum's rne, the attitude's rdn): the attitude at fp64 has cos at 2^-26, the card case's argument at a directed attribute, and all of them mark in segment 0. The pendulum at fp64 has no centre under rne (the committed lists hold none for sin or cos at fp64 under rne), so it has no structured lane, by name, and no lane of any segment marks.
+- **Logan's answer 2 on a tile.** The recipe's overflow lane holds 2^131081 at fp256, past 2^1024, and marks in all four segments of both fp256 entries (byte 0x90), which the revision-8 record had not held before (parcel MA's marks were in segment 0 only). The entries declare it an expected mark in those segments. The segments were measured, not assumed, and are those of the two fp256 entries on this one lane; the note says nothing of other arguments past the range.
+- **A finding in the control, not in mathlib.** The six's off-centre argument (a step of 2^-20 of x) is not off a trig centre: a centre c 2^-e has an exact square, so x(1 + 2^-20) squares to a few-bit dyadic on the result's grid, and cos at 2^-70 (1 + 2^-20) at fp256 under rdn is still classified "mark" by the theory and marked by the routine. The trig controls add a dense tail below the step.
+- Not in this note: the card leg (the lead's), and the stages' legs (parcel M2SL's).
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

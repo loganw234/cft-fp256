@@ -1325,6 +1325,583 @@
    ],
    "target": "u50-rev8-quad",
    "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/pendulum-rk4-tangent-fp64.bank",
+   "bank_sha256": "09949cf799516283f4f4b11e4ddde56b75a018646725bffee8b20f65e69e4940",
+   "boundaries": [
+    "73c0e073cfba1b99271e58868239c127543507c0cde46ec771e0bf34310477ba",
+    "56f7ea6a1657d467f732b8f1e2f9fad9e0e9da2adc9da18946ec4bf8a160bdc8",
+    "3f5a4c6f7da8bd2fb9fb389b2210b0d772826f686d2e956a5bf2a99a5aeabe13",
+    "8e7bbafc1eb00a16238d70224c18d05eaddb6b0adeca972f006b084b2cbc3d41",
+    "ae23a6f691c7e3860d5e3d5cec9f68750e32f21a0dd6eb374a1c595a5ff5d9d5"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/pendulum-rk4-tangent-fp64.cftp",
+   "image_sha256": "1729b46070b82ffa3afc86269776d93e5b4b4a4603bc85d01dc64fc65a336b95",
+   "init_sha256": "8708baaa6eedf58ce35b646b3cdf4c810bef4411db6a6db166ac0a3aa4d90f28",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "7c3b470d05056158b166443fe46baa520296b88909812ce1a5fec0d00f91a397",
+    "c15f64da6946ca733ee3ce43ab491caa0080bd85da664adfd1e7b4b3146e1227",
+    "c15f64da6946ca733ee3ce43ab491caa0080bd85da664adfd1e7b4b3146e1227",
+    "c15f64da6946ca733ee3ce43ab491caa0080bd85da664adfd1e7b4b3146e1227"
+   ],
+   "lanes": 256,
+   "marked": [
+    [],
+    [],
+    [],
+    []
+   ],
+   "name": "pendulum-rk4-tangent-fp64",
+   "no_structured": "the committed trig families (python/tests/mathlib_trig_family.py, TRIG_FAMILY) hold no sin and no cos centre at fp64 under rne, the pendulum's attribute: sin has centres at fp64 under the directed three alone, cos too, and fp64 has no stated range, so no lane of this entry is expected to mark",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/pendulum-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    126,
+    127,
+    128,
+    190,
+    191,
+    192,
+    254,
+    255
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/pendulum-rk4-tangent-fp256.bank",
+   "bank_sha256": "0536796a6268e54e9d8807b055b2a1ca7a49791d92034cd78cec3bab0a41ab1b",
+   "boundaries": [
+    "1584c54196494125d842b606492aee8e0b3e4a1a783b58d2a754cebbf119ff25",
+    "48ca64dbfb57e22fdbcb0fb3ab882d47c5df312bcc1b595ce8669f6d1a3a54c0",
+    "8d1b70a244edd8d5bf350731b59e1c5f589cf346b64748e50f9250bc4c620a08",
+    "49b10af5391a9237e51b9d6c5578451d8fe72b16be17ab79379c0864b5d6c227",
+    "71b1ba777ddce24f59e6243ead51a788c8a26475e588f753dbfff85a6c42b604"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/pendulum-rk4-tangent-fp256.cftp",
+   "image_sha256": "622c9da2dd7e192ed62735dc0fb70a02d557e73cc63de6c8a1c3fa37bea65416",
+   "init_sha256": "b362ff9902a85461d4550749261b3512c3a9f53679dfcc389609c66a2ff905f0",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "af9b1fcb5c31dc55f898d1f0fb1da705006d89b5a1e5a90a747112672434dc60",
+    "4fd941c7fb38a87749b0ab6880af29cb9730a4a67df266656a4884d0caaf10f3",
+    "4fd941c7fb38a87749b0ab6880af29cb9730a4a67df266656a4884d0caaf10f3",
+    "4fd941c7fb38a87749b0ab6880af29cb9730a4a67df266656a4884d0caaf10f3"
+   ],
+   "lanes": 64,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      19,
+      144
+     ],
+     [
+      31,
+      144
+     ],
+     [
+      35,
+      144
+     ],
+     [
+      51,
+      144
+     ]
+    ],
+    [
+     [
+      31,
+      144
+     ]
+    ],
+    [
+     [
+      31,
+      144
+     ]
+    ],
+    [
+     [
+      31,
+      144
+     ]
+    ]
+   ],
+   "name": "pendulum-rk4-tangent-fp256",
+   "range": [
+    {
+     "argument": "0x6000800000000000000000000000000000000000000000000000000000000000",
+     "components": [
+      0,
+      1
+     ],
+     "function": "range",
+     "lane": 31,
+     "segments": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "tile": 1
+    }
+   ],
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/pendulum-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    16,
+    19,
+    30,
+    31,
+    32,
+    35,
+    46,
+    47,
+    48,
+    51,
+    62,
+    63
+   ],
+   "status": [
+    64,
+    64,
+    64,
+    64
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ff8f50000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      21,
+      116
+     ],
+     "component": 0,
+     "function": "sin",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3ff8fb0000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      27,
+      116
+     ],
+     "component": 0,
+     "function": "sin",
+     "lane": 19,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3ff8f50000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      21,
+      116
+     ],
+     "component": 0,
+     "function": "sin",
+     "lane": 35,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x3ff8fb0000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      27,
+      116
+     ],
+     "component": 0,
+     "function": "sin",
+     "lane": 51,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/attitude-rk4-tangent-fp64.bank",
+   "bank_sha256": "462e5cfa8f6e54b136dfabef13c404cff8d32617956747940097bd6f3b2b6077",
+   "boundaries": [
+    "3f4c4028b80a362d61e5665d06dcaa5eb16943885a14b6ae620ae203ba1fb04b",
+    "1f3174e743ada4791163d23e48f27291018ba62299e675c6464cdca44249966e",
+    "39ec065b0eea3ef921b765420f3b4019c548fdc7bcedb37ca3b31f006751f6e4",
+    "237ac6dcfb0a994c74c07d53dd9429d9222d6032efa04c00c60adb2b351e7ff2",
+    "8b6e7778365610b1269b98257f2864d11c826261e853f26406cf7c32370db661"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/attitude-rk4-tangent-fp64.cftp",
+   "image_sha256": "fba2c01f3feaffe2e910c4161b905074ce38b23eebb2cff27e01763355ecdd4c",
+   "init_sha256": "8ea0f41133a3a2f6a3c7de1c9c4397089bc8942666ea4ebe723fbf77a32ad65b",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "1236569281d3e64304b720de44744d0d39a8a21f5e5ce6f162ea1c034c032922",
+    "5b7309c381439ab665950096d364f6a7c99d5fa2f76c19ba862ee4d26eb55ff1",
+    "5b7309c381439ab665950096d364f6a7c99d5fa2f76c19ba862ee4d26eb55ff1",
+    "5b7309c381439ab665950096d364f6a7c99d5fa2f76c19ba862ee4d26eb55ff1"
+   ],
+   "lanes": 256,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      67,
+      144
+     ],
+     [
+      131,
+      144
+     ],
+     [
+      195,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "attitude-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/attitude-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    64,
+    67,
+    126,
+    127,
+    128,
+    131,
+    190,
+    191,
+    192,
+    195,
+    254,
+    255
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3e50000000000000",
+     "centre": [
+      1,
+      26
+     ],
+     "component": 0,
+     "function": "cos",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3e60000000000000",
+     "centre": [
+      1,
+      25
+     ],
+     "component": 0,
+     "function": "cos",
+     "lane": 67,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3e68000000000000",
+     "centre": [
+      3,
+      26
+     ],
+     "component": 0,
+     "function": "cos",
+     "lane": 131,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x3e78000000000000",
+     "centre": [
+      3,
+      25
+     ],
+     "component": 0,
+     "function": "cos",
+     "lane": 195,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/attitude-rk4-tangent-fp256.bank",
+   "bank_sha256": "b4af4368e9a2c5bea0821e518c5fabaa656feb5fb23f0be6e10fd1afae0d7970",
+   "boundaries": [
+    "68473be7930b079f318af42e31b4eea3397de1a8328d1c7428f265ee1a4ff042",
+    "3b063a87a582f303efc651c6c73ccabd73f0e6d1da0c1f0b43ba8db2466bd80d",
+    "7569d38884e17f0e11682b493d038412a7ac23fa7783d8b3eb1ffbf02d861895",
+    "deeee11f99a111ead61de7ba3a9a4e755e9f69001997cfe6fad96c506a907482",
+    "494befa6742a36962388dc14a52830dac632dd6ceb8fab4ca5ca121d810838d0"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/attitude-rk4-tangent-fp256.cftp",
+   "image_sha256": "aeff5c2601783d1ad1ddbdb3cce4c898b12f94b803cacb01df026ecdd9598e50",
+   "init_sha256": "cfecba9137d776e2792847701e9a1dbdc18f9e48ef756d64b0e6af10cae7083c",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "af9b1fcb5c31dc55f898d1f0fb1da705006d89b5a1e5a90a747112672434dc60",
+    "abae106ad46bef7234ca7945d5dd90836d49705ada7cdebc0252fcaa814e01b4",
+    "abae106ad46bef7234ca7945d5dd90836d49705ada7cdebc0252fcaa814e01b4",
+    "abae106ad46bef7234ca7945d5dd90836d49705ada7cdebc0252fcaa814e01b4"
+   ],
+   "lanes": 64,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      19,
+      144
+     ],
+     [
+      31,
+      144
+     ],
+     [
+      35,
+      144
+     ],
+     [
+      51,
+      144
+     ]
+    ],
+    [
+     [
+      31,
+      144
+     ]
+    ],
+    [
+     [
+      31,
+      144
+     ]
+    ],
+    [
+     [
+      31,
+      144
+     ]
+    ]
+   ],
+   "name": "attitude-rk4-tangent-fp256",
+   "range": [
+    {
+     "argument": "0x6000800000000000000000000000000000000000000000000000000000000000",
+     "components": [
+      0,
+      1
+     ],
+     "function": "range",
+     "lane": 31,
+     "segments": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "tile": 1
+    }
+   ],
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/attitude-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    16,
+    19,
+    30,
+    31,
+    32,
+    35,
+    46,
+    47,
+    48,
+    51,
+    62,
+    63
+   ],
+   "status": [
+    64,
+    64,
+    64,
+    64
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ffb900000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      1,
+      70
+     ],
+     "component": 0,
+     "function": "cos",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3ffb880000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      3,
+      72
+     ],
+     "component": 1,
+     "function": "tan",
+     "lane": 19,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3ffb980000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      3,
+      71
+     ],
+     "component": 0,
+     "function": "sin",
+     "lane": 35,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x3ffb780000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      3,
+      73
+     ],
+     "component": 1,
+     "function": "tan",
+     "lane": 51,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
   }
  ],
  "made": "programs/acceptance.py --set rev8 --write: libcft's software backend, cft-segrun --scratch-depth at each entry's target's depth, open certificates, each accepted by cft-audit in full and by the golden spot check",

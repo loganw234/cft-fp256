@@ -34,7 +34,7 @@ THE LEGS (each a command the 2026-10-06 and 2026-10-12 card runs used; docs/VALI
   seq-check        host/tests/seq_check.py --device IMAGE: the eight corpora on the card
   acceptance       programs/acceptance.py --device IMAGE: the card's admission test
   acceptance-rev8  the revision-8 set, --target the image, only the entries the rule gives that
-                   image: the quad's nine workloads and six routine entries (the routine
+                   image: the quad's nine workloads and ten routine entries (the routine
                    entries read committed files and --lib host/libcft.so), the deep's one
   resident, selftest  (beyond the brief) cft-resident IMAGE; cft-selftest vectors/out IMAGE,
                    every third visit
@@ -172,16 +172,19 @@ IMAGES = {
 }
 
 # programs/acceptance.py, REV8 and REV8_ROUTINES: the revision-8 set's entries and the image the
-# rule picks for each - the ten workloads, then the six routine entries (parcel MA, 2026-10-19),
-# all six on the quad. hw/test_card_stress.py reads that source and fails if this table is not
-# both tuples, entry for entry, or if acceptance.py has a REV8 name the test has not been shown.
-# The six were missing from here from 2026-10-19 to 2026-10-20: the test read REV8 alone and
+# rule picks for each - the ten workloads, then the ten routine entries (the first six parcel MA's,
+# 2026-10-19; the pendulum's and the attitude's, at fp64 and fp256, parcel M2A, 2026-11-04), all
+# ten on the quad. hw/test_card_stress.py reads that source and fails if this table is not both
+# tuples, entry for entry, or if acceptance.py has a REV8 name the test has not been shown.
+# The first six were missing from here from 2026-10-19 to 2026-10-20: the test read REV8 alone and
 # counted its ten, so a second tuple in the same file went by unseen.
 # A routine entry's image and bank are committed files (programs/systems/compiled-tangent/): no
 # compile, nothing to cache in --rev8-images, which acceptance.py ignores for them.
 REV8_ROUTINE_ENTRIES = ("lotkavolterra-rk4-tangent-fp64", "lotkavolterra-rk4-tangent-fp256",
                         "diode-rk4-tangent-fp64", "diode-rk4-tangent-fp256",
-                        "culture-rk4-tangent-fp64", "culture-rk4-tangent-fp256")
+                        "culture-rk4-tangent-fp64", "culture-rk4-tangent-fp256",
+                        "pendulum-rk4-tangent-fp64", "pendulum-rk4-tangent-fp256",
+                        "attitude-rk4-tangent-fp64", "attitude-rk4-tangent-fp256")
 REV8_ENTRIES = {
     "u50-rev8-quad": ["gray_scott_hard_fp64", "gray_scott_wide_fp256",
                       "lorenz_tangent_hard_fp64", "lorenz_tangent_wide_fp256",
@@ -222,8 +225,11 @@ QUICK_BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-s
 # Seconds. Sized from the card runs of 2026-10-06 (docs/VALIDATION.md): device-test's three
 # matrices took about 2, 11-14 and 2 s; card-segrun 169-185 s; the acceptance set 371-384 s;
 # the revision-8 set 353 s on the quad (images cached) and 77 s on the deep, and 57 s for the six
-# routine entries (docs/CARDDAY.md, 2026-10-19), so 410 s for the quad's fifteen: 2400 s is 5.9
-# times that (COMPUTED). A timeout is a
+# routine entries (docs/CARDDAY.md, 2026-10-19), so 410 s for the quad's fifteen: 2400 s was 5.9
+# times that (COMPUTED). The quad's nineteen, since parcel M2A's four routine entries (2026-11-04),
+# are ESTIMATED at 505 to 540 s on the card (the nightly's fifteen: median 464.5 s over 188 passes,
+# docs/CARDDAY.md; the four's software set leg 64 s), so 2400 s is 4.4 to 4.8 times that (COMPUTED
+# from the estimate) and still covers all ten routine entries. A timeout is a
 # several-times margin on those, with a floor, because a hang costs only its timeout and a
 # false timeout costs a run (an abandoned run poisons the tile). api-test, dt-i, dt-b,
 # seq-check, resident and selftest have no card figure in the records: BELIEVED, from their

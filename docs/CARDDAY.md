@@ -1014,31 +1014,39 @@ printf it matches.
   resume-1020 to nightly-1024), says how many cycles did not say what they left out when a file has both kinds, and has no such section for a
   file that has only the old.
 - **The revision-8 leg** runs the entries the image is (`--target`): programs/acceptance.py's
-  rule puts fifteen on the quad - nine workloads and the six routine entries the math library
-  added on 2026-10-19 - one on the deep and **none on the single** (where R21 alone keeps a
+  rule puts nineteen on the quad - nine workloads and the ten routine entries (the six the math
+  library added on 2026-10-19 and the four of the radian case, parcel M2A, 2026-11-04) - one on the deep and **none on the single** (where R21 alone keeps a
   workload off the quad, which none does), so the single's battery **leaves the leg out** (since 2026-10-27; before, it was recorded as a skipped
   leg on every visit): `cycle_start` names it in `left_out` with the rule's text, and the report's LEGS LEFT OUT section says so.
   Two entries compile for 40 minutes and 2.2 hours (Gray-Scott extended, the deep's only entry,
   and Riccati extended): **they are left out unless their image and bank are already in
-  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs fourteen (eight
-  workloads and the six routine entries) and the deep's leg is skipped, by name, with that reason.
+  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs eighteen (eight
+  workloads and the ten routine entries) and the deep's leg is skipped, by name, with that reason.
   The driver does not compile them in the background; seed that directory from the lead's W8
-  images and it runs fifteen on the quad and one on the deep. The eight workloads that compile in
+  images and it runs nineteen on the quad and one on the deep. The eight workloads that compile in
   minutes compile once, on the first visit of the quad, and are read back after.
-  **The six routine entries** (the Lotka-Volterra, diode and culture references at fp64 and
+  **The ten routine entries** (the Lotka-Volterra, diode and culture references of the six, and
+  the pendulum and the attitude of sin, cos and tan, each at fp64 and
   fp256: `REV8_ROUTINES` in programs/acceptance.py, the section "The math library's routine entries in the revision-8 set" below)
   have nothing to compile or to cache: their image and bank are committed files under
   programs/systems/compiled-tangent/, which `--images` does not touch, so they never add the
   compile allowance to the leg's timeout. They need libcft's shared library for the mark probe,
   and the leg names this tree's own, host/libcft.so, with `--lib`, rather than leave it to `$CFT_LIB`
   (acceptance.py's default); the build step has already asserted that library is XRT-linked. Of the
-  box the six ask nothing the driver's build does not already make. They were missing from the
+  box the ten ask nothing the driver's build does not already make. They were missing from the
   driver from 2026-10-19 to 2026-10-20: `REV8_ENTRIES` is a table in hw/card_stress.py, and its test
   read `REV8` alone and counted its ten. The test now holds the table to `REV8` and
   `REV8_ROUTINES`, entry for entry and target for target, and goes red on any other `REV8` name in
   programs/acceptance.py that it has not been shown. The six took 57 s on the card (MEASURED, the
-  lead's, below); the leg's 2400 s is 5.9 times the quad's fifteen, 353 s for the nine workloads
-  (2026-10-12) and 57 s for the six, 410 s (COMPUTED). The smoke (`--quick`) runs one of them,
+  lead's, below); the leg's 2400 s was 5.9 times the quad's fifteen, 353 s for the nine workloads
+  (2026-10-12) and 57 s for the six, 410 s (COMPUTED). The four of parcel M2A (2026-11-04) join the
+  quad's argv, so it holds nineteen, and the 2400 s still covers all ten routine entries: the
+  nightly's fifteen took 464.5 s at the median (397.5 to 470.4 s over 188 passes, READ in
+  Data/runs/2026-10-12-math-round/box/nightly-1103/run/driver.log, the nights to 2026-11-04), and
+  the four's set leg took 64 s on the software backend (MEASURED, 110 checks, unniced, one process;
+  the desktop read 4 per cent by Win32_Processor after the next run), against 113 s for the six there (parcel MA); on the card the four are
+  ESTIMATED at 40 to 70 s (the six's 57 s, scaled by the software times), so the nineteen at 505 to 540 s
+  (ESTIMATE) and the 2400 s 4.4 to 4.8 times that. The first nightly after the merge has the figure. The smoke (`--quick`) runs one of them,
   `lotkavolterra-rk4-tangent-fp64`, beside `phi4_extended_fp64`: about 10 s more (COMPUTED, 57 s
   over six), the routine path on the card in the smoke instead of in the long run's first cycle.
 - **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
@@ -2702,6 +2710,107 @@ a segment (256 lanes, ten steps) is BELIEVED well under a second.
   on the software backend (no `--device`), then `git diff --stat programs/acceptance-rev8.json`
   must print nothing. All sixteen entries; the desktop took 558 s, the box BELIEVED 10 to 15 minutes.
 - **Not run, and not runnable:** rev8d (the command above selects no entry there).
+
+## The radian routine entries in the revision-8 set (added 2026-11-04; the card leg has not run)
+
+M2's build, the study's section 10 item 7 (docs/studies/M2-trig.md): STATUS[6] and the lane byte on a
+structured argument of sin, cos and tan, and the acceptance set with a radian routine case. Parcel M2A
+built the software side (docs/VALIDATION.md, 2026-11-04): `programs/acceptance.py --set rev8` holds
+**four routine entries more**, after the six of the section above - the committed pendulum
+(`pendulum-rk4-tangent-fp64`, `-fp256`: sin in the step, cos in its tangent, round rne) and attitude
+(`attitude-rk4-tangent-fp64`, `-fp256`: sin and cos of phi, tan of theta, round rdn) references of
+`programs/systems/compiled-tangent/`. The driver's docstring ("The routine entries") is the definition.
+**The card leg is the lead's, and has not run: every figure of the card below is an ESTIMATE or the
+software backend's, and the card's results are to be added under "What to record" after the run.**
+
+What is different from the six's section above:
+- **Quad only, again.** The rule puts all four on `u50-rev8-quad` (MEASURED 2026-11-04: `rule_target`
+  answered it from each image's own words; 1,849, 1,768, 3,619 and 3,455 instructions, 256 scratch
+  slots declared, no R21). `--target u50-rev8-deep` and `--target u50-rev8` select none of them.
+- **The structured lanes** are centres of `python/tests/mathlib_trig_family.py`'s TRIG_FAMILY at each
+  entry's own attribute, one a tile, marking in segment 0: the attitude at fp64 (rdn) cos at 2^-26 -
+  the study's card case's argument, at a directed attribute: no reference is rtz - then 2^-25, 3 2^-26
+  and 3 2^-25; the attitude at fp256 (rdn) cos at 2^-70, tan at 3 2^-72, sin at 3 2^-71, tan at 3 2^-73;
+  the pendulum at fp256 (rne) sin at 21 2^-116 and 27 2^-116, alternating. **The pendulum at fp64 has
+  none, by name**: TRIG_FAMILY has no sin or cos centre at fp64 under rne. Its lanes run, and the probe
+  holds that no lane of any segment marks (flags [29, 24, 24, 24], STATUS [0, 0, 0, 0]).
+- **The range lane** (Logan's answer 2, docs/ROADMAP.md's M2 block). The recipe's overflow lane, tile 1's
+  last (lane 31 at fp256), holds 2^131081, past 2^1024, where mathlib marks a lane whatever its test
+  says. At the two fp256 entries it is **declared an expected mark in each segment it marks in**, held
+  by name apart from the structured lanes. MEASURED on the software backend: byte 0x90 in segments 0 to
+  3 of both, so STATUS is [64, 64, 64, 64] there (the attitude at fp64 is [64, 0, 0, 0], the six's
+  shape). Its guess is wrong (the study); the card must reproduce it bit for bit. At fp64 the lane is
+  lane 127 at 2^521 and unmarked (TRIG_RANGE is None).
+- **The record** gained the keys `no_structured` (the pendulum at fp64's reason) and `range` (the
+  declaration); the six's entries are unchanged, byte for byte.
+
+On amd-arc-box, from the root of the branch's checkout (no other card user):
+
+    source /opt/xilinx/xrt/setup.sh
+    make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so
+    ldd host/cft-segrun | grep xrt        # libxrt_coreutil
+    ldd host/libcft.so  | grep xrt        # the same; none means an XRT=0 build
+    X=$HOME/cardday-rev8q/cft_hw_quad.xclbin
+    sha256sum $X                          # 4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b
+    FOUR=pendulum-rk4-tangent-fp64,pendulum-rk4-tangent-fp256,attitude-rk4-tangent-fp64,attitude-rk4-tangent-fp256
+    python3 programs/acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad \
+        --segrun host/cft-segrun --audit host/cft-audit --lib host/libcft.so \
+        --only $FOUR > radian-rev8q.log 2>&1; echo rc=$?
+    # then the same with --golden all, to radian-golden-rev8q.log
+    # and the six again on the same tree, as the regression:
+    python3 programs/acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad \
+        --segrun host/cft-segrun --audit host/cft-audit --lib host/libcft.so \
+        --only lotkavolterra-rk4-tangent-fp64,lotkavolterra-rk4-tangent-fp256,diode-rk4-tangent-fp64,diode-rk4-tangent-fp256,culture-rk4-tangent-fp64,culture-rk4-tangent-fp256 \
+        > routines-rev8q.log 2>&1; echo rc=$?
+
+**What it must print** (the software backend's run, MEASURED 2026-11-04 on the desktop; the card's
+differences are marked):
+- exit 0, and last, `acceptance rev8: 4 of 4 PASS on $X as u50-rev8-quad (set); N checks ok, 0 failed, S s`.
+  The software backend counts 110 checks for `--legs set` (one run, 64 s); N on a card is BELIEVED 111,
+  as the six's was the software count plus one (the probe-on-another-image control, which needs an
+  image: COMPUTED from the code, not run on a card).
+- four `PASS` lines. The software backend's, which the card's must equal but for `xrt`:
+  - `pendulum-rk4-tangent-fp64 ... flags [29, 24, 24, 24], status [0, 0, 0, 0]; every digest the set's,
+    cft-audit accepts in full, ... the spot check holds, no lane marks (no structured lane, by name)`
+  - `pendulum-rk4-tangent-fp256 ... status [64, 64, 64, 64]; ... 4 structured lanes mark (bit 7,
+    STATUS[6]), range lane 31 marks in segments 0, 1, 2, 3`
+  - `attitude-rk4-tangent-fp64 ... status [64, 0, 0, 0]; ... 4 structured lanes mark (bit 7, STATUS[6])`
+  - `attitude-rk4-tangent-fp256 ... status [64, 64, 64, 64]; ... 4 structured lanes mark (bit 7,
+    STATUS[6]), range lane 31 marks in segments 0, 1, 2, 3`
+- **each mark named**, in the `the structured lanes mark` line: lanes [3, 67, 131, 195] at fp64 and
+  [3, 19, 35, 51] at fp256 carry bit 7 (0x90) in segment 0, and at fp256 `so does the declared range lane
+  31 (past 2^1024: 0x90) in segments 0, 1, 2, 3`; and one `the golden mark check` line a segment the
+  probe saw a lane mark in (segments 0 to 3 at fp256, segment 0 at the attitude at fp64), then `the golden
+  mark check re-ran every segment the probe saw a lane mark in`. The pendulum at fp64 prints `no lane
+  marks: its recipe has no structured lane ...`.
+- **the probe's backend line** on every entry: `the mark probe opened the certificate's device: xrt, 4
+  tiles, 4096 slots a lane, image 4f9921a25af65444`. A library built without XRT is `the mark probe
+  could not open ...: no such device`.
+- the controls, once: the set's 16 `ok` lines on the first entry (the pendulum at fp64), then the
+  marks' controls on the first entry that has a structured lane (the pendulum at fp256: 21), then the
+  range lane's (8, on the same entry), and a `note  no mark control was possible on
+  pendulum-rk4-tangent-fp64: its recipe has no structured lane`. None `FAIL`.
+- the golden spot check of segment 3 prints `STATUS[6] set by the declared range lane` at the two fp256
+  entries.
+- a failure names its check: a range lane that does not mark is `range lane 31 (tile 1, components [0, 1]
+  = 0x..., past 2^1024) has byte 0x10 in segment K, without bit 7`; a mark in a segment not declared is
+  `segment K: lanes [31] carry bit 7, and the recipe marks none of them`.
+
+**Time (ESTIMATE).** The software backend took 64 s for the four at `--legs set` (MEASURED, one process,
+unniced, the desktop read 4 per cent by Win32_Processor after the next run), against 122 s for the ten
+routine entries. On the card the six took 57 s; the four are ESTIMATED at 40 to 70 s (the six's card
+time scaled by the software times), so 40 to 90 s with the build's 30 s apart. `--golden all`: the
+golden audit over an entry's four segments took 95.3 s (the pendulum at fp64), 26.2 s (fp256), 193.2 s
+(the attitude at fp64) and 52.9 s (fp256) on the software backend (MEASURED, runs of one to three entries, the
+desktop's load not read); the card's run is ESTIMATED at 400 to 650 s for the four
+(the six's 530 s on the card against 550 s of audit on the desktop; the host-side work is the same).
+The six again: about 60 s. In all, about 15 to 20 minutes of card time (ESTIMATE).
+
+**What it proves, if it passes:** the device reproduces the software backend's guess, mark and lane byte
+for sin, cos and tan, entry by entry, including the wrong guess past 2^1024 and marks in segments 1 to 3,
+which the six's leg could not show. It does not run an rtz image (no reference is rtz; the nightly
+seq-check's trig part is the fragment-level evidence) and it does not run the attitude's tan at fp64
+(TRIG_FAMILY has no tan centre at fp64 under rdn).
 
 ## What to record
 
