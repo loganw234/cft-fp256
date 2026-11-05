@@ -2338,9 +2338,9 @@ is.
     (docs/VALIDATION.md, 2026-10-29, "program.c parity for sin, cos and
     tan");
   - by the `lang-routines` and `tangent` stages, under the marked-lane
-    rule. On the one-call shapes of `lang-routines`' leg T1, the rule's
-    count of wrong guesses is also asserted equal to the golden
-    function's (docs/VALIDATION.md, 2026-11-04, "the stages' legs
+    rule. On the map configurations of `lang-routines`' leg T1 (its
+    one-call shapes, `next x = f(x)`), the rule's count of wrong guesses
+    is also asserted equal to the golden function's (docs/VALIDATION.md, 2026-11-04, "the stages' legs
     (parcel M2SL)");
   - and on the card, rev8q, 2026-11-04: "4 of 4 PASS", "111 checks ok,
     0 failed", with lane 31's marks past 2^1024 in all four segments

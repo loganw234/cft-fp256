@@ -27004,11 +27004,14 @@ Each merge's staged tree was asserted equal to the gated trial merge's before it
 - the tangent stage's Lyapunov legs E and F run only in the gates;
 - the remaining per-parcel limits are in each entry above.
 
-**The records that counted six on the tile** were brought to nine with the close, after its verifier, VM2CLOSE (Haiku), found the count left at six in two places the close had edited (its one (b)). Each change is a dated note beside the 2026-10-21 one, or a count:
-- README.md: the header table's cell ("9 also run on the tile"), the golden model's row, the bullet "Nine of the thirty-nine also run on the tile" and the plan's M2 line;
-- docs/TRANSCENDENTALS.md: three dated notes and a new last section, "sin, cos and tan on the tile";
-- CAPABILITIES.md: a dated note, "the qualification covers nine functions and no other";
-- docs/README.md: TRANSCENDENTALS.md's row and the M2 study's row.
+**The records that counted six on the tile now count nine.** The close made the change in three commits, two of them after its verifier, VM2CLOSE (Haiku), found counts left behind:
+- **the close itself:** README.md's bullet "Nine of the thirty-nine also run on the tile" and its plan line for M2, and the M2 study's row in docs/README.md;
+- **after pass 1's one (b):** README.md's header cell ("6 also run on the tile") and docs/README.md's TRANSCENDENTALS row ("the six of them") still counted six. The fix went wider, to every record the 2026-10-21 sweep had written about the six:
+  - README.md's header cell and the golden model's row;
+  - docs/TRANSCENDENTALS.md's four dated notes beside those of 2026-10-21, and its new last section, "sin, cos and tan on the tile";
+  - CAPABILITIES.md's dated note;
+  - docs/README.md's TRANSCENDENTALS row;
+- **after pass 2's two (b)s:** CAPABILITIES.md's clause-9 parenthesis ("six of them also as tile routines") now says nine, and this paragraph names each commit's changes.
 
 **From tonight's night on,** the stress run's revision-8 leg runs the four radian entries on the quad each night (hw/card_stress.py's table, parcel M2A). Night 1105 is the first launched at a tree with them.
 

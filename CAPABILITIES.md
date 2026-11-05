@@ -336,8 +336,9 @@ in docs/COMPATIBILITY.md) gets the full story.
   nextDown, classification, totalOrder, the signaling comparisons,
   remainder. Clause 9 followed in four steps between 2026-09-02 and
   2026-09-03: all thirty-nine functions of table 9.1, correctly rounded
-  in the library rather than in the tile (six of them also as tile
-  routines since M1's build, 2026-10-13 to 2026-10-19; see "Recommended
+  in the library rather than in the tile (nine of them also as tile
+  routines: six since M1's build, 2026-10-13 to 2026-10-19, and sin, cos
+  and tan since M2's, 2026-10-27 to 2026-11-04; see "Recommended
   operations"), with the radian trigonometry reduced against a
   270,336-bit 2/pi; the seven reductions of 9.4; the
   three augmented operations of 9.5; the three payload operations of
