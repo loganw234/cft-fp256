@@ -26970,3 +26970,40 @@ Each merge's staged tree was asserted equal to the gated trial merge's before it
 - **No tan mark at fp64,** because TRIG_FAMILY has no tan centre there under rdn.
 - **One argument on the range lane.** Its marks in segments 1 to 3 are for that one argument (2^131081) over these 40 steps.
 - **The nightly runs the four from the first night launched at a tree with this merge.** Night 1104 runs at 0bb2a92c, before it.
+
+## 2026-11-05 - M2's build, closed: sin, cos and tan, correctly rounded, from the golden generator to the card, 2026-10-27 to 2026-11-04 (the lead)
+
+**What M2 built,** by the study's section 10 (docs/studies/M2-trig.md), each item with its parcel's VALIDATION entry above:
+
+| item | what | parcels | their entries, and the merge |
+|---|---|---|---|
+| 1 | the golden generator at fp64, fp128 and fp256: the reduction, the routines, the budget, the rate law and the families | M2G1, M2G2a, M2G2b | 2026-10-27 and 28 |
+| 2 | fp32 as a triple word at G = 40 | M2X (the model), M2F1, M2F2 | 2026-10-27, 29 and 30 |
+| 3 | program.c parity | M2P | 2026-10-29 |
+| 4 | the language at 1.2 | M2L | 2026-11-02, d0c6bed4 |
+| 5 | cftc VERSION 7, with the pendulum and the attitude as references | M2C | 2026-11-02, d0c6bed4 |
+| 6 | the stages' legs | M2SL | 2026-11-04, f957c613 |
+| 7 | the revision-8 set's radian case, and the card leg on rev8q | M2A, then the lead's card leg | 2026-11-04, 900a6431; the card leg at 23c2805d |
+
+**How it was held:**
+- all eleven of the build's parcels had a Sonnet author and a Haiku verifier, Logan's trial for M2 (READ in each report's first line; the brief drafters were the default model);
+- each merge had the lead's gate on amd-arc-box;
+- the card leg (2026-11-04, above) gave 4 of 4 PASS, and 4 of 4 with the golden audit over every segment;
+- the hard-workload pack's 21 sources compile byte for byte the same at cftc versions 6 and 7, apart from the manifest's version line (2026-11-04, above).
+
+**Logan's answers that shaped it:**
+- the study's twelve, approved as recommended (2026-10-14);
+- fp32 as the triple word, after M2X measured it (2026-10-27);
+- answer 2: lanes past 2^1024 at fp128 and fp256 always mark. On the card that is lane 31 at fp256, marked in every segment, with its wrong guess reproduced bit for bit.
+
+**Known limits, carried:**
+- no committed reference is rtz, so the study's own card case (cos(2^-26) under rtz) ran at rdn; the nightly seq-check's trig part is the fragment-level evidence for rtz;
+- the attitude's tan does not mark at fp64 (TRIG_FAMILY has no tan centre there under rdn);
+- the radian case runs on one image, the quad;
+- which far lanes are wrong past the range is mathlib's unstated behaviour, so no check pins it, and the stages assert only a count against the golden function;
+- the tangent stage's Lyapunov legs E and F run only in the gates;
+- the remaining per-parcel limits are in each entry above.
+
+**From tonight's night on,** the stress run's revision-8 leg runs the four radian entries on the quad each night (hw/card_stress.py's table, parcel M2A). Night 1105 is the first launched at a tree with them.
+
+**Next in the math library,** by docs/ROADMAP.md: M4 (atan, atan2, asin and acos; its study done 2026-10-23, its thirteen questions for Logan), then M3 (the pow family). M2-M4's builds are each a round of their own (Logan, 2026-10-12).

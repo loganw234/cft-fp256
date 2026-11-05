@@ -288,22 +288,29 @@ runs that failed stay in the record. The load-bearing ones:
   before that day, whose count saturated at 2^40, fails the same check
   of the arithmetic on 3,969,901 of 10,334,817 (the check built against
   that library, on the desktop, 2026-09-30).
-- **Six of the thirty-nine also run on the tile**: exp, expm1, exp2,
-  log, log1p and log2, as routines the language's compiler writes into
-  a program that revision 8's tiles run (the math library's M1 build,
-  2026-10-13 to 2026-10-19). A routine decides its last bit in the
-  lane; where it cannot, it marks the lane (bit 7 of the lane byte,
-  STATUS[6]) and the definition replays that lane, and on the cases the
-  stages run they hold every lane it does not mark to the golden model
-  bit for bit. The card ran the six routine references on the quad
-  image on 2026-10-19: 6 of 6 passed, 118 checks, none failed
-  (`docs/VALIDATION.md`, "M1's build, seventh wave, closed";
-  `docs/LANGUAGE.md`, "The operations"). Since 2026-11-04 the
-  revision-8 set holds four routine references more, the pendulum and
-  the attitude at fp64 and fp256 (sin, cos and tan), run on the
-  software backend; their card leg has not run. The host operations are
-  unchanged: `cft_exp` still issues no `cft_run` pass, and a routine is
-  reached by compiling a program, not by that call.
+- **Nine of the thirty-nine also run on the tile.** They are routines
+  the language's compiler writes into a program that revision 8's tiles
+  run:
+  - exp, expm1, exp2, log, log1p and log2 (the math library's M1 build,
+    2026-10-13 to 2026-10-19);
+  - sin, cos and tan (its M2 build, 2026-10-27 to 2026-11-04).
+
+  A routine decides its last bit in the lane. Where it cannot, it marks
+  the lane (bit 7 of the lane byte, STATUS[6]) and the definition
+  replays that lane. On the cases the stages run, they hold every lane
+  it does not mark to the golden model bit for bit. sin, cos and tan
+  also mark every lane past 2^1024 at fp128 and fp256, their stated
+  range. The card ran the routine references on the quad image (none
+  failed):
+  - M1's six on 2026-10-19: 6 of 6 passed, 118 checks
+    (`docs/VALIDATION.md`, "M1's build, seventh wave, closed");
+  - the pendulum and the attitude at fp64 and fp256 on 2026-11-04: 4 of
+    4 passed, 111 checks, the six again 6 of 6 (`docs/VALIDATION.md`,
+    "the lead's: M2's wave 4 card leg on rev8q").
+
+  The operations are in `docs/LANGUAGE.md`, "The operations". The host
+  operations are unchanged: `cft_exp` still issues no `cft_run` pass,
+  and a routine is reached by compiling a program, not by that call.
 - **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
   deterministic camera around a plate, lowered to a sequencer program:
   a million samples a pass, five words a sample, and every pass's
@@ -437,9 +444,10 @@ no failure; and the sweep's coverage work.
 What is planned:
 
 - **The rest of the math library**, each part a design study before it
-  is built: sin, cos and tan (M2, `docs/studies/M2-trig.md`) are the
-  next build, then atan, atan2, asin and acos (M4), and the pow family
-  (M3) last.
+  is built. sin, cos and tan (M2, `docs/studies/M2-trig.md`) were the
+  next build, and since 2026-11-04 they run on the tile and the card
+  (above). Then come atan, atan2, asin and acos (M4, whose study is
+  done), and the pow family (M3) last.
 - **One gallery**, "with literature-checked answers and published
   certificates", as the roadmap puts it: step 7 of its work order, after
   step 6. It is not `docs/FIGURES.md`, the gallery of the project's

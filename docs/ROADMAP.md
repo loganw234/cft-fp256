@@ -6203,6 +6203,25 @@ function gains an L3 rule.
     and M2F2 (the routines, merged at d6f5574), equal to parcel M2X's
     model. program.c parity is item 2's trig part (above); cftc and the
     language are parcels M2C's and M2L's.
+  - **Built through the card, and closed** (2026-11-04):
+    - **the language, 1.2** (parcel M2L) and **cftc's VERSION 7**
+      (parcel M2C), with the pendulum and an attitude system as
+      references, merged together at d0c6bed4 on 2026-11-02;
+    - **the stages' legs** (parcel M2SL, f957c613): lang-routines and
+      tangent run the three under the marked-lane rule, with lanes past
+      2^1024 and the replay's values asserted against the golden
+      function;
+    - **the revision-8 set's radian case** (parcel M2A, 900a6431);
+    - **the card leg on rev8q,** the lead's: 4 of 4 PASS, with the
+      golden audit 4 of 4, STATUS[6] and the lane byte on structured
+      arguments of the three, and lane 31's wrong guess past 2^1024
+      reproduced in all four segments.
+
+    All seven items of the study's section 10 are built: the generator,
+    fp32, program.c parity, the language, cftc, the stages' legs and the
+    card. Each has its parcel's checks and the lead's gates. The open
+    ends are the VALIDATION entries' known limits: no rtz reference, no
+    tan mark at fp64, and one image.
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
   - **Its study is done** (2026-10-23, ahead of M2's build, by Logan's
