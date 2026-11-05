@@ -222,6 +222,12 @@ instructions, run with revision 8's flag control, and the tile still has
 no transcendental datapath. The host operations are as described,
 `cft_exp` included.
 
+*Note of 2026-11-05.* sin, cos and tan join them (M2's build, 2026-10-27
+to 2026-11-04; docs/TRANSCENDENTALS.md, "sin, cos and tan on the tile").
+So the qualification covers nine functions and no other. They are
+routines of the same kind, and the tile still has no transcendental
+datapath.
+
 ## The atlas-engine det_* library
 
 `atlas-engine`'s deterministic library is the workload this tile exists

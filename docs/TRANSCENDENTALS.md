@@ -23,6 +23,11 @@ the tile", says what that is. A passage below that calls a
 tile-assisted path a plausible later optimisation is as written on its
 date, 2026-09-02 or 09-03.*
 
+*Note of 2026-11-05. Since M2's build (2026-10-27 to 2026-11-04) sin,
+cos and tan run on the tile too, the same way. The section after "The
+six on the tile", "sin, cos and tan on the tile", says what they are.
+Their host operations are unchanged.*
+
 ## The promise, and why it is the only one worth making
 
 **Correctly rounded, at all four formats, under all five rounding
@@ -84,6 +89,11 @@ cannot, as this section guessed the host would. The argument above
 stands, and so do the host operations: `cft_exp` and the rest of the
 thirty-nine still issue no `cft_run` pass. The last section, "The six on
 the tile", has the details and the record.*
+
+*Note of 2026-11-05. M2's build (2026-10-27 to 2026-11-04) did the same
+for sin, cos and tan, so nine of the thirty-nine have that tile path.
+Their host operations issue no `cft_run` pass either. The section "sin,
+cos and tan on the tile", at the end, has their details.*
 
 ## Two implementations, one definition
 
@@ -606,6 +616,9 @@ by what came after.*
   language and at all four formats, not as a narrow-format fast path
   behind the host calls (the last section). The bullet stays as written
   on 2026-09-02, and still holds of the thirty-nine host entry points.*
+
+  *Status 2026-11-05: and for sin, cos and tan, the same way, since M2's
+  build ("sin, cos and tan on the tile", at the end).*
 - **The rest of clause 9.** sin, cos, tan and the inverse trigonometric
   and hyperbolic functions need one thing this set did not: an
   argument reduction against pi, which is a different and harder
@@ -2278,3 +2291,59 @@ what they are not, and where the record is.
   the pow family (M3) last. No performance claim is made, as above:
   docs/FIGURES.md's "What a correctly rounded function costs the tile"
   counts instructions, not time.
+
+  *Note of 2026-11-05: sin, cos and tan have been built since (the next
+  section). The other thirty are host operations only, and M4 and M3
+  remain.*
+
+---
+
+# sin, cos and tan on the tile
+
+sin, cos and tan of a radian argument are also routines the tile runs,
+since the math library round's M2 build (2026-10-27 to 2026-11-04).
+Everything above is about libcft's host operations and is left as it
+was. "The six on the tile" holds for these three in what they are and
+what they are not; this section gives what differs, and where the record
+is.
+
+- **Programs of the tile's instructions, on revision 8.** M2's build
+  changed no RTL either: the rtl tree is still 44b963dd.
+  - `python/cft_golden/mathlib.py` generates each of the three at each
+    of the four formats and five attributes, 60 fragments
+    (docs/VALIDATION.md, 2026-11-02, "cftc carries sin, cos and tan").
+  - fp64, fp128 and fp256 share one Payne-Hanek reduction against 2/pi,
+    whose bits are in bank words picked from the exponent.
+  - fp32 is a triple word at G = 40.
+  - The design is docs/studies/M2-trig.md.
+- **Operations of the language, not of the ABI.** `cftc` compiles each
+  run-time `sin(a)`, `cos(a)` and `tan(a)` as a routine (language 1.2
+  and cftc's output version 7, 2026-11-02), for the software targets and
+  revision 8's. Revision 7's refuse such a program with `target-feature`.
+  The host operations call none of them, as above.
+- **Decided in the lane, or marked,** in two ways.
+  - **The structured families:** near a family's centre the routine
+    cannot decide the last bit and marks the lane, as the six do.
+  - **The stated range:** at fp128 and fp256 every lane past 2^1024 is
+    marked whatever the in-lane test says (Logan's answer 2 to the
+    study, docs/ROADMAP.md's M2 block). fp32 and fp64 have no stated
+    range.
+
+  The definition replays a marked lane (docs/LANGUAGE.md, "A marked
+  lane"), and `transcend.py` stays the one definition.
+- **Held:**
+  - golden-first, with a planted fault for every check;
+  - through libcft's sequencer at fp64, fp128 and fp256: 45 fragments,
+    90 programs and 5,237 lanes at the gate's arguments, 0 mismatches
+    (docs/VALIDATION.md, 2026-10-29, "program.c parity for sin, cos and
+    tan");
+  - by the `lang-routines` and `tangent` stages, under the marked-lane
+    rule. On the one-call shapes of `lang-routines`' leg T1, the rule's
+    count of wrong guesses is also asserted equal to the golden
+    function's (docs/VALIDATION.md, 2026-11-04, "the stages' legs
+    (parcel M2SL)");
+  - and on the card, rev8q, 2026-11-04: "4 of 4 PASS", "111 checks ok,
+    0 failed", with lane 31's marks past 2^1024 in all four segments
+    (docs/VALIDATION.md, "the lead's: M2's wave 4 card leg on rev8q").
+- **Not here:** the other thirty, which are host operations only. M4
+  (atan, atan2, asin and acos) comes next, and M3 (the pow family) last.

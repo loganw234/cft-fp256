@@ -26986,7 +26986,7 @@ Each merge's staged tree was asserted equal to the gated trial merge's before it
 | 7 | the revision-8 set's radian case, and the card leg on rev8q | M2A, then the lead's card leg | 2026-11-04, 900a6431; the card leg at 23c2805d |
 
 **How it was held:**
-- all eleven of the build's parcels had a Sonnet author and a Haiku verifier, Logan's trial for M2 (READ in each report's first line; the brief drafters were the default model);
+- all eleven of the build's parcels had a Sonnet author and a Haiku verifier, Logan's trial for M2 (READ in each report, where the author or verifier names its model; the brief drafters were the default model);
 - each merge had the lead's gate on amd-arc-box;
 - the card leg (2026-11-04, above) gave 4 of 4 PASS, and 4 of 4 with the golden audit over every segment;
 - the hard-workload pack's 21 sources compile byte for byte the same at cftc versions 6 and 7, apart from the manifest's version line (2026-11-04, above).
@@ -27003,6 +27003,12 @@ Each merge's staged tree was asserted equal to the gated trial merge's before it
 - which far lanes are wrong past the range is mathlib's unstated behaviour, so no check pins it, and the stages assert only a count against the golden function;
 - the tangent stage's Lyapunov legs E and F run only in the gates;
 - the remaining per-parcel limits are in each entry above.
+
+**The records that counted six on the tile** were brought to nine with the close, after its verifier, VM2CLOSE (Haiku), found the count left at six in two places the close had edited (its one (b)). Each change is a dated note beside the 2026-10-21 one, or a count:
+- README.md: the header table's cell ("9 also run on the tile"), the golden model's row, the bullet "Nine of the thirty-nine also run on the tile" and the plan's M2 line;
+- docs/TRANSCENDENTALS.md: three dated notes and a new last section, "sin, cos and tan on the tile";
+- CAPABILITIES.md: a dated note, "the qualification covers nine functions and no other";
+- docs/README.md: TRANSCENDENTALS.md's row and the M2 study's row.
 
 **From tonight's night on,** the stress run's revision-8 leg runs the four radian entries on the quad each night (hw/card_stress.py's table, parcel M2A). Night 1105 is the first launched at a tree with them.
 

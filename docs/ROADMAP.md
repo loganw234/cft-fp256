@@ -6215,7 +6215,7 @@ function gains an L3 rule.
     - **the card leg on rev8q,** the lead's: 4 of 4 PASS, with the
       golden audit 4 of 4, STATUS[6] and the lane byte on structured
       arguments of the three, and lane 31's wrong guess past 2^1024
-      reproduced in all four segments.
+      reproduced in all four segments, by every boundary and block digest.
 
     All seven items of the study's section 10 are built: the generator,
     fp32, program.c parity, the language, cftc, the stages' legs and the

@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Fifty-two files, 95,736 lines. Flat in one directory they look like one
+Fifty-two files, 95,811 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **28,948 lines you consult while working** — the three under *Start here*,
+- **29,017 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,894 lines of tool manual**, one per shipped program;
 - **4,089 lines of operations**, read when you are about to do something to
   hardware;
-- **54,805 lines of record and argument** — the ledger, the roadmap and the
+- **54,811 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -56,7 +56,7 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [HOSTAPI.md](HOSTAPI.md) | 3,774 | The host API, function by function. The largest reference here and the one most often wanted. |
-| [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 2,280 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the six of them that also run on the tile. |
+| [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 2,349 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the nine of them that also run on the tile: M1's six and M2's sin, cos and tan. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 655 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
@@ -98,7 +98,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 27,009 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 27,015 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [FIGURES.md](FIGURES.md) | 474 | Fifteen figures of the project - its history, its gate, the card's clocks and its long stress run, the benchmarks, the math library's costs - drawn by script from the record's own data, light and dark, each with a sidecar of its numbers and the digests of its sources, and held to the numbers the README and other documents state. The page is written by `python/project_figures.py`, the `generated` stage's seventh generator, not by hand. |
 | [ROADMAP.md](ROADMAP.md) | 6,750 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
