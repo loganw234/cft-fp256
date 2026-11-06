@@ -2561,6 +2561,10 @@ that morning is Monday's; `COPY` is the copy's directory, the one holding `metri
    started `pages` alone), so it cancels no gates run and need not wait for one; a push that changes anything else still waits until no CI
    run is in progress (`gh run list --workflow gates --limit 3`), since gates cancels a superseded run of its branch. Then see `pages` go
    green and the page's health line, the first line of its glance, name the new night and its date.
+   **If `deploy-pages` times out, that commit cannot deploy again** (2026-11-06, 21eef8e9, run 42237436905). The step reached its ten-minute timeout, about two minutes
+   at `deployment_queued` and eight at `updating_pages`, and cancelled its deployment, whose ID is the commit's SHA. `gh run rerun --failed` then reruns the one job, whose
+   second upload leaves two `github-pages` artifacts, which deploy-pages refuses. `gh workflow run pages` at the same commit creates the same ID and reads
+   "Deployment cancelled" at once (run 42240002676). So it takes a later commit, then `gh workflow run pages --ref main`, or the next night's data commit.
 
 A changed tree is a new class (a tile item is counted per RTL tree, a host item per host tree and compiler), so the page's current class
 starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
