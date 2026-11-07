@@ -6740,6 +6740,134 @@ M2's build waits for HXa and HXc (Logan, 2026-10-26: "hold off on M2
 for now"). Until the wide items exist, the nights run the catalog's
 random items with new draws.
 
+### Noted 2026-11-06: what the card still lacks as a general-purpose coprocessor (no dates)
+
+Logan, verbatim, on 2026-11-06: "Lets go ahead and update the roadmap
+with the proposed items so we dont lose them, we will work on them as
+they arise with convenience".
+
+The items came from two of his questions that evening: what would
+happen if cft-Rebound and the nightly run met on the card, and what the
+card still lacks, parked exceptions aside, to be a useful
+general-purpose floating point coprocessor with certificate and replay
+support.
+
+**How to read this list.** None of these has a date, a study or a
+parcel. Each is taken up as it becomes convenient, and the list changes
+nothing in the order of M4, M3 or the scheduler's parcels. It unparks
+nothing: the Pi-variants and inverse hyperbolics of M4's question 13,
+R21 on the quad, SYNTH_CLOCK, a split of one program across tiles, and
+what step 3 and step 6 say they are not. Each item is READ at edfc7c4f
+unless it says otherwise. The lead's view is that the arithmetic is not
+what is missing, and that for one user running large batches at fp128
+or fp256 the card is useful now.
+
+**Certificates and replay.** The largest group: what a certificate can
+describe is narrower than what the card can run.
+
+1. **Certifying what general programs do.** Neither version can describe
+   deposits, lane masks, index tables, or streams that change between
+   segments (docs/CERTIFICATES.md, "What version 1 does not do" and
+   "What version 2 does not do"). Plain `cft_run` and `cft_reduce` calls
+   have no writer at all: cft-segrun, cft-orbits and the golden writer
+   all certify programs.
+2. **Replay beyond the language.** A run that writes `source none` gives
+   up its replays ("Sources"), and a source is a file of the language,
+   which is for ODEs and maps. So a program the language cannot express
+   has no replay.
+3. **Auditing a replay in C.** cft-audit has no compiler or interpreter
+   of the language, so a replay in a re-run segment, a wider-source
+   relation and a definition re-run refuse `source-missing` there and
+   are the golden auditor's, in Python. Where marks come by design that
+   can be every segment.
+4. **A proved bound on a result.** Neither version carries a bound, or a
+   value that is not an exact rational. An accuracy entry today is an
+   estimate or a measurement.
+5. **Trust from outside.** An audit reports the device and the build as
+   stated, not checked. A signature is detached Ed25519 under the
+   issuer's key, and version 2 does not bind a key to a person,
+   distribute or revoke keys, or sign a time. This matters only where
+   someone must trust a result without re-running it.
+
+**Reaching the card from ordinary code.**
+
+6. **A general way to write a program.** The language is for dynamical
+   systems (docs/LANGUAGE.md). Anything else is hand-written assembly or
+   library calls. A Python front end is one answer, and stays where step
+   3 left it.
+7. **Standard numerical kernels.** host/include names no matrix
+   multiply, linear solve or FFT.
+8. **Moving data between lanes.** There is no scatter-add and no strided
+   access, and a gather is one HBM round trip an element, 310 to 340 ns
+   at every format on the U50 (CAPABILITIES.md).
+9. **The rest of table 9.1 on the tile.** After M4 thirteen of the
+   thirty-nine run on the tile, and M3's family would make it eighteen
+   (BELIEVED: pow, pown, powr, compound and rootn; its study will say).
+   Seven are parked by M4's question 13: asinPi, acosPi, atanPi,
+   atan2Pi, asinh, acosh and atanh. The other fourteen are in no plan:
+   sinh, cosh, tanh, sinPi, cosPi, tanPi, exp2m1, exp10, exp10m1, log10,
+   log2p1, log10p1, hypot and rSqrt. All thirty-nine work in the
+   library, on the host, so a program that needs one of them leaves the
+   tile.
+10. **More than one format in a program.** A program is compiled for one
+    format, because its constants are format-width values
+    (docs/SEQUENCER.md), so a mixed-precision method such as iterative
+    refinement is separate runs.
+
+**Behaving as a shared device.**
+
+11. **A host stop for a running tile.** The kernel is `ap_ctrl_hs`, so a
+    run that fails or is killed carries on, and the tile wants an image
+    reload (docs/HOSTAPI.md, "A tile a run was abandoned on"). Revision
+    8's abort ends a run only on a read burst of the wrong length. This
+    is RTL, so it would go in the next revision, beside the fma invalid
+    row (above, "Decided 2026-10-20").
+12. **The remote path as a service.** cft-serve has no authentication,
+    no encryption and no resident path (docs/REMOTE.md,
+    docs/INTEGRATION.md), and a certificate made through a remote handle
+    reads `device-caps unknown` and records no depth or device lines.
+13. **A card guard that sees any program.** The launcher's pgrep names
+    this project's programs, and the driver's `card_user` reads command
+    lines, so neither sees cft-Rebound. MEASURED: `card_user` returned
+    nothing for `ias15_cft` with an image on its command line or none,
+    and for a Python script, and named both controls, device-test with
+    an xclbin and `xbutil validate`. The fix is for `find_card_users` to
+    read who holds the card's render node as well. `fuser` names a live
+    card process (MEASURED 2026-11-06: rate-probe, in 293 of 294 samples
+    over 90 s), though only while it holds the device, so a program that
+    opens and closes for each case can fall between looks. Between legs
+    the driver would then wait, up to `--guard-wait-max` (4 h), and at
+    its start refuse by name.
+
+    What it guards against has not been seen on a night: the fifteen
+    nights' metrics hold no guard event. READ and COMPUTED: compute
+    units are exclusive (`failed to open cu context`, MEASURED
+    2026-09-25) and xocl refuses to change an image in use
+    (`xocl_xclbin_in_use`, XRT 2.19's source, not measured here), so the
+    answers stay safe and the cost is card time. A refused open counts
+    as `no_device`. One during the smoke fails it and the long run never
+    starts. In the long run six in a row end it with `card_lost`, which
+    a hold of about 8 to 14 minutes reaches at the run's settings, and
+    it then waits for a resume by hand. `CFT_ERR_BUSY`, already planned
+    (above, "Library debts the round's verifiers found"), would tell a
+    refused open from a lost card.
+
+**Limits, not items.** The speed case is fp128 and fp256. Four tiles
+with resident data do 1,664 M fp64 fma a second, about 1.6 times one
+CPU core's 0.97 ns, and 427 M at fp256, about 30 times MPFR's 71 ns
+(COMPUTED from docs/INTEGRATION.md and docs/BENCHMARKS.md). Those
+software rows are one core each, so a fully loaded CPU would be much
+closer, and that has not been measured. A resident run costs about 35
+microseconds, so the card is a batch device, at full rate from about a
+hundred thousand elements, and a resident stream is at most 256 MB a
+tile, 8M fp256 elements.
+
+**The lead's view of where to start,** for when one is taken up: item 1,
+which closes the largest distance between what the card runs and what
+it can certify, and item 11 with the next RTL revision, which rebuilds
+and re-proves every image anyway. A new rtl/ tree restarts the card's
+coverage, so RTL items are best gathered into one revision.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
