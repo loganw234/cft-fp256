@@ -6780,9 +6780,10 @@ describe is narrower than what the card can run.
    relation and a definition re-run refuse `source-missing` there and
    are the golden auditor's, in Python. Where marks come by design that
    can be every segment.
-4. **A proved bound on a result.** Neither version carries a bound, or a
-   value that is not an exact rational. An accuracy entry today is an
-   estimate or a measurement.
+4. **A proved bound on a result.** No method in either version proves a
+   bound on an error, or has a quantity that is not an exact rational:
+   a `rounded` or `enclosed` value renders an exact one. An accuracy
+   entry today is an estimate or a measurement.
 5. **Trust from outside.** An audit reports the device and the build as
    stated, not checked. A signature is detached Ed25519 under the
    issuer's key, and version 2 does not bind a key to a person,
@@ -6798,11 +6799,13 @@ describe is narrower than what the card can run.
 7. **Standard numerical kernels.** host/include names no matrix
    multiply, linear solve or FFT.
 8. **Moving data between lanes.** There is no scatter-add and no strided
-   access, and a gather is one HBM round trip an element, 310 to 340 ns
-   at every format on the U50 (CAPABILITIES.md).
-9. **The rest of table 9.1 on the tile.** After M4 thirteen of the
-   thirty-nine run on the tile, and M3's family would make it eighteen
-   (BELIEVED: pow, pown, powr, compound and rootn; its study will say).
+   access beyond a stride-0 scalar, and a gather is one HBM round trip
+   an element, 310 to 340 ns at every format on the U50
+   (CAPABILITIES.md).
+9. **The rest of table 9.1 on the tile.** Nine of the thirty-nine run
+   on the tile today, thirteen once M4 is built, and M3's family would
+   make it eighteen (BELIEVED: pow, pown, powr, compound and rootn; its
+   study will say).
    Seven are parked by M4's question 13: asinPi, acosPi, atanPi,
    atan2Pi, asinh, acosh and atanh. The other fourteen are in no plan:
    sinh, cosh, tanh, sinPi, cosPi, tanPi, exp2m1, exp10, exp10m1, log10,
@@ -6819,13 +6822,17 @@ describe is narrower than what the card can run.
 11. **A host stop for a running tile.** The kernel is `ap_ctrl_hs`, so a
     run that fails or is killed carries on, and the tile wants an image
     reload (docs/HOSTAPI.md, "A tile a run was abandoned on"). Revision
-    8's abort ends a run only on a read burst of the wrong length. This
-    is RTL, so it would go in the next revision, beside the fma invalid
-    row (above, "Decided 2026-10-20").
+    8's abort answers a read burst of the wrong length, or a read fault
+    on the header or an instruction, and the host cannot ask for it.
+    This is RTL, so it would go in the next revision, beside the fma
+    invalid row (above, "Decided 2026-10-20").
 12. **The remote path as a service.** cft-serve has no authentication,
     no encryption and no resident path (docs/REMOTE.md,
-    docs/INTEGRATION.md), and a certificate made through a remote handle
-    reads `device-caps unknown` and records no depth or device lines.
+    docs/INTEGRATION.md). A certificate made through a remote handle
+    records the server's decoded fields where the protocol carries them,
+    and the client's library build. The server's image and build are not
+    known, `device-caps unknown` leaves the scratch depth unrecorded, and
+    the device's four extra lines at version 2 are `unknown`.
 13. **A card guard that sees any program.** The launcher's pgrep names
     this project's programs, and the driver's `card_user` reads command
     lines, so neither sees cft-Rebound. MEASURED: `card_user` returned
@@ -6844,18 +6851,21 @@ describe is narrower than what the card can run.
     units are exclusive (`failed to open cu context`, MEASURED
     2026-09-25) and xocl refuses to change an image in use
     (`xocl_xclbin_in_use`, XRT 2.19's source, not measured here), so the
-    answers stay safe and the cost is card time. A refused open counts
-    as `no_device`. One during the smoke fails it and the long run never
-    starts. In the long run six in a row end it with `card_lost`, which
-    a hold of about 8 to 14 minutes reaches at the run's settings, and
-    it then waits for a resume by hand. `CFT_ERR_BUSY`, already planned
-    (above, "Library debts the round's verifiers found"), would tell a
-    refused open from a lost card.
+    answers stay safe and the cost is card time. The driver counts a
+    refused open as `no_device`. One during the smoke fails it and the
+    long run never starts. In the long run six in a row end it with
+    `card_lost`. At the run's settings that takes about 8 minutes of
+    pauses on a quad sweep wave with its four refused, about 14 on a
+    battery leg or a one-tile image, and up to about 30 if recovery legs
+    pass, with the legs' own time on top. It then waits for a resume by
+    hand. `CFT_ERR_BUSY`, already planned (above, "Library debts the
+    round's verifiers found"), would tell a refused open from a lost
+    card.
 
 **Limits, not items.** The speed case is fp128 and fp256. Four tiles
 with resident data do 1,664 M fp64 fma a second, about 1.6 times one
-CPU core's 0.97 ns, and 427 M at fp256, about 30 times MPFR's 71 ns
-(COMPUTED from docs/INTEGRATION.md and docs/BENCHMARKS.md). Those
+CPU core's 0.97 ns, and 427 M at fp256, about 30 times `mpfr+754`'s 71
+ns (COMPUTED from docs/INTEGRATION.md and docs/BENCHMARKS.md). Those
 software rows are one core each, so a fully loaded CPU would be much
 closer, and that has not been measured. A resident run costs about 35
 microseconds, so the card is a batch device, at full rate from about a
