@@ -63,6 +63,15 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             with the flag turned off in a copy). The plants of HXd (CARD_STRESS_PLANT='HXd: ') also run the report's test (`plant_report`) and the page's
             (`plant_progress`, which lays out hw/ and site/ side by side so that a plant of site/nightly.html has its own page) on a plant's copy of the code.
 
+  routine  (parcel M4X2, 2026-11-09) the nine routine items of host/tools/routine_sweep.c (parcel M4X) after the 287: the catalog (the 125 and the first 287 held, by hash of vars(), to
+            f0e301c8's; every field of the nine; the digests held to the real tool's `list` and the generator's manifest, both the box's, as fixtures rs-*; atan2's nine x through a table of
+            the test's own), parse_routine_marks on nine real logs (the box's software run, the card's first run, four made in WSL) and every damage it must refuse, the stand-in's lines held to
+            the real ones and each of its misbehaviours through the parser, the driver's plans and guard, nine items served in a dry run with exp covered whole, the report's routine block and rates
+            bucket and the reducer on that run, the refusal without --mpfr-prefix, and the build step on the driver's real path over test doubles (a fake generator that writes the box's real manifest,
+            the stand-in as routine-sweep; POSIX): `routine images` and `mpfr routine-sweep`, red for a moved digest, a missing digest, another commit, a generator that fails or writes no manifest,
+            a missing image, an oracle naming MPFR 4.1.0, a tool with no `list` and marks that are not the smoke's; python/figure_extracts.py's rule for the routine op words and host/Makefile's
+            rule for routine-sweep. Plants: CARD_STRESS_PLANT='M4X2: ' (some also run the report's and the page's tests, as HXd's do).
+
   probe    (parcel TP, 2026-10-28) the card's rates and the probe leg: the driver's dry run with --rate-probe (the quad's tile 1 alone, then its four tiles together, one
             process a tile; the single's and the deep's one; kind `probe`, no sweep, no rate, no skipped leg), the same run without the flag (nothing recorded, built or
             written, the other legs and the sweep's coverage one for one the run with the probe's), what the probe does when the card misbehaves (a check red, no device,

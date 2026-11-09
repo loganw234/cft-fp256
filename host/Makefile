@@ -923,7 +923,7 @@ rate-probe$(EXE): tools/rate_probe.c libcft.a
 # `ldd host/routine-sweep | grep xrt` (without XRT=1 it opens none: CLAUDE.md). -DLANES=n at build sets the lanes a call.
 # The images it runs are host/tools/gen_sweep_images.py's, read from CFT_SWEEP_IMAGES or sweep-images/ beside the binary.
 # Under MPFR=1 (the card driver's --mpfr-prefix build) it is relinked every time, as the soaks are ($(SOAK_MPFR_DEPS)), so that a binary linked
-# against another MPFR, or without XRT, is never taken for the build's (parcel M4X2).
+# against another MPFR, or without XRT, is rebuilt by it and not taken for the build's (parcel M4X2).
 routine-sweep$(EXE): tools/routine_sweep.c tools/mpfr_tfn.h tools/mpfr_ieee.h libcft.a $(SOAK_MPFR_DEPS)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include) -fno-math-errno \
 	  tools/routine_sweep.c libcft.a -o $@ $(XRTLIBS) $(LDLIBS) \

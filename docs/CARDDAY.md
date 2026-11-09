@@ -1965,7 +1965,7 @@ bits and flags with MPFR. It exists because fp32's bound has no budget (Logan's 
 samples and an exhaustive sweep of the 2^32 arguments of each function, and nothing could run such a sweep. It is the soaks' form
 (host/tools/divsqrt_soak.c) so that the card can run it slice by slice: a verdict line, the first sixteen disagreements, the
 backend chosen by `CFT_SOAK_ARTIFACT` (unset: the software backend, which is the CPU fallback), `CFT_XRT_TILES` honoured by the
-library, a run that keeps no state (resume is the driver's). Parcel M4X2 makes it an item of the nightly catalog; the first card run
+library, a run that keeps no state (resume is the driver's). Parcel M4X2 made it an item of the nightly catalog ("The routine items in the driver", below); the first card run
 is the lead's, below.
 
 **Build and images.** On the box: `make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt MPFR=1 MPFR_PREFIX=DIR routine-sweep`, then
@@ -2462,6 +2462,81 @@ and fp256 as at fp64; the -f32 claims are complete statements over their 2^32 in
 targets"; `cvtfrom128-class` and `cvtfrom256-class` "the integer sources -> fp128" and "the integer sources -> fp256" - read from
 clause5_soak.c's table of its wide modes (`WJOBS`: each job's wide format, and a conversion's destination), and held to it by the suite
 (`format_table_checks`). The 60 items are in the report's and the page's `wide` group, as HXc's are (the catalog's `mpfr` flag).
+
+### The routine items in the driver (added 2026-11-09, parcel M4X2): the fp32 routine sweep as items of the nightly catalog
+
+Parcel M4X's `routine-sweep` ("The routine sweep", above) runs a routine of the maths library as its compiled program over a slice of the 2^32 fp32
+arguments, on the tile, against MPFR. This is the driver running it, slice by slice, with resume and coverage like every other exhaustive item. Logan's
+answers of 2026-11-06 (plan.md): partial coverage is acceptable, the sweeps run on the card, and the M1 and M2 routines are included.
+
+**The items.** With `--mpfr-prefix`, `sweep_items(mpfr=True)` appends **nine items after HXb's 60** (296 in all; the 287 before them keep their places and every
+field: `hw/test_card_stress.py`'s `routine_catalog_checks` hashes `vars()` of the first 125 and of the first 287 and holds them to the hashes taken at f0e301c8, the
+base of this parcel). One item a routine, named `<op word>-all`, where the op word is `<name>-f32-d<digest>` and the digest is the first 32 bits of the sha256 of the
+routine's five images and banks (routine_sweep.c's grammar; `ROUTINE_DIGESTS` in hw/card_stress_lib.py is the table):
+
+| item | | item | |
+|---|---|---|---|
+| `exp-f32-d043b3bb5-all` | `exp2-f32-dce1e05a9-all` | `expm1-f32-de63ada45-all` | `log-f32-de84c29cb-all` |
+| `log2-f32-dc274c957-all` | `log1p-f32-d38ea27d9-all` | `sin-f32-d05eb28b1-all` | `cos-f32-d98b93d46-all` |
+| `tan-f32-ddbfd4a4e-all` | | | |
+
+(The digests are the real tool's `routine-sweep list` of the lead's run at c99df121, `box/tool-m4x/list.out`, held by the suite to the fixture `rs-list.txt` and to
+the generator's manifest `rs-images-manifest.txt`.) Each is exhaustive over 2^32 encodings under `all` (the five attributes in one job: five checks an encoding,
+E encodings and none skipped, so a slice's cases are 5 E and a wholly covered item's are 5 x 2^32 with 0 skipped, which the driver's whole-space check holds), reaches
+the tile, computes in fp32, takes no seed, and is in the report's and the page's **`routine` group**. atan, asin, acos and atan2 have an item when parcels M4F1 and M4F2
+have built their fp32 programs and a later change adds their digests (and the generator's names): atan2 is then nine items a digest, one for each of `ATAN2_X`, the lead's nine
+x (1, -1, one ulp above 1, 2^40, the largest and the smallest normal, a subnormal 3, 0x3fb504f3, 0xc0490fdb), 21 items in all (COMPUTED: 12 x 1 + 9). The suite makes the
+atan2 items from a table of its own (`routine_items(table)`), so they are held before the tool can run them.
+
+**What a pass claims** (`Item.claim`, never "swept", never containing ", under "): *every fp32 x through `<name>` as the compiled program (its images' digest named), each of
+the five attributes: an unmarked lane's bits and flags equal to MPFR's, a marked lane counted and its guess compared, not decided (L1 over the fp32 slice)*; for atan2, *every
+fp32 y for x = 0x... (what x is), ..., not the whole space of (y, x) pairs*.
+
+**Digests, and how one moves.** The digest is in the item's name, because coverage is keyed by the name: a moved fragment (the routine's source in python/cft_golden/mathlib.py,
+its constants, or the compiler's output) gives the generator another digest, the tool refuses the old op word (exit 2: `... names digest X, the images' digest is Y`), and
+the table must be changed - with the lead's approval, as python/tests/routine_digests.py is - which makes a NEW item whose coverage starts from nothing; the old item's slices stay in
+the files that hold them (the report names an item the catalog no longer holds, in its records' group). The build step fails by name on a table that disagrees with the generator, and
+hw/test_routine_sweep.py's `images` leg (in the `mpfr` stage since this parcel) fails the gate at the merge of the fragment, not a night.
+
+**The marks.** `parse_soak` reads the verdict unedited; `parse_routine_marks` (hw/card_stress_lib.py) then reads the tool's marks line, its MARK lines and its timing line, and refuses what
+disagrees: not one marks line, another op or mode, a dash where the attribute ran or a number where it did not, a total that is not the sum of the attributes, off the list or wrong above the
+total, MARK lines not min(total, 16) (the tool shows sixteen of any kind, right ones included), a MARK line of an attribute that did not run, and - when every mark is shown - WRONG lines,
+"(off the list)" lines or an attribute's lines that do not equal the counts. A refusal is a `parse_error`, named. **An off-list mark and a wrong guess are counted and named and leave the
+slice `pass`** (decision 6 and 8 of plan.md; the tool exits 0). The record: `counts.marked`, `counts.off_list`, `counts.guesses_wrong`; `extra.marks` (`by_attr`, `named`, `not_named`: the
+marks no MARK line named) and `extra.times` (device s, oracle s, lanes a call); `sweep.group: "routine"` (a routine slice's record only: no older item's record gains a field). The report's
+**routine block**, under the sweep table, gives for each routine item its claim, its slices, the marks by attribute, those off the list, the guesses wrong, every lane the tool named that was off
+the list or wrong (all slices; the first 200 an item in the text, all of them in `--json` under `sweep.routine`), the marks no line named, and the device and oracle seconds summed. The rates
+leave routine slices out in a bucket of their own (`left_out.routine`, present only when a run has one): a compiled program with MPFR beside it in one process, whose seconds are in the block.
+`status.txt` has a `routine` line (slices, marked, off the list, guesses wrong) once the catalog has the items.
+
+**The page.** The reducer's `RULES["groups"]` names three groups; `after.groups` is written for a class once it has a row of a group other than base served, so every night already published keeps its
+fields. The page draws the routine group wherever it draws the wide one: a row at a glance after the base and wide rows, a list of its own after them (never inside the base group), a line in
+orange in the chart, the earlier trees' line, the legend and the notes. `SCHEMA` stays 1.
+
+**The build step** (`--mpfr-prefix` only; a run without it builds, plans, runs and records what it did). `routine-sweep` is the last of the make line's targets (after the literal lists, as `rate-probe`
+is) and is held to `ldd` for XRT; host/Makefile relinks it every time under `MPFR=1` (`$(SOAK_MPFR_DEPS)`), as the soaks are. Two steps follow `mpfr clause5-soak`:
+- **`routine images`**: `python3 -B host/tools/gen_sweep_images.py --out <run>/sweep-images-<stamp>` into a directory that is new each run start, kept, and handed to every routine job as
+  `CFT_SWEEP_IMAGES`; the manifest's `commit` must be this checkout's HEAD and its nine `digest` lines the table's (the step names the routine, both digests and what to update; a digest the table lacks
+  is said and does not fail).
+- **`mpfr routine-sweep`**: with no `CFT_SOAK_ARTIFACT` and no `CFT_XRT_TILES` in its environment, `routine-sweep list` names the nine with five images and the table's digests, and one job,
+  `exp-f32-d043b3bb5 0x33fffffb 0x34000004 all`, passes the soak's rules (45 cases, 9 encodings) and the marks' (3 marked: rne 0, rtz 1, rdn 1, rup 1, rmm 0; none off the list or wrong) with an oracle line
+  naming MPFR at the pin. A failure fails the step by name and the run does not start (`build_failed`, exit 3). Without `--mpfr-prefix` a routine item named by `--sweep-items` is refused by name: one
+  skipped leg, `refused: no-mpfr-prefix`, its reason saying "a routine item", not "a wide item".
+The guard (`card_user`) knows `routine-sweep`: one that holds `CFT_SOAK_ARTIFACT` is a card user. Under `--sweep-chunk` a routine slice runs the one built `routine-sweep` in host/ (the tool has no pass size).
+
+**What a night needs.** No new flag: `--mpfr-prefix <the pinned prefix>` and `--sweep-items` naming the nine (the first full-scale run is the nine under `all`, plan.md decision 10); the images are made by the
+build step. From a clone that holds these literal texts (the build step reads them): `THE LEGS` in hw/card_stress.py, `THE ROUTINE CORPUS DID NOT REACH EVERY FORM` in host/tests/seq_check.py, `REV8_ORDER` in programs/acceptance.py,
+`== card-segrun:` in hw/card-segrun.sh. The guard's process name is `routine-sweep`. The scheduler (hw/sched) builds its catalog without `mpfr` and has no `--mpfr-prefix`, and hw/sweep_record.py's exporter reads
+`sweep_items()`: a routine item in a night's spec is refused there by name ("not in the sweep catalog"), as HXc's are. Known limits, as theirs.
+
+**The first card run** is the lead's (rev8q, 2026-11-09 12:58 to 13:00, nothing else on the card; `box/card-m4x/` of the round's folder, three of its logs are the suite's fixtures `rs-card-*`): the five 9-lane
+exp slices on tile 1 printed the software's verdict and marks lines, byte for byte; `CFT_SOAK_SABOTAGE=1` exit 1; tan under `all` over 2^20 encodings on tile 1: 5,242,880 cases, device 5.497 s, oracle 3.638 s; four
+processes, one a tile, disjoint 2^24 slices of exp: 83,886,080 cases each, 0 mismatches, device 36.3 to 36.7 s, oracle 33.7 to 44.0 s, 82 s wall, about 818,000 encodings a second for the quad (COMPUTED by the lead:
+4 x 2^24 / 82 s). Nothing in this section is the card's but those.
+
+**The suite.** `bash hw/test-card-stress.sh --only routine` (group `routine`): the catalog, the marks' parser on the nine real logs (the box's software run, the card's three, four made in WSL) and each damage it must
+refuse, the stand-in's lines held to the real ones, the driver's plans and guard, nine items served in a dry run with exp covered whole and its whole-space event, the report, the reducer, the refusal, the build step over test
+doubles with nine reds, the figure extracts' rule and the Makefile rule; the report's and the page's tests have routine groups of their own. Its plants are `CARD_STRESS_PLANT='M4X2: '`.
 
 ### The card's rates (added 2026-10-28, parcel TP): cases a second a tile by op and format, and the probe leg
 
