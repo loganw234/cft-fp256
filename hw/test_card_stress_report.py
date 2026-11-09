@@ -1866,8 +1866,8 @@ def build_reach_run():
 
 def build_routine_run(item="exp-f32-d043b3bb5-all", group="routine"):
     """A one-cycle run of routine slices, records as the driver writes them (parcel M4X2): exp over three slices of 2^20 encodings on the quad's tile 1 -
-    the first with exp's three right marks on the list, the second with twenty marks off the list of which sixteen were named (two WRONG, one of them a
-    mark the tool did not name as wrong... the counts say 2 wrong, the named lines show 1), the third with none - and, apart, a sweep leg of an item the catalog does
+    the first with exp's three right marks on the list, the second with twenty marks off the list, sixteen of them named (one WRONG among the sixteen; the
+    counts say two guesses wrong, the second among the four marks no line named), the third with none - and, apart, a sweep leg of an item the catalog does
     not name (an older digest) whose records say `group`. Returns (records, the item's op)."""
     op = item[:-4]
     fx = Fx()

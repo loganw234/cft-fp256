@@ -181,6 +181,45 @@ def gen(outdir, *args):
     return p.returncode, p.stdout + p.stderr
 
 
+def gen_account(manifest):
+    """The generator's own account of what it built (send-back 1 of parcel M4X2): (BUILT, SKIPPED) - BUILT the (name, digest) of each `digest` line, in the order
+    written, SKIPPED the names of its `skipped <name> not built at fp32` lines. The test follows these, so that a routine built later (parcel M4F1's atan) breaks
+    no figure here; what must stay true is held by account_problems."""
+    return (re.findall(r"^digest (\w+) ([0-9a-f]{8})$", manifest, re.M), re.findall(r"^skipped (\w+) not built at fp32$", manifest, re.M))
+
+
+def account_problems(built, skipped):
+    """What is wrong with a generator's account: BUILT and SKIPPED must be disjoint, a name once each, and together the tool's thirteen, BUILT in the tool's order."""
+    names = [n for n, _ in built]
+    p = []
+    if len(set(names)) != len(names) or len(set(skipped)) != len(skipped):
+        p.append("a name twice")
+    if set(names) & set(skipped):
+        p.append(f"both built and skipped: {sorted(set(names) & set(skipped))}")
+    if [n for n in THIRTEEN if n not in names and n not in skipped]:
+        p.append(f"neither built nor skipped: {[n for n in THIRTEEN if n not in names and n not in skipped]}")
+    if [n for n in names + list(skipped) if n not in THIRTEEN]:
+        p.append("a name that is not one of the thirteen")
+    if names != [n for n in THIRTEEN if n in names]:
+        p.append("built names not in the tool's order")
+    return p
+
+
+def digest_judge(built, table):
+    """The build step's rule (hw/card_stress.py, `routine images`): every row of the table must be among the built names with an equal digest, in the table's
+    order - a row the generator skipped, or whose digest differs, fails by name; a built name with no row is NAMED and does not fail. (failures, named)."""
+    d = dict(built)
+    fails = []
+    for n, dg in table.items():
+        if n not in d:
+            fails.append(f"{n}: no digest line (skipped, or not built)")
+        elif d[n] != dg:
+            fails.append(f"{n}: the generator's digest is {d[n]}, the table's {dg}")
+    if not fails and [n for n, _ in built if n in table] != list(table):
+        fails.append("the table's order is not the generator's")
+    return fails, [n for n, _ in built if n not in table]
+
+
 def build_tool(tree: str, label: str, targets=("routine-sweep",)):
     """make in tree/host: (log, rc)."""
     p = subprocess.run(NICE + ["make", "-C", os.path.join(tree, "host"), "-j4"] + list(targets), capture_output=True, text=True,
@@ -275,12 +314,17 @@ def group_build(tool, log, tree, work, imgs, manifest):
     rows = out.splitlines()
     names = [r.split("-f32")[0] for r in rows]
     check("build: `list` names the thirteen, in the order of the brief", rc == 0 and names == list(THIRTEEN), f"rc {rc} {names}")
-    dig = dict(re.findall(r"^digest (\S+) (\S+)$", manifest, re.M))
+    built, skipped = gen_account(manifest)
+    dig = dict(built)
     listed = {r.split("-f32")[0]: re.search(r"digest (\S+)$", r).group(1) for r in rows if "digest" in r}
-    check("build: `list` gives each of the nine the digest the generator's manifest gives (two implementations of the same hash "
-          "over five images and banks)", listed == dig and len(dig) == 9, f"{listed} {dig}")
-    check("build: `list` says `no image` for atan, asin, acos and atan2",
-          all(rows[i].endswith("no image") for i in range(9, 13)) and len(rows) == 13, f"{rows[9:]}")
+    check("build: `list` gives each routine the generator built (its `digest` lines) the digest the generator's manifest gives (two implementations of the same hash "
+          "over five images and banks)", listed == dig and len(built) > 0, f"{listed} {dig}")
+    noimg = [r.split("-f32")[0] for r in rows if r.endswith("no image")]
+    check("build: `list` has thirteen rows, five images for exactly the generator's built names (in the tool's order) and `no image` for exactly the names it skipped",
+          len(rows) == 13 and [r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built] and noimg == skipped and not account_problems(built, skipped),
+          f"{rows} {built} {skipped}")
+    check("build: RED - the `list` check above is red when the generator's skipped names are one short (a routine `list` calls `no image` that the account built), and when a built name is dropped",
+          not (noimg == skipped[1:] and len(skipped) > 0) and not ([r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built[1:]]), "")
     rc, out, err = tool.raw("list", imgs=os.path.join(work, "nowhere"))
     check("build: `list` with no images directory says `no image` thirteen times", rc == 0 and out.count("no image") == 13, out[:200])
     rc, out, err = tool.raw("exp-f32", 0, 4, "rne")
@@ -297,28 +341,51 @@ def group_images(tool, tree, work, imgs, manifest):
     rc, o = gen(d2)
     same = rc == 0 and sorted(os.listdir(d2)) == sorted(os.listdir(imgs)) and all(
         filecmp.cmp(os.path.join(d2, f), os.path.join(imgs, f), shallow=False) for f in os.listdir(imgs))
-    check("images: the generator is deterministic - a second run into another directory writes the same 136 files, byte for byte",
-          same and len(os.listdir(imgs)) == 136, o[-200:])
+    built, skipped = gen_account(manifest)
+    expected_files = 15 * len(built) + 1                     # three files an attribute, five attributes, a built name; and manifest.txt
+    check("images: the generator is deterministic - a second run into another directory writes the same files (15 for each built routine and the manifest: 136 with nine), byte for byte",
+          same and len(os.listdir(imgs)) == expected_files, f"{len(os.listdir(imgs))} files, {expected_files} expected, {o[-200:]}")
     rc, o = gen(d2)
     check("images: a DIR that exists is refused (exit 2), nothing written", rc == 2 and "exists" in o, o[-200:])
     rc, o = gen(os.path.join(work, "img-bad"), "--names", "exp,nonesuch")
     check("images: an unknown name is refused, exit 2", rc == 2, o[-200:])
-    check("images: the manifest names the four routines not built at fp32",
-          all(f"skipped {n} not built at fp32" in manifest for n in ("atan", "asin", "acos", "atan2")), manifest[-300:])
-    check("images: the manifest has an image line for each of the 45 (name, attribute) with its three sha256, dag_digest and commit",
-          len(re.findall(r"^image \S+ \S+ instructions \d+ words \d+ image_sha256 [0-9a-f]{64} bank_sha256 [0-9a-f]{64} "
-                         r"marks_sha256 [0-9a-f]{64} dag_digest [0-9a-f]{64} commit \S+$", manifest, re.M)) == 45, "")
+    image_line = re.compile(r"^image \S+ \S+ instructions \d+ words \d+ image_sha256 [0-9a-f]{64} bank_sha256 [0-9a-f]{64} "
+                            r"marks_sha256 [0-9a-f]{64} dag_digest [0-9a-f]{64} commit \S+$", re.M)
+    check("images: the generator's account is whole - the names it built (`digest` lines) and the names it skipped (`skipped ... not built at fp32`) are disjoint, once each, "
+          "BUILT in the tool's order, and together the thirteen", account_problems(built, skipped) == [], f"{account_problems(built, skipped)} {built} {skipped}")
+    check("images: the manifest has an image line for each (built name, attribute) - 45 with nine - with its three sha256, dag_digest and commit",
+          len(image_line.findall(manifest)) == 5 * len(built), f"{len(image_line.findall(manifest))} for {len(built)} built")
+    # each derived check shown able to fail, on doctored input in scratch (send-back 1 of parcel M4X2): the checks above and below, run on a doctored copy
+    red_dir = os.path.join(work, "img-red")
+    shutil.copytree(imgs, red_dir)
+    for ext in ("cftp", "bank", "marks"):
+        os.remove(os.path.join(red_dir, f"{built[0][0]}-fp32-rne.{ext}"))
+    check("images: RED - one built name's three files of one attribute removed: the derived file count is not the directory's (the deterministic-run check's figure)",
+          len(os.listdir(red_dir)) != expected_files, f"{len(os.listdir(red_dir))} vs {expected_files}")
+    shutil.rmtree(red_dir)
+    check("images: RED - a `skipped` line added for a name that has a digest line: the account is not whole (built and skipped overlap)",
+          any("both built and skipped" in x for x in account_problems(built, skipped + [built[0][0]])), "")
+    check("images: RED - a built name dropped from both lists: the account is not whole (neither built nor skipped)",
+          any("neither built nor skipped" in x for x in account_problems(built[1:], skipped)), "")
+    check("images: RED - an image line dropped: the manifest's image lines are not 5 for each built name",
+          len(image_line.findall(manifest.replace(image_line.findall(manifest)[0] + "\n", "", 1))) != 5 * len(built), "")
+    check("images: GREEN - a doctored manifest with one more built name (an atan `digest` line, atan taken off the skipped lines) has a whole account",
+          account_problems(built + ([("atan", "00000000")] if "atan" in skipped else []), [n for n in skipped if n != "atan"]) == [], "")
     # parcel M4X2: the generator's `digest` lines against hw/card_stress_lib.py's table of them, which the card driver holds its build step to: a moved fragment
     # fails the gate at its merge and not a night. The judge is a function, so that it is shown red on a doctored table as well as green on the real one.
-    mdig = re.findall(r"^digest (\w+) ([0-9a-f]{8})$", manifest, re.M)
-    agrees = lambda table: mdig == list(table.items())            # noqa: E731
+    mdig = built
+    fails_, named_ = digest_judge(mdig, L.ROUTINE_DIGESTS)
     doctored = dict(L.ROUTINE_DIGESTS)
     doctored["exp"] = doctored["exp"][:-1] + ("0" if doctored["exp"][-1] != "0" else "1")
-    check("images: the generator's nine `digest` lines equal hw/card_stress_lib.py's ROUTINE_DIGESTS, name and digest and order, and that table has nothing else",
-          len(mdig) == len(NINE) == len(L.ROUTINE_DIGESTS) and agrees(L.ROUTINE_DIGESTS), f"{mdig} {L.ROUTINE_DIGESTS}")
-    check("images: ... and the same judge is red on a table with one digit of exp's digest changed, on one with a routine dropped, and on one in another order",
-          not agrees(doctored) and not agrees({k: v for k, v in L.ROUTINE_DIGESTS.items() if k != "tan"})
-          and not agrees(dict(reversed(list(L.ROUTINE_DIGESTS.items())))), "")
+    check("images: every row of hw/card_stress_lib.py's ROUTINE_DIGESTS is among the generator's `digest` lines with an equal digest, in the table's order (the build step's rule); "
+          f"a built name with no row is named and does not fail ({named_ or 'none today'})", not fails_ and len(L.ROUTINE_DIGESTS) > 0, f"{fails_} {mdig} {L.ROUTINE_DIGESTS}")
+    check("images: ... and the same judge is red on a table with one digit of exp's digest changed, on one with a row the generator skipped, and on one in another order; "
+          "the table with a row dropped is green and names the built name it lacks",
+          digest_judge(mdig, doctored)[0] and digest_judge(mdig, dict(L.ROUTINE_DIGESTS, **{(skipped or ["nonesuch"])[0]: "00000000"}))[0]
+          and digest_judge(mdig, dict(reversed(list(L.ROUTINE_DIGESTS.items()))))[0]
+          and digest_judge(mdig, {k: v for k, v in L.ROUTINE_DIGESTS.items() if k != "tan"}) == ([], ["tan"] + [n for n, _ in mdig if n not in L.ROUTINE_DIGESTS]), "")
+    check("images: ... and green, naming the extra, on a manifest with one more built name than the table (an atan `digest` line)",
+          digest_judge(mdig + [("atan", "00000000")], L.ROUTINE_DIGESTS) == ([], named_ + ["atan"]) if "atan" not in dict(mdig) else True, "")
     ok = os.path.exists(os.path.join(tree, "host", "positive-run"))
     if not ok:
         skip("images: positive-run", "did not build")
@@ -494,7 +561,12 @@ def group_refuse(tool, work, imgs):
     refused("a missing attribute", ("exp-f32", 0, 5))
     refused("an unknown attribute", ("exp-f32", 0, 5, "rnx"))
     refused("an unknown name", ("nonesuch-f32", 0, 5, "rne"), "unknown op")
-    refused("a name with no image (atan)", ("atan-f32", 0, 5, "rne"), "atan-fp32-rne.cftp")
+    skipped_ = gen_account(open(os.path.join(imgs, "manifest.txt")).read())[1]
+    if skipped_:
+        n_ = skipped_[0]
+        refused(f"a name with no image ({n_}, the first the generator skipped)", (f"{n_}-f32" + ("-x3f800000" if n_ == "atan2" else ""), 0, 5, "rne"), f"{n_}-fp32-rne.cftp")
+    else:
+        skip("refuse: a name with no image", "the generator skipped no name (all thirteen are built)")
     refused("a name without -f32", ("exp", 0, 5, "rne"), "unknown op")
     refused("atan2 without its x", ("atan2-f32", 0, 5, "rne"), "atan2 takes")
     refused("an x with 7 digits", ("atan2-f32-x3f80000", 0, 5, "rne"), "eight hex")

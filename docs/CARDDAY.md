@@ -2534,7 +2534,7 @@ exp slices on tile 1 printed the software's verdict and marks lines, byte for by
 processes, one a tile, disjoint 2^24 slices of exp: 83,886,080 cases each, 0 mismatches, device 36.3 to 36.7 s, oracle 33.7 to 44.0 s, 82 s wall, about 818,000 encodings a second for the quad (COMPUTED by the lead:
 4 x 2^24 / 82 s). Nothing in this section is the card's but those.
 
-**The suite.** `bash hw/test-card-stress.sh --only routine` (group `routine`): the catalog, the marks' parser on the nine real logs (the box's software run, the card's three, four made in WSL) and each damage it must
+**The suite.** `bash hw/test-card-stress.sh --only routine` (group `routine`): the catalog, the marks' parser on the nine real logs (the box's two software logs, the card's three, four made in WSL) and each damage it must
 refuse, the stand-in's lines held to the real ones, the driver's plans and guard, nine items served in a dry run with exp covered whole and its whole-space event, the report, the reducer, the refusal, the build step over test
 doubles with nine reds, the figure extracts' rule and the Makefile rule; the report's and the page's tests have routine groups of their own. Its plants are `CARD_STRESS_PLANT='M4X2: '`.
 

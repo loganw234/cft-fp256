@@ -65,7 +65,7 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
 
   routine  (parcel M4X2, 2026-11-09) the nine routine items of host/tools/routine_sweep.c (parcel M4X) after the 287: the catalog (the 125 and the first 287 held, by hash of vars(), to
             f0e301c8's; every field of the nine; the digests held to the real tool's `list` and the generator's manifest, both the box's, as fixtures rs-*; atan2's nine x through a table of
-            the test's own), parse_routine_marks on nine real logs (the box's software run, the card's first run, four made in WSL) and every damage it must refuse, the stand-in's lines held to
+            the test's own), parse_routine_marks on nine real logs (the box's two software logs, the card's three, four made in WSL) and every damage it must refuse, the stand-in's lines held to
             the real ones and each of its misbehaviours through the parser, the driver's plans and guard, nine items served in a dry run with exp covered whole, the report's routine block and rates
             bucket and the reducer on that run, the refusal without --mpfr-prefix, and the build step on the driver's real path over test doubles (a fake generator that writes the box's real manifest,
             the stand-in as routine-sweep; POSIX): `routine images` and `mpfr routine-sweep`, red for a moved digest, a missing digest, another commit, a generator that fails or writes no manifest,
