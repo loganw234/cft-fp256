@@ -5619,6 +5619,11 @@ DOC_WIDE_C5 = {"rint128-class": (137_344, 2, (274_688, 0), "class", "tile"), "ri
                "cvtto128-class": (91_872, 4, (367_488, 0), "class", "host"), "cvtto256-class": (205_440, 4, (821_760, 0), "class", "host"),
                "cvtfrom128-class": (50_923, 1, (50_923, 0), "class", "host"), "cvtfrom256-class": (50_923, 1, (50_923, 0), "class", "host")}
 DOC_WIDE_C5_NAMES = [f"{op}-{m}" for op in DOC_WIDE_C5 for m in M5]
+# parcel M4X2: the nine routine items' names, typed here from host/tools/routine_sweep.c's op grammar and the box's `routine-sweep list` (the
+# digests: box/tool-m4x/list.out, hw/card_stress_fixtures/rs-list.txt), in the tool's order
+DOC_ROUTINE_DIGESTS = [("exp", "043b3bb5"), ("exp2", "ce1e05a9"), ("expm1", "e63ada45"), ("log", "e84c29cb"), ("log2", "c274c957"),
+                       ("log1p", "38ea27d9"), ("sin", "05eb28b1"), ("cos", "98b93d46"), ("tan", "dbfd4a4e")]
+DOC_ROUTINE_NAMES = [f"{n}-f32-d{d}-all" for n, d in DOC_ROUTINE_DIGESTS]
 WIDE_C5_LOGS = (("wc-rint128-class.txt", "rint128-class-rne"), ("wc-rint256-class.txt", "rint256-class-rmm"),
                 ("wc-scaleb128-class.txt", "scaleb128-class-rup"), ("wc-scaleb256-class.txt", "scaleb256-class-rdn"),
                 ("wc-rint128-f32.txt", "rint128-f32-rne"), ("wc-rint256-f32.txt", "rint256-f32-rmm"),
@@ -5702,7 +5707,8 @@ def format_table_checks(src: str = HERE) -> list:
     want.update(wide_c5)
     with lib_from(src) as L2:
         full = L2.sweep_items(mpfr=True)
-        ops = {it.op for it in full}
+        routine_ops = {it.op for it in full if it.tool == "routine"}         # parcel M4X2: nine more ops, all fp32, checked apart below
+        ops = {it.op for it in full} - routine_ops
         c("format: the C tool's table of modes gives the 30 wide ops their formats (fp64 x 2, fp128 x 14, fp256 x 14), and they are the library's wide ops",
           set(wide_c) == set(L2.WIDE_OPS) and sorted(Counter(wide_c.values()).items()) == [("fp128", 14), ("fp256", 14), ("fp64", 2)], str(sorted(Counter(wide_c.values()).items())))
         c("format: clause5_soak.c's table of its wide modes (WJOBS) gives the 12 wide clause-5 ops their formats - fp128 x 3 and fp256 x 3 (rint, "
@@ -5713,8 +5719,14 @@ def format_table_checks(src: str = HERE) -> list:
                ("fp256 -> the integer targets", 1), ("the integer sources -> fp128", 1), ("the integer sources -> fp256", 1)]),
           str(sorted(Counter(wide_c5.values()).items())))
         c("format: the table names every op of the full catalog (80 ops) and no other, and the documents' table is over the same 80",
-          set(L2.OP_FORMAT) == ops and len(ops) == 80 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
-        bad = {op: (L2.OP_FORMAT.get(op), f) for op, f in want.items() if L2.OP_FORMAT.get(op) != f}
+          set(L2.OP_FORMAT) - routine_ops == ops and len(ops) == 80 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
+        c("format: the nine routine ops (parcel M4X2) are the table's other nine - 89 ops in all - and each is fp32, the format of the programs they run",
+          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) == 9
+          and routine_ops == {n.rsplit("-all", 1)[0] for n in DOC_ROUTINE_NAMES} and all(L2.OP_FORMAT[op] == "fp32" for op in routine_ops),
+          str(sorted(routine_ops)))
+        want.update({op: "fp32" for op in routine_ops})
+        ops = ops | routine_ops
+        bad ={op: (L2.OP_FORMAT.get(op), f) for op, f in want.items() if L2.OP_FORMAT.get(op) != f}
         c("format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) and the one the C "
           "tool's table of modes gives for the 30 wide ops (read from divsqrt_soak.c), and the one clause5_soak.c's WJOBS gives for the 12 wide clause-5 ops "
           "(read from that file; parcel HXb); a conversion names both ends (cvtto: fp32, fp64, fp128 or fp256 to the integer targets; cvtfrom: the integer "
@@ -5942,8 +5954,10 @@ def wide_c5_catalog_checks(src: str = HERE) -> list:
         by = {it.name: it for it in c5}
         c("wide c5 catalog: the 60 wide clause-5 items follow the 227 - the 125 and HXc's 102, every one a divsqrt item - in the study's order "
           "(rank 3: the class modes of rint and scaleB; rank 5: the fp32 slice through the wide rint; then the wide conversions), each under "
-          "all five attributes", len(full) == 287 and [it.name for it in full[227:]] == DOC_WIDE_C5_NAMES and [it.name for it in full[125:227]]
-          == DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]), f"{len(full)}: {[it.name for it in full[227:]][:3]}")
+          "all five attributes (parcel M4X2: the 287 are the first 287 of the catalog, the routine items follow them; the routine group's own count is "
+          "its catalog check)", len(full) == 287 + len(DOC_ROUTINE_NAMES) and [it.name for it in full[227:287]] == DOC_WIDE_C5_NAMES
+          and [it.name for it in full[125:227]] == DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]),
+          f"{len(full)}: {[it.name for it in full[227:]][:3]}")
         bad = []
         for it in c5:
             sp, k, whole, level, reach = DOC_WIDE_C5.get(it.op, (None,) * 5)
@@ -6107,8 +6121,9 @@ def wide_driver_checks(env: Env, src: str = HERE) -> list:
             q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
             c("wide driver: with it the make lines gain MPFR=1 MPFR_PREFIX=<the prefix> and the catalog the 102 wide items after the 125, "
               "and parcel HXb's 60 wide clause-5 items after those",
-              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287
-              and [it.name for it in d.items[125:227]] == DOC_WIDE_NAMES and [it.name for it in d.items[227:]] == DOC_WIDE_C5_NAMES)
+              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287 + len(DOC_ROUTINE_NAMES)
+              and [it.name for it in d.items[125:227]] == DOC_WIDE_NAMES and [it.name for it in d.items[227:287]] == DOC_WIDE_C5_NAMES
+              and [it.name for it in d.items[287:]] == DOC_ROUTINE_NAMES)       # parcel M4X2: the routine items after the 287
             j = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
             b = d.soak_binary(j["item"])
             c("wide plan: div256-hard-rtz's first slice is `divsqrt-soak div256-hard 0 2^20 rtz`, four checks an index, no fixed case count, "
