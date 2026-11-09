@@ -452,7 +452,7 @@ def _loud(prog, bank, fmt, nth=LOUD_MUL):
     """The compiled program with its QUIET moved to just after the body's
     nth MUL (the third, P = c d_h, by default): that instruction is outside
     the quiet region and raises its flags on the lane, the fault the byte must
-    see. The first two MULs are exact at d = 1 (the seed of 1 is 1 - 2^-11) and
+    see. The first two MULs are exact at d = 1 (the seed of 1 is 1 - 2^-10) and
     the lane's flag word says inexact for every lane that is not exact, so the
     fault shows on a lane where this MUL raises what the result's flag word
     does not: +inf, where P = 0 x inf raises invalid early and the byte is
@@ -849,9 +849,10 @@ def check_audit(fmt, plant=None, lanes=None, b=None):
     (Nh0); per lane: |theta0 - atan(n/d)| under 2^-(p+G) theta0, mpmath at 4p
     + 200 bits. tally: lanes, premise (lanes with the premise broken),
     inexact, past (past the bound), largest (log2 of the largest |theta0 -
-    atan| / (2^-(p+G) theta0)). This is the only check that sees
-    sterbenz_bias: on atan's own lanes d = 1 or n = 1 never meets the
-    overestimating seed's k = 1 below t = 1/16."""
+    atan| / (2^-(p+G) theta0)). It measures sterbenz_bias's premise
+    directly: that plant is red here, in core (Kk's contract) and in
+    constants (MSEL), and in no check of atan's own lanes, where d = 1 or
+    n = 1 never meets the overestimating seed's k = 1 below t = 1/16."""
     b = core_of(fmt, plant) if b is None else b
     p, G = fmt.prec, b.meta["G"]
     lanes = audit_lanes(fmt) if lanes is None else lanes
