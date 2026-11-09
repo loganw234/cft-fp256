@@ -1922,7 +1922,7 @@ def corner_region(fmt, lane):
 
 
 def check_corner(f, lanes=None, b=None, evaluator=None, seq_evaluator=None,
-                 region=True):
+                 region=True, seq=True):
     """[finding], tally: corner. The committed corner lanes (CORNER, or
     `lanes`) of the fragment's format through atan2, under the fragment's
     attribute: every lane in the region (corner_region); every unmarked lane
@@ -1993,11 +1993,13 @@ def check_corner(f, lanes=None, b=None, evaluator=None, seq_evaluator=None,
         x, r = first["past"]
         out.append(f"{where}: {tally['past']} unmarked lanes are past the "
                    f"bound, first {_hexes([x])} at 2^{r:+.2f} of Bv")
-    # the same lanes on seq.py: equal to evaluate()
-    outs, words = routines.run(f, *_split(lanes))
-    got = list(zip(outs, words)) if seq_evaluator is None \
-        else [seq_evaluator(f, x) for x in lanes]
-    differ = [x for x, g in zip(lanes, got) if g != ml.evaluate(f, x)]
+    # the same lanes on seq.py: equal to evaluate() (seq=False leaves it out)
+    differ = []
+    if seq:
+        outs, words = routines.run(f, *_split(lanes))
+        got = list(zip(outs, words)) if seq_evaluator is None \
+            else [seq_evaluator(f, x) for x in lanes]
+        differ = [x for x, g in zip(lanes, got) if g != ml.evaluate(f, x)]
     tally["differ"] = len(differ)
     if differ:
         out.append(f"{where}: seq.py and evaluate() differ on {len(differ)} "
