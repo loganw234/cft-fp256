@@ -2033,9 +2033,9 @@ from the software runs of M4X, 2026-11-09; the card's figures are **not measured
    should print `exp-f32 all: 45 cases, 0 value mismatches, 0 flag mismatches, 9 encodings, 0 skipped` and
    `exp-f32 all: 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), 0 off the list, 0 guesses wrong`; the software and tile verdict and marks
    lines must be equal, 15 marks in all, none off the list.
-2. `CFT_SOAK_SABOTAGE=1` once, on one of those slices: exit 1, a `MISMATCH` line for each of the four unmarked attributes.
+2. `CFT_SOAK_SABOTAGE=1` once, on one of those slices: exit 1, a `MISMATCH` line for each of the five attributes (the slice's first lane is unmarked under all five, and sabotage flips each call's first unmarked lane).
 3. `tan-f32` under `all` over 2^20 lanes (the largest program, 998 instructions): expect `5242880 cases ... 1048576 encodings`; read
-   `device s` against `oracle s`. COMPUTED, not measured on the card: a tile runs a routine at about 1/(0.98 ns x instructions) per lane-attribute (BENCHMARKS.md's revision-6 figure, not measured on revision 8), 998 instructions for tan, so about 1.0M cases/s; the tool runs a call and then checks it, so device and oracle times add in one process, and the software run's tan oracle (0.44 s for 2^18 lanes, 0.34 us a case) would be about a quarter of it.
+   `device s` against `oracle s`. COMPUTED, not measured on the card: a tile runs a routine at about 1/(0.98 ns x instructions) per lane-attribute (BENCHMARKS.md's revision-6 figure, not measured on revision 8), 998 instructions for tan, so about 1.0M cases/s; the tool runs a call and then checks it, so device and oracle times add in one process, and the software run's tan oracle (0.44 s for 2^18 lanes, 0.34 us a case) would be about a third of it.
 4. Four processes, one a tile (`CFT_XRT_TILES=1..4`), disjoint 2^24 slices of `exp-f32`: expect `83886080 cases ... 16777216 encodings`
    from each; read lanes a second a tile, with the oracle beside it. COMPUTED, not measured: exp's 387 instructions give about 2.6M cases/s a tile, and the software run's exp oracle (0.51 s for 2^18 lanes, 0.39 us a case) adds about as much time again in each process, so about 1.3M cases/s a process is what to compare the card's figure with.
 
