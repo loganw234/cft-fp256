@@ -373,14 +373,26 @@ STRUCT_GUESS_WRONG = {
 }
 
 
+# the functions whose committed lanes are taken as listed, no sign flipped:
+# acos is not odd (acos(-x) = pi - acos(x)), so each lane carries its sign
+ONE_SIGN = {"acos"}
+
+
 def structured_lanes(fn, fmt, rnd, table=None):
-    """The committed lanes of (fn, fmt, rnd), both signs: encodings."""
+    """The committed lanes of (fn, fmt, rnd), each also with its sign
+    flipped (y's for a pair: atan2(-y, x) = -atan2(y, x)), but for the
+    functions of ONE_SIGN, whose lanes are taken as listed."""
     out = []
     for rnds, lanes in (STRUCT if table is None else table)[fn].get(
             fmt.name, []):
         if rnd in rnds:
             for x in lanes:
-                out += [x, x | fmt.sign_mask]
+                if fn in ONE_SIGN:
+                    out.append(x)
+                elif isinstance(x, tuple):
+                    out += [x, (x[0] | fmt.sign_mask,) + x[1:]]
+                else:
+                    out += [x, x | fmt.sign_mask]
     return out
 
 
@@ -596,10 +608,15 @@ def check_bound(b, xs, label="random"):
     return out, (worst, n, len(xs))
 
 
+# the regions of each function's bound check (the study's 3.2): atan's are
+# REGIONS; M4G2 and M4G3 assign theirs, with the diagonal (diag)
+REGIONS_BY_FN = {"atan": REGIONS}
+
+
 def placed_points(fn, fmt, n=48, seed=11):
-    """The bound check's lanes: n points of each region (edge, big, small,
-    random), seed `seed`."""
-    return {r: sample(fn, fmt, r, n, seed) for r in REGIONS}
+    """The bound check's lanes: n points of each of the function's regions
+    (REGIONS_BY_FN; atan's edge, big, small and random), seed `seed`."""
+    return {r: sample(fn, fmt, r, n, seed) for r in REGIONS_BY_FN[fn]}
 
 
 # ---- the specials ----------------------------------------------------------------
@@ -694,13 +711,17 @@ _QUOTIENT = {"fp64": 17, "fp128": 19, "fp256": 21}
 _TAIL = {"fp64": 6, "fp128": 14, "fp256": 29}
 
 
+# the model's instructions by phase, by function: (those equal at every
+# format, {phase: {format: count}} for the rest); M4G2 and M4G3 assign theirs
+MODEL_PHASES = {"atan": (_PHASES_ATAN, {"quotient": _QUOTIENT, "tail": _TAIL})}
+
+
 def model_phases(fn, fmt_name):
-    """The study's instructions by phase for fn at the format; atan's, the
-    function this parcel builds (M4G2 and M4G3 extend it by function)."""
-    if fn != "atan":
+    """The model's instructions by phase for fn at the format."""
+    if fn not in MODEL_PHASES:
         raise ValueError(f"no phases of {fn} pinned")
-    return dict(_PHASES_ATAN, quotient=_QUOTIENT[fmt_name],
-                tail=_TAIL[fmt_name])
+    same, by_fmt = MODEL_PHASES[fn]
+    return dict(same, **{k: v[fmt_name] for k, v in by_fmt.items()})
 
 
 # The values the flag word takes (the study's section 4; MEASURED by its

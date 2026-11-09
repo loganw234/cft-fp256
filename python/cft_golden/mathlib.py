@@ -6050,6 +6050,156 @@ def check_inv_constants(builder=None, formats=INV_FORMATS,
 # _INV_ROLE_CHECKS, never edit their literals.)
 
 
+# atan2's six plants (the study's plants.py): faults of atan2's front, recon
+# and specials, assigned beside M4G1's. Each acts through _act in
+# _build_atan2; the other plants act on atan2 where the core and the final
+# are the same code (tiny_gate_off and tiny_side are atan's, refused by name).
+INV_PLANTS.update({
+    "signed_zero": "atan2(+-0, -0) answered +-0, not +-pi: C from x's sign "
+                   "only where x is not zero",
+    "side_rule_off": "the exact-quotient rule not applied in-lane",
+    "side_rule_sign": "the exact-quotient rule's FMA rounded away from zero, "
+                      "not toward it",
+    "range_off": "the tiny-quotient range not marked",
+    "quadrant": "sigma from the swap alone: x's sign ignored",
+    "prescale_d": "the 2^3p prescale keyed on d, as first designed (send-back "
+                  "1): a tiny n under a large d keeps an inexact remainder",
+})
+
+
+def _build_atan2(b: Build, y, x):
+    """atan2(y, x), y first (as C and transcend.py have it): n, d = min, max
+    of |y| and |x| (swapped where |y| > |x|), both scaled by 2^3p where n is
+    below 2^(emin+3p) (and d is not past 2^(emax-3p-2)) so that the quotient's
+    FMA remainder is exact, both by 2^-2 where d is past 2^(emax-1) (the
+    plant prescale_d keys the first on d, the first design); inv_core on the
+    single words; theta0 forced to 0 where either operand is infinite or zero
+    and to pi/4 where both are infinite; C = pi/2 under the swap, else pi
+    where x's sign bit is set, else 0; sigma negative where swap differs from
+    x's sign (plant quadrant: from the swap alone); y's sign on V. Then the
+    specials, lowest priority first: the exact-quotient rule (x > 0, |y| <
+    |x|, k = 0, the remainder zero, s_h below atan's gate: FMA(ss, -2^-(p+2),
+    ss) under the attribute, inexact), the tiny-quotient range (x > 0, |y| <
+    |x|, t~ below 2^(emin+p+2): the mark, the bits left), 9.2.1's zeros,
+    the NaNs. The study's model (docs/studies/m4/m4inv.py :200 to :474) ported
+    instruction for instruction."""
+    fmt, p = b.fmt, b.fmt.prec
+    G, shift = b.meta["G"], b.meta["shift"]
+    kw = _inv_consts(b)
+    ZERO, ONE, SIGN, ABSM = kw.ZERO, kw.ONE, kw.SIGN, kw.ABSM
+    INF, INT1, QBIT = kw.INF, kw.INT1, kw.QBIT
+    PIO2h, PIO2l = _inv_pio2(b)
+    PIh, PIl = (b.const(r, w) for r, w in zip(("PIH", "PIL"),
+                                              _words(fmt, _pi(), 2)))
+    PIO4h, PIO4l = (b.const(r, w) for r, w in zip(("PIO4H", "PIO4L"),
+                                                  _words(fmt, _pi() / 4, 2)))
+    ga = trig_gates(fmt)[1]                # atan's gate, the rule's ga
+
+    # ---- the front: n <= d, the prescales, the quadrant's conditions ---------
+    b.phase = "front"
+    ay, ax = b.iand(y, ABSM), b.iand(x, ABSM)
+    swap = b.icmplt(ax, ay)                              # |y| > |x|
+    n0, d0 = b.sel(ax, ay, swap), b.sel(ay, ax, swap)
+    DSUB = b.const("DSUB", _pow2(fmt, fmt.emin + 3 * p))
+    if _act(b, "prescale_d"):
+        dsub = b.icmplt(d0, DSUB)
+    else:
+        nsub = b.icmplt(n0, DSUB)
+        dok = b.icmplt(d0, b.const("DOK", _pow2(fmt, fmt.emax - 3 * p - 2)))
+        dsub = b.sel(dok, ZERO, nsub)
+    S3P = b.const("S3P", _pow2(fmt, 3 * p))
+    n1 = b.sel(b.mul(n0, S3P), n0, dsub)
+    d1 = b.sel(b.mul(d0, S3P), d0, dsub)
+    dbig = b.icmplt(b.const("DBIG", _pow2(fmt, fmt.emax - 1) - 1), d0)
+    QTR = b.const("QTR", _pow2(fmt, -2))
+    nh = b.sel(b.mul(n1, QTR), n1, dbig)
+    dh = b.sel(b.mul(d1, QTR), d1, dbig)
+    xneg = b.icmplt(ABSM, x)                             # x's sign bit set
+    sx = b.iand(y, SIGN)                                 # the result's sign
+
+    core = inv_core(b, nh, dh)
+
+    # ---- theta0 forced, C and sigma, V = C + sigma theta0 --------------------
+    b.phase = "recon"
+    yinf, xinf = b.cmpeq(ay, INF), b.cmpeq(ax, INF)
+    yzero, xzero = b.icmplt(ay, INT1), b.icmplt(ax, INT1)
+    s0 = b.sel(ONE, b.sel(ONE, b.sel(ONE, xzero, yzero), xinf), yinf)
+    both = b.sel(xinf, ZERO, yinf)
+    th, tl = b.sel(ZERO, core.th, s0), b.sel(ZERO, core.tl, s0)
+    th, tl = b.sel(PIO4h, th, both), b.sel(PIO4l, tl, both)
+    xc = b.sel(ZERO, xneg, xzero) if _act(b, "signed_zero") else xneg
+    cpi_h, cpi_l = b.sel(PIh, ZERO, xc), b.sel(PIl, ZERO, xc)
+    Ch, Cl = b.sel(PIO2h, cpi_h, swap), b.sel(PIO2l, cpi_l, swap)
+    sigc = swap if _act(b, "quadrant") else b.ixor(swap, xneg)
+    Vh, Vl = inv_recon(b, th, tl, Ch, Cl, sigc, sx)
+    b.probes.update(th=th, tl=tl)
+
+    # ---- the final rounding and the in-lane test -------------------------------
+    fin = inv_final(b, Vh, Vl, G=G, shift=shift)
+    bits_, fl = fin.R, fin.fl
+
+    # ---- the specials, lowest priority first --------------------------------------
+    b.phase = "special"
+    c0 = b.sel(ZERO, b.sel(ZERO, ONE, xneg), swap)       # x > 0 and not swap
+    kz = b.cmpeq(core.Kk, kw.MAGIC)
+    ex = b.cmpeq(core.rem0, ZERO)
+    small = b.icmplt(core.sh0, b.const("GATEA", _pow2(fmt, ga)))
+    side = b.sel(b.sel(b.sel(small, ZERO, ex), ZERO, kz), ZERO, c0)
+    ss = b.ixor(core.sh0, sx)
+    eps = Fraction(1, 2 ** (p + 2))
+    tb = b.fma(ss, b.const("SIDE_EPS", _enc(
+        fmt, eps if _act(b, "side_rule_sign") else -eps)), ss, b.rnd)
+    if not _act(b, "side_rule_off"):
+        bits_ = b.sel(tb, bits_, side)
+        fl = b.sel(kw.INX, fl, side)
+    if not _act(b, "range_off"):
+        rmk = b.sel(b.icmplt(core.tt, b.const(
+            "TQR", _pow2(fmt, fmt.emin + p + 2))), ZERO, c0)
+        fl = b.sel(kw.INXM, fl, rmk)
+    zres = b.sel(ZERO, b.sel(ONE, b.sel(b.sel(ZERO, ONE, yinf), ZERO, xinf),
+                             yzero), xneg)
+    bits_ = b.sel(sx, bits_, zres)
+    fl = b.sel(ZERO, fl, zres)
+    ynan, xnan = b.icmplt(INF, ay), b.icmplt(INF, ax)
+    ysn = b.sel(ZERO, ynan, b.iand(y, QBIT))
+    xsn = b.sel(ZERO, xnan, b.iand(x, QBIT))
+    anynan = b.sel(ONE, xnan, ynan)
+    anysn = b.sel(ONE, xsn, ysn)
+    bits_ = b.sel(kw.QNAN, bits_, anynan)
+    fl = b.sel(b.sel(kw.INVALID, ZERO, anysn), fl, anynan)
+    return b.finish(bits_, fl)
+
+
+_INV_BUILDERS["atan2"] = _build_atan2
+
+
+def _check_atan2_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
+    """atan2's words beyond the shared ones: pi/2, pi and pi/4 as two words
+    each against Machin's enclosure (the low word the nearest to what the high
+    leaves); the powers of two (2^(emin+3p), 2^3p, 2^-2, atan's gate, 2^(emin+
+    p+2), -2^-(p+2)) as exact points, their exponents from the IEEE fields
+    and p, not from fmt.emin or the generator; DOK and DBIG as integers."""
+    fmt, p = b.fmt, b.fmt.prec
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    emax = 2 ** (ew - 1) - 1
+    emin = 2 - 2 ** (ew - 1)
+    for hi_role, lo_role, k in (("PIO2H", "PIO2L", 2), ("PIH", "PIL", 1),
+                                ("PIO4H", "PIO4L", 4)):
+        w0 = verify(hi_role, "rn", lo_pi / k, hi_pi / k)
+        verify(lo_role, "rn", lo_pi / k - w0, hi_pi / k - w0)
+    point("DSUB", Fraction(2) ** (emin + 3 * p))
+    point("S3P", Fraction(2) ** (3 * p))
+    point("QTR", Fraction(1, 4))
+    point("GATEA", Fraction(2) ** _check_trig_gate(p, False))
+    point("TQR", Fraction(2) ** (emin + p + 2))
+    point("SIDE_EPS", -Fraction(1, 2 ** (p + 2)))
+    bits_are("DOK", (emax - 3 * p - 2 + emax) << mw)
+    bits_are("DBIG", ((emax - 1 + emax) << mw) - 1)
+
+
+_INV_ROLE_CHECKS["atan2"] = _check_atan2_roles
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the

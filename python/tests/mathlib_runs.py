@@ -1115,7 +1115,7 @@ def cmd_inv_bound(a):
         for fn in _inv_fns(a.fn):
             for rnd in rnds:
                 b = ml.build(fn, fmt, rnd, guard=a.guard)
-                for k, region in enumerate(I.REGIONS):
+                for k, region in enumerate(I.REGIONS_BY_FN[fn]):
                     xs = I.sample(fn, fmt, region, n, a.seed + k)
                     out, (worst, main, lanes) = I.check_bound(
                         b, xs, f"{region} seed {a.seed + k}")

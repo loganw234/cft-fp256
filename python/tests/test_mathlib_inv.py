@@ -142,8 +142,10 @@ def test_inv_names_is_beside_the_six_and_the_trig_names():
     assert ml.TRIG_NAMES == ("sin", "cos", "tan")
     assert not set(ml.INV_NAMES) & set(ml.NAMES + ml.TRIG_NAMES)
     assert ml.INV_FORMATS == (FP64, FP128, FP256)
-    assert tuple(ml._INV_BUILDERS) == ("atan",)
-    assert FUNCS == ("atan",)
+    # atan first, then what wave 2 builds, in INV_NAMES' order (M4G2's asin
+    # and acos, M4G3's atan2): each parcel's own file pins its own names
+    assert FUNCS == tuple(n for n in ml.INV_NAMES if n in ml._INV_BUILDERS)
+    assert FUNCS[0] == "atan"
 
 
 def test_the_caps_are_logans_answer_9():
@@ -188,12 +190,21 @@ def test_the_refusals_are_by_name():
             with pytest.raises(ValueError, match="parcel M4F1's") as e:
                 call(name, FP32, RNE)
             assert f"{name} at fp32 is not built" in str(e.value)
+    # a name of INV_NAMES not built is refused by name, saying whose it is:
+    # each in turn taken out of the builders and the fragment cache, so the
+    # refusal is held whatever wave 2 has built
     for name, parcel in (("asin", "M4G2"), ("acos", "M4G2"),
                          ("atan2", "M4G3")):
-        for call in (ml.build, ml.fragment):
-            with pytest.raises(ValueError, match=f"parcel {parcel}'s") as e:
-                call(name, FP64, RNE)
-            assert repr(name) in str(e.value) and "not built yet" in str(e.value)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(ml, "_INV_BUILDERS", {k: v for k, v in
+                                             ml._INV_BUILDERS.items()
+                                             if k != name})
+            mp.setattr(ml, "_CACHE", {})
+            for call in (ml.build, ml.fragment):
+                with pytest.raises(ValueError,
+                                   match=f"parcel {parcel}'s") as e:
+                    call(name, FP64, RNE)
+                assert repr(name) in str(e.value)                     and "not built yet" in str(e.value)
     with pytest.raises(ValueError, match="attribute"):
         ml.build("atan", FP64, 7)
     with pytest.raises(ValueError, match="formats"):
@@ -523,12 +534,15 @@ def test_core_single_word_lanes_are_the_same_function():
 def test_constants_in_process():
     findings, lines = I.check_constants()
     assert findings == []
-    assert len(lines) == 1 + 3 + 3          # the identity, the seed, atan
+    # the identity, the seed at three formats, each built function at three
+    assert len(lines) == 1 + 3 + 3 * len(FUNCS)
     assert lines[0].startswith("atan(7/8) + atan(1/15) = pi/4")
     assert all("derived constants in 5 fragments" in s for s in lines[4:])
     counts = {s.split(":")[0]: int(s.split(": ")[2].split()[0])
               for s in lines[4:]}
-    assert counts == {"atan fp64": 295, "atan fp128": 335, "atan fp256": 410}
+    assert len(counts) == 3 * len(FUNCS)
+    # atan's, as M4G1 measured them; wave 2's files pin their own
+    assert {k: counts[k] for k in ("atan fp64", "atan fp128", "atan fp256")}         == {"atan fp64": 295, "atan fp128": 335, "atan fp256": 410}
 
 
 def _run_module(*args):
@@ -541,9 +555,9 @@ def test_constants_as_a_program():
     r = _run_module("--check", "--only", "inv")
     assert r.returncode == 0, r.stdout + r.stderr
     lines = r.stdout.splitlines()
-    assert lines[-1] == "mathlib --check (inv): 1 routines, 3 formats, " \
-        "0 differences"
-    assert len(lines) == 8 and "DIFFERENCE" not in r.stdout
+    assert lines[-1] == (f"mathlib --check (inv): {len(FUNCS)} routines, "
+                         f"3 formats, 0 differences")
+    assert len(lines) == 1 + 3 + 3 * len(FUNCS) + 1         and "DIFFERENCE" not in r.stdout
     assert lines[0].startswith("atan(7/8) + atan(1/15) = pi/4")
     assert sum(s.startswith("atan fp") for s in lines) == 3
     assert sum(s.startswith("RECIP_SEED") for s in lines) == 3
@@ -565,8 +579,8 @@ def test_check_prints_inv_lines_only_under_only_and_exits_1_on_a_difference(
     assert ml.main(["--check", "--only", "inv"]) == 1
     shown = capsys.readouterr().out.splitlines()
     assert shown == ["an inv line", "DIFFERENCE: inv x differs",
-                     "mathlib --check (inv): 1 routines, 3 formats, "
-                     "1 differences"]
+                     f"mathlib --check (inv): {len(FUNCS)} routines, "
+                     "3 formats, 1 differences"]
     # clean: the default run prints nothing of inv
     monkeypatch.setattr(ml, "check_inv_constants",
                         lambda *a, **k: (["an inv line"], []))
@@ -665,7 +679,12 @@ def _check_row(row):
 
 def test_every_plant_is_in_the_table_and_every_row_lists_every_check():
     named = [row[0] for row in PLANTED]
-    assert set(named) == INV_PLANT_NAMES == set(ml.INV_PLANTS)
+    # M4G1's twelve, and beside them only wave 2's, which their files table
+    assert set(named) == INV_PLANT_NAMES <= set(ml.INV_PLANTS)
+    assert set(ml.INV_PLANTS) - INV_PLANT_NAMES <= {
+        "domain_edge", "u_low_dropped", "sqrt_product", "acos_quadrant",
+        "signed_zero", "side_rule_off", "side_rule_sign", "range_off",
+        "quadrant", "prescale_d"}
     assert len(named) == len(set(named))
     assert all(isinstance(t, str) and len(t) > 20
                for t in ml.INV_PLANTS.values())
@@ -723,7 +742,7 @@ def test_every_plant_changes_the_build():
     """A plant that did nothing would pass every row green: each is a different
     build from the clean one, in its body or its words."""
     clean = build_of("atan", FP64, RNE)
-    for plant in ml.INV_PLANTS:
+    for plant in sorted(INV_PLANT_NAMES):
         b = build_of("atan", FP64, RNE, plant)
         same = (b.body == clean.body and b.words == clean.words
                 and b.result == clean.result and b.flags == clean.flags)
@@ -1264,8 +1283,8 @@ def test_the_inv_commands_run_at_small_sizes_and_refuse_an_existing_out(
     R.FINDINGS.clear()
     with pytest.raises(SystemExit, match="fp32 is parcel M4F1's"):
         R.main(["inv-pools", "--formats", "fp32"])
-    with pytest.raises(SystemExit, match="--fn 'asin'"):
-        R.main(["inv-bound", "--fn", "asin"])
+    with pytest.raises(SystemExit, match="--fn 'atanh'"):
+        R.main(["inv-bound", "--fn", "atanh"])
     # --seq runs the compiled shape over the same lanes
     R.FINDINGS.clear()
     R.main(["inv-pools", "--quick", "--formats", "fp64", "--attrs", "rne",
