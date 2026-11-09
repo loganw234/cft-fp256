@@ -358,11 +358,15 @@ STRUCT = {
             0x3ffb880000000000000000000000000000000000000000000000000000000000])],
     },
 }
-# The marked lanes whose guess differs from transcend.py's, listed: a marked
-# lane's guess is the routine's best, and where the true value is within the
-# bound of a midpoint it may be either side (the replay decides). (function,
-# format, attribute) -> lanes (MEASURED: the midpoint centre at fp64 under rne
-# and rmm).
+# A PIN on the fragment's current guesses, not a claim of correctness: the
+# marked lanes whose guess differs from transcend.py's. A marked lane's guess
+# is not promised right (the replay with the definition decides it), and where
+# the true value is within the bound of a midpoint it may fall either side. The
+# brief asked every structured lane's guess to equal transcend.py's; for these
+# it does not. The check fails on an unlisted wrong guess and on a listed lane
+# whose guess has become right, so a change of the guess is seen, not judged.
+# (function, format, attribute) -> lanes (MEASURED: the midpoint centre at fp64
+# under rne and rmm, both signs).
 STRUCT_GUESS_WRONG = {
     ("atan", "fp64", RNE): {0x43349ff16b9c1e3e, 0x43349ff16b9c1e3e | 1 << 63},
     ("atan", "fp64", RMM): {0x43349ff16b9c1e3e, 0x43349ff16b9c1e3e | 1 << 63},

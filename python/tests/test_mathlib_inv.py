@@ -589,9 +589,12 @@ def test_check_prints_inv_lines_only_under_only_and_exits_1_on_a_difference(
 # structured, bound and specials are the study's (docs/studies/m4/
 # plants.fp64.out.txt) except where a row says otherwise; the cells for seq,
 # shape, audit, core and constants are this parcel's. Differences from the
-# study's table: sl_dropped is also red in structured (the committed list of
-# guesses that differ from transcend.py, STRUCT_GUESS_WRONG, names a lane the
-# plant makes right), mark_silenced also in seq (a lane's byte) and in shape
+# study's table: sl_dropped is also red in structured, and the reason is a pin,
+# not a fault of the lane: STRUCT_GUESS_WRONG pins the fragment's current guesses
+# for 0x43349ff16b9c1e3e (both signs) under rne and rmm, which differ from
+# transcend.py's (a marked lane's guess is not promised, the replay decides it),
+# and with s's low word dropped the guess becomes right, so the check's leg
+# "listed as having a wrong guess have the right one" goes red; mark_silenced also in seq (a lane's byte) and in shape
 # (the instruction count), and every plant that changes an instruction or a
 # word count is red in shape.
 CHECKS = I.CHECKS

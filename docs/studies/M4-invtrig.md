@@ -30,6 +30,8 @@ Every statement is one of five kinds, and says which:
 - **PROPOSED**: this design. Every name, constant and order below is a
   proposal for the lead and Logan, not a decision.
 
+**A note of 2026-11-09, at parcel M4G1** (the core and atan built; the study's text stays as written). The core of 2.1 to 2.5 (the index, the double-word numerator and denominator, the quotient, the polynomial, the table, the reconstruction and the final rounding with the in-lane test) and atan are built in python/cft_golden/mathlib.py at fp64, fp128 and fp256 (`inv_core`, `inv_recon`, `inv_final`, `build_inv_core`, `INV_LIVE_CAP`, `INV_PLANTS`, `check_inv_constants`, `--check --only inv`), held by python/tests/test_mathlib_inv.py; the 15 atan fragments equal section 11's model by dag digest and on every pool lane (docs/VALIDATION.md, the entry for parcel M4G1). **Nothing else of M4 is built:** no asin, acos or atan2 routine, no fp32, no budget, no language node. **Question 9's account of the scheduler is superseded:** it no longer holds that a phase outside PHASE_ORDER falls back (it is a KeyError), and schedule_order has a third candidate, the design's own order, since M2G2a. With the seven new names (front, sqrt, index, num, den, atan_s, table) in one block between "red-small" and "lowword", atan keeps 15 values live in the design's order against 36 by the ranked order and 16 by the depth-first (MEASURED at fp64 rne), so schedule_order takes the design's order, the approved cap of 15; asin, acos (16) and atan2 (19) are the drafter's measurement, to be confirmed by M4G2 and M4G3.
+
 ## Contents
 
 0. In brief

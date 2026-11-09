@@ -188,6 +188,25 @@ plan_trig_tw, trig_rho, trig_after and check_trig_constants (`--check`, and
 calls (trig_after with abs_by_xor, plan_trig for K and D). The design is
 docs/studies/M2-trig.md, 2.1 and 2.4 to 2.6; the construction below IS the
 study's model (docs/studies/m2/m2trig.py), ported, and nothing here imports it.
+
+atan, asin, acos and atan2 (parcel M4G1, M4's build, wave 1) are beside all of
+these: INV_NAMES = ("atan", "asin", "acos", "atan2") is a third tuple, and
+NAMES and TRIG_NAMES stay as they were, for the reason TRIG_NAMES is beside
+NAMES (the batteries that iterate them). Every function is sign (C + sigma
+atan(n/d)) with 0 <= n <= d, built on ONE core, inv_core (a table of N = 8,
+its index from RECIP_SEED with the 63/64 bias, one double-word quotient),
+inv_recon and inv_final; parcel M4G1 builds the core and atan at fp64, fp128
+and fp256, parcel M4G2 asin and acos and parcel M4G3 atan2 on the same three,
+parcel M4F1 fp32 (its triple word). The public names are INV_NAMES,
+INV_FORMATS, INV_LIVE_CAP, INV_PLANTS, inv_cells, inv_rho, plan_inv,
+inv_core, inv_recon, inv_final, build_inv_core and check_inv_constants
+(`--check --only inv`); build() and fragment() accept a name that is built, a
+lane of a fragment of two or more inputs (atan2's) is a tuple in its inputs'
+order for evaluate() and Build.run(). The design is docs/studies/M4-invtrig.md
+and Logan's answers of 2026-11-06 (docs/ROADMAP.md, "Logan's answers on M4's
+study"); the construction below IS the study's model (docs/studies/m4/
+m4inv.py), ported, and nothing here imports it. A change to a public name is
+the lead's to approve.
 """
 
 import argparse
@@ -5419,8 +5438,11 @@ def inv_core(b: Build, nh, dh, nl=None, dl=None) -> types.SimpleNamespace:
     mathlib_inv_harness.py's `audit` and `core`: th + tl = atan(n/d) with
     |error| under 2^-(p+G) theta0 (G = b.meta["G"]); th and tl are an
     UNNORMALISED pair (th is not promised to be RN(th + tl): inv_recon
-    normalises V); 0 <= th, and th is at most pi/4 and a few ulps (th = the
-    table's high word plus the polynomial's, Fast2Sum'd); the index is exact:
+    normalises V); 0 <= th, and th is at most pi/4 plus under one ulp of pi/4
+    (MEASURED by the core check: over its 60 lanes a format, three of them
+    n = d, th - pi/4 is at most 0.77 ulp(pi/4); th is the Fast2Sum of the
+    table's high word and the polynomial's; a sampled figure, not a proof);
+    the index is exact:
     n_h / P is in [1/2, 2] for every k >= 1 and n_h - P is computed exactly
     (Sterbenz), which `audit` shows lane by lane.
 
