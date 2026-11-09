@@ -8290,7 +8290,7 @@ def plants(env: Env) -> None:
            "        self.last_tel = rec\n")],
          scn_telemetry, ["telemetry: the stand-in's temperature rises with time and the samples show it, in order"]),
         ("the revision-8 table drops a routine entry",
-         [("card_stress.py", '"culture-rk4-tangent-fp64", "culture-rk4-tangent-fp256")', '"culture-rk4-tangent-fp64")')],
+         [("card_stress.py", '"attitude-rk4-tangent-fp64", "attitude-rk4-tangent-fp256")', '"attitude-rk4-tangent-fp64")')],
          lambda env, src: group_commands(src), ["REV8_ENTRIES is acceptance.py's table"]),
         ("a routine entry counts as an image that is not cached",
          [("card_stress.py", "            missing = [e for e in chosen if e not in REV8_ROUTINE_ENTRIES\n                       and not all(",
