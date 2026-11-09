@@ -64,7 +64,7 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             (`plant_progress`, which lays out hw/ and site/ side by side so that a plant of site/nightly.html has its own page) on a plant's copy of the code.
 
   routine  (parcel M4X2, 2026-11-09) the nine routine items of host/tools/routine_sweep.c (parcel M4X) after the 287: the catalog (the 125 and the first 287 held, by hash of vars(), to
-            f0e301c8's; every field of the nine; the digests held to the real tool's `list` and the generator's manifest, both the box's, as fixtures rs-*; atan2's nine x through a table of
+            f0e301c8's, whose tree is main's 69d97469; every field of the nine; the digests held to the real tool's `list` and the generator's manifest, both the box's, as fixtures rs-*; atan2's nine x through a table of
             the test's own), parse_routine_marks on nine real logs (the box's two software logs, the card's three, four made in WSL) and every damage it must refuse, the stand-in's lines held to
             the real ones and each of its misbehaviours through the parser, the driver's plans and guard, nine items served in a dry run with exp covered whole, the report's routine block and rates
             bucket and the reducer on that run, the refusal without --mpfr-prefix, and the build step on the driver's real path over test doubles (a fake generator that writes the box's real manifest,
@@ -6571,7 +6571,8 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
 # ---------------------------------------------------------------------------------------
 
 # The two digests below are sha256 of the sorted fields of every item (vars()) of the catalog's first 125 and first 287 items, computed with the
-# expression in routine_catalog_checks at f0e301c8, the commit this parcel was made from, by importing `git show f0e301c8:hw/card_stress_lib.py`:
+# expression in routine_catalog_checks at f0e301c8, the commit this parcel was made from, by importing `git show f0e301c8:hw/card_stress_lib.py` (the branch was
+# replayed onto main at its merge; main's 69d97469 has f0e301c8's tree, so `git show 69d97469:hw/card_stress_lib.py` gives the same file):
 # the same expression over the tip's library gives the same two, which is must-have (1), "the 287 keep their places and their fields".
 BASE_VARS_125 = "623065ad41772d311b375990da49c94aa44a2b2351487c9aaaf02e1931035327"
 BASE_VARS_287 = "b6d52edd3cb7c31edc421d0d54da24c1b51af6a7864fd4b3d48826a1de2fd41d"
@@ -6616,7 +6617,7 @@ def routine_catalog_checks(src: str = HERE) -> list:
     with lib_from(src) as L2:
         old, full = L2.sweep_items(), L2.sweep_items(mpfr=True)
         h = lambda items: hashlib.sha256("\n".join(repr(sorted(vars(i).items())) for i in items).encode()).hexdigest()      # noqa: E731
-        c("routine catalog: the 125 items without mpfr and the first 287 with it are the base's, field for field (vars() of each, hashed; the digests are f0e301c8's), "
+        c("routine catalog: the 125 items without mpfr and the first 287 with it are the base's, field for field (vars() of each, hashed; the digests are those of f0e301c8's tree, main's 69d97469), "
           "and every one of them is in group base (the 125) or wide (HXc's and HXb's): the routine items add to them and change none",
           h(old) == BASE_VARS_125 and h(full[:287]) == BASE_VARS_287 and len(old) == 125
           and all(i.group == "base" for i in full[:125]) and all(i.group == "wide" for i in full[125:287]) and not any(i.tool == "routine" for i in full[:287]),

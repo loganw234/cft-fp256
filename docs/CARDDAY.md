@@ -2471,7 +2471,7 @@ answers of 2026-11-06 (plan.md): partial coverage is acceptable, the sweeps run 
 
 **The items.** With `--mpfr-prefix`, `sweep_items(mpfr=True)` appends **nine items after HXb's 60** (296 in all; the 287 before them keep their places and every
 field: `hw/test_card_stress.py`'s `routine_catalog_checks` hashes `vars()` of the first 125 and of the first 287 and holds them to the hashes taken at f0e301c8, the
-base of this parcel). One item a routine, named `<op word>-all`, where the op word is `<name>-f32-d<digest>` and the digest is the first 32 bits of the sha256 of the
+base of this parcel, whose tree main's 69d97469 has: the branch was replayed onto main at its merge, each commit with its own tree). One item a routine, named `<op word>-all`, where the op word is `<name>-f32-d<digest>` and the digest is the first 32 bits of the sha256 of the
 routine's five images and banks (routine_sweep.c's grammar; `ROUTINE_DIGESTS` in hw/card_stress_lib.py is the table):
 
 | item | | item | |

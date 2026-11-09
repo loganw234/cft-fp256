@@ -158,7 +158,7 @@ rp-sw-fp128max.txt	0	host/rate-probe - 0.02 [1 s]
 # CHANGE: the image path's home directory, written out in full in the original, is $HOME (the driver's own default form, $HOME/cardday-rev8q/
 # cft_hw_quad.xclbin); rs-card-exp-all-2p24 is tile 1's of four disjoint 2^24 slices run at once. The box ran these as `exp-f32` and `tan-f32`, with no
 # digest in the op word. The four after them were made by parcel M4X2 in WSL (Ubuntu 22.04, gcc 11.4, the system's MPFR 4.1.0 and GMP 6.2.1, which their
-# oracle line names) from a clone of 73fa760f built with make -C host routine-sweep (XRT=0, no MPFR=1 word: the tool is always linked with MPFR), the images
+# oracle line names) from a clone of 73fa760f (its replay f3ebd517, the same tree) built with make -C host routine-sweep (XRT=0, no MPFR=1 word: the tool is always linked with MPFR), the images
 # made by host/tools/gen_sweep_images.py from the same clone (CFT_SWEEP_IMAGES=<its --out>; the digests it wrote are the box's), the software backend, no card:
 # rs-exp-d-all is the catalog's op word on the build step's slice, rs-exp-d-wrong a digest that is not the images' (exit 2, no verdict), rs-exp-rtz the same slice
 # under one attribute (the four `-` columns), and rs-exp-s34-all the images made with --names exp --bound-shift 34 (a wider in-lane bound, so that the program
