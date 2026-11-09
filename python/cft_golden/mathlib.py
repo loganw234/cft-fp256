@@ -6077,10 +6077,11 @@ def _build_atan2(b: Build, y, x):
     and to pi/4 where both are infinite; C = pi/2 under the swap, else pi
     where x's sign bit is set, else 0; sigma negative where swap differs from
     x's sign (plant quadrant: from the swap alone); y's sign on V. Then the
-    specials, lowest priority first: the exact-quotient rule (x > 0, |y| <
-    |x|, k = 0, the remainder zero, s_h below atan's gate: FMA(ss, -2^-(p+2),
-    ss) under the attribute, inexact), the tiny-quotient range (x > 0, |y| <
-    |x|, t~ below 2^(emin+p+2): the mark, the bits left), 9.2.1's zeros,
+    specials, lowest priority first: the exact-quotient rule (x's sign bit
+    clear, so x >= +0, and |y| <= |x|, k = 0, the remainder zero, s_h below
+    atan's gate: FMA(ss, -2^-(p+2), ss) under the attribute, inexact), the
+    tiny-quotient range (the same two conditions on x and |y|, t~ below
+    2^(emin+p+2): the mark, the bits left), 9.2.1's zeros,
     the NaNs. The study's model (docs/studies/m4/m4inv.py :200 to :474) ported
     instruction for instruction."""
     fmt, p = b.fmt, b.fmt.prec

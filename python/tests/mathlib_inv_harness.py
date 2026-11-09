@@ -1339,8 +1339,8 @@ SPECIAL_ROWS["atan2"] = _rows_atan2
 
 def _range_rows(fmt):
     """[(label, lane)]: the tiny-quotient range's lanes that must mark, in a
-    table of their own: the eight rows of 9.2.1 and the exact quotients that
-    fall in it, and the last y that marks against x = 1."""
+    table of their own: four rows of 9.2.1 and four exact quotients (the
+    eight of _RANGE_LABELS), and the last y that marks against x = 1."""
     rows = [(label, lane) for label, lane in _all_rows_atan2(fmt)
             if label in _RANGE_LABELS]
     rows.append(("the range's edge: last y that marks, y / 1",
@@ -1710,7 +1710,8 @@ def check_range(f, rows=None, edge=None, evaluator=None):
 # from the sampler's region `tinyn` (100 lanes at fp64, seed 17, plants.py's;
 # 40 at fp128 and fp256, seed 17) with verifier-VM4S's lane appended at fp64
 # (the other named lane, 0x812d63ff0271ce60 against 0x3c3053b19c7200ec, is
-# drawn). No pool reaches them; the plant prescale_d is red here alone.
+# drawn). No pool reaches them; the plant prescale_d is red here alone among the
+# lane checks (it is also red in shape and constants).
 
 CORNER = {
     "fp64": [
