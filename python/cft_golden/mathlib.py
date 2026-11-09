@@ -5699,8 +5699,10 @@ _INV_BUILDERS = {"atan": _build_atan}
 
 # ---- asin and acos: parcel M4G2 builds here ----
 
-# (M4G2's builders, plants and role checks go at this anchor: assign into
-# _INV_BUILDERS, INV_PLANTS and _INV_ROLE_CHECKS, never edit their literals.)
+# (M4G2's builders and plants go at this anchor: assign into _INV_BUILDERS
+# and INV_PLANTS, never edit their literals. Its role checks are registered
+# after _INV_ROLE_CHECKS' definition, below: a statement here would run
+# before that dict exists.)
 
 INV_PLANTS.update({
     "domain_edge": "|x| > 1 tested as |x| >= 1: +-1 refused (asin and acos)",
