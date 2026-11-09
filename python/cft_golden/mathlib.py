@@ -6043,6 +6043,13 @@ def check_inv_constants(builder=None, formats=INV_FORMATS,
     return lines, findings
 
 
+# ---- atan2: parcel M4G3 builds here ----
+
+# (M4G3's builder, plants and role checks go at this anchor, the section's
+# end, well apart from M4G2's above: assign into _INV_BUILDERS, INV_PLANTS and
+# _INV_ROLE_CHECKS, never edit their literals.)
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the
