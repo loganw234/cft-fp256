@@ -102,6 +102,26 @@ PROBES = ("Vh", "Vl", "Bv", "R", "R1", "R2", "mk", "th", "tl", "tt", "Kk", "c",
           "ul", "wh", "wl", "nl", "dh", "dl")
 
 
+# mathlib.__all__ at fd37791d, the base of this parcel (READ: the tuple in
+# `git show fd37791d:python/cft_golden/mathlib.py`)
+BASE_ALL = (
+    'fragment', 'evaluate', 'invariants', 'flag_words', 'build',
+    'build_exp', 'build_exp2', 'build_expm1', 'build_log', 'build_log2',
+    'build_log1p', 'Build', 'plan_exp', 'plan_exp32', 'plan_log',
+    'plan_log32', 'GUARD', 'LIVE_CAP', 'PLANTS', 'FORMATS', 'NAMES',
+    'EXP_NAMES', 'LOG_NAMES', 'PHASE_ORDER', 'dag_digest', 'schedule_order',
+    'check_constants', 'main', 'TRIG_RANGE', 'TRIG_LOST', 'trig_gates',
+    'plan_reduction', 'ReductionValue', 'reduction_front', 'trig_reduction',
+    'reduction_audit', 'build_reduction', 'REDUCTION_PLANTS',
+    'check_reduction_constants', 'plan_reduction_tw', 'trig_reduction_tw',
+    'TRIG_TW_PLANTS', 'check_reduction_tw_constants', 'TRIG_NAMES',
+    'TRIG_LIVE_CAP', 'TRIG_PLANTS', 'plan_trig', 'trig_rho', 'trig_after',
+    'check_trig_constants', 'TRIG_FORMATS', 'TRIG_TW_ROUTINE_PLANTS',
+    'plan_trig_tw', 'INV_NAMES', 'INV_FORMATS', 'INV_LIVE_CAP',
+    'INV_PLANTS', 'inv_cells', 'inv_rho', 'plan_inv', 'inv_core',
+    'inv_recon', 'inv_final', 'build_inv_core', 'check_inv_constants')
+
+
 # =====================================================================
 # what is built, and where it is registered
 # =====================================================================
@@ -113,13 +133,13 @@ def test_asin_then_acos_are_registered_after_atan_in_inv_names_order():
     assert ml._INV_BUILDERS["asin"] is ml._build_asin
     assert ml._INV_BUILDERS["acos"] is ml._build_acos
     assert I.FUNCS[:3] == ("atan", "asin", "acos")
-    # the role checks are assigned beside atan's, and no name is added to
-    # mathlib's __all__ by this parcel's builders
+    # the role checks are assigned beside atan's
     assert {"atan", "asin", "acos"} <= set(ml._INV_ROLE_CHECKS)
     assert ml._INV_ROLE_CHECKS["asin"] is ml._check_asin_roles
     assert ml._INV_ROLE_CHECKS["acos"] is ml._check_acos_roles
-    assert not [n for n in ml.__all__ if "asin_acos" in n or
-                n.startswith(("_build_a", "_check_a"))]
+    # mathlib's __all__ is the base's (fd37791d), recorded as a literal: this
+    # parcel adds no name to it
+    assert tuple(ml.__all__) == BASE_ALL
 
 
 def test_the_four_plants_are_in_the_table_and_described():
@@ -164,9 +184,10 @@ def test_the_build_keeps_what_the_budget_and_the_sequel_read(fn, fmt):
     (tag, ref), = m["data"]
     assert tag == "index" and b.body[ref][0] == sf.OP_FMA
     assert b.inputs == ("a",)
-    # the builder's probes are the front's: the core's operands, as double
-    # words, and the recon's th and tl are the core's
-    assert b.probes["th"] == b.probes["th"] and b.probes["nh"][0] == "v"
+    # the front's own probes (the core's operands as double words) are values
+    # of the body; th and tl against the core's output are
+    # test_the_cores_double_word_branch_runs_on_the_fragments_own_operands
+    assert b.probes["nh"][0] == b.probes["dh"][0] == "v"
 
 
 @pytest.mark.parametrize("fn", FN2)
@@ -971,7 +992,7 @@ def test_each_leg_of_constants_can_fail_alone():
 # audit green). The rest are this parcel's, and where a cell differs from what
 # the study's table would suggest it says so:
 #   * sterbenz_bias: red in audit through the CORE leg (M4G1's check_audit, the
-#     only one that sees it); the own-lane leg is green by design (the
+#     only audit leg that sees it); the own-lane leg is green by design (the
 #     index never reaches k = 1 below t = 1/16 on these lanes), shown in
 #     test_the_audit_through_the_own_lanes_cannot_see_sterbenz_bias. Its
 #     shape cell is the sharing's: the plant changes asin's (or acos's) body
