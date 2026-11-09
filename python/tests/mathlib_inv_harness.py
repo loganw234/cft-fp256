@@ -1089,7 +1089,7 @@ def red_checks(plant, fmt=FP64, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
         add("core", check_core(fmt, plant)[0])
     add("constants", check_constants(
         builder=lambda name, f_, r_: build_of(name, f_, r_, plant),
-        formats=(fmt,), attrs=(RNE,))[0])
+        formats=(fmt,), attrs=(RNE,), names=(fn,))[0])
     return red
 
 
