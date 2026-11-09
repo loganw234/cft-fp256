@@ -6656,7 +6656,7 @@ def routine_catalog_checks(src: str = HERE) -> list:
           all(isinstance(it.claim, str) and f"every fp32 x through {it.op.split('-')[0]} as the compiled program (its images' digest {L2.ROUTINE_DIGESTS[it.op.split('-')[0]]})" in it.claim
               and "each of the five attributes" in it.claim and "an unmarked lane's bits and flags equal to MPFR's" in it.claim
               and "a marked lane counted and its guess compared, not decided" in it.claim and it.claim.endswith("(L1 over the fp32 slice)")
-              and "swept" not in it.claim and ", under " not in it.claim for it in rs), rs[0].claim)
+              and "swept" not in it.claim and ", under " not in it.claim for it in rs), rs[0].claim if rs else "no routine item")
         # atan2: one item for each of the lead's nine x, in his order, through a table of a test's own (atan2 has no digest in the real table until its fp32 program is built)
         xs = [0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb]
         c("routine catalog: ATAN2_X is the lead's nine x in his order (1, -1, one ulp above 1, 2^40, the largest normal, the smallest normal, a subnormal, two full significands)",
@@ -6713,6 +6713,8 @@ def routine_parser_checks(src: str = HERE) -> list:
     with lib_from(src) as L2:
         raises = lambda fn: raises_in(L2, fn)               # noqa: E731
         parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+        mk = lambda v: (v.extra.get("marks") if v is not None else None) or {"by_attr": {}, "named": [], "not_named": None}      # noqa: E731
+        tm = lambda v: (v.extra.get("times") if v is not None else None) or {}                                                 # noqa: E731
 
         def job(nm):
             op, lo, hi, mode = fixture_job(index, nm)
@@ -6727,36 +6729,36 @@ def routine_parser_checks(src: str = HERE) -> list:
         c("routine real log (the box, software): exp-f32 over 9 encodings under all passes - 45 cases, 9 encodings, 0 skipped, 0 mismatches - with 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), "
           "0 off the list, 0 guesses wrong, the three named lanes right, and the timing line read",
           v is not None and v.ok and v.counts == {"cases": 45, "value_mismatches": 0, "flag_mismatches": 0, "encodings": 9, "skipped": 0, "marked": 3, "off_list": 0, "guesses_wrong": 0}
-          and v.extra["marks"]["by_attr"] == {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0} and v.extra["marks"]["not_named"] == 0
-          and [(n["attr"], n["lane"], n["guess"]) for n in v.extra["marks"]["named"]] == [("rtz", 0x33ffffff, 0x3f800000), ("rdn", 0x33ffffff, 0x3f800000), ("rup", 0x33ffffff, 0x3f800001)]
-          and not any(n["wrong"] or n["off_list"] for n in v.extra["marks"]["named"]) and v.extra["times"] == {"device_s": 0.005, "oracle_s": 0.0, "lanes_a_call": 16384}, why or str(v))
+          and mk(v)["by_attr"] == {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0} and mk(v)["not_named"] == 0
+          and [(n["attr"], n["lane"], n["guess"]) for n in mk(v)["named"]] == [("rtz", 0x33ffffff, 0x3f800000), ("rdn", 0x33ffffff, 0x3f800000), ("rup", 0x33ffffff, 0x3f800001)]
+          and not any(n["wrong"] or n["off_list"] for n in mk(v)["named"]) and tm(v) == {"device_s": 0.005, "oracle_s": 0.0, "lanes_a_call": 16384}, why or str(v))
         v, why = parse_ok(lambda: whole("rs-exp-all-sab.txt"))
         c("routine real log (the box, CFT_SOAK_SABOTAGE=1): 5 value mismatches and exit 1 - a failing verdict (ok False) with the marks as they were; the log with exit 0 is refused",
           v is not None and not v.ok and v.counts["value_mismatches"] == 5 and v.counts["marked"] == 3 and len(v.extra["disagreements"]) == 5
           and raises(lambda: L2.parse_routine(fixture("rs-exp-all-sab.txt"), 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5})), why or str(v))
         v, why = parse_ok(lambda: whole("rs-exp-d-all.txt"))
         c("routine real log (this parcel's, the catalog's op word exp-f32-d043b3bb5): the same verdict and marks as the box's, under the op word with the digest",
-          v is not None and v.ok and v.counts["cases"] == 45 and v.counts["marked"] == 3 and v.extra["marks"]["by_attr"]["rup"] == 1, why or str(v))
+          v is not None and v.ok and v.counts["cases"] == 45 and v.counts["marked"] == 3 and mk(v)["by_attr"].get("rup") == 1, why or str(v))
         v, why = parse_ok(lambda: whole("rs-exp-rtz.txt"))
         c("routine real log (one attribute, rtz): 9 cases for 9 encodings (one check an encoding), 1 marked in rtz and the four others '-' (None), the timing line the job's",
           v is not None and v.ok and v.counts["cases"] == 9 and v.counts["marked"] == 1
-          and v.extra["marks"]["by_attr"] == {"rne": None, "rtz": 1, "rdn": None, "rup": None, "rmm": None} and v.extra["times"]["lanes_a_call"] == 16384, why or str(v))
+          and mk(v)["by_attr"] == {"rne": None, "rtz": 1, "rdn": None, "rup": None, "rmm": None} and tm(v).get("lanes_a_call") == 16384, why or str(v))
         v, why = parse_ok(lambda: whole("rs-exp-s34-all.txt"))
         c("routine real log (images made with --bound-shift 34, 4096 encodings): 529 marked (rne 113, rtz 101, rdn 101, rup 101, rmm 113), all 529 off the list, 0 wrong, sixteen MARK "
           "lines (the tool's limit for marks of any kind, right ones included), so 513 are not named; each named lane off the list",
-          v is not None and v.ok and v.counts["marked"] == v.counts["off_list"] == 529 and v.counts["guesses_wrong"] == 0 and len(v.extra["marks"]["named"]) == 16
-          and v.extra["marks"]["not_named"] == 513 and all(n["off_list"] and not n["wrong"] for n in v.extra["marks"]["named"])
-          and v.extra["marks"]["by_attr"] == {"rne": 113, "rtz": 101, "rdn": 101, "rup": 101, "rmm": 113}, why or str(v))
+          v is not None and v.ok and v.counts["marked"] == v.counts["off_list"] == 529 and v.counts["guesses_wrong"] == 0 and len(mk(v)["named"]) == 16
+          and mk(v)["not_named"] == 513 and all(n["off_list"] and not n["wrong"] for n in mk(v)["named"])
+          and mk(v)["by_attr"] == {"rne": 113, "rtz": 101, "rdn": 101, "rup": 101, "rmm": 113}, why or str(v))
         v, why = parse_ok(lambda: whole("rs-card-exp-all-marks.txt", art=RS_ART))
         c("routine real log (the card, rev8q, tile 1): the box's software verdict and marks, from a log whose backend line names the DEVICE - the artifact the job was given - and nothing else",
-          v is not None and v.ok and v.counts["cases"] == 45 and v.counts["marked"] == 3 and v.extra["times"]["device_s"] == 0.002, why or str(v))
+          v is not None and v.ok and v.counts["cases"] == 45 and v.counts["marked"] == 3 and tm(v).get("device_s") == 0.002, why or str(v))
         v, why = parse_ok(lambda: whole("rs-card-tan-all.txt", art=RS_ART))
         c("routine real log (the card, tan over 2^20 encodings): 5,242,880 cases, 1,048,576 encodings, 0 marked, device 5.497 s and oracle 3.638 s",
-          v is not None and v.ok and v.counts["cases"] == 5242880 and v.counts["encodings"] == 1048576 and v.counts["marked"] == 0 and v.extra["times"]["device_s"] == 5.497
-          and v.extra["times"]["oracle_s"] == 3.638, why or str(v))
+          v is not None and v.ok and v.counts["cases"] == 5242880 and v.counts["encodings"] == 1048576 and v.counts["marked"] == 0 and tm(v).get("device_s") == 5.497
+          and tm(v).get("oracle_s") == 3.638, why or str(v))
         v, why = parse_ok(lambda: whole("rs-card-exp-all-2p24.txt", art=RS_ART))
         c("routine real log (the card, exp over 2^24 encodings): 83,886,080 cases, 0 marked, device 36.657 s, oracle 38.249 s",
-          v is not None and v.ok and v.counts["cases"] == 83886080 and v.counts["marked"] == 0 and v.extra["times"] == {"device_s": 36.657, "oracle_s": 38.249, "lanes_a_call": 16384},
+          v is not None and v.ok and v.counts["cases"] == 83886080 and v.counts["marked"] == 0 and tm(v) == {"device_s": 36.657, "oracle_s": 38.249, "lanes_a_call": 16384},
           why or str(v))
         card = fixture("rs-card-exp-all-marks.txt")
         c("routine card log: refused for another artifact; refused as a CPU job's (a software job whose log names a DEVICE); the software log refused as a card job's (no DEVICE line)",
@@ -6818,21 +6820,21 @@ def routine_parser_checks(src: str = HERE) -> list:
         vo, w1 = parse_ok(lambda: L2.parse_routine(t_off, 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
         vw, w2 = parse_ok(lambda: L2.parse_routine(t_wr, 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
         c("routine: an off-list mark and a wrong guess leave the verdict ok (the tool exits 0 and its V and F are 0), counted and named",
-          vo is not None and vo.ok and vo.counts["off_list"] == 1 and vo.extra["marks"]["named"][-1]["off_list"] is True
-          and vw is not None and vw.ok and vw.counts["guesses_wrong"] == 1 and vw.extra["marks"]["named"][-1]["wrong"] is True, f"{w1} {w2}")
+          vo is not None and vo.ok and vo.counts["off_list"] == 1 and (mk(vo)["named"] or [{}])[-1].get("off_list") is True
+          and vw is not None and vw.ok and vw.counts["guesses_wrong"] == 1 and (mk(vw)["named"] or [{}])[-1].get("wrong") is True, f"{w1} {w2}")
         # -- the stand-in's lines are the real tool's
-        rc, txt = rs_standin(["exp-f32", "0x33fffffb", "0x34000004", "all"])
+        rc, txt = rs_standin(["exp-f32", "0x33fffffb", "0x34000004", "all"], src=src)
         c("routine stand-in: for the box's slice (exp-f32 0x33fffffb..0x34000004 under all) it prints exactly the real tool's lines (rs-exp-all-marks), stderr then stdout, the hashes and times masked",
           rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-exp-all-marks.txt")), "\n".join(rs_mask(txt)[:12]))
-        rc, txt = rs_standin(["exp-f32-d043b3bb5", "0x33fffffb", "0x34000004", "rtz"])
+        rc, txt = rs_standin(["exp-f32-d043b3bb5", "0x33fffffb", "0x34000004", "rtz"], src=src)
         c("routine stand-in: under one attribute (rtz) it prints the real tool's lines (rs-exp-rtz): one image line, nine cases, the four dashes",
           rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-exp-rtz.txt")), "\n".join(rs_mask(txt)[:10]))
-        rc, txt = rs_standin(["list"])
+        rc, txt = rs_standin(["list"], src=src)
         c("routine stand-in: `list` prints the real tool's thirteen lines (rs-list)", rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-list.txt")), txt[:200])
-        rc, txt = rs_standin(["exp-f32-d00000000", "0x33fffffb", "0x34000004", "all"])
+        rc, txt = rs_standin(["exp-f32-d00000000", "0x33fffffb", "0x34000004", "all"], src=src)
         c("routine stand-in: a digest that is not the images' is refused as the real tool refuses it (rs-exp-d-wrong), exit 2, no verdict",
           rc == 2 and rs_mask(txt) == rs_mask(fixture("rs-exp-d-wrong.txt")), txt[:200])
-        rc, txt = rs_standin(["exp-f32", "0x33fffffb", "0x34000004", "all"], {"CFT_SOAK_ARTIFACT": RS_ART, "CFT_XRT_TILES": "1"})
+        rc, txt = rs_standin(["exp-f32", "0x33fffffb", "0x34000004", "all"], {"CFT_SOAK_ARTIFACT": RS_ART, "CFT_XRT_TILES": "1"}, src=src)
         c("routine stand-in: with an artifact it prints the DEVICE line the card's log has (rs-card-exp-all-marks, the image path and the timing masked), the rest the same",
           [x for x in rs_mask(txt) if not x.startswith("soaking")] == [x for x in rs_mask(fixture("rs-card-exp-all-marks.txt")) if not x.startswith("soaking")]
           and f"soaking the DEVICE backend: {RS_ART}" in txt and f"soaking the DEVICE backend: {RS_ART}" in fixture("rs-card-exp-all-marks.txt"))
@@ -6905,7 +6907,7 @@ def routine_driver_checks(env: Env, src: str = HERE) -> list:
               "(cases 5 x E, E encodings, covered by the rule), reach tile, and the record says group routine",
               j["argv"] == [b, op, str(j["lo"]), str(j["hi"]), "all"] and b.replace("\\", "/").endswith("host/routine-sweep") and j["lo"] == 0
               and j["cover"] == {"encodings": j["hi"] - j["lo"], "per_encoding": 5} and j["expected"] == 5 * (j["hi"] - j["lo"])
-              and j["sweep"]["reach"] == "tile" and j["sweep"]["group"] == "routine" and j["sweep"]["op"] == op and j["sweep"]["mode"] == "all", str(j["argv"]))
+              and j["sweep"]["reach"] == "tile" and j["sweep"].get("group") == "routine" and j["sweep"]["op"] == op and j["sweep"]["mode"] == "all", str(j["argv"]))
             d.intervals[f"{op}-all"] = [(0, (1 << 32) - 77)]
             j = d.plan_wave(q, 3600, 1, [f"{op}-all"])[0]
             c("routine plan: its last slice ends exactly at 2^32", (j["lo"], j["hi"]) == ((1 << 32) - 77, 1 << 32))
