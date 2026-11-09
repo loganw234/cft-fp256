@@ -43,12 +43,15 @@ log2 and log1p.
     python python/tests/mathlib_runs.py trig-family [--fn sin,cos,tan]
         [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm]
         [--centres N] [--jmax J] [--quick] [--out PATH] | --write | --check
-    python python/tests/mathlib_runs.py inv-pools [--fn atan]
+    python python/tests/mathlib_runs.py inv-pools [--fn atan,atan2]
         [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
         [--step N] [--quick] [--out PATH]
-    python python/tests/mathlib_runs.py inv-bound [--fn atan]
+    python python/tests/mathlib_runs.py inv-bound [--fn atan,atan2]
         [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
         [--guard G] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py inv-corner [--fn atan2]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--n N]
+        [--seed 101] [--seq] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -150,30 +153,48 @@ sample is a function of --seed, so a run can be repeated.
            pools (1: all). --quick: --step 8, and fp128 under rne and rtz where
            --formats and --attrs are not given (the golden stage's smoke
            run). Not part of `all`
-  inv-pools  atan, asin, acos and atan2 (parcel M4G1 builds atan; the
-           others join as they are built: --fn defaults to every function
-           python/tests/mathlib_inv_harness.py has a pool for): the unary pool
-           (the stage's trig_pool, the vector sets' and test_transcend's brute
-           pool: 333, 285 and 285 arguments at fp64, fp128 and fp256) through
+  inv-pools  atan, asin, acos and atan2 (parcel M4G1 builds atan, M4G3
+           atan2; the others join as they are built: --fn defaults to every
+           function python/tests/mathlib_inv_harness.py has a pool for): the
+           pool (atan's unary: the stage's trig_pool, the vector sets' and
+           test_transcend's brute pool, 333, 285 and 285 arguments at fp64,
+           fp128 and fp256; atan2's PAIRS (y, x): the stage's atan2_pairs, the
+           vector sets' and the brute pool's 9 x 9, 527, 479 and 479) through
            every configuration, each lane equal to transcend.py in bits and
            flag word or marked and on INV_POOL_MARKS; with --seq the fragment
-           as a program on seq.py and as the compiled shape over the same
-           lanes. MEASURED at full size (atan, 15 configurations, one process,
+           as a program on seq.py (y in r0, x in r1) and as the compiled shape
+           over the same lanes. MEASURED at full size (atan, 15 configurations, one process,
            unniced, the desktop shared with other parcels and its load not
            measured): 11 s without --seq (peak memory 50 MB), 36 s with it
-           (51 MB); --step 8 and --quick take less. No code changes for
-           asin, acos or atan2: the lanes, pools and tables come from the
-           harness by function
+           (51 MB); --step 8 and --quick take less. atan2's full-size time
+           is given in the entry of docs/VALIDATION.md. No code changes for
+           asin or acos: the lanes, pools and tables come from the harness
+           by function
   inv-bound  the same functions: |V - f(x)| / Bv under 1, mpmath at 4p + 200
-           bits, at --n placed points of each of the study's regions (edge,
-           big, small, random: python/tests/mathlib_inv_harness.REGIONS; a
-           seed each from --seed on) of each format (3,000 a region at fp64
-           and 1,000 at fp128 and fp256 by default), each lane also against
-           transcend.py. The largest is a sampled lower bound. MEASURED at full
+           bits, at --n placed points of each of the function's regions
+           (python/tests/mathlib_inv_harness.REGIONS_BY_FN: atan's edge, big,
+           small and random, atan2's those and the diagonal, diag; a seed each
+           from --seed on) of each format (3,000 a region at fp64 and 1,000 at
+           fp128 and fp256 by default), each lane also against
+           transcend.py; a lane of atan2 is a pair (y, x). The largest is a sampled lower bound. MEASURED at full
            size (atan, the defaults: 3,000 points a region at fp64, 1,000 at
            fp128 and fp256, rne; one process, unniced, the desktop shared and
            its load not measured): 93 s, peak memory 51 MB, RESULT: ok;
-           --quick is 12 points a region. No code changes for asin, acos or atan2
+           --quick is 12 points a region. atan2's full-size time is in the
+           entry of docs/VALIDATION.md. No code changes for asin or acos
+  inv-corner  atan2 (parcel M4G3; the study's corner.py): the region `tinyn`,
+           send-back 1's corner, a tiny or subnormal |y| against a larger |x|
+           that no pool reaches, --n sampled pairs (2,000 at fp64, 500 at fp128,
+           300 at fp256 by default, seed --seed 101) of each format under
+           --attrs (all five by default): every unmarked lane equal to
+           transcend.py in bits and flag word, and under rne every unmarked lane
+           with y not zero and flag word exactly inexact within its bound
+           (|V - f| / Bv under 1, mpmath at 4p + 200 bits, Bv not zero); with
+           --seq the same lanes on seq.py equal to evaluate(). Prints per
+           configuration the lanes, those marked and wrong, the largest
+           |V - f| / Bv over the lanes tested and the lanes whose Bv
+           underflowed. --quick: 12 lanes, fp128 under rne and rtz by
+           default. Not part of `all`
   trig-bound  sin, cos and tan: |V - f(x)| / Bv under 1, mpmath at 4p + 200
            bits, at --n placed points of each of the study's five regions
            (edge, near, zero, small, random; a seed each from --seed on) of
@@ -1100,6 +1121,43 @@ def cmd_inv_pools(a):
     say(f"inv-pools: {_memory_line()}")
 
 
+def cmd_inv_corner(a):
+    """atan2's corner at sampled size: the harness's check_corner over the
+    region `tinyn` (parcel M4G3; the study's corner.py), under --attrs."""
+    I = _inv_harness()
+    open_out(a.out)
+    if a.fn and a.fn != "atan2":
+        raise SystemExit(f"--fn {a.fn!r}: the corner is atan2's (the only "
+                         f"function with two operands built)")
+    sizes = {"fp64": 2000, "fp128": 500, "fp256": 300}
+    fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in I.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else (
+        [I.RNE, I.RTZ] if a.quick else list(sf.RND_MODES))
+    for fmt in fmts:
+        n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
+        lanes = I.sample("atan2", fmt, "tinyn", n, a.seed)
+        for rnd in rnds:
+            f = ml.fragment("atan2", fmt, rnd)
+            t0 = time.perf_counter()
+            out, t = I.check_corner(f, lanes, b=ml.build("atan2", fmt, rnd),
+                                    seq=a.seq)
+            note(out)
+            tail = ""
+            if rnd == I.RNE:
+                tail = (f"; largest |V - f| / Bv over the unmarked lanes "
+                        f"tested 2^{t['largest']:+.2f}, {t['bv0']} whose Bv "
+                        f"underflowed to 0")
+            seq = (f"; seq.py differs from evaluate() on {t['differ']}"
+                   if a.seq else "")
+            say(f"inv-corner atan2 {fmt.name} {sf.RND_NAMES[rnd]} tinyn seed "
+                f"{a.seed}{' on seq.py' if a.seq else ''}: {t['lanes']} "
+                f"lanes, {len(f)} instructions: {t['wrong']} wrong unmarked, "
+                f"{t['marked']} marked{tail}{seq}; {len(out)} findings; "
+                f"{time.perf_counter() - t0:.0f}s")
+    say(f"inv-corner: {_memory_line()}")
+
+
 def cmd_inv_bound(a):
     """|V - f(x)| / Bv at placed points of the harness's regions, for the
     inverse routines built (parcel M4G1: atan), each lane also against
@@ -1350,7 +1408,7 @@ def main(argv=None):
     p.add_argument("--check", action="store_true")
     p.set_defaults(fn_=cmd_trig_family)
     p = sub.add_parser("inv-pools")
-    p.add_argument("--fn", help="atan (the functions built, by default)")
+    p.add_argument("--fn", help="atan,atan2 (the functions built, by default)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--seq", action="store_true")
@@ -1362,7 +1420,7 @@ def main(argv=None):
                                  "exists is refused")
     p.set_defaults(fn_=cmd_inv_pools)
     p = sub.add_parser("inv-bound")
-    p.add_argument("--fn", help="atan (the functions built, by default)")
+    p.add_argument("--fn", help="atan,atan2 (the functions built, by default)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
     p.add_argument("--attrs", help="rne (by default)")
     p.add_argument("--n", type=int, default=0,
@@ -1376,6 +1434,22 @@ def main(argv=None):
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_inv_bound)
+    p = sub.add_parser("inv-corner")
+    p.add_argument("--fn", help="atan2 (the only one, the default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes (default 2,000 at fp64, 500 at fp128, 300 at "
+                        "fp256)")
+    p.add_argument("--seed", type=int, default=101,
+                   help="the sampler's seed (the study's corner runs)")
+    p.add_argument("--seq", action="store_true",
+                   help="the same lanes on seq.py, equal to evaluate()")
+    p.add_argument("--quick", action="store_true",
+                   help="12 lanes, fp128 under rne and rtz by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_inv_corner)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)
