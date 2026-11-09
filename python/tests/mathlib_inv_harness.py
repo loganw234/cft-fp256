@@ -373,14 +373,26 @@ STRUCT_GUESS_WRONG = {
 }
 
 
+# the functions whose committed lanes are taken as listed, no sign flipped:
+# acos is not odd (acos(-x) = pi - acos(x)), so each lane carries its sign
+ONE_SIGN = {"acos"}
+
+
 def structured_lanes(fn, fmt, rnd, table=None):
-    """The committed lanes of (fn, fmt, rnd), both signs: encodings."""
+    """The committed lanes of (fn, fmt, rnd), each also with its sign
+    flipped (y's for a pair: atan2(-y, x) = -atan2(y, x)), but for the
+    functions of ONE_SIGN, whose lanes are taken as listed."""
     out = []
     for rnds, lanes in (STRUCT if table is None else table)[fn].get(
             fmt.name, []):
         if rnd in rnds:
             for x in lanes:
-                out += [x, x | fmt.sign_mask]
+                if fn in ONE_SIGN:
+                    out.append(x)
+                elif isinstance(x, tuple):
+                    out += [x, (x[0] | fmt.sign_mask,) + x[1:]]
+                else:
+                    out += [x, x | fmt.sign_mask]
     return out
 
 
@@ -596,10 +608,15 @@ def check_bound(b, xs, label="random"):
     return out, (worst, n, len(xs))
 
 
+# the regions of each function's bound check (the study's 3.2): atan's are
+# REGIONS; M4G2 and M4G3 assign theirs, with the diagonal (diag)
+REGIONS_BY_FN = {"atan": REGIONS}
+
+
 def placed_points(fn, fmt, n=48, seed=11):
-    """The bound check's lanes: n points of each region (edge, big, small,
-    random), seed `seed`."""
-    return {r: sample(fn, fmt, r, n, seed) for r in REGIONS}
+    """The bound check's lanes: n points of each of the function's regions
+    (REGIONS_BY_FN; atan's edge, big, small and random), seed `seed`."""
+    return {r: sample(fn, fmt, r, n, seed) for r in REGIONS_BY_FN[fn]}
 
 
 # ---- the specials ----------------------------------------------------------------
@@ -694,13 +711,17 @@ _QUOTIENT = {"fp64": 17, "fp128": 19, "fp256": 21}
 _TAIL = {"fp64": 6, "fp128": 14, "fp256": 29}
 
 
+# the model's instructions by phase, by function: (those equal at every
+# format, {phase: {format: count}} for the rest); M4G2 and M4G3 assign theirs
+MODEL_PHASES = {"atan": (_PHASES_ATAN, {"quotient": _QUOTIENT, "tail": _TAIL})}
+
+
 def model_phases(fn, fmt_name):
-    """The study's instructions by phase for fn at the format; atan's, the
-    function this parcel builds (M4G2 and M4G3 extend it by function)."""
-    if fn != "atan":
+    """The model's instructions by phase for fn at the format."""
+    if fn not in MODEL_PHASES:
         raise ValueError(f"no phases of {fn} pinned")
-    return dict(_PHASES_ATAN, quotient=_QUOTIENT[fmt_name],
-                tail=_TAIL[fmt_name])
+    same, by_fmt = MODEL_PHASES[fn]
+    return dict(same, **{k: v[fmt_name] for k, v in by_fmt.items()})
 
 
 # The values the flag word takes (the study's section 4; MEASURED by its
@@ -1048,7 +1069,7 @@ def red_checks(plant, fmt=FP64, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
         add("core", check_core(fmt, plant)[0])
     add("constants", check_constants(
         builder=lambda name, f_, r_: build_of(name, f_, r_, plant),
-        formats=(fmt,), attrs=(RNE,))[0])
+        formats=(fmt,), attrs=(RNE,), names=(fn,))[0])
     return red
 
 
@@ -1057,6 +1078,446 @@ def red_checks(plant, fmt=FP64, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
 # (assign into POOL_FNS, TRUE_FNS, SAMPLE_FNS, IN_MAIN, SPECIAL_ROWS, STRUCT,
 # SHAPE, FLAG_WORDS, MIN_MAX and extend INV_POOL_MARKS, model_phases and the
 # plants table of test_mathlib_inv.py; do not edit the checks above)
+
+# ---- the tables of asin and acos (the study's m4measure.py, specials.py,
+# census.py and plants.py, ported) ---------------------------------------------
+
+_UNARY2 = ("asin", "acos")
+
+
+def _mp_fn(name):
+    return lambda fmt, x: getattr(mpmath, name)(_mp(value(fmt, x)))
+
+
+for _fn in _UNARY2:
+    POOL_FNS[_fn] = _unary_pool
+    TRUE_FNS[_fn] = _mp_fn(_fn)
+    REGIONS_BY_FN[_fn] = REGIONS + ("diag",)
+
+
+def _sample_unary2(fn):
+    def sampler(fmt, mode, n, seed):
+        """n arguments of asin or acos placed where the bound binds
+        (m4measure.sample's unary modes, seeded as it seeds them): random,
+        the exponent uniform from the tiny gate (asin) or -(p + 20) (acos)
+        to -1; edge, n/d at the table's cells' edges, |x| = t/sqrt(1 + t^2)
+        or its mirror 1/sqrt(1 + t^2), +-2 ulps; big, |x| = 1 - j ulp (j to
+        2^12) or 1 - 2^-e; small, the exponent from the gate to -5; diag, |x|
+        within 8 ulps of 1/sqrt(2), where n and w swap."""
+        rng = random.Random(seed * 1000003 + fmt.width * 7 + len(fn))
+        p = fmt.prec
+        gs = ml.trig_gates(fmt)[0]
+        lo_e = gs if fn == "asin" else -(p + 20)
+        edges = [e for lo_hi in ml.inv_cells(ml.INV_N) for e in lo_hi
+                 if 0 < e <= 1]
+        one = sf.one_bits(fmt)
+        out = []
+        for _ in range(n):
+            s = rng.getrandbits(1)
+            sign = fmt.sign_mask if s else 0
+            if mode == "random":
+                out.append(_rand_sig(rng, fmt, rng.randint(lo_e, -1), s))
+            elif mode == "edge":
+                t = rng.choice(edges) * (1 + Fraction(rng.randint(-64, 64),
+                                                      2 ** 16))
+                t = min(t, Fraction(1))
+                v = math.sqrt(float(t * t / (1 + t * t)))
+                X = Fraction(v) if rng.getrandbits(1) else Fraction(
+                    math.sqrt(max(0.0, 1 - v * v)))
+                out.append((ml._enc(fmt, X) + rng.randint(-2, 2)) | sign)
+            elif mode == "big":
+                j = rng.randint(1, 1 << 12) if rng.getrandbits(1) else 0
+                if j:
+                    b = one - j
+                else:
+                    b = ml._enc(fmt, 1 - Fraction(1, 2 ** rng.randint(1, p)))
+                out.append(b | sign)
+            elif mode == "small":
+                out.append(_rand_sig(rng, fmt, rng.randint(lo_e, -5), s))
+            elif mode == "diag":
+                b = ml._enc(fmt, Fraction(math.sqrt(0.5))) + rng.randint(-8, 8)
+                out.append(b | sign)
+            else:
+                raise ValueError(f"region {mode!r}: one of "
+                                 f"{', '.join(REGIONS_BY_FN[fn])}")
+        return out
+    return sampler
+
+
+def _in_main_unary2(fn):
+    def in_main_(fmt, x):
+        """Whether the main path answers x (m4measure.in_main): finite and
+        nonzero, |x| < 1, and for asin not under its tiny gate; but acos's
+        +-0 and acos(-1) are main-path lanes."""
+        ax = x & ~fmt.sign_mask
+        if not _finite(fmt, x):
+            return fn == "acos" and sf.unpack(fmt, x).kind == sf.ZERO
+        if ax >= sf.one_bits(fmt):
+            return fn == "acos" and x == sf.one_bits(fmt, 1)
+        if fn == "asin" and ax < ml._pow2(fmt, ml.trig_gates(fmt)[0]):
+            return False
+        return True
+    return in_main_
+
+
+for _fn in _UNARY2:
+    SAMPLE_FNS[_fn] = _sample_unary2(_fn)
+    IN_MAIN[_fn] = _in_main_unary2(_fn)
+
+
+def _nearest_inv_sqrt2(fmt):
+    """The float nearest 1/sqrt(2) at the format (mpmath at 4p + 100 bits)."""
+    with mpmath.workprec(4 * fmt.prec + 100):
+        return ml._enc(fmt, ml._frac(mpmath.sqrt(mpmath.mpf(1) / 2)))
+
+
+def _rows_unary2(fmt):
+    """[(label, lanes)]: the rows of the study's section 4 for asin and acos
+    (specials.py's 23, grouped by row), both signs where a row has them: the
+    sign of asin's lanes is a mirror, acos's is not (acos(-x) = pi - acos(x))
+    and is a row of its own. Every one equal to transcend.py in bits and flag
+    word, none marked."""
+    p = fmt.prec
+    gs = ml.trig_gates(fmt)[0]
+    one, mone = sf.one_bits(fmt), sf.one_bits(fmt, 1)
+    S = fmt.sign_mask
+    mxn = sf.max_normal_bits(fmt)
+    g = _V(fmt, 0, 1, gs)
+    half = _V(fmt, 0, 1, -1)
+    r2 = _nearest_inv_sqrt2(fmt)
+    r3 = ml._enc(fmt, Fraction(7071067811865475244, 10 ** 19))
+    return [("+0, -0", [0, S]),
+            ("+inf, -inf", [sf.inf_bits(fmt), sf.inf_bits(fmt) | S]),
+            ("qNaN, both signs", [sf.qnan_bits(fmt), sf.qnan_bits(fmt) | S]),
+            ("sNaN, both signs", [sf.snan_bits(fmt), sf.snan_bits(fmt) | S]),
+            ("minSub, both signs", [sf.min_subnormal_bits(fmt),
+                                    sf.min_subnormal_bits(fmt) | S]),
+            ("maxSub, both signs", [sf.max_subnormal_bits(fmt),
+                                    sf.max_subnormal_bits(fmt) | S]),
+            ("minNormal, both signs", [sf.min_normal_bits(fmt),
+                                       sf.min_normal_bits(fmt) | S]),
+            (f"gate - ulp (2^{gs} - ulp), both signs", [g - 1, (g - 1) | S]),
+            (f"gate 2^{gs}, both signs", [g, g | S]),
+            ("+1, -1", [one, mone]),
+            ("1 - ulp, -(1 - ulp)", [one - 1, mone - 1]),
+            ("1 + ulp, -(1 + ulp)", [one + 1, mone + 1]),
+            ("+maxN, -maxN", [mxn, mxn | S]),
+            ("+1/2, -1/2", [half, half | S]),
+            ("the float nearest 1/sqrt(2), both signs (the swap)",
+             [r2, r2 | S]),
+            # the model's lane: 0.7071067811865475244 rounded, which is the
+            # nearest float only at fp64
+            ("0.7071067811865475244 rounded (specials.py's), both signs",
+             [r3, r3 | S])]
+
+
+for _fn in _UNARY2:
+    SPECIAL_ROWS[_fn] = _rows_unary2
+
+
+# ---- the structured lanes (the study's 3.5; census.py's families, measured on
+# the fragments of this parcel) ---------------------------------------------
+#
+# asin: the tiny family, asin(x) = x + x^3/6 + ...: fp64's one centre 3 2^-25 =
+# 0x3e78000000000000 (also 6 2^-26 and 12 2^-27) under rtz, rdn and rup, with
+# its neighbours +-1; at fp128 and fp256 the first lane of the family that
+# marks under the directed three (140 and 450 marks a directed attribute over
+# c = 1 to 16 in both signs). Both signs of each, by structured_lanes.
+# acos: the windows next to pi/2, acos(x) = pi/2 - x - ...: the centre of the
+# nearest grid boundary (directed three) and of the nearest midpoint (rne, rmm)
+# with the neighbours +-1, POSITIVE x as listed (acos is in ONE_SIGN: -x0 marks
+# under no attribute, which `specials` holds as a row).
+STRUCT["asin"] = {
+    "fp64": [(_DIRECTED, [0x3e77ffffffffffff, 0x3e78000000000000,
+                          0x3e78000000000001])],
+    "fp128": [(_DIRECTED, [0x3fd78000000000000000000000000000])],
+    "fp256": [(_DIRECTED, [
+        0x3ffb880000000000000000000000000000000000000000000000000000000000])],
+}
+_ACOS_GRID = {"fp64": 0x3c91a62633145c07,
+              "fp128": 0x3f8ccd129024e088a67cc74020bbea64,
+              "fp256": 0x3ff11cd9128a5043cc71a026ef7ca8cd9e69d218d98158536f92f8a1ba7f09ab}
+_ACOS_MID = {"fp64": 0x3ca8d313198a2e03,
+             "fp128": 0x3f8e7344a4093822299f31d0082efa99,
+             "fp256": 0x3ff12e6c89452821e638d01377be5466cf34e90c6cc0ac29b7c97c50dd3f84d6}
+STRUCT["acos"] = {n: [(_DIRECTED, [_ACOS_GRID[n] - 1, _ACOS_GRID[n],
+                                   _ACOS_GRID[n] + 1]),
+                      (_NEAREST, [_ACOS_MID[n] - 1, _ACOS_MID[n],
+                                  _ACOS_MID[n] + 1])]
+                  for n in _ACOS_GRID}
+# A PIN on the fragments' current guesses, as atan's above (MEASURED by this
+# parcel): acos's centres at fp128 (both kinds) and at fp256 (the grid point).
+# Not a claim of correctness: the replay with the definition decides the lane.
+STRUCT_GUESS_WRONG.update({
+    ("acos", "fp128", rnd): {_ACOS_GRID["fp128"]} for rnd in _DIRECTED})
+STRUCT_GUESS_WRONG.update({
+    ("acos", "fp128", rnd): {_ACOS_MID["fp128"]} for rnd in _NEAREST})
+STRUCT_GUESS_WRONG.update({
+    ("acos", "fp256", rnd): {_ACOS_GRID["fp256"]} for rnd in _DIRECTED})
+
+# acos's -x0: the windows' centres with the sign flipped mark under no
+# attribute (MEASURED on the fragments: the true value there is pi - acos(x0),
+# nowhere near a boundary); a row of the specials at the three formats
+_ACOS_NEG_ROW = "-x0 of the windows next to pi/2 (acos is not odd: unmarked)"
+_rows_unary2_base = _rows_unary2
+
+
+def _rows_acos_neg(fmt):
+    rows = _rows_unary2_base(fmt)
+    if fmt.name in _ACOS_GRID:
+        S = fmt.sign_mask
+        rows.append((_ACOS_NEG_ROW, [_ACOS_GRID[fmt.name] | S,
+                                     _ACOS_MID[fmt.name] | S]))
+    return rows
+
+
+SPECIAL_ROWS["acos"] = _rows_acos_neg
+
+# the card's case: asin(3 2^-25) under rtz at fp64, marked
+SEQ_MARKED[("asin", "fp64", RTZ)] = 0x3e78000000000000
+
+
+# ---- the shape: the model's instructions, words and live ---------------------
+
+# (instructions, bank words, values live) in RND_MODES' order, the same under
+# every attribute: the study's (costs.fp64, fp128, fp256.out.txt: asin 221, 235,
+# 256 and acos 217, 231, 252 instructions; words 56, 64, 79 and 54, 62, 77) and
+# the design's order's 16 values live (INV_LIVE_CAP's rows)
+SHAPE.update({
+    ("asin", "fp64"): [(221, 56, 16)] * 5,
+    ("asin", "fp128"): [(235, 64, 16)] * 5,
+    ("asin", "fp256"): [(256, 79, 16)] * 5,
+    ("acos", "fp64"): [(217, 54, 16)] * 5,
+    ("acos", "fp128"): [(231, 62, 16)] * 5,
+    ("acos", "fp256"): [(252, 77, 16)] * 5,
+})
+# instructions by phase: the sqrt (36, 40, 44), the quotient (17, 19, 21) and
+# the tail (6, 14, 29) are the formats'; the rest is the same at every format
+_SQRT = {"fp64": 36, "fp128": 40, "fp256": 44}
+_PHASES_ASIN = {"front": 8, "index": 7, "num": 11, "den": 8, "z": 6,
+                "head": 52, "atan_s": 6, "table": 17, "recon": 20,
+                "final": 9, "classify": 4, "special": 14}
+_PHASES_ACOS = dict(_PHASES_ASIN, recon=22, classify=3, special=9)
+_FORMAT_PHASES = {"sqrt": _SQRT, "quotient": _QUOTIENT, "tail": _TAIL}
+MODEL_PHASES["asin"] = (_PHASES_ASIN, _FORMAT_PHASES)
+MODEL_PHASES["acos"] = (_PHASES_ACOS, _FORMAT_PHASES)
+FLAG_WORDS["asin"] = frozenset({0x0, 0x1, 0x10, 0x18, 0x90})
+FLAG_WORDS["acos"] = frozenset({0x0, 0x1, 0x10, 0x90})
+# one MIN (the index's), one MAX (the root's seed operand kept off zero)
+MIN_MAX["asin"] = MIN_MAX["acos"] = (1, 1)
+
+
+# ---- the sharing of the front (the study's 2.1, share.py) --------------------
+
+# (instructions together, apart) of asin's and acos's fragments of ONE argument
+# under cftc's keying, at each format, the same under every attribute (the
+# study's share.*.out.txt: 255 (438), 269 (466), 290 (508)); `together` is what
+# cftc's inliner is left with when both are called on one argument
+SHARE = {"fp64": (255, 438), "fp128": (269, 466), "fp256": (290, 508)}
+
+
+def share_count(frags):
+    """(keys, total): cftc's inliner (python/cftc/inline.py, expand) keys each
+    routine instruction by (opcode name, attribute, resolved operands) across
+    every instance in a step, after routines.simplify: this replays that
+    keying (the study's share.py, inputs keyed by name) over the fragments,
+    all bound to ONE input, and counts what remains against the sum of their
+    lengths."""
+    keyed, total = {}, 0
+    for f in frags:
+        vals = {}
+        for i, (opc, r, srcs) in enumerate(f.body):
+            ss = tuple(("x", s[1]) if s[0] == "in" else vals[s] if s[0] == "v"
+                       else ("w", f.words[s[1]]) for s in srcs)
+            same = routines.simplify(
+                opc, ss, lambda t: t[1] if t[0] == "w" else None,
+                f.fmt.sign_mask)
+            if same is not None:
+                vals[("v", i)] = same
+                continue
+            key = (sf.OP_NAMES[opc], r, ss)
+            if key not in keyed:
+                keyed[key] = ("n", len(keyed))
+            vals[("v", i)] = keyed[key]
+        total += len(f.body)
+    return len(keyed), total
+
+
+def check_share(fmt, fragments=None, want=None):
+    """[finding]: shape (the sharing). asin's and acos's fragments of one
+    argument, under every attribute, replayed through cftc's keying
+    (share_count): SHARE's instructions together and apart. `fragments`
+    {(fn, rnd): Fragment} stands for the library's, for the test that doctors
+    one (and for a plant's fragment beside the clean other)."""
+    want = (SHARE if want is None else want)[fmt.name]
+    out = []
+    for rnd in RND_MODES:
+        frs = [(fragments or {}).get((g, rnd)) or fragment_of(g, fmt, rnd)
+               for g in _UNARY2]
+        got = share_count(frs)
+        if got != tuple(want):
+            out.append(f"shape: asin and acos {fmt.name} "
+                       f"{sf.RND_NAMES[rnd]}: {got[0]} instructions together "
+                       f"({got[1]} apart) under cftc's keying, the study's "
+                       f"{want[0]} ({want[1]}): the front is not shared")
+    return out
+
+
+def check_shape_unary2(fmt, builds, tables=None, fragments=None):
+    """[finding]: shape of asin and acos: check_shape over `builds` {(fn, rnd):
+    Build} (one function or both, all five attributes), and the sharing of
+    the front (check_share) over their fragments, the library's clean ones
+    beside a single function's."""
+    out = check_shape(fmt, builds, tables, fragments)
+    frs = {k: (fragments or {}).get(k) or b.fragment()
+           for k, b in builds.items()}
+    return out + check_share(fmt, fragments=frs)
+
+
+# ---- the audit through asin's and acos's own n and d (the study's 8, item 2) -
+
+def audit_own_lanes(fmt):
+    """x placed so that t = n/d sits at each cell's two ends (the cells
+    inv_cells gives, those with 0 < t <= 1) and at 49 values of t just below
+    and above 1/16 (the least k = 1 index: (1/16) (1 + j 2^-13), j = -24 to
+    24), x = t/sqrt(1 + t^2) (|x| < w, n = |x|) and its mirror 1/sqrt(1 +
+    t^2) (|x| > w, n = w), +-2 ulps each, both signs: encodings."""
+    ts = [t for lo_hi in ml.inv_cells(ml.INV_N) for t in lo_hi
+          if 0 < t <= 1]
+    ts += [Fraction(1, 16) * (1 + Fraction(j, 2 ** 13))
+           for j in range(-24, 25)]
+    out = []
+    with mpmath.workprec(4 * fmt.prec + 100):
+        for t in ts:
+            tt = _mp(t)
+            for X in (tt / mpmath.sqrt(1 + tt * tt),
+                      1 / mpmath.sqrt(1 + tt * tt)):
+                e = ml._enc(fmt, ml._frac(X))
+                for j in range(-2, 3):
+                    out += [e + j, (e + j) | fmt.sign_mask]
+    return out
+
+
+def check_audit_own(fmt, fn, plant=None, lanes=None, b=None):
+    """[finding], tally: audit, through the fragment's own n and d. Per lane
+    (probes nh, nl, dh, dl, P, Nh0, Kk, th, tl): with k >= 1, n_h / P in [1/2,
+    2] and n_h - P equal to its exact value Nh0 (Sterbenz's premise, as
+    check_audit holds it through build_inv_core); |th + tl - atan((n_h + n_l)
+    / (d_h + d_l))| under 2^-(p+G) of theta0 (mpmath at 4p + 200 bits); and
+    the lane equal to transcend.py or marked. tally: lanes, premise, inexact,
+    past, wrong, largest. This is a guard of the core's premise on THIS
+    function's lanes: the index never reaches k = 1 below t = 1/16 on them
+    (the seed underestimates 1/d there), so it does not see sterbenz_bias."""
+    b = build_of(fn, fmt, RNE, plant) if b is None else b
+    p, G = fmt.prec, b.meta["G"]
+    lanes = audit_own_lanes(fmt) if lanes is None else lanes
+    magic = ml._enc_exact(fmt, Fraction(3, 2) * 2 ** (p - 1))
+    tally = {"lanes": 0, "premise": 0, "inexact": 0, "past": 0, "wrong": 0,
+             "largest": -1e9}
+    first = {}
+    with mpmath.workprec(4 * p + 200):
+        for x in lanes:
+            res, fw, pr = b.run(x, ("nh", "nl", "dh", "dl", "P", "Nh0", "Kk",
+                                    "th", "tl"))
+            tally["lanes"] += 1
+            if pr["Kk"] != magic:
+                nh, P_, N0 = (value(fmt, pr[k]) for k in ("nh", "P", "Nh0"))
+                if P_ and not (Fraction(1, 2) <= nh / P_ <= 2):
+                    tally["premise"] += 1
+                    first.setdefault("premise", x)
+                if nh - P_ != N0:
+                    tally["inexact"] += 1
+                    first.setdefault("inexact", x)
+            n = value(fmt, pr["nh"]) + value(fmt, pr["nl"])
+            d = value(fmt, pr["dh"]) + value(fmt, pr["dl"])
+            theta = value(fmt, pr["th"]) + value(fmt, pr["tl"])
+            r = _bound_log2(theta, mpmath.atan(_mp(n) / _mp(d)), p, G)
+            if r is not None:
+                tally["largest"] = max(tally["largest"], r)
+                if r > 0:
+                    tally["past"] += 1
+                    first.setdefault("past", x)
+            if not fw & MARK and (res, fw) != golden(fmt, b.rnd, x, fn):
+                tally["wrong"] += 1
+                first.setdefault("wrong", x)
+    where = f"audit: {fn} {fmt.name}" + (f" plant {plant}" if plant else "")
+    out = []
+    if tally["premise"]:
+        out.append(f"{where}: {tally['premise']} of {tally['lanes']} lanes "
+                   f"have n_h / P outside [1/2, 2], first "
+                   f"{_hexes([first['premise']], 1)}")
+    if tally["inexact"]:
+        out.append(f"{where}: {tally['inexact']} of {tally['lanes']} lanes "
+                   f"have n_h - P inexact, first "
+                   f"{_hexes([first['inexact']], 1)}")
+    if tally["past"]:
+        out.append(f"{where}: {tally['past']} of {tally['lanes']} lanes have "
+                   f"|theta0 - atan(n/d)| past 2^-(p+G) theta0, first "
+                   f"{_hexes([first['past']], 1)}, the largest "
+                   f"2^{tally['largest']:+.1f} of the bound")
+    if tally["wrong"]:
+        out.append(f"{where}: {tally['wrong']} unmarked lanes differ from "
+                   f"transcend.{fn}, first {_hexes([first['wrong']], 1)}")
+    return out, tally
+
+
+def check_audit_both(fmt, fn, plant=None, lanes=None):
+    """[finding]: audit of asin or acos as the matrix holds it: the core leg,
+    check_audit through build_inv_core (M4G1's: the only leg that sees
+    sterbenz_bias; a plant outside the core is refused there by name and the
+    leg is then green) AND check_audit_own through the fragment's lanes."""
+    out = []
+    try:
+        core_of(fmt, plant)
+    except ValueError as e:
+        if "does not apply" not in str(e):
+            raise
+    else:
+        out += check_audit(fmt, plant)[0]
+    return out + check_audit_own(fmt, fn, plant, lanes)[0]
+
+
+# ---- the plants: every check on every plant, asin and acos -------------------
+
+CHECKS_ASIN = ("pools", "seq", "bound", "structured", "specials", "shape",
+               "audit", "constants")
+
+
+def red_checks_asin_acos(plant, fn, fmt=FP64, pool_rnds=(RNE, RTZ),
+                         seq_rnds=(RNE, RTZ), bound_n=48, audit_n=None):
+    """{check: [findings]} for the checks that are RED on `plant` (None: the
+    control) in `fn` (asin or acos) at `fmt`, as red_checks does for atan:
+    pools and seq under pool_rnds and seq_rnds, bound over the five regions
+    (bound_n points each) under rne, structured, specials and shape (with the
+    sharing) under all five attributes, audit (the core's leg and the
+    fragment's own) and constants (rne). `audit_n` takes every audit_n-th of
+    the own-lane audit's lanes (a test's saving). A check the plant cannot
+    reach is green there."""
+    red = {}
+
+    def add(name, found):
+        if found:
+            red.setdefault(name, []).extend(found)
+    for rnd in pool_rnds:
+        add("pools", check_pools(fragment_of(fn, fmt, rnd, plant))[0])
+    for rnd in seq_rnds:
+        add("seq", check_seq(fragment_of(fn, fmt, rnd, plant))[0])
+    b = build_of(fn, fmt, RNE, plant)
+    for region, xs in placed_points(fn, fmt, bound_n).items():
+        add("bound", check_bound(b, xs, region)[0])
+    for rnd in RND_MODES:
+        f = fragment_of(fn, fmt, rnd, plant)
+        add("structured", check_structured(f)[0])
+        add("specials", check_specials(f)[0])
+    add("shape", check_shape_unary2(
+        fmt, {(fn, rnd): build_of(fn, fmt, rnd, plant) for rnd in RND_MODES}))
+    lanes = audit_own_lanes(fmt)
+    add("audit", check_audit_both(
+        fmt, fn, plant, lanes if audit_n is None else lanes[::audit_n]))
+    add("constants", check_constants(
+        builder=lambda name, f_, r_: build_of(name, f_, r_, plant),
+        formats=(fmt,), attrs=(RNE,), names=(fn,))[0])
+    return red
 
 
 # ---- atan2: parcel M4G3 builds here ----
