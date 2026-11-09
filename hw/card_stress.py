@@ -356,6 +356,12 @@ MPFR_ORACLE_JOB = ("sqrt128-f32", "0", "1", "rne")      # one case on the softwa
 # parcel HXb: the clause-5 soak's wide modes (hw/card_stress_lib.py WIDE_C5_OPS) exist only in a clause5-soak built with MPFR=1 too, where
 # `clause5-soak dump <mode> size` exits 0 and prints the mode's space; one index of rint128-class (two cases, one a lane) names the MPFR
 MPFR_C5_ORACLE_JOB = ("rint128-class", "0", "1", "rne")
+# parcel M4X2: the routine items. The build step `routine images` runs host/tools/gen_sweep_images.py into a new directory and holds its `digest`
+# lines to hw/card_stress_lib.py's ROUTINE_DIGESTS; the step `mpfr routine-sweep` runs `routine-sweep list` and ONE job on the software backend,
+# the 9 encodings 0x33fffffb..0x34000004 of exp under all five attributes (the lead's smoke of box/tool-m4x: 45 cases, three marked lanes, all
+# right and on the list), whose stderr names the MPFR it linked. Its digest is the table's, so a moved exp fragment fails the step twice, by name.
+ROUTINE_ORACLE_JOB = ("exp", "0x33fffffb", "0x34000004", "all")
+ROUTINE_ORACLE_MARKS = {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0}
 
 
 def mpfr_pin(root: str) -> Optional[str]:
@@ -494,7 +500,7 @@ def proc_environ(pid: int) -> Dict[str, str]:
     return env
 
 
-SOAK_TOOLS = ("divsqrt-soak", "clause5-soak", "divsqrt_soak", "clause5_soak")
+SOAK_TOOLS = ("divsqrt-soak", "clause5-soak", "divsqrt_soak", "clause5_soak", "routine-sweep", "routine_sweep")   # routine-sweep: parcel M4X2
 DEVICE_FLAG_TOOLS = ("cft-segrun", "acceptance.py", "seq_check.py", "cft-audit")
 # Programs that open an xclbin they are handed: an argument ending .xclbin makes the process
 # a card user only when one of these is on its command line (a `cp`, `sha256sum` or editor
@@ -534,7 +540,7 @@ def card_user(p: Dict[str, Any]) -> Optional[str]:
                     return f"--device {v}"
             elif a.startswith("--device=") and not a[9:].startswith(("sw", "cft://")):
                 return a
-    if any(b in SOAK_TOOLS or b.startswith(("divsqrt-soak", "clause5-soak")) for b in base):
+    if any(b in SOAK_TOOLS or b.startswith(("divsqrt-soak", "clause5-soak", "routine-sweep")) for b in base):
         art = proc_environ(p["pid"]).get("CFT_SOAK_ARTIFACT")
         if art:
             return f"CFT_SOAK_ARTIFACT={os.path.basename(art)}"
@@ -819,6 +825,10 @@ class Driver:
         self.mpfr_pin = mpfr_pin(self.root) if self.mpfr_prefix else None
         self.mpfr_seen: Optional[str] = None                # the MPFR version the built tool's oracle line named
         self.wide_names = frozenset(it.name for it in L.sweep_items(mpfr=True) if it.mpfr)
+        # parcel M4X2: the directory of the routine images this run's build step made (gen_sweep_images.py --out; a new one each run start,
+        # never reused, never deleted by the driver), which every routine job is handed as CFT_SWEEP_IMAGES; None until the step has run
+        self.routine_images: Optional[str] = None
+        self.routine_marks = [0, 0, 0, 0]      # this run's routine slices: how many, and their marked lanes, off the list, guesses wrong
         # cases and skipped slots of each item's completed slices, to hold a wholly covered item to its whole-space figures
         self.sums: Dict[str, List[int]] = {}
         self.whole_done: set = set()
@@ -897,13 +907,18 @@ class Driver:
             if it is None:
                 continue
             now = time.time()
-            why = (f"a wide item, REFUSED: no --mpfr-prefix, so its tool is not built with MPFR=1 against the pinned MPFR "
-                   f"({MPFR_PIN_SCRIPT}) and it does not run; it is not covered and nothing of it passed")
+            if it.tool == L.ROUTINE_TOOL:      # parcel M4X2: routine-sweep links the pinned MPFR and is built only under --mpfr-prefix
+                why = (f"a routine item, REFUSED: no --mpfr-prefix, so routine-sweep is not built against the pinned MPFR "
+                       f"({MPFR_PIN_SCRIPT}) and it does not run; it is not covered and nothing of it passed")
+            else:
+                why = (f"a wide item, REFUSED: no --mpfr-prefix, so its tool is not built with MPFR=1 against the pinned MPFR "
+                       f"({MPFR_PIN_SCRIPT}) and it does not run; it is not covered and nothing of it passed")
             self.rec({"type": "leg", "cycle": self.cycle, "image": NO_IMAGE, "image_sha256": None, "leg": f"sweep-{n}", "kind": "sweep",
                       "attempt": 1, "start": L.iso(now), "end": L.iso(now), "start_epoch": round(now, 3), "end_epoch": round(now, 3),
                       "duration_s": 0.0, "rc": None, "status": "skipped", "timed_out": False, "killed": None, "counts": None,
                       "rate": None, "disagreements": None, "log": None, "log_kept": "none", "reason": why, "tile": None, "extra": None,
-                      "sweep": {"item": n, "tool": it.tool, "op": it.op, "mode": it.mode, "reach": it.reach, "refused": "no-mpfr-prefix"}})
+                      "sweep": dict({"item": n, "tool": it.tool, "op": it.op, "mode": it.mode, "reach": it.reach, "refused": "no-mpfr-prefix"},
+                                    **({"group": it.group} if it.tool == L.ROUTINE_TOOL else {}))})
             self.tally(NO_IMAGE, "skipped")
             self.say(f"sweep item {n}: SKIPPED ({why})")
 
@@ -1817,6 +1832,8 @@ class Driver:
     def soak_binary(self, it: L.Item) -> str:
         """The tool of a sweep slice: the default build, or with --sweep-chunk N the one `make soak-chunk` made at pass size N
         (host/Makefile: divsqrt-soak-cN, clause5-soak-cN, each against a library of its own)."""
+        if it.tool == L.ROUTINE_TOOL:
+            return os.path.join(self.root, "host", "routine-sweep")      # never a -cN build: the tool has no pass size (parcel M4X2)
         name = "divsqrt-soak" if it.tool == "divsqrt" else "clause5-soak"
         return os.path.join(self.root, "host", f"{name}-c{self.chunk}" if self.chunk else name)
 
@@ -1850,6 +1867,8 @@ class Driver:
                 job["argv"] = it.argv(self.soak_binary(it), lo=lo, hi=hi)
                 job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
                                 "reach": it.reach, "lo": lo, "hi": hi, "tile": None}
+                if it.tool == L.ROUTINE_TOOL:
+                    job["sweep"]["group"] = it.group        # a routine slice's record says its group; no older item's record gains a field
             else:
                 n = self.seed_n.get(it.name, 0)
                 seed = it.seed_for(n)
@@ -1895,6 +1914,8 @@ class Driver:
             env = {"CFT_SOAK_ARTIFACT": img.path}
             if job["tile"]:
                 env["CFT_XRT_TILES"] = str(job["tile"])
+            if it.tool == L.ROUTINE_TOOL:
+                env["CFT_SWEEP_IMAGES"] = self.routine_images or ""      # the run's images (the build step's `routine images`)
             argv = self.standin("soak", job["argv"]) if self.dry else job["argv"]
             res = ProcResult()
             res.start = time.time()
@@ -1925,9 +1946,15 @@ class Driver:
             it = job["item"]
             exp = job["expected"]
             cover = job["cover"]
-            cmd = Cmd(job["argv"], job["timeout"],
-                      (lambda t, rc, it=it, exp=exp, cover=cover, img=img: L.parse_soak(
-                          t, rc, it.op, it.verdict_mode, img.path, exp, cover, chunk=self.chunk)))
+            if it.tool == L.ROUTINE_TOOL:
+                # the soak's verdict, then the marks (L.parse_routine); the tool has no pass-size line, so no chunk
+                cmd = Cmd(job["argv"], job["timeout"],
+                          (lambda t, rc, it=it, exp=exp, cover=cover, img=img: L.parse_routine(
+                              t, rc, it.op, it.verdict_mode, img.path, exp, cover)))
+            else:
+                cmd = Cmd(job["argv"], job["timeout"],
+                          (lambda t, rc, it=it, exp=exp, cover=cover, img=img: L.parse_soak(
+                              t, rc, it.op, it.verdict_mode, img.path, exp, cover, chunk=self.chunk)))
             sweep = dict(job["sweep"])
             sweep["jobs"] = len(wave)
             if exp is not None:
@@ -1972,6 +1999,10 @@ class Driver:
                 else:
                     self.seed_n[it.name] = job["seed_n"] + 1
                 self.note_rate(rec)
+                if it.tool == L.ROUTINE_TOOL:
+                    c = rec.get("counts") or {}
+                    for i, key in enumerate((None, "marked", "off_list", "guesses_wrong")):
+                        self.routine_marks[i] += 1 if key is None else int(c.get(key, 0))
                 if st == "fail":
                     self.disagreements += 1
             elif it.kind == "exhaustive":
@@ -2440,6 +2471,7 @@ class Driver:
                 intervals = {k: list(v) for k, v in self.intervals.items()}
                 served, rate, disabled = dict(self.served), dict(self.rate), dict(self.disabled_items)
                 disagreements, pool_served = self.disagreements, self.pool_served
+                routine = list(self.routine_marks)
                 in_flight = sorted(f"{n} [{s['job']['sweep'].get('lo', s['job']['sweep'].get('count'))}"
                                    f"{'-' + str(s['job']['sweep']['hi']) if 'hi' in s['job']['sweep'] else ' cases'}]"
                                    for n, s in self.pool_busy.items())
@@ -2496,6 +2528,9 @@ class Driver:
                 f"{k} items: exhaustive {v[1]:,} of {v[2]:,} encodings ({(100.0 * v[1] / v[2]) if v[2] else 0:.3f} %)"
                 f" over {v[0]} item(s), random begun {v[3]}" for k, v in by_reach.items())
                          + "; the tile computes nothing for a host item")
+            if any(it.tool == L.ROUTINE_TOOL for it in self.items):
+                lines.append(f"routine    {routine[0]} slice(s) of the routine items: marked {routine[1]:,} (off the list {routine[2]:,}, guesses wrong "
+                             f"{routine[3]:,}); a mark is counted and named in the report, and fails nothing")
             lines.append(f"hostpool   {self.pool_note}; {pool_served} slice(s) recorded; in flight: "
                          + ("; ".join(in_flight) if in_flight else "none"))
             if self.sink is not None:
@@ -2611,6 +2646,8 @@ class Driver:
             step(f"content {rel}", found, f"contains {text!r}" if found else f"does not contain {text!r} (a stale tree?)")
         if self.dry:
             step("tools", True, "dry run: no make, no ldd, no XRT (the stand-ins replace every command)")
+            if self.mpfr_prefix:
+                self.routine_images = os.path.join(self.out, "sweep-images-dry")       # named, not made: the stand-ins read no image
         else:
             self.build_tools(step)
         self.check_vectors(step)
@@ -2796,6 +2833,103 @@ class Driver:
                  f"space; one index of {op5} ({k5} cases) on the software backend passed, and its oracle line names MPFR {seen} with GMP "
                  f"{gmp}: the pin")
 
+    def check_routine(self, step: Callable[[str, bool, str], None], host: str) -> None:
+        """--mpfr-prefix brings the routine items (parcel M4X2), and with them two steps. `routine images`: host/tools/gen_sweep_images.py
+        makes the five images of each routine, their banks and marks lists, in a NEW directory of this run (never reused, never deleted
+        here; it refuses one that exists), and the manifest it writes must carry this checkout's HEAD as its commit and, for every routine of
+        hw/card_stress_lib.py's ROUTINE_DIGESTS, a `digest` line equal to the table's: a moved fragment fails the step, naming the routine, both
+        digests and what to update (a manifest digest the table lacks is said, not failed - a routine built before it has an item). The
+        directory is handed to every routine job (CFT_SWEEP_IMAGES). `mpfr routine-sweep`: with that environment and no CFT_SOAK_ARTIFACT or
+        CFT_XRT_TILES, `routine-sweep list` names each routine of the table with five images and the table's digest (the tool's own, computed
+        apart from the generator's), and one job on the software backend passes the soak's verdict and the marks' (ROUTINE_ORACLE_JOB) with an
+        oracle line naming MPFR at the pin. A failure fails its step by name and the run does not start (build_failed)."""
+        gen = os.path.join(self.root, "host", "tools", "gen_sweep_images.py")
+        base = os.path.join(self.out, "sweep-images-" + time.strftime("%Y%m%d-%H%M%S"))
+        d, k = base, 1
+        while os.path.exists(d):
+            k += 1
+            d = f"{base}-{k}"
+        rc, out = self.run_quiet([self.python, "-B", gen, "--out", d], float(self.a.build_timeout))
+        self.routine_images = d
+        bad: List[str] = []
+        said = ""
+        if rc != 0:
+            bad.append(f"`{os.path.basename(self.python)} host/tools/gen_sweep_images.py --out <dir>` exited {rc} ({out.strip()[-160:]!r})")
+        else:
+            try:
+                with open(os.path.join(d, "manifest.txt"), "r", encoding="utf-8", errors="replace") as fh:
+                    man = fh.read()
+            except OSError as e:
+                man = ""
+                bad.append(f"the generator wrote no readable manifest.txt in the images directory: {e}")
+            if man:
+                com = re.findall(r"^commit (\S+)$", man, re.M)
+                if len(com) != 1 or (self.head and com[0] != self.head):
+                    bad.append(f"the manifest's commit is {com or 'not given'}, this checkout's HEAD is {self.head or 'unknown'}: "
+                               f"the images were not made from this tree")
+                got = dict(re.findall(r"^digest (\S+) ([0-9a-f]{8})$", man, re.M))
+                for name, want in L.ROUTINE_DIGESTS.items():
+                    if got.get(name) != want:
+                        bad.append(f"{name}: the generator's digest is {got.get(name, 'not given (no digest line)')}, ROUTINE_DIGESTS has {want}: "
+                                   f"the fragment moved (or its images were not all built) - update hw/card_stress_lib.py ROUTINE_DIGESTS with "
+                                   f"the lead's approval; the item it makes is new, its coverage from nothing")
+                extra = sorted(set(got) - set(L.ROUTINE_DIGESTS))
+                if extra:
+                    said = f"; the manifest also has digests for {', '.join(extra)}, which the table lacks (no item for them yet)"
+        step("routine images", not bad, ("; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else "")) if bad else
+             f"gen_sweep_images.py rc 0 into {d} (a new directory, kept); the manifest's commit is this checkout's HEAD and its digest lines "
+             f"equal ROUTINE_DIGESTS for the {len(L.ROUTINE_DIGESTS)} routines{said}")
+        if bad:
+            return
+        env = {k2: v for k2, v in os.environ.items() if k2 not in HOST_JOB_DROPS}
+        env["CFT_SWEEP_IMAGES"] = d
+        tool = os.path.join(host, "routine-sweep")
+
+        def runr(args: List[str]) -> Tuple[int, str]:
+            try:
+                p = subprocess.run([tool] + args, capture_output=True, text=True, timeout=300, cwd=self.root, env=env)
+                return p.returncode, (p.stderr or "") + (p.stdout or "")
+            except (OSError, subprocess.TimeoutExpired) as ex:
+                return 127, f"{ex}"
+        rc, out = runr(["list"])
+        if rc != 0:
+            step("mpfr routine-sweep", False, f"`routine-sweep list` exited {rc} ({out.strip()[-100:]!r}): this tool has no `list`, so it is not "
+                 f"the routine-sweep of host/tools/routine_sweep.c")
+            return
+        listed = dict(re.findall(r"^(\S+)-f32: (.*)$", out, re.M))
+        bad = []
+        for name, want in L.ROUTINE_DIGESTS.items():
+            if listed.get(name) != f"images rne rtz rdn rup rmm, digest {want}":
+                bad.append(f"{name}: `routine-sweep list` says {listed.get(name, 'nothing')!r}, not 'images rne rtz rdn rup rmm, digest {want}' "
+                           f"(ROUTINE_DIGESTS; five images in {d})")
+        if bad:
+            step("mpfr routine-sweep", False, "; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else ""))
+            return
+        name, lo, hi, mode = ROUTINE_ORACLE_JOB
+        op = L.routine_op_word(name, L.ROUTINE_DIGESTS[name])
+        rc, out = runr([op, lo, hi, mode])
+        n = int(hi, 0) - int(lo, 0)
+        try:
+            L.parse_soak(out, rc, op, mode, None, n * 5, {"encodings": n, "per_encoding": 5}, cpu=True)
+            r = L.parse_routine_marks(out, op, mode)
+            if r["by_attr"] != ROUTINE_ORACLE_MARKS or (r["marked"], r["off_list"], r["wrong"]) != (3, 0, 0):
+                raise L.VerdictError(f"marks {r['by_attr']}, {r['off_list']} off the list, {r['wrong']} wrong, where the smoke has "
+                                     f"{ROUTINE_ORACLE_MARKS}, 0 and 0 (three marked lanes, all on the list and right)")
+            ora = list(L.SOAK_ORACLE_MPFR.finditer(out))
+            if len(ora) != 1:
+                raise L.VerdictError(f"{len(ora)} lines 'oracle: MPFR <version> with GMP <version>, ...', where there is one")
+        except L.VerdictError as e:
+            step("mpfr routine-sweep", False, f"the job `routine-sweep {op} {lo} {hi} {mode}` on the software backend: {e}")
+            return
+        seen, gmp = ora[0].group(1), ora[0].group(2)
+        if seen.strip() != (self.mpfr_pin or "").strip():       # (written apart from the two tests above it: a plant's anchor is that text, once)
+            step("mpfr routine-sweep", False, f"its oracle line names MPFR {seen} (with GMP {gmp}), and the pin is {self.mpfr_pin} "
+                 f"({MPFR_PIN_SCRIPT}): routine-sweep linked another MPFR than the pinned one in {self.mpfr_prefix}")
+            return
+        step("mpfr routine-sweep", True, f"`routine-sweep list` names the {len(L.ROUTINE_DIGESTS)} routines with five images and the table's "
+             f"digests; the job {op} {lo} {hi} {mode} passed ({n * 5} cases, 3 marked lanes right and on the list), and its oracle line names "
+             f"MPFR {seen} with GMP {gmp}: the pin")
+
     def build_tools(self, step: Callable[[str, bool, str], None]) -> None:
         a = self.a
         host = os.path.join(self.root, "host")
@@ -2814,7 +2948,7 @@ class Driver:
             except OSError:
                 pass
         step("roundeven probe", True, "present" if c5defs else "absent: the rne oracle is rint under FE_TONEAREST")
-        targets = ["all", "device-test", "api-test", "remote-test", "divsqrt-soak", "clause5-soak"] + (["rate-probe"] if self.probing else [])
+        targets = ["all", "device-test", "api-test", "remote-test", "divsqrt-soak", "clause5-soak"] + (["rate-probe"] if self.probing else [])             + (["routine-sweep"] if self.mpfr_prefix else [])         # parcel M4X2: the routine items' tool, linked with the pinned MPFR
         xrt_flags = a.make_xrt_flags.split() if a.make_xrt_flags else ["XRT=1", f"XRT_ROOT={a.xrt_root}"]
         argv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
         if c5defs:
@@ -2869,6 +3003,8 @@ class Driver:
             exes += [f"divsqrt-soak-c{self.chunk}", f"clause5-soak-c{self.chunk}"]
         if self.probing:
             exes.append("rate-probe")          # --rate-probe asked for it: a missing or unlinked one refuses the run, by name, as the soaks do
+        if self.mpfr_prefix:
+            exes.append("routine-sweep")       # --mpfr-prefix brings the routine items: a missing or unlinked one refuses the run, by name
         if "XRT=1" not in xrt_flags:
             exes.remove("cft-resident")      # only an XRT=1 build makes it (the test's XRT=0 build has none)
         # cft-resident and cft-selftest serve optional legs: a missing or unlinked one disables its leg
@@ -2899,6 +3035,8 @@ class Driver:
             self.build_id = bid.strip()          # what a host slice's record says was run
         if self.mpfr_prefix:
             self.check_mpfr(step, host)          # the wide modes are there, against the pinned MPFR (parcel HXc)
+        if self.mpfr_prefix:
+            self.check_routine(step, host)       # the routine images are made, and routine-sweep reads them against the pin (parcel M4X2)
         for mod in ("mpmath", "pytest"):
             rc, _ = self.run_quiet([self.python, "-c", f"import {mod}"], 60)
             if rc != 0:

@@ -38,6 +38,15 @@ failure policy meets each kind of failure:
           wrongchunk  (soak) a pass-size line saying twice the pass size the tool's name carries
           defchunk    (soak) a pass-size line, from a tool whose name carries no pass size (the default build prints none)
           slow:N      N seconds, then the normal verdict
+        and for a routine-sweep op (parcel M4X2; fail, mismatch, short, shortcase and badenc act on it as on the others):
+          marks       three marked lanes on the list, all right (rtz, rdn, rup of the slice's first encoding)
+          offlist     one marked lane off the list, right
+          wrongguess  one marked lane on the list whose guess is WRONG
+          manymarks   40 marks (three off the list, two wrong) of which the tool shows 16 MARK lines
+          nomarks     the marks line left out
+          badmarks    a marks line whose total is not the sum of its attributes
+          digest      the tool's refusal of an op word whose digest is not its images', exit 2
+          noimage     the tool's refusal of a missing image file, exit 2
     CFT_STANDIN_STATE=<dir>            where the counts are kept (required with a scenario)
     CFT_STANDIN_SOAK_RATE=<cases/s>    a soak takes cases / rate seconds (default 0: at once)
     CFT_STANDIN_TILES=<n>              tiles the identity says (default: 4 for a path with "quad")
@@ -94,6 +103,96 @@ def count(state: str, key: str) -> int:
 
 
 OP = ""      # a soak job's op (argv[1] after the binary), for rules that name one
+
+# Parcel M4X2: host/tools/routine_sweep.c, as the dry run and the build step's test doubles meet it. THE STAND-IN'S OWN COPIES (the suite holds
+# them to hw/card_stress_lib.py's ROUTINE_DIGESTS and to the box's `routine-sweep list`, box/tool-m4x/list.out): the digests of the nine
+# routines that have images, and the instructions and words of exp's five (the tool's own image lines, step1 of the same run); every
+# other routine's image lines carry the exp numbers - a count that adds up, not a measurement - and a hash the stand-in makes up.
+ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
+ROUTINE_ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
+ROUTINE_STANDIN_DIGESTS = {"exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb", "log2": "c274c957",
+                           "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e"}
+ROUTINE_EXP_SIZES = {"rne": (387, 71), "rtz": (385, 71), "rdn": (385, 71), "rup": (384, 70), "rmm": (387, 71)}
+ROUTINE_OP = re.compile(r"^(%s)-f32(?:-x([0-9a-f]{8}))?(?:-d([0-9a-f]{8}))?$" % "|".join(ROUTINE_NAMES))
+EXP_SMOKE_LANE = 0x33ffffff           # exp's marked lane in the lead's smoke slice: rtz and rdn guess 1.0, rup the next float up (all right)
+EXP_SMOKE_MARKS = (("rtz", 0x3f800000), ("rdn", 0x3f800000), ("rup", 0x3f800001))
+
+
+def routine_marks(name: str, attrs, lo: int, hi: int, do: str):
+    """The marked lanes this stand-in says a routine slice has: [(attribute, lane, guess, wrong, off_list)] in the tool's order (attribute
+    by attribute). By default exp's three in the smoke slice (the tool's own, MEASURED), none elsewhere; `do` makes others."""
+    if do == "marks":
+        return [(a, lo, 0x3f800000 + i, False, False) for i, a in enumerate(attrs) if a in ("rtz", "rdn", "rup")] if len(attrs) > 1 else             [(attrs[0], lo, 0x3f800000, False, False)]
+    if do == "offlist":
+        return [(attrs[0], lo, 0x3f800000, False, True)]
+    if do == "wrongguess":
+        return [(attrs[0], lo, 0x3f800000, True, False)]
+    if do == "manymarks":
+        res = []
+        for i in range(40):
+            a = attrs[(i * len(attrs)) // 40]
+            res.append((a, lo + i, 0x3f800000, i in (7, 31), i in (3, 20, 33)))
+        return res
+    if name == "exp" and lo <= EXP_SMOKE_LANE < hi:
+        return [(a, EXP_SMOKE_LANE, g, False, False) for a, g in EXP_SMOKE_MARKS if a in attrs]
+    return []
+
+
+def routine_main(real, do: str) -> int:
+    """A routine-sweep invocation: `list`, or `<op word> <lo> <hi> <attribute|all>` (the tool's lines, stderr then stdout)."""
+    op = real[1]
+    if op == "list":
+        for n in ROUTINE_NAMES:
+            if n in ROUTINE_STANDIN_DIGESTS:
+                out(f"{n}-f32: images rne rtz rdn rup rmm, digest {ROUTINE_STANDIN_DIGESTS[n]}")
+            else:
+                out(f"{n}-f32: no image")
+        return 0
+    m = ROUTINE_OP.match(op)
+    if m is None or len(real) != 5:
+        err(f"routine-sweep: {op}: unknown op (the thirteen are exp exp2 expm1 log log2 log1p sin cos tan atan asin acos atan2, each as <name>-f32)")
+        return 2
+    name, d = m.group(1), m.group(3)
+    lo, hi, mode = int(real[2], 0), int(real[3], 0), real[4]
+    if not 0 <= lo < hi <= 1 << 32 or (mode != "all" and mode not in ROUTINE_ATTRS):
+        err(f"routine-sweep: [{real[2]}, {real[3]}) must satisfy 0 <= lo < hi <= 2^32, and the mode one of rne rtz rdn rup rmm all")
+        return 2
+    attrs = ROUTINE_ATTRS if mode == "all" else (mode,)
+    imgdir = os.environ.get("CFT_SWEEP_IMAGES") or "sweep-images"
+    out(f"standin: env CFT_SWEEP_IMAGES={os.environ.get('CFT_SWEEP_IMAGES', '<unset>')}")
+    if do == "noimage":
+        err(f"routine-sweep: cannot read {imgdir}/{name}-fp32-{attrs[0] if d is None else 'rne'}.cftp")
+        return 2
+    if do == "digest" or (d is not None and name in ROUTINE_STANDIN_DIGESTS and d != ROUTINE_STANDIN_DIGESTS[name]):
+        want = ROUTINE_STANDIN_DIGESTS.get(name, "00000000")
+        err(f"routine-sweep: {op} names digest {d or '00000000'}, the images' digest is {want if d != want else 'ffffffff'}")
+        return 2
+    art = os.environ.get("CFT_SOAK_ARTIFACT")
+    if do == "software":
+        art = None
+    err(f"soaking the {'DEVICE' if art else 'software'} backend{': ' + art if art else ''}")
+    err(f"oracle: MPFR {os.environ.get('CFT_STANDIN_MPFR') or '4.2.2'} with GMP 6.3.0, mpfr_ieee.h's emulation")
+    for a in attrs:
+        ninsn, nwords = ROUTINE_EXP_SIZES[a]
+        err(f"image {name} {a}: sha256 {hashlib.sha256((name + a).encode()).hexdigest()}, {ninsn} instructions, {nwords} words")
+    err(f"{op} {mode}: device 0.000 s, oracle 0.000 s, 16384 lanes a call")
+    enc = hi - lo - (1 if do == "short" else 0)
+    cases = enc * len(attrs) - (1 if do == "shortcase" else 0)
+    marks = routine_marks(name, attrs, lo, hi, do)
+    for a, lane, guess, wrong, off in marks[:16]:
+        out(f"  MARK {a} a=0x{lane:08x} guess=0x{guess:08x} {'WRONG' if wrong else 'right'}{' (off the list)' if off else ''}")
+    bad = do in ("fail", "mismatch")
+    if bad:
+        out(f"  MISMATCH {attrs[0]} a=0x{lo:08x} lib=0x3f800000 mpfr=0x3f800001")
+        out(f"  FLAGS {attrs[0]} a=0x{lo:08x} lib=0x01 mpfr=0x00")
+    out(f"{op} {mode}: {cases} cases, {int(bad)} value mismatches, {int(bad)} flag mismatches, "
+        f"{enc - (1 if do == 'badenc' else 0)} encodings, 0 skipped")
+    if do != "nomarks":
+        counts = [sum(1 for k in marks if k[0] == a) if a in attrs else "-" for a in ROUTINE_ATTRS]
+        total = sum(k for k in counts if k != "-") + (1 if do == "badmarks" else 0)
+        out(f"{op} {mode}: {total} marked (rne {counts[0]}, rtz {counts[1]}, rdn {counts[2]}, rup {counts[3]}, rmm {counts[4]}), "
+            f"{sum(1 for k in marks if k[4])} off the list, {sum(1 for k in marks if k[3])} guesses wrong")
+    return 1 if bad else 0
 
 # The checks a slice of each exhaustive conversion/scaleB mode makes for every encoding of its operand:
 # host/tools/clause5_soak.c's "Exhaustive modes" section, and hw/card_stress_lib.py's PER_ENCODING (the
@@ -358,7 +457,8 @@ def main() -> int:
     do = rule_for("soak" if leg == "soak" else leg, image) or ""
     fail = do == "fail"
     if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase", "badenc", "skipoff",
-                         "nochunk", "wrongchunk", "defchunk"):
+                         "nochunk", "wrongchunk", "defchunk", "marks", "offlist", "wrongguess", "manymarks", "nomarks", "badmarks",
+                         "digest", "noimage"):
         apply_misbehaviour(do, leg, xb)
 
     tiles = int(os.environ.get("CFT_STANDIN_TILES") or (4 if "quad" in (xb or "") else 1))
@@ -507,6 +607,8 @@ def main() -> int:
 
     if leg == "soak":
         op = real[1]
+        if op == "list" or ROUTINE_OP.match(op):
+            return routine_main(real, do)           # parcel M4X2: host/tools/routine_sweep.c
         if op == "hard-space" and len(real) == 3:
             # the tool's hard-space line for an index mode (divsqrt_soak.c, hard_space_cmd and whard_space_cmd: its first line; the
             # segments are not here), which the driver's build step asks of an MPFR=1 build; CFT_STANDIN_NO_WIDE=1 is a tool built
