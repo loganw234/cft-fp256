@@ -544,6 +544,7 @@ def group_sabotage(tool, work, names):
         mk = marks_of(text)
         check(f"sabotage: {n} =3 over 4096 lanes with marks ({mk and mk[0]}) exits 1 on the call's STATUS check alone: a FLAGS line "
               f"for STATUS[6], and no MISMATCH line", rc == 1 and "STATUS[6] set and no lane" in text
+              and text.count("  FLAGS ") == 1 and "  MISMATCH " not in text
               and mk is not None and mk[0] == 0, f"rc {rc} {text[-300:]}")
         rc, text, m = tool.run(f"{n}-f32", lo3, lo3 + 4096, "rtz", imgs=vol)
         mk = marks_of(text)
