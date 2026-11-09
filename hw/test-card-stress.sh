@@ -23,7 +23,7 @@
 #
 # Groups for --only: parsers commands standin normal cadence fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
-# pool seeds trees items chunk records notes resume wide probe testfiles report plants. `deaf` (a process that ignores SIGTERM),
+# pool seeds trees items chunk records notes resume wide routine probe testfiles report plants. `deaf` (a process that ignores SIGTERM),
 # `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records and wide groups'
 # real (not dry) runs over test doubles: each is skipped by name elsewhere. `probe` (parcel TP, 2026-10-28): the card's rates - the probe leg in the dry run with and
 # without --rate-probe, what it does when the card misbehaves, and host/tools/rate_probe.c on the software backend (POSIX with cc and make; skipped by name

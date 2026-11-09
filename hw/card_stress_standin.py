@@ -53,6 +53,8 @@ failure policy meets each kind of failure:
     CFT_STANDIN_MPFR=<version>         the MPFR the wide modes' oracle line names (default 4.2.2, the pin)
     CFT_STANDIN_NO_WIDE=1              a soak built without MPFR=1: it refuses every wide mode, exit 2 (the divsqrt soak `unknown op`,
                                        and hard-space's `unknown hard-case mode`; the clause-5 soak its usage text, run or dump)
+    CFT_STANDIN_NO_LIST=1              (routine-sweep) a tool from before `list`: its usage text, exit 2
+    CFT_STANDIN_LIST_MISSING=<names>   (routine-sweep) `list` says of each name (exp,tan) that only four of its five images were found
     CFT_STANDIN_PROBE_NOFMT=<fmt>      (rate-probe) an image that lacks a format: every row at <fmt> is refused, by the library's name
                                        (CFT_ERR_UNSUPPORTED) and never timed, as host/tools/rate_probe.c refuses it
   The rate-probe leg (parcel TP) prints the lines host/tools/rate_probe.c prints, with rates of its own that differ by op, format and tile
@@ -142,8 +144,14 @@ def routine_main(real, do: str) -> int:
     """A routine-sweep invocation: `list`, or `<op word> <lo> <hi> <attribute|all>` (the tool's lines, stderr then stdout)."""
     op = real[1]
     if op == "list":
+        if os.environ.get("CFT_STANDIN_NO_LIST"):          # a routine-sweep from before `list`: the usage text, exit 2 (routine_sweep.c: argc != 5)
+            err(f"usage: {real[0]} <op word> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>")
+            return 2
+        missing = [x for x in (os.environ.get("CFT_STANDIN_LIST_MISSING") or "").split(",") if x]
         for n in ROUTINE_NAMES:
-            if n in ROUTINE_STANDIN_DIGESTS:
+            if n in missing:                                # routine_sweep.c:830, some of the five images not found
+                out(f"{n}-f32: 4 of 5 images found (cannot read {os.environ.get('CFT_SWEEP_IMAGES') or 'sweep-images'}/{n}-fp32-rmm.cftp)")
+            elif n in ROUTINE_STANDIN_DIGESTS:
                 out(f"{n}-f32: images rne rtz rdn rup rmm, digest {ROUTINE_STANDIN_DIGESTS[n]}")
             else:
                 out(f"{n}-f32: no image")

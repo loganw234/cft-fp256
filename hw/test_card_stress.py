@@ -6377,22 +6377,42 @@ def scn_wide_c5_refused(env: Env, src: str = HERE) -> list:
     return out
 
 
-def scn_wide_build(env: Env, src: str = HERE) -> list:
-    """The build with --mpfr-prefix on the driver's REAL path (not a dry run) over a scratch checkout whose tools and `make` and `ldd` are
-    test doubles (scn_records_real's): MPFR=1 MPFR_PREFIX=<prefix> on the default make line and on `soak-chunk`'s, nothing else changed;
-    the check that the tool has the wide modes (hard-space div128-hard) and that its oracle line names the pin, run on divsqrt-soak and
-    on divsqrt-soak-cN; a tool whose oracle names another MPFR, or one built without MPFR=1, stops the run (build_failed); and the
-    warnings: the known ones said as known, a new one as new, in a NOTE."""
-    out: list = []
+FAKE_GEN = """import os, subprocess, sys
+# a test double for host/tools/gen_sweep_images.py (parcel M4X2): writes the manifest of the box's real generation (FAKE_GEN_MANIFEST: the suite's
+# rs-images-manifest.txt) with this tree's HEAD as its commit, into the --out directory it is given, which it refuses to find there already.
+# FAKE_GEN_FAIL=<rc> exits so; FAKE_GEN_MOVE=<name> changes that routine's digest; FAKE_GEN_DROP=<name> leaves its digest line out;
+# FAKE_GEN_EXTRA=<line> adds a line; FAKE_GEN_COMMIT=<sha> says another commit; FAKE_GEN_NOMAN=1 writes no manifest.
+out = sys.argv[sys.argv.index("--out") + 1]
+if os.path.exists(out):
+    sys.stderr.write("gen_sweep_images: %s exists\n" % out)
+    sys.exit(2)
+if os.environ.get("FAKE_GEN_FAIL"):
+    sys.exit(int(os.environ["FAKE_GEN_FAIL"]))
+root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+com = os.environ.get("FAKE_GEN_COMMIT") or subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+lines = []
+for ln in open(os.environ["FAKE_GEN_MANIFEST"], encoding="utf-8").read().splitlines():
+    if ln.startswith("commit "):
+        ln = "commit " + com
+    mv, dr = os.environ.get("FAKE_GEN_MOVE"), os.environ.get("FAKE_GEN_DROP")
+    if mv and ln.startswith("digest " + mv + " "):
+        ln = ln[:-1] + ("0" if ln[-1] != "0" else "1")
+    if dr and ln.startswith("digest " + dr + " "):
+        continue
+    lines.append(ln)
+if os.environ.get("FAKE_GEN_EXTRA"):
+    lines.append(os.environ["FAKE_GEN_EXTRA"])
+os.makedirs(out)
+if not os.environ.get("FAKE_GEN_NOMAN"):
+    open(os.path.join(out, "manifest.txt"), "w", newline="\n").write("\n".join(lines) + "\n")
+"""
 
-    def c(n, ok, d=""):
-        out.append((n, bool(ok), d))
 
-    need = [x for x in ("git", "sh", "nice", "timeout") if not shutil.which(x)]
-    if not POSIX or need:
-        skip("wide build", "needs POSIX with git, sh, nice and timeout" + (f" (missing: {', '.join(need)})" if need else ""))
-        return out
-    root = os.path.join(env.tmp, "faketree-wide")
+def fake_build_tree(env: Env, src: str, tag: str):
+    """A scratch checkout whose tools, `make`, `ldd` and host/tools/gen_sweep_images.py are test doubles (scn_records_real's pattern), and a function
+    that drives the REAL build path over it (not a dry run): (root, fakebin, prefix, drive(name, extra, env_extra, items) -> Run). Shared by the wide
+    build scenario (parcel HXc) and the routine one (parcel M4X2)."""
+    root = os.path.join(env.tmp, f"faketree-{tag}")
     for rel in ("host/tests/seq_check.py", "programs/acceptance.py", "hw/card-segrun.sh", "verify/build-mpfr-oracle.sh"):
         os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
         shutil.copy(os.path.join(ROOT, rel), os.path.join(root, rel))
@@ -6411,9 +6431,14 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
     for name in ("device-test", "remote-test", "cft-audit", "cft-selftest"):
         script(os.path.join(root, "host", name), "exit 0")
     open(os.path.join(root, "host", "libcft.so"), "w").close()
+    script(os.path.join(root, "host", "routine-sweep"), f'{run_standin} soak -- "$0" "$@"')       # parcel M4X2: routine-sweep over the stand-in
+    gen = os.path.join(root, "host", "tools", "gen_sweep_images.py")
+    os.makedirs(os.path.dirname(gen), exist_ok=True)
+    with open(gen, "w") as fh:
+        fh.write(FAKE_GEN)
     for git in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "t"]):
         subprocess.run(["git", "-C", root] + git, capture_output=True, timeout=120)
-    fb = os.path.join(env.tmp, "fakebin-wide")
+    fb = os.path.join(env.tmp, f"fakebin-{tag}")
     os.makedirs(fb, exist_ok=True)
     script(os.path.join(fb, "ldd"), "echo '\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)'")
     # the make double: logs its words, prints FAKE_MAKE_WARN's lines (separated by '|') as a build's output (not print-build-id's), and makes
@@ -6423,24 +6448,47 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
            '  case "$a" in print-build-id) echo FAKEBUILDID; exit 0;; SOAK_CHUNK=*) n="${a#SOAK_CHUNK=}";; esac\n  prev="$a"\ndone\n'
            'if [ -n "$FAKE_MAKE_WARN" ]; then printf "%s\\n" "$FAKE_MAKE_WARN" | tr "|" "\\n"; fi\n'
            'if [ -n "$n" ]; then for t in divsqrt-soak clause5-soak; do cp "$dir/$t" "$dir/$t-c$n"; done; fi\nexit 0')
-    pfx = fake_mpfr_prefix(os.path.join(env.tmp, "wide-build-pin"))
+    pfx = fake_mpfr_prefix(os.path.join(env.tmp, f"{tag}-build-pin"))
 
-    def drive(name, extra, env_extra=None):
+    def drive(name, extra, env_extra=None, items="sqrt128-f32-rne,div128-hard-rtz,rint64-class-rne"):
         env.n += 1
         o = os.path.join(env.tmp, f"{env.n:02d}-{name}")
         makelog = os.path.join(env.tmp, f"{env.n:02d}-{name}-make.log")
         cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick", "--legs", "api-test",
                "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
-               "--build-jobs", "2", "--make-xrt-flags", "XRT=0", "--sweep-items", "sqrt128-f32-rne,div128-hard-rtz,rint64-class-rne"]
+               "--build-jobs", "2", "--make-xrt-flags", "XRT=0", "--sweep-items", items]
         for n, pth in env.imgs.items():
             cmd += ["--image", f"{n}={pth}", "--sha", f"{n}={env.shas[n]}"]
-        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, **(env_extra or {}))
+        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, FAKE_GEN_MANIFEST=os.path.join(FIX, "rs-images-manifest.txt"),
+                 **(env_extra or {}))
         p = subprocess.run(cmd + extra, capture_output=True, text=True, env=e, cwd=ROOT, timeout=300)
         r = Run(o)
         r.rc, r.text = p.returncode, p.stdout + p.stderr
         r.makelog = open(makelog).read().splitlines() if os.path.exists(makelog) else []
         r.steps = {s["name"]: s for s in (r.last("build") or {}).get("steps", [])}
         return r
+    return root, fb, pfx, drive
+
+
+def scn_wide_build(env: Env, src: str = HERE) -> list:
+    """The build with --mpfr-prefix on the driver's REAL path (not a dry run) over a scratch checkout whose tools and `make` and `ldd` are
+    test doubles (scn_records_real's): MPFR=1 MPFR_PREFIX=<prefix> on the default make line and on `soak-chunk`'s, nothing else changed;
+    the check that the tool has the wide modes (hard-space div128-hard) and that its oracle line names the pin, run on divsqrt-soak and
+    on divsqrt-soak-cN; a tool whose oracle names another MPFR, or one built without MPFR=1, stops the run (build_failed); and the
+    warnings: the known ones said as known, a new one as new, in a NOTE."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    need = [x for x in ("git", "sh", "nice", "timeout") if not shutil.which(x)]
+    if not POSIX or need:
+        skip("wide build", "needs POSIX with git, sh, nice and timeout" + (f" (missing: {', '.join(need)})" if need else ""))
+        return out
+    root, fb, pfx, drive_ = fake_build_tree(env, src, "wide")
+
+    def drive(name, extra, env_extra=None):
+        return drive_(name, extra, env_extra, "sqrt128-f32-rne,div128-hard-rtz,rint64-class-rne")
     def mpfr_words(tokens):
         """The two words from MPFR=1 on, in a make line's words; [] where it has none (a red check, not a crash)."""
         return tokens[tokens.index("MPFR=1"):tokens.index("MPFR=1") + 2] if "MPFR=1" in tokens else []
@@ -6453,7 +6501,7 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
     want = ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(pfx)}"]
     c("wide build A: with --mpfr-prefix the default make line carries MPFR=1 MPFR_PREFIX=<the prefix> after the XRT flags and C5DEFS, "
       "before the targets, and is otherwise the line a run without it makes (B)",
-      bool(mk_a) and bool(mk_b) and [x for x in mk_a if x not in want] == mk_b and mpfr_words(mk_a) == want
+      bool(mk_a) and bool(mk_b) and [x for x in mk_a if x not in want + ["routine-sweep"]] == mk_b and mpfr_words(mk_a) == want
       and "all" in mk_a and mk_a.index("MPFR=1") < mk_a.index("all") and not any(x.startswith("MPFR") for x in mk_b), f"{mk_a} | {mk_b}")
     s = A.steps.get("mpfr divsqrt-soak") or {}
     c("wide build A: the build step checks the tool: hard-space div128-hard rc 0 with the catalog's space, and one case of sqrt128-f32 whose "
@@ -6507,6 +6555,609 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
       "name", s5.get("ok") is False and "dump rint128-class size` exited 2" in s5.get("detail", "") and "MPFR=1" in s5.get("detail", ""),
       f"{s5}")
     return out
+
+
+# ---------------------------------------------------------------------------------------
+# parcel M4X2 (2026-11-09): the routine items - host/tools/routine_sweep.c's fp32 routines as items of the card's nightly catalog
+# ---------------------------------------------------------------------------------------
+
+# The two digests below are sha256 of the sorted fields of every item (vars()) of the catalog's first 125 and first 287 items, computed with the
+# expression in routine_catalog_checks at f0e301c8, the commit this parcel was made from, by importing `git show f0e301c8:hw/card_stress_lib.py`:
+# the same expression over the tip's library gives the same two, which is must-have (1), "the 287 keep their places and their fields".
+BASE_VARS_125 = "623065ad41772d311b375990da49c94aa44a2b2351487c9aaaf02e1931035327"
+BASE_VARS_287 = "b6d52edd3cb7c31edc421d0d54da24c1b51af6a7864fd4b3d48826a1de2fd41d"
+RS_ART = "$HOME/cardday-rev8q/cft_hw_quad.xclbin"            # the image path the card fixtures hold, the home directory written $HOME
+RS_MASK = [(re.compile(r"sha256 [0-9a-f]{64}"), "sha256 H"), (re.compile(r"device \d+\.\d+ s, oracle \d+\.\d+ s"), "device T s, oracle T s"),
+           (re.compile(r"MPFR \S+ with GMP \S+,"), "MPFR V with GMP V,")]
+
+
+def rs_mask(text: str) -> list:
+    """A routine-sweep log as lines, the stand-in's own header lines out and the numbers a machine makes (hashes, times, library versions) masked."""
+    out = []
+    for ln in text.splitlines():
+        if ln.startswith("standin:"):
+            continue
+        for rx, sub in RS_MASK:
+            ln = rx.sub(sub, ln)
+        out.append(ln)
+    return out
+
+
+def rs_standin(args: list, env_extra=None, src: str = HERE) -> "tuple[int, str]":
+    """The stand-in's run of `soak -- host/routine-sweep ARGS`: (rc, its stderr then its stdout), the order a driver log of these slices has."""
+    e = dict(os.environ)
+    for k in ("CFT_SOAK_ARTIFACT", "CFT_XRT_TILES", "CFT_STANDIN_SCENARIO", "CFT_STANDIN_MPFR"):
+        e.pop(k, None)
+    e.update(env_extra or {})
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_standin.py"), "soak", "--", "host/routine-sweep"] + args,
+                       capture_output=True, text=True, env=e, timeout=120)
+    return p.returncode, p.stderr + p.stdout
+
+
+def routine_catalog_checks(src: str = HERE) -> list:
+    """The nine routine items in the catalog (parcel M4X2): only with mpfr=True and after the 287, the first 287 and the 125 unchanged field for
+    field, every field of the nine, their digests held to the real tool's `list` and to the generator's manifest (both the box's, as fixtures), the
+    atan2 items through a table of a test's own, the claims, and the group each item is in."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = fixture_index()
+    with lib_from(src) as L2:
+        old, full = L2.sweep_items(), L2.sweep_items(mpfr=True)
+        h = lambda items: hashlib.sha256("\n".join(repr(sorted(vars(i).items())) for i in items).encode()).hexdigest()      # noqa: E731
+        c("routine catalog: the 125 items without mpfr and the first 287 with it are the base's, field for field (vars() of each, hashed; the digests are f0e301c8's), "
+          "and every one of them is in group base (the 125) or wide (HXc's and HXb's): the routine items add to them and change none",
+          h(old) == BASE_VARS_125 and h(full[:287]) == BASE_VARS_287 and len(old) == 125
+          and all(i.group == "base" for i in full[:125]) and all(i.group == "wide" for i in full[125:287]) and not any(i.tool == "routine" for i in full[:287]),
+          f"{len(old)} {h(old)[:12]} {h(full[:287])[:12]}")
+        rs = full[287:]
+        c("routine catalog: the nine routine items follow the 287, in the tool's order, named <op word>-all, and the catalog is 296 items with mpfr and 125 without",
+          len(full) == 296 and [it.name for it in rs] == DOC_ROUTINE_NAMES and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
+        bad = []
+        for it, (nm, dg_) in zip(rs, DOC_ROUTINE_DIGESTS):
+            got = (it.tool, it.kind, it.op, it.mode, it.verdict_mode, it.exact, it.per_encoding, it.space, it.level, it.whole, it.mpfr, it.reach, it.format,
+                   it.extra_cases, it.seed_index, it.group, it.base_seed, it.layout_dependent)
+            want = ("routine", "exhaustive", f"{nm}-f32-d{dg_}", "all", "all", True, 5, 1 << 32, "exhaustive", (5 << 32, 0), True, "tile", "fp32",
+                    0, None, "routine", 0, False)
+            if got != want:
+                bad.append(f"{it.name}: {got} vs {want}")
+        c("routine catalog: each item runs routine-sweep's `all` mode (the op word the item's name ends in -all), is exact with five checks an encoding over 2^32 encodings "
+          "and none skipped (whole space 5 x 2^32, 0), reaches the tile, is fp32, takes no seed, and is in group routine", not bad and len(rs) == 9, "; ".join(bad[:2]))
+        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the nine op words, both built from the digest table (a new digest needs no third edit)",
+          all(L2.OP_REACH.get(it.op) == "tile" and L2.OP_FORMAT.get(it.op) == "fp32" for it in rs)
+          and {op for op in L2.OP_REACH if L2.ROUTINE_OP.match(op)} == {it.op for it in rs} == {op for op in L2.OP_FORMAT if L2.ROUTINE_OP.match(op)})
+        # the digests: the real tool's own `list` (the box's, at c99df121) and the generator's manifest (the same run's), parsed here, never read from the table they test
+        lst = [re.fullmatch(r"(\w+)-f32: (images rne rtz rdn rup rmm, digest ([0-9a-f]{8})|no image)", ln) for ln in fixture("rs-list.txt").splitlines()]
+        listed = [(m.group(1), m.group(3)) for m in lst if m and m.group(3)]
+        noimg = [m.group(1) for m in lst if m and not m.group(3)]
+        man = fixture("rs-images-manifest.txt")
+        mdig = re.findall(r"^digest (\w+) ([0-9a-f]{8})$", man, re.M)
+        c("routine catalog: ROUTINE_DIGESTS is the real tool's `list` (rs-list.txt: nine routines with five images and a digest each, four with no image), in its order; and the "
+          "generator's manifest of the same run (rs-images-manifest.txt) has the same nine `digest` lines; no routine without a digest has an item",
+          len(lst) == 13 and all(lst) and list(L2.ROUTINE_DIGESTS.items()) == listed == mdig == DOC_ROUTINE_DIGESTS
+          and noimg == ["atan", "asin", "acos", "atan2"] and not any(n in L2.ROUTINE_DIGESTS for n in noimg), f"{listed} {mdig}")
+        c("routine catalog: every routine item's op word is the tool's op grammar - <name>-f32, then -x<8 hex> (atan2 alone) and -d<8 hex> - and its digest is the table's",
+          all(L2.ROUTINE_OP.match(it.op) and L2.ROUTINE_OP.match(it.op).group(3) == L2.ROUTINE_DIGESTS[it.op.split("-")[0]] for it in rs)
+          and not L2.ROUTINE_OP.match("exp-f32-d043b3b") and not L2.ROUTINE_OP.match("exp-f32-d043b3bb5-all") and not L2.ROUTINE_OP.match("nosuch-f32"))
+        # claims: by space and level, never "swept", none with ", under " (the wide claims block takes those), the images' digest named
+        c("routine catalog: each claim names the space (every fp32 x), the routine as the compiled program, its images' digest, the five attributes, the unmarked lanes' bits and "
+          "flags equal to MPFR's, the marked lanes counted and their guess compared, not decided, and the level (L1 over the fp32 slice); none says 'swept' or contains ', under '",
+          all(isinstance(it.claim, str) and f"every fp32 x through {it.op.split('-')[0]} as the compiled program (its images' digest {L2.ROUTINE_DIGESTS[it.op.split('-')[0]]})" in it.claim
+              and "each of the five attributes" in it.claim and "an unmarked lane's bits and flags equal to MPFR's" in it.claim
+              and "a marked lane counted and its guess compared, not decided" in it.claim and it.claim.endswith("(L1 over the fp32 slice)")
+              and "swept" not in it.claim and ", under " not in it.claim for it in rs), rs[0].claim)
+        # atan2: one item for each of the lead's nine x, in his order, through a table of a test's own (atan2 has no digest in the real table until its fp32 program is built)
+        xs = [0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb]
+        c("routine catalog: ATAN2_X is the lead's nine x in his order (1, -1, one ulp above 1, 2^40, the largest normal, the smallest normal, a subnormal, two full significands)",
+          [x for x, _ in L2.ATAN2_X] == xs and len({x for x, _ in L2.ATAN2_X}) == 9)
+        tbl = {"atan2": "12345678"}
+        ops = [op for _n, _x, _d, op in L2.routine_ops(tbl)]
+        saved = (dict(L2.OP_REACH), dict(L2.OP_FORMAT))
+        try:
+            L2.OP_REACH.update({op: L2.TILE for op in ops})
+            L2.OP_FORMAT.update({op: "fp32" for op in ops})
+            at = L2.routine_items(tbl)
+        finally:
+            L2.OP_REACH.clear()
+            L2.OP_REACH.update(saved[0])
+            L2.OP_FORMAT.clear()
+            L2.OP_FORMAT.update(saved[1])
+        c("routine catalog: a table that has atan2 makes nine atan2 items, one an x, op atan2-f32-x<x>-d<digest>, named ...-all, in the lead's order, each in group routine",
+          [it.op for it in at] == [f"atan2-f32-x{x:08x}-d12345678" for x in xs] and [it.name for it in at] == [f"atan2-f32-x{x:08x}-d12345678-all" for x in xs]
+          and all(it.group == "routine" and it.exact and it.per_encoding == 5 for it in at), str([it.name for it in at][:2]))
+        c("routine catalog: an atan2 claim says every fp32 y for that x and what x is, and not the whole space of (y, x) pairs (Logan's answer 1), and never ', under '",
+          all(f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest 12345678)" in it.claim
+              and "not the whole space of (y, x) pairs" in it.claim and ", under " not in it.claim and "swept" not in it.claim
+              for it, (x, what) in zip(at, L2.ATAN2_X)), at[0].claim)
+        c("routine catalog: an op the tables do not hold is refused BY NAME where the item is made (OP_REACH first, then OP_FORMAT), as any item",
+          raises_value(lambda: L2.Item("zz-all", "routine", "exhaustive", "zz-f32-d00000000", "all", verdict_mode="all")))
+        # the stand-in's copy of the digests is its own, and equal to the library's
+        sp = importlib.util.spec_from_file_location("rs_standin_copy", os.path.join(src, "card_stress_standin.py"))
+        sm = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(sm)
+        c("routine catalog: the stand-in's own table of digests (the nine) and its list of the thirteen names are the library's and the box's `list`",
+          sm.ROUTINE_STANDIN_DIGESTS == dict(L2.ROUTINE_DIGESTS) and list(sm.ROUTINE_NAMES) == list(L2.ROUTINE_NAMES) == [n for n, _ in listed] + noimg
+          and list(sm.ROUTINE_ATTRS) == list(L2.ROUTINE_ATTRS))
+    return out
+
+
+def raises_value(fn) -> bool:
+    """fn raises ValueError (format_of) or KeyError (OP_REACH) naming the op it was given: zz-f32-d00000000."""
+    try:
+        fn()
+    except (ValueError, KeyError) as e:
+        return "zz-f32-d00000000" in str(e)
+    return False
+
+
+def routine_parser_checks(src: str = HERE) -> list:
+    """parse_routine_marks and parse_routine on the real logs - the box's tool run and the card's first run, and four of this parcel's - and every damage each
+    must refuse; the card logs' DEVICE line against the artifact, and refused as a CPU job's; the stand-in's lines held to the real ones."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = fixture_index()
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+
+        def job(nm):
+            op, lo, hi, mode = fixture_job(index, nm)
+            return op, hi - lo, mode
+
+        def whole(nm, art=None, cpu=False):
+            op, n, mode = job(nm)
+            k = 5 if mode == "all" else 1
+            return L2.parse_routine(fixture(nm), index[nm][0], op, mode, art, n * k, {"encodings": n, "per_encoding": k}, cpu=cpu)
+        # -- each real log
+        v, why = parse_ok(lambda: whole("rs-exp-all-marks.txt"))
+        c("routine real log (the box, software): exp-f32 over 9 encodings under all passes - 45 cases, 9 encodings, 0 skipped, 0 mismatches - with 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), "
+          "0 off the list, 0 guesses wrong, the three named lanes right, and the timing line read",
+          v is not None and v.ok and v.counts == {"cases": 45, "value_mismatches": 0, "flag_mismatches": 0, "encodings": 9, "skipped": 0, "marked": 3, "off_list": 0, "guesses_wrong": 0}
+          and v.extra["marks"]["by_attr"] == {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0} and v.extra["marks"]["not_named"] == 0
+          and [(n["attr"], n["lane"], n["guess"]) for n in v.extra["marks"]["named"]] == [("rtz", 0x33ffffff, 0x3f800000), ("rdn", 0x33ffffff, 0x3f800000), ("rup", 0x33ffffff, 0x3f800001)]
+          and not any(n["wrong"] or n["off_list"] for n in v.extra["marks"]["named"]) and v.extra["times"] == {"device_s": 0.005, "oracle_s": 0.0, "lanes_a_call": 16384}, why or str(v))
+        v, why = parse_ok(lambda: whole("rs-exp-all-sab.txt"))
+        c("routine real log (the box, CFT_SOAK_SABOTAGE=1): 5 value mismatches and exit 1 - a failing verdict (ok False) with the marks as they were; the log with exit 0 is refused",
+          v is not None and not v.ok and v.counts["value_mismatches"] == 5 and v.counts["marked"] == 3 and len(v.extra["disagreements"]) == 5
+          and raises(lambda: L2.parse_routine(fixture("rs-exp-all-sab.txt"), 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5})), why or str(v))
+        v, why = parse_ok(lambda: whole("rs-exp-d-all.txt"))
+        c("routine real log (this parcel's, the catalog's op word exp-f32-d043b3bb5): the same verdict and marks as the box's, under the op word with the digest",
+          v is not None and v.ok and v.counts["cases"] == 45 and v.counts["marked"] == 3 and v.extra["marks"]["by_attr"]["rup"] == 1, why or str(v))
+        v, why = parse_ok(lambda: whole("rs-exp-rtz.txt"))
+        c("routine real log (one attribute, rtz): 9 cases for 9 encodings (one check an encoding), 1 marked in rtz and the four others '-' (None), the timing line the job's",
+          v is not None and v.ok and v.counts["cases"] == 9 and v.counts["marked"] == 1
+          and v.extra["marks"]["by_attr"] == {"rne": None, "rtz": 1, "rdn": None, "rup": None, "rmm": None} and v.extra["times"]["lanes_a_call"] == 16384, why or str(v))
+        v, why = parse_ok(lambda: whole("rs-exp-s34-all.txt"))
+        c("routine real log (images made with --bound-shift 34, 4096 encodings): 529 marked (rne 113, rtz 101, rdn 101, rup 101, rmm 113), all 529 off the list, 0 wrong, sixteen MARK "
+          "lines (the tool's limit for marks of any kind, right ones included), so 513 are not named; each named lane off the list",
+          v is not None and v.ok and v.counts["marked"] == v.counts["off_list"] == 529 and v.counts["guesses_wrong"] == 0 and len(v.extra["marks"]["named"]) == 16
+          and v.extra["marks"]["not_named"] == 513 and all(n["off_list"] and not n["wrong"] for n in v.extra["marks"]["named"])
+          and v.extra["marks"]["by_attr"] == {"rne": 113, "rtz": 101, "rdn": 101, "rup": 101, "rmm": 113}, why or str(v))
+        v, why = parse_ok(lambda: whole("rs-card-exp-all-marks.txt", art=RS_ART))
+        c("routine real log (the card, rev8q, tile 1): the box's software verdict and marks, from a log whose backend line names the DEVICE - the artifact the job was given - and nothing else",
+          v is not None and v.ok and v.counts["cases"] == 45 and v.counts["marked"] == 3 and v.extra["times"]["device_s"] == 0.002, why or str(v))
+        v, why = parse_ok(lambda: whole("rs-card-tan-all.txt", art=RS_ART))
+        c("routine real log (the card, tan over 2^20 encodings): 5,242,880 cases, 1,048,576 encodings, 0 marked, device 5.497 s and oracle 3.638 s",
+          v is not None and v.ok and v.counts["cases"] == 5242880 and v.counts["encodings"] == 1048576 and v.counts["marked"] == 0 and v.extra["times"]["device_s"] == 5.497
+          and v.extra["times"]["oracle_s"] == 3.638, why or str(v))
+        v, why = parse_ok(lambda: whole("rs-card-exp-all-2p24.txt", art=RS_ART))
+        c("routine real log (the card, exp over 2^24 encodings): 83,886,080 cases, 0 marked, device 36.657 s, oracle 38.249 s",
+          v is not None and v.ok and v.counts["cases"] == 83886080 and v.counts["marked"] == 0 and v.extra["times"] == {"device_s": 36.657, "oracle_s": 38.249, "lanes_a_call": 16384},
+          why or str(v))
+        card = fixture("rs-card-exp-all-marks.txt")
+        c("routine card log: refused for another artifact; refused as a CPU job's (a software job whose log names a DEVICE); the software log refused as a card job's (no DEVICE line)",
+          raises(lambda: L2.parse_routine(card, 0, "exp-f32", "all", "$HOME/other.xclbin", 45, {"encodings": 9, "per_encoding": 5}))
+          and raises(lambda: whole("rs-card-exp-all-marks.txt", cpu=True)) and raises(lambda: whole("rs-exp-all-marks.txt", art=RS_ART)))
+        c("routine real log (a digest that is not the images'): the tool's refusal, exit 2, has no verdict line - a parse_error, not a pass",
+          raises(lambda: L2.parse_routine(fixture("rs-exp-d-wrong.txt"), 2, "exp-f32-d00000000", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
+          and "names digest 00000000, the images' digest is 043b3bb5" in fixture("rs-exp-d-wrong.txt"))
+        c("routine: parse_soak is not edited for the marks - it reads the verdict of a routine log by the soak's own rule, and the marks parser alone refuses what is wrong with the marks",
+          L2.parse_soak(fixture("rs-exp-all-marks.txt"), 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}).counts["cases"] == 45
+          and raises(lambda: L2.parse_routine_marks(fixture("rs-exp-all-marks.txt").replace("3 marked", "4 marked"), "exp-f32", "all")))
+        # -- damages: each must be refused, and the refusal must name what is wrong
+        real = fixture("rs-exp-all-marks.txt")
+        one = fixture("rs-exp-rtz.txt")
+        many = fixture("rs-exp-s34-all.txt")
+        marks_line = "exp-f32 all: 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), 0 off the list, 0 guesses wrong"
+        mark_rup = "  MARK rup a=0x33ffffff guess=0x3f800001 right\n"
+        assert marks_line in real and mark_rup in real
+        timing = [ln for ln in real.splitlines() if ln.startswith("exp-f32 all: device")][0]
+        cases_ = [
+            ("the marks line left out", real.replace(marks_line + "\n", ""), "exp-f32", "all", "found 0"),
+            ("the marks line twice", real.replace(marks_line + "\n", marks_line + "\n" + marks_line + "\n"), "exp-f32", "all", "found 2"),
+            ("the marks line of another op", real.replace(marks_line, marks_line.replace("exp-f32 all", "exp2-f32 all")), "exp-f32", "all", "the line is for"),
+            ("the marks line of another mode", real.replace(marks_line, marks_line.replace("exp-f32 all", "exp-f32 rtz")), "exp-f32", "all", "the line is for"),
+            ("a total that is not the sum", real.replace("3 marked", "4 marked"), "exp-f32", "all", "sum to 3"),
+            ("an attribute's count changed", real.replace("rtz 1, rdn 1", "rtz 2, rdn 1"), "exp-f32", "all", "sum to"),
+            ("a dash under all", real.replace("rne 0,", "rne -,"), "exp-f32", "all", "the job ran"),
+            ("a number where one attribute leaves a dash", one.replace("rne -", "rne 0"), "exp-f32-d043b3bb5", "rtz", "the job ran"),
+            ("more off the list than marked", real.replace("0 off the list", "4 off the list"), "exp-f32", "all", "off the list of 3"),
+            ("more wrong than marked", real.replace("0 guesses wrong", "4 guesses wrong"), "exp-f32", "all", "guesses wrong of 3"),
+            ("a MARK line gone", real.replace(mark_rup, ""), "exp-f32", "all", "MARK lines where 3 marked show"),
+            ("a MARK line more", real.replace(mark_rup, mark_rup + mark_rup), "exp-f32", "all", "MARK lines where 3 marked show"),
+            ("a MARK line of an attribute the job did not run", one.replace("MARK rtz", "MARK rdn"), "exp-f32-d043b3bb5", "rtz", "which this job did not run"),
+            ("a WRONG line where the line says none wrong", real.replace(mark_rup, mark_rup.replace("right", "WRONG")), "exp-f32", "all", "WRONG MARK lines"),
+            ("an (off the list) line where the line says none", real.replace(mark_rup, mark_rup.replace("right", "right (off the list)")), "exp-f32", "all", "off the list)' MARK lines"),
+            ("the MARK lines of another attribute than the counts say", real.replace("MARK rup", "MARK rtz"), "exp-f32", "all", "MARK lines of"),
+            ("seventeen MARK lines where the total shows sixteen", many.replace("exp-f32 all: 20480 cases", "  MARK rne a=0x3f000999 guess=0x3fd30956 right (off the list)\nexp-f32 all: 20480 cases"), "exp-f32", "all", "MARK lines where 529 marked show"),
+            ("fifteen MARK lines where the total shows sixteen", many.replace("  MARK rne a=0x3f00008e guess=0x3fd309c2 right (off the list)\n", ""), "exp-f32", "all", "MARK lines where 529 marked show"),
+            ("a timing line twice", real + timing + "\n", "exp-f32", "all", "lines match"),
+            ("a timing line of another op", real.replace(timing, timing.replace("exp-f32 all", "exp-f32 rtz")), "exp-f32", "all", "routine timing: the line is for"),
+        ]
+        for nm_, text, op_, mode_, want in cases_:
+            try:
+                L2.parse_routine_marks(text, op_, mode_)
+                got = "accepted"
+            except L2.VerdictError as e:
+                got = str(e)
+            c(f"routine marks damage: {nm_} - refused, naming it", want in got, got[:200])
+        # the same damages through the whole slice's parse (the driver's parser): a parse_error, never a pass
+        c("routine slice damage: a damaged marks line is a VerdictError of parse_routine as well (the driver's parser), the undamaged log passing",
+          raises(lambda: L2.parse_routine(real.replace("3 marked", "4 marked"), 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
+          and not raises(lambda: L2.parse_routine(real, 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5})))
+        c("routine slice damage: the soak verdict's own rules still bind a routine slice - a case fewer, an encoding fewer, a mismatch with exit 0, a library failure - each refused",
+          all(raises(lambda t=t, rc=rc: L2.parse_routine(t, rc, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
+              for t, rc in ((real.replace("45 cases", "44 cases"), 0), (real.replace("9 encodings", "8 encodings"), 0), (real.replace("0 value mismatches", "1 value mismatches"), 0),
+                            (real, 1), (real.replace("exp-f32 all: 45", "  library call failed\nexp-f32 all: 45"), 1))))
+        t_off = real.replace("0 off the list", "1 off the list").replace(mark_rup, mark_rup.replace("right", "right (off the list)"))
+        t_wr = real.replace("0 guesses wrong", "1 guesses wrong").replace(mark_rup, mark_rup.replace("right", "WRONG"))
+        vo, w1 = parse_ok(lambda: L2.parse_routine(t_off, 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
+        vw, w2 = parse_ok(lambda: L2.parse_routine(t_wr, 0, "exp-f32", "all", None, 45, {"encodings": 9, "per_encoding": 5}))
+        c("routine: an off-list mark and a wrong guess leave the verdict ok (the tool exits 0 and its V and F are 0), counted and named",
+          vo is not None and vo.ok and vo.counts["off_list"] == 1 and vo.extra["marks"]["named"][-1]["off_list"] is True
+          and vw is not None and vw.ok and vw.counts["guesses_wrong"] == 1 and vw.extra["marks"]["named"][-1]["wrong"] is True, f"{w1} {w2}")
+        # -- the stand-in's lines are the real tool's
+        rc, txt = rs_standin(["exp-f32", "0x33fffffb", "0x34000004", "all"])
+        c("routine stand-in: for the box's slice (exp-f32 0x33fffffb..0x34000004 under all) it prints exactly the real tool's lines (rs-exp-all-marks), stderr then stdout, the hashes and times masked",
+          rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-exp-all-marks.txt")), "\n".join(rs_mask(txt)[:12]))
+        rc, txt = rs_standin(["exp-f32-d043b3bb5", "0x33fffffb", "0x34000004", "rtz"])
+        c("routine stand-in: under one attribute (rtz) it prints the real tool's lines (rs-exp-rtz): one image line, nine cases, the four dashes",
+          rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-exp-rtz.txt")), "\n".join(rs_mask(txt)[:10]))
+        rc, txt = rs_standin(["list"])
+        c("routine stand-in: `list` prints the real tool's thirteen lines (rs-list)", rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-list.txt")), txt[:200])
+        rc, txt = rs_standin(["exp-f32-d00000000", "0x33fffffb", "0x34000004", "all"])
+        c("routine stand-in: a digest that is not the images' is refused as the real tool refuses it (rs-exp-d-wrong), exit 2, no verdict",
+          rc == 2 and rs_mask(txt) == rs_mask(fixture("rs-exp-d-wrong.txt")), txt[:200])
+        rc, txt = rs_standin(["exp-f32", "0x33fffffb", "0x34000004", "all"], {"CFT_SOAK_ARTIFACT": RS_ART, "CFT_XRT_TILES": "1"})
+        c("routine stand-in: with an artifact it prints the DEVICE line the card's log has (rs-card-exp-all-marks, the image path and the timing masked), the rest the same",
+          [x for x in rs_mask(txt) if not x.startswith("soaking")] == [x for x in rs_mask(fixture("rs-card-exp-all-marks.txt")) if not x.startswith("soaking")]
+          and f"soaking the DEVICE backend: {RS_ART}" in txt and f"soaking the DEVICE backend: {RS_ART}" in fixture("rs-card-exp-all-marks.txt"))
+        # each misbehaviour, through the driver's parser
+        def via(do, *, mode="all", lo="0x33fffffb", hi="0x34000004", op="exp-f32-d043b3bb5", envx=None):
+            with tempfile.TemporaryDirectory() as td:
+                sc = os.path.join(td, "sc.json")
+                with open(sc, "w") as fh:
+                    json.dump([{"leg": "soak", "nth": [1], "do": do}], fh)
+                e = {"CFT_STANDIN_SCENARIO": sc, "CFT_STANDIN_STATE": td}
+                e.update(envx or {})
+                p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_standin.py"), "soak", "--", "host/routine-sweep", op, lo, hi, mode],
+                                   capture_output=True, text=True, env=dict(os.environ, **e), timeout=120)
+            n = int(hi, 0) - int(lo, 0)
+            k = 5 if mode == "all" else 1
+            return p.returncode, p.stderr + p.stdout, (n, k)
+        for do, want in (("marks", ("ok", 3, 0, 0)), ("offlist", ("ok", 1, 1, 0)), ("wrongguess", ("ok", 1, 0, 1)), ("manymarks", ("ok", 40, 3, 2))):
+            rc, txt, (n, k) = via(do)
+            v, why = parse_ok(lambda txt=txt, rc=rc, n=n, k=k: L2.parse_routine(txt, rc, "exp-f32-d043b3bb5", "all", None, n * k, {"encodings": n, "per_encoding": k}))
+            c(f"routine stand-in `{do}`: parsed ok, {want[1]} marked, {want[2]} off the list, {want[3]} guesses wrong (never a failure of the slice)",
+              v is not None and v.ok and (v.counts["marked"], v.counts["off_list"], v.counts["guesses_wrong"]) == want[1:] and rc == 0, why or str(v))
+        rc, txt, _ = via("manymarks")
+        c("routine stand-in `manymarks`: forty marks, sixteen MARK lines (the tool's limit), so 24 not named",
+          txt.count("\n  MARK ") == 16 and "40 marked" in txt and L2.parse_routine_marks(txt, "exp-f32-d043b3bb5", "all")["not_named"] == 24, txt[-300:])
+        for do, want in (("nomarks", "found 0"), ("badmarks", "sum to")):
+            rc, txt, (n, k) = via(do)
+            try:
+                L2.parse_routine(txt, rc, "exp-f32-d043b3bb5", "all", None, n * k, {"encodings": n, "per_encoding": k})
+                got = "accepted"
+            except L2.VerdictError as e:
+                got = str(e)
+            c(f"routine stand-in `{do}`: refused by the marks parser, naming it", want in got, got[:160])
+        for do, want in (("fail", "value mismatches"), ("mismatch", "value mismatches")):
+            rc, txt, (n, k) = via(do)
+            v, why = parse_ok(lambda txt=txt, rc=rc, n=n, k=k: L2.parse_routine(txt, rc, "exp-f32-d043b3bb5", "all", None, n * k, {"encodings": n, "per_encoding": k}))
+            c(f"routine stand-in `{do}`: a failing verdict (ok False, exit 1) with a MISMATCH line", v is not None and not v.ok and rc == 1 and "  MISMATCH " in txt, why or str(v))
+        for do in ("short", "shortcase", "badenc"):
+            rc, txt, (n, k) = via(do)
+            c(f"routine stand-in `{do}`: refused by the soak's cover rule, as for the other exhaustive tools",
+              raises(lambda txt=txt, rc=rc, n=n, k=k: L2.parse_routine(txt, rc, "exp-f32-d043b3bb5", "all", None, n * k, {"encodings": n, "per_encoding": k})))
+        for do, want in (("digest", "names digest"), ("noimage", "cannot read")):
+            rc, txt, (n, k) = via(do)
+            c(f"routine stand-in `{do}`: exit 2 with the tool's refusal ({want}) and no verdict line - a parse_error", rc == 2 and want in txt
+              and raises(lambda txt=txt, rc=rc, n=n, k=k: L2.parse_routine(txt, rc, "exp-f32-d043b3bb5", "all", None, n * k, {"encodings": n, "per_encoding": k})), txt[-200:])
+        c("routine stand-in: the refusals' texts are the tool's (host/tools/routine_sweep.c prints 'names digest' and 'cannot read %s' and the image files end .cftp)",
+          not source_has("host/tools/routine_sweep.c", "%s names digest %08lx, the images' digest is %08lx", "cannot read %s", '"cftp"'))
+        c("routine marks: the patterns quote the tool's printf lines (the marks line, a MARK line and the timing line), at the lines the library's comment cites",
+          not source_has("host/tools/routine_sweep.c", "%s %s: %llu marked (rne %s, rtz %s, rdn %s, rup %s, rmm %s), %llu off the list, %llu guesses wrong",
+                         '"  MARK %s a=0x%08lx guess=0x%08lx %s%s\\n"', "%s %s: device %.3f s, oracle %.3f s, %lu lanes a call", "#define SHOW 16"))
+    return out
+
+def routine_driver_checks(env: Env, src: str = HERE) -> list:
+    """The driver's side, in-process (parcel M4X2): the routine items in the run's catalog only with --mpfr-prefix, the plan of a slice (argv, cover, expected cases, the group in
+    its record), no -cN tool under --sweep-chunk, the guard's rule for a routine-sweep that holds an image, and the host pool never planning a routine item."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-m4x2-")
+    try:
+        good = fake_mpfr_prefix(os.path.join(tmp, "pin"))
+        op = "exp-f32-d043b3bb5"
+        with driver_from(src, ["--mpfr-prefix", good]) as (mod, d, L2):
+            d.items = d.catalog()
+            q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+            j = d.plan_wave(q, 3600, 1, [f"{op}-all"])[0]
+            b = d.soak_binary(j["item"])
+            c("routine plan: the first slice of exp-f32-d043b3bb5-all is `routine-sweep exp-f32-d043b3bb5 <lo> <hi> all` from the build's host/routine-sweep, five checks an encoding "
+              "(cases 5 x E, E encodings, covered by the rule), reach tile, and the record says group routine",
+              j["argv"] == [b, op, str(j["lo"]), str(j["hi"]), "all"] and b.replace("\\", "/").endswith("host/routine-sweep") and j["lo"] == 0
+              and j["cover"] == {"encodings": j["hi"] - j["lo"], "per_encoding": 5} and j["expected"] == 5 * (j["hi"] - j["lo"])
+              and j["sweep"]["reach"] == "tile" and j["sweep"]["group"] == "routine" and j["sweep"]["op"] == op and j["sweep"]["mode"] == "all", str(j["argv"]))
+            d.intervals[f"{op}-all"] = [(0, (1 << 32) - 77)]
+            j = d.plan_wave(q, 3600, 1, [f"{op}-all"])[0]
+            c("routine plan: its last slice ends exactly at 2^32", (j["lo"], j["hi"]) == ((1 << 32) - 77, 1 << 32))
+            k = d.plan_wave(q, 3600, 1, ["sqrt32-rne"])[0]
+            c("routine plan: an older item's slice record has no `group` (no older item's record gains a field), and the host pool never plans a routine item (they reach the tile)",
+              "group" not in k["sweep"] and d.plan_wave(d.cpu, 3600, 1, [f"{op}-all"], L2.HOST) == [])
+        with driver_from(src, ["--mpfr-prefix", good, "--sweep-chunk", "16384"]) as (mod, d, L2):
+            d.items = d.catalog()
+            q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+            j = d.plan_wave(q, 3600, 1, [f"{op}-all"])[0]
+            w = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
+            c("routine plan: under --sweep-chunk a routine slice runs the one routine-sweep (no -cN build exists: the tool has no pass size), while a divsqrt slice runs divsqrt-soak-c16384",
+              d.soak_binary(j["item"]).replace("\\", "/").endswith("host/routine-sweep") and d.soak_binary(w["item"]).replace("\\", "/").endswith("host/divsqrt-soak-c16384")
+              and j["argv"][0] == d.soak_binary(j["item"]))
+        with driver_from(src) as (mod, d, L2):
+            d.items = d.catalog()
+            q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+            c("routine plan: without --mpfr-prefix a routine item is never planned (it is not in the run's catalog: the 125)",
+              len(d.catalog()) == 125 and d.plan_wave(q, 3600, 1, [f"{op}-all"]) == [] and d.mpfr_flags() == [])
+        # the guard: a routine-sweep that holds an image is a card user, by its environment as the soaks are, and by an xclbin argument
+        if not POSIX:
+            skip("routine guard", "needs POSIX (a process's environment is read from /proc)")
+        else:
+            with driver_from(src) as (mod, d, L2):
+                script = os.path.join(tmp, "routine-sweep")
+                with open(script, "w") as fh:
+                    fh.write("#!/bin/sh\nsleep 20\n")
+                os.chmod(script, 0o755)
+                procs = []
+                try:
+                    for art in ("/i/q.xclbin", None):
+                        e = dict(os.environ)
+                        e.pop("CFT_SOAK_ARTIFACT", None)
+                        if art:
+                            e["CFT_SOAK_ARTIFACT"] = art
+                        procs.append(subprocess.Popen([script, op, "0", "1", "all"], env=e))
+                    time.sleep(0.5)
+                    held = mod.card_user({"pid": procs[0].pid, "ppid": 0, "args": [script, op, "0", "1", "all"]})
+                    free = mod.card_user({"pid": procs[1].pid, "ppid": 0, "args": [script, op, "0", "1", "all"]})
+                    c("routine guard: a routine-sweep whose environment holds CFT_SOAK_ARTIFACT IS a card user (named by the image), one without it is NOT, and an xclbin argument makes it one "
+                      "(and a software run, `-`-less, is not)", bool(held) and "q.xclbin" in held and free is None
+                      and bool(mod.card_user({"pid": 0, "ppid": 0, "args": ["host/routine-sweep", "/i/q.xclbin"]}))
+                      and mod.card_user({"pid": 0, "ppid": 0, "args": ["host/routine-sweep", op, "0", "1", "all"]}) is None, f"{held} {free}")
+                finally:
+                    for p in procs:
+                        p.kill()
+                        p.wait()
+    except Exception as e:                      # a driver that cannot be driven this way is a red check, not a crash
+        c("routine driver: the driver could be driven in-process", False, repr(e))
+    finally:
+        rmtree_force(tmp)
+    return out
+
+
+ROUTINE_SERVED = [f"{n}-f32-d{d}-all" for n, d in DOC_ROUTINE_DIGESTS]
+
+
+def scn_routine_items(env: Env, src: str = HERE) -> list:
+    """The nine routine items named by --sweep-items and served by the driver against the stand-in, with --mpfr-prefix: exp covered whole and its whole-space event, every slice's
+    record carrying the marks, the times and the group, the lane exp marks found in its slice, the run stopped on STOP; the report's routine block, group line and rates bucket; the
+    reducer on a copy; and, without --mpfr-prefix, all nine refused by name."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    pfx = fake_mpfr_prefix(os.path.join(env.tmp, "routine-pin"))
+    expn = ROUTINE_SERVED[0]
+    r = start_driver(env, "routineitems", ["--until", until(300), "--mpfr-prefix", pfx, "--sweep-items", ",".join(ROUTINE_SERVED)] + SWEEP_ALL_BASE, src=src, to_file=True)
+
+    def complete():
+        iv = L.sweep_coverage(r.recs)[0]
+        return bool(iv.get(expn)) and L.first_gap(iv[expn], 1 << 32) is None
+
+    done = wait_for(complete, 240, 0.5)
+    stop_run(r)
+    r.finish(90)
+    legs = r.legs(kind="sweep")
+    c("routine items: exp was served to the end of 2^32, every slice of the run passed, and the run stopped on STOP",
+      done and r.rc == 0 and bool(legs) and all(x["status"] == "pass" for x in legs), f"done {done}, rc {r.rc}, {sorted({x['status'] for x in legs})}")
+    mine = sorted((x for x in legs if x["sweep"]["item"] == expn), key=lambda x: x["sweep"]["lo"])
+    c("routine items: exp's slices tile [0, 2^32) once, each slice's verdict covering its encodings with exactly five checks each and none skipped, its expected cases and encodings recorded, "
+      "on the quad (reach tile), in group routine, and recording no pass size (the tool has none)",
+      bool(mine) and mine[0]["sweep"]["lo"] == 0 and mine[-1]["sweep"]["hi"] == 1 << 32
+      and all(a["sweep"]["hi"] == b["sweep"]["lo"] for a, b in zip(mine, mine[1:]))
+      and all(dg(x, "counts", "encodings") == x["sweep"]["hi"] - x["sweep"]["lo"] == dg(x, "sweep", "expected_encodings")
+              and dg(x, "counts", "cases") == 5 * dg(x, "counts", "encodings") == dg(x, "sweep", "expected_cases") and dg(x, "counts", "skipped") == 0
+              and (x["image"], x["sweep"]["reach"], x["sweep"].get("group")) == ("quad", "tile", "routine") and "batch" not in x["sweep"] and "chunk" not in x["sweep"]
+              for x in mine), f"{len(mine)} slices")
+    c("routine items: every routine slice's record carries the marks in its counts (marked, off_list, guesses_wrong), its extra (marks by attribute, the named lanes, how many are not "
+      "named; times: device s, oracle s, lanes a call), and no other kind of slice's record has them",
+      all(all(isinstance(dg(x, "counts", k), int) for k in ("marked", "off_list", "guesses_wrong")) and isinstance(dg(x, "extra", "marks", "by_attr"), dict)
+          and dg(x, "extra", "marks", "not_named") == 0 and isinstance(dg(x, "extra", "times", "device_s"), float) for x in legs), str(legs[0].get("counts")))
+    lane = [x for x in mine if x["sweep"]["lo"] <= 0x33ffffff < x["sweep"]["hi"]]
+    others = [x for x in mine if x not in lane]
+    c("routine items: exactly one slice of exp holds the lane 0x33ffffff, and it alone has the three marks the real tool finds there (rtz 1, rdn 1, rup 1, right, on the list; the stand-in's copy of "
+      "the box's figures), the others none", len(lane) == 1 and dg(lane[0], "counts", "marked") == 3 and dg(lane[0], "extra", "marks", "by_attr") == {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0}
+      and [(n["attr"], n["lane"]) for n in dg(lane[0], "extra", "marks", "named")] == [("rtz", 0x33ffffff), ("rdn", 0x33ffffff), ("rup", 0x33ffffff)]
+      and all(dg(x, "counts", "marked") == 0 for x in others), f"{len(lane)} {dg(lane[0], 'counts') if lane else None}")
+    ev = r.events("whole_space_ok")
+    c("routine items: the whole-space check ran for exp and found its slices adding up to 5 x 2^32 cases and 0 skipped, and found no mismatch anywhere",
+      [e["item"] for e in ev if e["item"] == expn] == [expn] and not r.events("whole_space_mismatch")
+      and next(e for e in ev if e["item"] == expn)["cases"] == 5 << 32 and next(e for e in ev if e["item"] == expn)["skipped"] == 0, str([e["item"] for e in ev]))
+    served = {x["sweep"]["item"] for x in legs}
+    c("routine items: all nine items were served (each at least one slice) in the quad's tiles, and the run's status file has a `routine` line with their marks",
+      served == set(ROUTINE_SERVED) and bool(re.search(r"^routine    \d+ slice\(s\) of the routine items: marked \d+ \(off the list 0, guesses wrong 0\)",
+                                                          read_bytes(os.path.join(r.out, "status.txt")).decode("utf-8", "replace"), re.M)), str(sorted(served)))
+    log0 = log_text(r, mine[0]) if mine else ""
+    c("routine items: a routine job was handed CFT_SWEEP_IMAGES (the run's images directory: the dry run names one, sweep-images-dry, in the run's own output directory) and, on the quad, "
+      "CFT_SOAK_ARTIFACT and its tile",
+      f"standin: env CFT_SWEEP_IMAGES={os.path.join(os.path.abspath(r.out), 'sweep-images-dry')}" in log0 and "standin: env CFT_SOAK_ARTIFACT=" in log0
+      and "CFT_SOAK_ARTIFACT=<unset>" not in log0, log0[:400])
+    # the report
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), r.out, "--no-write", "--json", os.path.join(env.tmp, "routine-report.json")],
+                       capture_output=True, text=True, timeout=120)
+    t = p.stdout
+    try:
+        rj = json.loads(read_bytes(os.path.join(env.tmp, "routine-report.json")))
+    except ValueError:
+        rj = {}
+    rr = ((rj.get("sweep") or {}).get("routine") or [])
+    exp_r = next((x for x in rr if x["item"] == expn), {})
+    n_exp = len(mine)
+    c("routine items: the report states the routine group on a line of its own and the sentence naming the groups, no base group line (the run served routine items alone), the nine rows with "
+      "the format fp32 in their last column",
+      p.returncode == 0 and re.search(r"^  group routine: \d+ exhaustive item\(s\) seen; covered \d+ of \d+ encodings", t, re.M) and "  group base:" not in t
+      and "group routine is the routine sweeps' items" in t and re.search(rf"^  {re.escape(expn)}\s+\d+.*\s+tile\s+fp32$", t, re.M), t[t.find("exhaustive items"):][:900])
+    c("routine items: the report's routine block gives exp's claim, its slices, its marks by attribute (rne 0, rtz 1, rdn 1, rup 1, rmm 0), nothing off the list or wrong, none not named, the "
+      "three lanes the tool named and the device and oracle seconds summed - and --json says the same under sweep.routine, with the named lanes only where they were off the list or wrong (none)",
+      f"    {expn}: every fp32 x through exp as the compiled program (its images' digest 043b3bb5)" in t
+      and f"{n_exp} slice(s); marked 3 (rne 0, rtz 1, rdn 1, rup 1, rmm 0); off the list 0; guesses wrong 0; marks no MARK line named 0; device " in t
+      and exp_r.get("slices") == n_exp and exp_r.get("marked") == 3 and exp_r.get("by_attr") == {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0} and exp_r.get("named") == []
+      and exp_r.get("named_other") == 3 and exp_r.get("not_named") == 0 and isinstance(exp_r.get("device_s"), float), t[t.find("a routine item"):][:900])
+    lo_ = (rj.get("rates") or {}).get("left_out") or {}
+    c("routine items: the rates leave the routine slices out in a bucket of their own (`routine`, listed with its reason), the buckets still adding to the sweep legs seen, and no rate row is "
+      "made of a routine slice", lo_.get("routine") == len(legs) and sum(lo_.values()) == (rj.get("rates") or {}).get("seen") and not (rj.get("rates") or {}).get("rows")
+      and re.search(r"^  routine: \d+ - a routine-sweep slice", t, re.M) is not None, str(lo_))
+    # the nightly page's reducer on a copy with the dry-run flag turned off
+    rp = os.path.join(src, "card_stress_progress.py")
+    cp = os.path.join(env.tmp, "routine-reduce")
+    os.makedirs(cp, exist_ok=True)
+    with open(os.path.join(r.out, "metrics.jsonl"), encoding="utf-8") as fh:
+        recs = [json.loads(x) for x in fh if x.strip()]
+    for x in recs:
+        if x.get("type") == "run_start":
+            x["settings"]["dry_run"] = False
+    with open(os.path.join(cp, "metrics.jsonl"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("".join(json.dumps(x, separators=(",", ":")) + "\n" for x in recs))
+    q = subprocess.run([sys.executable, "-B", "-I", rp, cp, "--commit", "none"], capture_output=True, text=True, timeout=120)
+    try:
+        dj = json.loads(q.stdout)
+    except ValueError:
+        dj = {}
+    sv = [k for k in (dj.get("now") or {}).get("classes", []) if k["served"]]
+    c("routine items: with the flag turned off in a copy, the reducer reads the driver's own routine records: one served class (the tile's), the nine rows each with format fp32 and group routine, "
+      "the routine group alone in the class's groups and totals, and the night's `after.groups` written (a class with a routine row served has it)",
+      q.returncode == 0 and len(sv) == 1 and sv[0]["kind"] == "tile" and {x["item"]: (x["format"], x["group"]) for x in sv[0]["items"]} == {n: ("fp32", "routine") for n in ROUTINE_SERVED}
+      and [(g["group"], g["items"]) for g in sv[0]["groups"]] == [("routine", 9)]
+      and sorted(((dj.get("nights") or [{}])[-1].get("after") or {}).get("groups", {}).get(sv[0]["id"], {})) == ["routine"], f"rc {q.returncode}: {q.stderr[-200:]} {str(sv)[:300]}")
+    # without --mpfr-prefix: refused by name
+    r2 = start_driver(env, "routinerefused", ["--until", until(300), "--sweep-items", f"{ROUTINE_SERVED[0]},{ROUTINE_SERVED[8]},rint64-class-rne"] + SWEEP_ALL_BASE, src=src, to_file=True)
+    done2 = wait_for(lambda: bool(L.sweep_coverage(r2.recs)[0].get("rint64-class-rne")), 120, 0.5)
+    stop_run(r2)
+    r2.finish(90)
+    sk = r2.legs(kind="sweep", status="skipped")
+    iv2, served2 = L.sweep_coverage(r2.recs)[:2]
+    c("routine refused: a routine item named in a run without --mpfr-prefix is ONE skipped sweep leg naming it, image '-', the reason saying `a routine item` (not `a wide item`), "
+      "refused: no-mpfr-prefix and group routine in its sweep; neither ran or is covered; the older item beside them was served; the run exits 0",
+      done2 and r2.rc == 0 and sorted(x["sweep"]["item"] for x in sk) == sorted([ROUTINE_SERVED[0], ROUTINE_SERVED[8]])
+      and all(x["image"] == "-" and "a routine item, REFUSED: no --mpfr-prefix" in (x["reason"] or "") and "wide item" not in (x["reason"] or "")
+              and dg(x, "sweep", "refused") == "no-mpfr-prefix" and dg(x, "sweep", "group") == "routine" for x in sk)
+      and not any(x["sweep"]["item"] in ROUTINE_SERVED for x in r2.legs(kind="sweep") if x["status"] != "skipped")
+      and not any(n in iv2 or n in served2 for n in ROUTINE_SERVED) and L.first_gap(iv2.get("rint64-class-rne", []), 35_840) is None,
+      f"done {done2}, rc {r2.rc}: {[(x['leg'], x['image']) for x in sk]}")
+    p2 = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), r2.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    c("routine refused: the report lists each under its skipped legs with the reason, and neither in its coverage table; and a run with no routine slice has no routine block, group line or rates bucket",
+      p2.returncode == 0 and re.search(rf'^  sweep-{re.escape(ROUTINE_SERVED[0])}: 1 x "a routine item, REFUSED: no --mpfr-prefix', p2.stdout, re.M)
+      and not re.search(rf"^  {re.escape(ROUTINE_SERVED[0])} ", p2.stdout, re.M) and "a routine item (parcel M4X2" not in p2.stdout and "group routine" not in p2.stdout
+      and not re.search(r"^  routine: \d+ - ", p2.stdout, re.M), p2.stdout[p2.stdout.find("skipped legs"):][:400])
+    return out
+
+
+def scn_routine_build(env: Env, src: str = HERE) -> list:
+    """The build step of the routine items on the driver's REAL path over a scratch checkout whose tools, `make`, `ldd` and generator are test doubles (fake_build_tree; the generator
+    writes the box's real manifest, the tool is the stand-in): `routine images` and `mpfr routine-sweep` made with --mpfr-prefix and only then, routine-sweep a make target and a tool held to
+    ldd after the literal lists, the images directory new each run and handed to the routine job, and each failure fatal by name: a moved digest, a missing digest, another commit, a generator
+    that fails, a missing image, an oracle naming another MPFR, a routine-sweep with no `list`."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    need = [x for x in ("git", "sh", "nice", "timeout") if not shutil.which(x)]
+    if not POSIX or need:
+        skip("routine build", "needs POSIX with git, sh, nice and timeout" + (f" (missing: {', '.join(need)})" if need else ""))
+        return out
+    root, fb, pfx, drive = fake_build_tree(env, src, "routine")
+    item = ROUTINE_SERVED[0]
+    names = f"{item},sqrt128-f32-rne"
+
+    def rd(*a, **k):
+        return drive(*a, items=names, **k)
+    A = rd("routine-build-a", ["--mpfr-prefix", pfx], {"CFT_SOAK_ARTIFACT": LEAKED_ARTIFACT})
+    B = rd("routine-build-b", [])
+    mk_a = next((ln.split() for ln in A.makelog if " all " in ln + " "), [])
+    mk_b = next((ln.split() for ln in B.makelog if " all " in ln + " "), [])
+    c("routine build A: with --mpfr-prefix routine-sweep is the LAST make target, after the literal lists (so `targets = [...]` reads as it did), and the make line is otherwise the same words as "
+      "the line without it (B), which has no routine-sweep",
+      bool(mk_a) and bool(mk_b) and mk_a[-1] == "routine-sweep" and "routine-sweep" not in mk_b and [x for x in mk_a if x not in ("MPFR=1", "routine-sweep") and not x.startswith("MPFR_PREFIX=")] == mk_b,
+      f"{mk_a} | {mk_b}")
+    s1, s2 = A.steps.get("routine images") or {}, A.steps.get("mpfr routine-sweep") or {}
+    m = re.search(r"into (\S+) \(a new directory, kept\)", s1.get("detail", ""))
+    d1 = m.group(1) if m else ""
+    c("routine build A: the step `routine images` ran the generator into a NEW directory under the run's output (sweep-images-<stamp>), checked the manifest's commit against HEAD and its nine `digest` "
+      "lines against the table, and kept the directory; the step `mpfr routine-sweep` listed the nine with five images and the table's digests and passed the smoke job (45 cases, 3 marked lanes) with "
+      "the oracle line at the pin - while the driver itself held an image in its environment (the job was started without it, or the soak's CPU rule would have refused its DEVICE line)",
+      s1.get("ok") is True and s2.get("ok") is True and os.path.basename(d1).startswith("sweep-images-") and os.path.dirname(d1) == os.path.abspath(A.out) and os.path.isdir(d1)
+      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 9 routines" in s1.get("detail", "")
+      and "names the 9 routines with five images" in s2.get("detail", "") and "45 cases, 3 marked lanes right and on the list" in s2.get("detail", "")
+      and "names MPFR 4.2.2 with GMP 6.3.0" in s2.get("detail", "") and A.rc == 0, f"rc {A.rc}: {s1} {s2}")
+    c("routine build A: the xrt step holds routine-sweep to ldd after the literal list (links libxrt_coreutil), and the run served the routine item and a wide one and passed them",
+      (A.steps.get("xrt routine-sweep") or {}).get("ok") is True and {x["sweep"]["item"] for x in A.legs(kind="sweep", status="pass")} >= {item, "sqrt128-f32-rne"},
+      str(A.steps.get("xrt routine-sweep")))
+    lg = [log_text(A, x) for x in A.legs(kind="sweep", status="pass") if x["sweep"]["item"] == item]
+    c("routine build A: a routine slice of the real path was handed the images directory the step made (CFT_SWEEP_IMAGES=<that directory>)",
+      bool(d1) and bool(lg) and all(f"standin: env CFT_SWEEP_IMAGES={d1}" in t for t in lg), str(lg[:1])[:300])
+    c("routine build B: without --mpfr-prefix neither routine step is made, the routine tool is neither a make target nor held to ldd, no images directory is made, and the run is what it was",
+      B.rc == 0 and "routine images" not in B.steps and "mpfr routine-sweep" not in B.steps and "xrt routine-sweep" not in B.steps
+      and not any(n.startswith("sweep-images-") for n in os.listdir(B.out)), f"rc {B.rc}: {sorted(B.steps)[:8]}")
+    A2 = rd("routine-build-a2", ["--mpfr-prefix", pfx])
+    d2 = (re.search(r"into (\S+) \(a new directory, kept\)", (A2.steps.get("routine images") or {}).get("detail", "")) or [None, ""])[1]
+    c("routine build: another run starts in a directory of its own - the images directory is never the last run's (the generator refuses one that exists) and the first run's is still there",
+      bool(d1) and bool(d2) and d1 != d2 and os.path.isdir(d1) and os.path.isdir(d2) and A2.rc == 0, f"{d1} {d2}")
+
+    def red(name, envx, step, want, why=""):
+        X = rd(f"routine-build-{name}", ["--mpfr-prefix", pfx], envx)
+        s = X.steps.get(step) or {}
+        c(f"routine build red: {why} - the step `{step}` fails, by name ({want}), the run stops before any leg (build_failed, exit 3)",
+          s.get("ok") is False and all(w in s.get("detail", "") for w in want) and X.rc == 3 and not X.legs(kind="sweep") and any(e.get("reason") == "build_failed" for e in X.events()),
+          f"rc {X.rc}: {s}")
+        return X
+    red("moved", {"FAKE_GEN_MOVE": "exp"}, "routine images", ("exp: the generator's digest is 043b3bb0", "ROUTINE_DIGESTS has 043b3bb5", "fragment moved", "new, its coverage from nothing"),
+        "a moved fragment (the generator's exp digest is not the table's)")
+    red("dropped", {"FAKE_GEN_DROP": "tan"}, "routine images", ("tan: the generator's digest is not given", "ROUTINE_DIGESTS has dbfd4a4e"), "a routine whose digest line the manifest lacks")
+    red("commit", {"FAKE_GEN_COMMIT": "0" * 40}, "routine images", ("the manifest's commit is", "this checkout's HEAD is"), "a manifest made from another commit")
+    red("genfail", {"FAKE_GEN_FAIL": "1"}, "routine images", ("gen_sweep_images.py --out <dir>` exited 1",), "a generator that exits 1")
+    red("noman", {"FAKE_GEN_NOMAN": "1"}, "routine images", ("no readable manifest.txt",), "a generator that writes no manifest")
+    red("missing", {"CFT_STANDIN_LIST_MISSING": "exp"}, "mpfr routine-sweep", ("exp: `routine-sweep list` says", "4 of 5 images found"), "an image the tool cannot find (list: four of the five)")
+    red("mpfr41", {"CFT_STANDIN_MPFR": "4.1.0"}, "mpfr routine-sweep", ("names MPFR 4.1.0", "the pin is 4.2.2"), "an oracle line naming MPFR 4.1.0")
+    red("nolist", {"CFT_STANDIN_NO_LIST": "1"}, "mpfr routine-sweep", ("`routine-sweep list` exited 2", "no `list`"), "a routine-sweep from before `list`")
+    E = rd("routine-build-extra", ["--mpfr-prefix", pfx], {"FAKE_GEN_EXTRA": "digest atan2 12345678"})
+    s = E.steps.get("routine images") or {}
+    c("routine build: a manifest digest the table lacks (atan2, built before it has an item) is SAID in the step and does not fail it",
+      s.get("ok") is True and "also has digests for atan2" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
+    return out
+
+
+def group_routine(env: Env, src: str = HERE) -> list:
+    """Parcel M4X2, the routine items: the catalog and its digests, the marks' parser on the real logs and every damage, the stand-in, the driver's plans and guard, the items served
+    and covered in a dry run with their report and reduced night, refused without --mpfr-prefix, and the build step over test doubles (POSIX)."""
+    return (routine_catalog_checks(src) + routine_parser_checks(src) + routine_driver_checks(env, src) + scn_routine_items(env, src) + scn_routine_build(env, src))
 
 
 def group_wide(env: Env, src: str = HERE) -> list:
@@ -9566,7 +10217,7 @@ def main() -> int:
                                       ("trees", scn_trees, False),
                                       ("items", group_items, False), ("chunk", group_chunk, False),
                                       ("records", group_records, False), ("notes", group_notes, False),
-                                      ("resume", group_resume, False), ("wide", group_wide, False), ("probe", group_probe, False),
+                                      ("resume", group_resume, False), ("wide", group_wide, False), ("routine", group_routine, False), ("probe", group_probe, False),
                                       ("testfiles", group_testfiles, False)):
             if not want(gname):
                 continue
