@@ -204,7 +204,8 @@ def test_the_refusals_are_by_name():
                 with pytest.raises(ValueError,
                                    match=f"parcel {parcel}'s") as e:
                     call(name, FP64, RNE)
-                assert repr(name) in str(e.value)                     and "not built yet" in str(e.value)
+                assert repr(name) in str(e.value) \
+                    and "not built yet" in str(e.value)
     with pytest.raises(ValueError, match="attribute"):
         ml.build("atan", FP64, 7)
     with pytest.raises(ValueError, match="formats"):
@@ -542,7 +543,8 @@ def test_constants_in_process():
               for s in lines[4:]}
     assert len(counts) == 3 * len(FUNCS)
     # atan's, as M4G1 measured them; wave 2's files pin their own
-    assert {k: counts[k] for k in ("atan fp64", "atan fp128", "atan fp256")}         == {"atan fp64": 295, "atan fp128": 335, "atan fp256": 410}
+    assert {k: counts[k] for k in ("atan fp64", "atan fp128", "atan fp256")} \
+        == {"atan fp64": 295, "atan fp128": 335, "atan fp256": 410}
 
 
 def _run_module(*args):
@@ -557,7 +559,8 @@ def test_constants_as_a_program():
     lines = r.stdout.splitlines()
     assert lines[-1] == (f"mathlib --check (inv): {len(FUNCS)} routines, "
                          f"3 formats, 0 differences")
-    assert len(lines) == 1 + 3 + 3 * len(FUNCS) + 1         and "DIFFERENCE" not in r.stdout
+    assert len(lines) == 1 + 3 + 3 * len(FUNCS) + 1 \
+        and "DIFFERENCE" not in r.stdout
     assert lines[0].startswith("atan(7/8) + atan(1/15) = pi/4")
     assert sum(s.startswith("atan fp") for s in lines) == 3
     assert sum(s.startswith("RECIP_SEED") for s in lines) == 3
