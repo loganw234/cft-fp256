@@ -3218,13 +3218,16 @@ def group_rates():
           "rates: ... and not k times its indices, which is the cases and the skipped slots together (84,943,152)")
     # -- the table of rate ops is held to the catalog both ways: every tile op of the exhaustive and hard levels has one, and none is dead
     cat = LIB.sweep_items(mpfr=True)
-    need = {it.op for it in cat if it.kind == "exhaustive" and it.reach == "tile" and it.level in ("exhaustive", "hard")}
+    need = {it.op for it in cat if it.kind == "exhaustive" and it.reach == "tile" and it.level in ("exhaustive", "hard") and it.tool != "routine"}
     eq(set(R.RATE_OP), need, f"rates: the rate-op table names every op word of the catalog's tile items at the exhaustive and hard levels ({len(need)}) and no other")
     eq({o: R.RATE_OP[o] for o in need}, {o: re.match(r"[a-z]+", o).group(0) for o in need},
        "rates: and each op word's rate op is the operation it names: the word's letters before its digits (the oracle's own parse)")
     eq(sorted(set(R.RATE_OP.values())), sorted(R.RATE_OPS), "rates: and the ops a table lists are exactly the ones the rows can have")
     # -- the other levels' items are out of the rows by the catalog, not by luck: no class or random or host item has an op in the table
     check(not any(it.op in R.RATE_OP for it in cat if it.level in ("class", "random") or it.reach != "tile"), "rates: no class-level, random or host item's op has a rate op")
+    # -- parcel M4X2: the routine items (tile, exhaustive) are left out of the rates by a bucket of their own: no routine op has a rate op, and the catalog has them
+    check(sum(1 for it in cat if it.tool == "routine") == 9 and not any(it.op in R.RATE_OP for it in cat if it.tool == "routine"),
+          "rates: the nine routine items' ops have no rate op (their slices are the 'routine' bucket of left_out)")
     # -- no probe: the card-alone cells are '-' and the text says so; nothing is put in their place
     eq(X["probe"], None, "rates: a run with no probe leg has probe None, not zeros")
     check(all(r["card"] is None for r in X["rows"]) and all(r["card_alone"] == "-" and r["ratio"] == "-" for r in tab if r["tile"] in ("all", "only")),

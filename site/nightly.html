@@ -371,8 +371,11 @@ and holds no figure of its own.</p>
     // ---- at a glance: how far along? Each current class, a row a group (the class's total where it has no wide-format items): the share covered, the
     //      items complete and the finish. A group's finish is not in the file: it is the latest of its open items' estimates, computed here, and says so.
     function rowsOf(c) {
-      var b = group(c, "base"), w = group(c, "wide");
-      return w ? [b ? ["base items", b, "base"] : null, ["wide-format items", w, "wide"]] : [["all items", c.total, null]];
+      var b = group(c, "base"), w = group(c, "wide"), rt = group(c, "routine");
+      var rows = w ? [b ? ["base items", b, "base"] : null, ["wide-format items", w, "wide"]] : [["all items", c.total, null]];
+      // parcel M4X2: a class with routine items has a row for that group too, after the base and wide-format rows, and its total is no row of its own
+      if (rt) rows = [b ? ["base items", b, "base"] : null, w ? ["wide-format items", w, "wide"] : null, ["routine items", rt, "routine"]];
+      return rows;
     }
     function finish(c, g) {
       var open = c.items.filter(function (r) { return !r.complete && (g === null || r.group === g); }), last = null, none = 0;
@@ -430,16 +433,20 @@ and holds no figure of its own.</p>
           (!r.complete && c.current) ? h("div", { "class": "small" }, estimateText(r.estimate, r.estimate_note)) : null);
       }
       // a class with wide-format items lists them as a group of their own after the base items, each group open items first
-      var base = group(c, "base"), wide = group(c, "wide");
-      function part(isWide) {
-        return open.filter(function (r) { return (r.group === "wide") === isWide; }).concat(done.filter(function (r) { return (r.group === "wide") === isWide; })).map(row);
+      var base = group(c, "base"), wide = group(c, "wide"), rout = group(c, "routine");
+      function pick(gname) {
+        return open.filter(function (r) { return (r.group || "base") === gname; }).concat(done.filter(function (r) { return (r.group || "base") === gname; })).map(row);
       }
+      function part(isWide) { return pick(isWide ? "wide" : "base"); }
       function head(what, g) { return h("div", { "class": "grouphead", text: what + ": " + g.complete + " of " + g.items + " fully covered" }); }
       var items = wide ? [base ? [head("Base items", base), part(false)] : null, head("Wide-format items", wide), part(true)] : open.concat(done).map(row);
+      // parcel M4X2: the routine items are a group of their own after the base and wide-format items, never inside the base group
+      if (rout) items = [wide ? items : (base ? [head("Base items", base), part(false)] : null), head("Routine items", rout), pick("routine")];
       // a current class's figures, which the glance shows as a bar and a share, in full: its covered indices of its space, a group's over its own
       function says(t) { return t.complete + " of " + t.items + " fully covered" + (c.current ? ", " + pct1(t.covered, t.space) + " of the campaign's " + fmt(t.space) + " encodings or indices (" + fmt(t.covered) + " covered)" : ""); }
       return h("div", null, h("h3", { "class": "mono", text: c.kind + " items - " + c.label }),
-        h("p", { "class": "small dim", text: (wide ? (base ? "base items: " + says(base) + "; " : "") + "wide-format items: " + says(wide) + "; night" : says(c.total) + "; night") + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
+        h("p", { "class": "small dim", text: (rout ? (base ? "base items: " + says(base) + "; " : "") + (wide ? "wide-format items: " + says(wide) + "; " : "") + "routine items: " + says(rout) + "; night" :
+          wide ? (base ? "base items: " + says(base) + "; " : "") + "wide-format items: " + says(wide) + "; night" : says(c.total) + "; night") + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
         c.served ? items : h("details", null, h("summary", { text: "No slice has completed under this tree yet: its " + c.items.length + " items are all at zero" }), items));
     }
     var nCur = 0, nCurDone = 0;
@@ -468,10 +475,11 @@ and holds no figure of its own.</p>
     // the earlier trees, kept as history: a line each, then their items
     if (old.length) {
       var earlier = old.map(function (c) {
-        var base = group(c, "base"), wide = group(c, "wide");
+        var base = group(c, "base"), wide = group(c, "wide"), rout = group(c, "routine");
         function line(t) { return t.complete + " of " + t.items + " items fully covered, " + pct1(t.covered, t.space) + " (" + fmt(t.covered) + " of " + fmt(t.space) + ")"; }
-        return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " +
-          (wide ? (base ? line(base) + "; " : "") + "wide-format items: " + line(wide) : line(c.total)) + ", night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
+        var core = (wide ? (base ? line(base) + "; " : "") + "wide-format items: " + line(wide) : line(c.total));
+        if (rout) core = (wide ? core + "; " : (base ? line(base) + "; " : "")) + "routine items: " + line(rout);       // parcel M4X2
+        return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " + core + ", night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
       });
       var nOld = 0, nOldDone = 0;
       old.forEach(function (c) { nOld += c.total.items; nOldDone += c.total.complete; });
@@ -512,9 +520,16 @@ and holds no figure of its own.</p>
             return g.group === "base" ? (s ? s.covered : 0) : null;
           } };
         }
+        var rout = group(c, "routine");
+        if (rout && !wide) {         // parcel M4X2: a class with routine items has a line for each group, the routine group in a third colour
+          if (group(c, "base")) lines.push(line(group(c, "base"), c.style, "base items"));
+          lines.push(line(rout, c.style.replace(/stroke:var\([^)]*\)/, "stroke:var(--s2)"), "routine items"));
+          return;
+        }
         if (!wide) { lines.push(line(null, c.style, "")); return; }
         if (group(c, "base")) lines.push(line(group(c, "base"), c.style, "base items"));
         lines.push(line(wide, c.style.replace(/stroke:var\([^)]*\)/, "stroke:var(--s3)"), "wide-format items"));
+        if (rout) lines.push(line(rout, c.style.replace(/stroke:var\([^)]*\)/, "stroke:var(--s2)"), "routine items"));
       });
       function plot(W) {
         var H = Math.max(150, Math.min(210, Math.round(W * 0.36))), L = W < 400 ? 36 : 46, R = 14, T = 12, B = 30;
@@ -565,7 +580,8 @@ and holds no figure of its own.</p>
       h("p", { "class": "small dim", text: "A slice is one range of an item's space swept and compared; a case is one result compared. Legs are the battery's checks and the sweep's slices. Times are the card host's." }),
       h("h3", { text: "Coverage after each night, by tree" }),
       h("p", { "class": "small dim", text: "Each line is one tree class: the share of that class's campaign covered, cumulatively. Blue is tile items, green host items; a dashed line is an earlier tree, which no longer gains." +
-        (d.now.classes.some(function (c) { return group(c, "wide"); }) ? " A class with wide-format items has a line for each group, purple for the wide-format items, each over its own items and spaces, so that a group joining a class does not redraw the other's history; a group's line starts on the first night it had anything covered." : "") }),
+        (d.now.classes.some(function (c) { return group(c, "wide"); }) ? " A class with wide-format items has a line for each group, purple for the wide-format items, each over its own items and spaces, so that a group joining a class does not redraw the other's history; a group's line starts on the first night it had anything covered." : "") +
+        (d.now.classes.some(function (c) { return group(c, "routine"); }) ? " A class with routine items has a line for its routine group too, orange, over that group's own items and spaces." : "") }),
       chart()));
 
     // totals
@@ -585,7 +601,7 @@ and holds no figure of its own.</p>
     frag.appendChild(fold("notes", "How to read it: nights, trees and groups, time, estimates, and which figures are the page's own",
       h("p", { "class": "small" }, h("strong", { text: "Nights. " }), d.rules.night),
       h("p", { "class": "small" }, h("strong", { text: "Why a changed tree starts again. " }), d.rules.classes),
-      (d.rules.groups && d.now.classes.some(function (c) { return group(c, "wide"); })) ? h("p", { "class": "small" }, h("strong", { text: "Groups. " }), d.rules.groups) : null,
+      (d.rules.groups && d.now.classes.some(function (c) { return group(c, "wide") || group(c, "routine"); })) ? h("p", { "class": "small" }, h("strong", { text: "Groups. " }), d.rules.groups) : null,
       h("p", { "class": "small" }, h("strong", { text: "Time. " }), d.rules.card_time),
       h("p", { "class": "small" }, h("strong", { text: "Estimates. " }), d.rules.estimate),
       h("p", { "class": "small" }, h("strong", { text: "Kinds of figure. " }), "Counts, times and the coverage of each item are READ from the run's record by the project's report. Sums, percentages and the differences between nights are COMPUTED from those. The finish dates are ESTIMATES. A tile item is one the card's tile computes; a host item is the library's host code run against the CPU, in which the tile computes nothing."),

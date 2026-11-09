@@ -148,3 +148,29 @@ wc-build-warnings.txt	0	make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=
 rp-sw.txt	0	host/rate-probe - 0.05 [2 s]
 rp-sw-sab.txt	1	env CFT_RATE_PROBE_SABOTAGE=1 host/rate-probe - 0.02 [1 s]
 rp-sw-fp128max.txt	0	host/rate-probe - 0.02 [1 s]
+# rs-*: parcel M4X2 (2026-11-09), host/tools/routine_sweep.c's logs (parcel M4X's tool), each file the tool's stderr and then its stdout, which is the
+# order a driver log has for these slices (INFERRED, and shown once on a software run by hand: a merged redirect `> log 2>&1` of rs-exp-d-all's command
+# gave the same bytes as stderr then stdout, but for the digits of the timing line). Not a driver log by origin: the box's, which the driver would
+# have written as one file. rs-exp-all-marks, rs-exp-all-sab, rs-list and rs-images-manifest: the lead's tool run of 2026-11-09 on amd-arc-box at
+# c99df121 (the software backend, the pinned MPFR 4.2.2 and GMP 6.3.0: box/tool-m4x/step1-0x33ffffff, step2, list.out and images-manifest.txt of the
+# round's folder), copied byte for byte after their sha256 was held to the folder's SHA256SUMS.local. rs-card-*: the lead's first card run of the same
+# day (rev8q, 12:58 to 13:00, tile 1 and the quad's four tiles, box/card-m4x/step1-0x33ffffff, step3 and step4-tile1), copied the same way with ONE
+# CHANGE: the image path's home directory, written out in full in the original, is $HOME (the driver's own default form, $HOME/cardday-rev8q/
+# cft_hw_quad.xclbin); rs-card-exp-all-2p24 is tile 1's of four disjoint 2^24 slices run at once. The box ran these as `exp-f32` and `tan-f32`, with no
+# digest in the op word. The four after them were made by parcel M4X2 in WSL (Ubuntu 22.04, gcc 11.4, the system's MPFR 4.1.0 and GMP 6.2.1, which their
+# oracle line names) from a clone of 73fa760f built with make -C host routine-sweep (XRT=0, no MPFR=1 word: the tool is always linked with MPFR), the images
+# made by host/tools/gen_sweep_images.py from the same clone (CFT_SWEEP_IMAGES=<its --out>; the digests it wrote are the box's), the software backend, no card:
+# rs-exp-d-all is the catalog's op word on the build step's slice, rs-exp-d-wrong a digest that is not the images' (exit 2, no verdict), rs-exp-rtz the same slice
+# under one attribute (the four `-` columns), and rs-exp-s34-all the images made with --names exp --bound-shift 34 (a wider in-lane bound, so that the program
+# marks many lanes) over 0x3f000000 to 0x3f001000 (4096 encodings; widened from the first 9 until marks passed sixteen: 529 marked, all off the list, none
+# guessed wrong, sixteen MARK lines shown). rs-images-manifest is not a log, and has no row: the suite reads it by name, as the manifest-* files.
+rs-exp-all-marks.txt	0	host/routine-sweep exp-f32 0x33fffffb 0x34000004 all [0 s]
+rs-exp-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/routine-sweep exp-f32 0x33fffffb 0x34000004 all [0 s]
+rs-list.txt	0	host/routine-sweep list [0 s]
+rs-card-exp-all-marks.txt	0	env CFT_SOAK_ARTIFACT=$HOME/cardday-rev8q/cft_hw_quad.xclbin CFT_XRT_TILES=1 host/routine-sweep exp-f32 0x33fffffb 0x34000004 all [1 s]
+rs-card-tan-all.txt	0	env CFT_SOAK_ARTIFACT=$HOME/cardday-rev8q/cft_hw_quad.xclbin CFT_XRT_TILES=1 host/routine-sweep tan-f32 0x3f000000 0x3f100000 all [10 s]
+rs-card-exp-all-2p24.txt	0	env CFT_SOAK_ARTIFACT=$HOME/cardday-rev8q/cft_hw_quad.xclbin CFT_XRT_TILES=1 host/routine-sweep exp-f32 0x3d000000 0x3e000000 all [82 s]
+rs-exp-d-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exp-f32-d043b3bb5 0x33fffffb 0x34000004 all [0 s]
+rs-exp-d-wrong.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exp-f32-d00000000 0x33fffffb 0x34000004 all [0 s]
+rs-exp-rtz.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exp-f32-d043b3bb5 0x33fffffb 0x34000004 rtz [0 s]
+rs-exp-s34-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES34 host/routine-sweep exp-f32 0x3f000000 0x3f001000 all [2 s]

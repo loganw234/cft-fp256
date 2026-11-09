@@ -1055,6 +1055,18 @@ WIDE_C5_TILE_OPS = ("rint128-class", "rint256-class", "scaleb128-class", "scaleb
 STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "scaleb32", "scaleb64",
                    "div32-hard", "div64-hard", "sqrt64-hard", "rint64-class", "scaleb64-class",
                    "scaleb32-all", "scaleb32-wide") + WIDE_TILE_OPS + WIDE_C5_TILE_OPS
+# Parcel M4X2: the routine items (host/tools/routine_sweep.c; the catalog's `routine` group) have an op WORD each, <name>-f32[-x<8 hex>][-d<8 hex>], with
+# the digest of the programs in it, so the words are not a fixed list: a routine op is a tile op by a RULE, read from routine_sweep.c's op grammar
+# (parse_op: the thirteen names, then -x and -d words of exactly eight hex digits) and not copied from hw/card_stress_lib.py's table of digests - the
+# two statements stay two, as STRESS_TILE_OPS and OP_REACH do. Each lane of a routine item is a program run on the tile (cft_program_run_ex).
+ROUTINE_OP_RE = re.compile(r"^(?:exp|exp2|expm1|log|log2|log1p|sin|cos|tan|atan|asin|acos|atan2)-f32(?:-x[0-9a-f]{8})?(?:-d[0-9a-f]{8})?$")
+
+
+def is_tile_op(op):
+    """Whether an op word exercises the card's tile: in STRESS_TILE_OPS, or a routine op word (ROUTINE_OP_RE)."""
+    return op in STRESS_TILE_OPS or (isinstance(op, str) and ROUTINE_OP_RE.match(op) is not None)
+
+
 STRESS_TEL = {
     "power_w": "electrical.devices[0].electrical.power_consumption_watts",
     "fpga_c": "thermal.devices[0].thermals.FPGA.temp_C",
@@ -1070,19 +1082,19 @@ def tile_ops_served(served_ops):
     not of the table: the table grows with the catalog (KL-135), and the reduction of a run must not change by a
     byte because the catalog did (what `decoys` and --verify hold). For card-stress-1016, which served the table's
     first eight, this is the list the committed docs/figures/stress.json holds."""
-    return [op for op in STRESS_TILE_OPS if op in served_ops]
+    return [op for op in STRESS_TILE_OPS if op in served_ops] + sorted(op for op in served_ops if op not in STRESS_TILE_OPS and is_tile_op(op))
 
 
 def _check_reach(served_ops, reach):
     """The ops a run served, held to the library's own table of the same fact (OP_REACH) - the check that stands
     only while the two tables stay two (see STRESS_TILE_OPS). Raises ExtractError by name where they disagree."""
     wrong = sorted(op for op in served_ops
-                   if reach.get(op) != ("tile" if op in STRESS_TILE_OPS else "host"))
+                   if reach.get(op) != ("tile" if is_tile_op(op) else "host"))
     if wrong:
         raise ExtractError("the library's OP_REACH and STRESS_TILE_OPS disagree about the served op%s %s: %s there, "
                            "%s here" % ("" if len(wrong) == 1 else "s", ", ".join(wrong),
                                         ", ".join(str(reach.get(op)) for op in wrong),
-                                        ", ".join("tile" if op in STRESS_TILE_OPS else "host" for op in wrong)))
+                                        ", ".join("tile" if is_tile_op(op) else "host" for op in wrong)))
 
 
 def _median(vals):
@@ -1177,7 +1189,7 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
         catalog += _decoys(catalog)
     items = served_items(catalog, by["leg"])
     served_ops = {it.op for it in items.values()}
-    host_ops = sorted(served_ops - set(STRESS_TILE_OPS))
+    host_ops = sorted(op for op in served_ops if not is_tile_op(op))
     reach = getattr(L, "OP_REACH", None)          # the library's own table of the same fact, where it has one
     if reach is not None:
         _check_reach(served_ops, reach)
@@ -1253,7 +1265,7 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
         if any(r["start_epoch"] <= epoch <= r["end_epoch"] for r in batt_run):
             return "other battery leg"
         act = [r for r in sweeps_run if r["start_epoch"] <= epoch <= r["end_epoch"]]
-        if any(r["sweep"]["op"] in STRESS_TILE_OPS for r in act):
+        if any(is_tile_op(r["sweep"]["op"]) for r in act):
             return "sweep, with tile items"
         if act:
             return "sweep, host items only"
@@ -1287,7 +1299,7 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
             mism += 1
 
     def unit_of(op):
-        return "tile" if op in STRESS_TILE_OPS else "host"
+        return "tile" if is_tile_op(op) else "host"
     item_rows = []
     for nm, it in items.items():
         d = per_item[nm]

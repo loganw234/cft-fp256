@@ -94,9 +94,10 @@ RULES = {
                "item is counted per RTL tree, and a host item per host tree and compiler, because no tile computes it. A changed "
                "tree starts a new class from nothing, and nothing is summed across classes. How a run that did not record its tree "
                "is placed is the report's rule, and the class's label says which.",
-    "groups": "Within a class the items are in two groups, each counted over its own items and spaces so that a group joining a class does not "
-              "move the other's figures: the base items, and the wide-format items (fp64, fp128 and fp256), which exist only in a tool built "
-              "against the pinned MPFR. A class's total is over both. Each item names the format it computes in; a conversion names both ends.",
+    "groups": "Within a class the items are in up to three groups, each counted over its own items and spaces so that a group joining a class does "
+              "not move the others' figures: the base items; the wide-format items (fp64, fp128 and fp256), which exist only in a tool built "
+              "against the pinned MPFR; and the routine items (a routine of the maths library compiled to a program, run on the tile against "
+              "MPFR, one item a routine). A class's total is over all its groups. Each item names the format it computes in; a conversion names both ends.",
     "estimate": "ESTIMATE, not a measurement. For an item not yet fully covered in a current class: its gain over the class's last "
                 "3 nights (fewer if the class is younger), divided by the nights in that window, is its rate a night; the nights "
                 "left are the remaining indices over that rate, rounded up; the date counts that many days after the newest night, "
@@ -293,9 +294,12 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
                 if e["complete"]:
                     first_complete.setdefault((c["id"], e["item"]), k)
             after_classes[c["id"]] = {"covered": sum(e["covered"] for e in seen), "complete": sum(1 for e in seen if e["complete"])}
+            grp = {g: {"covered": sum(e["covered"] for e in mine), "complete": sum(1 for e in mine if e["complete"])}
+                   for g in R.GROUPS if (mine := [e for e in seen if e["group"] == g])}
             if any(e["group"] == "wide" for e in seen):
-                after_groups[c["id"]] = {g: {"covered": sum(e["covered"] for e in mine), "complete": sum(1 for e in mine if e["complete"])}
-                                         for g in R.GROUPS if (mine := [e for e in seen if e["group"] == g])}
+                after_groups[c["id"]] = grp
+            elif any(e["group"] == "routine" for e in seen):         # parcel M4X2: a class with a routine row served has its groups written too
+                after_groups[c["id"]] = grp
         nights.append({
             "n": k, "date": st["ts"][:10] if isinstance(st.get("ts"), str) and re.match(r"\d{4}-\d\d-\d\d", st["ts"]) else None,
             "start": st["ts"], "start_epoch": st["epoch"], "end": end.get("ts"), "end_epoch": end.get("epoch"),

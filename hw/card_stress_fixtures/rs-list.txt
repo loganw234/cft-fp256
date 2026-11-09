@@ -1,0 +1,13 @@
+exp-f32: images rne rtz rdn rup rmm, digest 043b3bb5
+exp2-f32: images rne rtz rdn rup rmm, digest ce1e05a9
+expm1-f32: images rne rtz rdn rup rmm, digest e63ada45
+log-f32: images rne rtz rdn rup rmm, digest e84c29cb
+log2-f32: images rne rtz rdn rup rmm, digest c274c957
+log1p-f32: images rne rtz rdn rup rmm, digest 38ea27d9
+sin-f32: images rne rtz rdn rup rmm, digest 05eb28b1
+cos-f32: images rne rtz rdn rup rmm, digest 98b93d46
+tan-f32: images rne rtz rdn rup rmm, digest dbfd4a4e
+atan-f32: no image
+asin-f32: no image
+acos-f32: no image
+atan2-f32: no image

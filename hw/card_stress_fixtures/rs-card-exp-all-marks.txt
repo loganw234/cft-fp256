@@ -1,0 +1,13 @@
+soaking the DEVICE backend: $HOME/cardday-rev8q/cft_hw_quad.xclbin
+oracle: MPFR 4.2.2 with GMP 6.3.0, mpfr_ieee.h's emulation
+image exp rne: sha256 774a170f4de22b56a11a5f3089f6d86f9779d0323e0e1be05e8c29b1442f9f56, 387 instructions, 71 words
+image exp rtz: sha256 845566d93fd52144ff1ea386be3518243cd580e57def6295bddcabf3308e98c2, 385 instructions, 71 words
+image exp rdn: sha256 c94bfb0fd2c26e170fe3a608b73eb49d7d95e629a5d6cce610954c23826339ec, 385 instructions, 71 words
+image exp rup: sha256 780460885ef70f37570712544e704a5d657a02631428e846a7fd5f14be5ceee0, 384 instructions, 70 words
+image exp rmm: sha256 16193f6017b3782eb7a0aedba74547cfbe9df7815fb27d5a13401e47077e893b, 387 instructions, 71 words
+exp-f32 all: device 0.002 s, oracle 0.000 s, 16384 lanes a call
+  MARK rtz a=0x33ffffff guess=0x3f800000 right
+  MARK rdn a=0x33ffffff guess=0x3f800000 right
+  MARK rup a=0x33ffffff guess=0x3f800001 right
+exp-f32 all: 45 cases, 0 value mismatches, 0 flag mismatches, 9 encodings, 0 skipped
+exp-f32 all: 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), 0 off the list, 0 guesses wrong
