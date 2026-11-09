@@ -6384,7 +6384,7 @@ FAKE_GEN = """import os, subprocess, sys
 # FAKE_GEN_EXTRA=<line> adds a line; FAKE_GEN_COMMIT=<sha> says another commit; FAKE_GEN_NOMAN=1 writes no manifest.
 out = sys.argv[sys.argv.index("--out") + 1]
 if os.path.exists(out):
-    sys.stderr.write("gen_sweep_images: %s exists\n" % out)
+    sys.stderr.write("gen_sweep_images: %s exists\\n" % out)
     sys.exit(2)
 if os.environ.get("FAKE_GEN_FAIL"):
     sys.exit(int(os.environ["FAKE_GEN_FAIL"]))
@@ -6404,7 +6404,7 @@ if os.environ.get("FAKE_GEN_EXTRA"):
     lines.append(os.environ["FAKE_GEN_EXTRA"])
 os.makedirs(out)
 if not os.environ.get("FAKE_GEN_NOMAN"):
-    open(os.path.join(out, "manifest.txt"), "w", newline="\n").write("\n".join(lines) + "\n")
+    open(os.path.join(out, "manifest.txt"), "w", newline="\\n").write("\\n".join(lines) + "\\n")
 """
 
 
