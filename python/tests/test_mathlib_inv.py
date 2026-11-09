@@ -654,24 +654,32 @@ def test_each_plant_is_red_in_its_checks_and_green_in_the_others(row):
         assert check not in got, f"{plant}: {check} is red: {got[check][:2]}"
 
 
+def _check_row(row):
+    plant, red, green = row
+    assert set(red) | set(green) == set(CHECKS), \
+        (plant, set(CHECKS) - set(red) - set(green))
+    assert not set(red) & set(green), plant
+    assert len(red) + len(green) == len(CHECKS), plant
+    assert red, plant
+
+
 def test_every_plant_is_in_the_table_and_every_row_lists_every_check():
     named = [row[0] for row in PLANTED]
     assert set(named) == INV_PLANT_NAMES == set(ml.INV_PLANTS)
     assert len(named) == len(set(named))
     assert all(isinstance(t, str) and len(t) > 20
                for t in ml.INV_PLANTS.values())
-    for plant, red, green in PLANTED:
-        assert set(red) | set(green) == set(CHECKS), \
-            (plant, set(CHECKS) - set(red) - set(green))
-        assert not set(red) & set(green), plant
-        assert len(red) + len(green) == len(CHECKS), plant
-        assert red, plant
-        if plant in CORE_PLANTS:
-            continue
-    # a row that omitted a check would be caught here, and the test itself is
-    # shown to catch it on a doctored table
-    doctored = ("coef", ("bound",), ("pools",))
-    assert set(doctored[1]) | set(doctored[2]) != set(CHECKS)
+    for row in PLANTED:
+        _check_row(row)
+    # the row check itself is shown to refuse a row that omits a check, one
+    # that names a check red and green, and one red in nothing
+    rest = tuple(c for c in CHECKS if c not in ("bound", "pools"))
+    for bad in (("coef", ("bound",), ("pools",)),
+                ("coef", ("bound", "pools"), ("pools",) + rest),
+                ("coef", (), tuple(CHECKS))):
+        with pytest.raises(AssertionError):
+            _check_row(bad)
+    _check_row(("coef", ("bound",), ("pools",) + rest))
 
 
 def test_every_check_has_a_plant_red_in_it_and_every_plant_is_red_somewhere():

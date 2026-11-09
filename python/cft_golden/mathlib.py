@@ -203,7 +203,7 @@ inv_core, inv_recon, inv_final, build_inv_core and check_inv_constants
 (`--check --only inv`); build() and fragment() accept a name that is built, a
 lane of a fragment of two or more inputs (atan2's) is a tuple in its inputs'
 order for evaluate() and Build.run(). The design is docs/studies/M4-invtrig.md
-and Logan's answers of 2026-11-06 (docs/ROADMAP.md, "Logan's answers on M4's
+and Logan's answers of 2026-10-23 (docs/ROADMAP.md, "Logan's answers on M4's
 study"); the construction below IS the study's model (docs/studies/m4/
 m4inv.py), ported, and nothing here imports it. A change to a public name is
 the lead's to approve.
@@ -5239,7 +5239,7 @@ def _build_trig_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
 
 # ---- atan, atan2, asin and acos: the core, and atan (parcel M4G1) -------------
 #
-# M4's design is docs/studies/M4-invtrig.md and Logan's answers of 2026-11-06
+# M4's design is docs/studies/M4-invtrig.md and Logan's answers of 2026-10-23
 # (docs/ROADMAP.md, "Logan's answers on M4's study"). Every function is
 #
 #     result = sign (C + sigma atan(n/d)),    0 <= n <= d,
@@ -5267,7 +5267,7 @@ INV_BIAS = Fraction(63, 64)             # the index's bias: Sterbenz's premise
 INV_EPS_T = Fraction(28, 10000)
 
 # The most values an inverse routine may keep live at once, by function and
-# format (Logan's answer 9 of 2026-11-06): atan 15, asin 16, acos 16, atan2 19
+# format (Logan's answer 9 of 2026-10-23): atan 15, asin 16, acos 16, atan2 19
 # at fp64, fp128 and fp256, and 25, 25, 25 and 31 at fp32 (the triple word,
 # parcel M4F1's). One row each: invariants() holds an inverse fragment to its
 # own row and falls back to no other. routines.py does not name these four
@@ -5590,7 +5590,8 @@ def inv_recon(b: Build, th, tl, Ch, Cl, sigc, sx=None):
     zero; `sx`, a sign word, is XORed onto both words of V before the one
     rounding, or None (acos). A front that forces theta0 (atan's infinities,
     atan2's table) does so between inv_core and this. Guarantees: Vh + Vl = C +
-    sigma (th + tl) up to the three roundings, 2^-(2p-3) of V or so, and
+    sigma (th + tl) up to the three roundings (BELIEVED about 2^-(2p-3) of V, not
+    measured by any check), and
     |Vl| <= ulp(Vh)/2 (Vh = RN(Vh + Vl)), which inv_final's test needs.
     Probes Vh and Vl."""
     kw = _inv_consts(b)
@@ -5710,7 +5711,7 @@ def _inv_refuse(name, fmt):
     if name not in _INV_BUILDERS:
         raise ValueError(f"{name!r} is not built yet: it is parcel "
                          f"{_INV_PARCEL[name]}'s ({', '.join(_INV_BUILDERS)} "
-                         f"are built)")
+                         f"{'is' if len(_INV_BUILDERS) == 1 else 'are'} built)")
 
 
 def _check_inv_plant_fired(b: Build):
@@ -5765,8 +5766,8 @@ def build_inv_core(fmt: FpFormat, rnd: int = RNE, *, G=None, plant=None,
     is th and whose flags are tl (so nothing compiles it, and Build.run()
     reads it; a lane is a tuple in inputs order). `G` overrides the guard,
     `plant` is one of the faults inv_core acts on (table_entry, coef,
-    newton_short, sterbenz_bias, zl_dropped, sl_dropped); any other of
-    INV_PLANTS is refused by name. Probes are inv_core's; meta fn is
+    newton_short, sterbenz_bias, zl_dropped, sl_dropped, and two_sum_all,
+    which acts on every Fast2Sum); any other of INV_PLANTS is refused by name. Probes are inv_core's; meta fn is
     "inv_core"."""
     G = _inv_args("atan", fmt, rnd, plant, G)
     b = _inv_setup("inv_core", fmt, rnd, G, 0, plant)

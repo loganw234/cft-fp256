@@ -685,7 +685,7 @@ SHAPE = {
 }
 
 # the study's instructions by phase (costs.*.out.txt): the quotient (17, 19,
-# 21: the Newton steps) and the tail (6, 14, 29: D - K + 1 FMAs) are the
+# 21: the Newton steps) and the tail (6, 14, 29: D - K FMAs) are the
 # formats'; the rest is the same at every format
 _PHASES_ATAN = {"front": 5, "index": 7, "num": 6, "den": 6, "z": 6,
                 "head": 52, "atan_s": 6, "table": 17, "recon": 23,

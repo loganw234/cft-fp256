@@ -158,11 +158,10 @@ sample is a function of --seed, so a run can be repeated.
            every configuration, each lane equal to transcend.py in bits and
            flag word or marked and on INV_POOL_MARKS; with --seq the fragment
            as a program on seq.py and as the compiled shape over the same
-           lanes. ESTIMATED (from the golden stage's measured 12 s for the
-           pools, structured lanes and specials of atan at 15
-           configurations, one core of the desktop, BELIEVED about as fast on
-           the box): under 1 minute without --seq, 1 to 2 minutes with it, 100
-           to 150 MB; --step 8 and --quick take less. No code changes for
+           lanes. MEASURED at full size (atan, 15 configurations, one process,
+           unniced, the desktop shared with other parcels and its load not
+           measured): 11 s without --seq (peak memory 50 MB), 36 s with it
+           (51 MB); --step 8 and --quick take less. No code changes for
            asin, acos or atan2: the lanes, pools and tables come from the
            harness by function
   inv-bound  the same functions: |V - f(x)| / Bv under 1, mpmath at 4p + 200
@@ -170,12 +169,11 @@ sample is a function of --seed, so a run can be repeated.
            big, small, random: python/tests/mathlib_inv_harness.REGIONS; a
            seed each from --seed on) of each format (3,000 a region at fp64
            and 1,000 at fp128 and fp256 by default), each lane also against
-           transcend.py. The largest is a sampled lower bound. ESTIMATED
-           (about 5 ms a lane at fp64 and 10 ms at fp256, from the harness's
-           measured 48-point regions: BELIEVED, not yet run at this size):
-           12,000 lanes at fp64 take about 1 minute, 4,000 at fp128 and
-           fp256 about 1 minute each, 100 to 200 MB; --quick is 12 points a
-           region. No code changes for asin, acos or atan2
+           transcend.py. The largest is a sampled lower bound. MEASURED at full
+           size (atan, the defaults: 3,000 points a region at fp64, 1,000 at
+           fp128 and fp256, rne; one process, unniced, the desktop shared and
+           its load not measured): 93 s, peak memory 51 MB, RESULT: ok;
+           --quick is 12 points a region. No code changes for asin, acos or atan2
   trig-bound  sin, cos and tan: |V - f(x)| / Bv under 1, mpmath at 4p + 200
            bits, at --n placed points of each of the study's five regions
            (edge, near, zero, small, random; a seed each from --seed on) of
