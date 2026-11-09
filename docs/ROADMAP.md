@@ -6232,6 +6232,19 @@ function gains an L3 rule.
     one double-word quotient. Its verifier found one design defect,
     atan2 with a tiny numerator wrong and unmarked, fixed before the
     merge.
+  - **Its build started 2026-11-09,** a round of its own as M2's was,
+    with Sonnet authors and Haiku verifiers (Logan, 2026-11-06: "M4
+    Monday with Sonnet and Haiku"): thirteen parcels in five waves, in
+    the order of the study's section 10. Wave 1 is the one core with
+    atan at fp64, fp128 and fp256 in the golden generator (parcel
+    M4G1, merged at 57ba36af), and the fp32 sweep tool (parcel M4X).
+  - **Logan's answers on the round's plan** (2026-11-06, in chat): "1.
+    Partial is acceptable 2. Card 3. Yes include M1 and M2 routines".
+    So atan2's fp32 sweep, which cannot cover its 2^64 pairs, takes
+    every y for a fixed list of nine x; the sweeps run on the U50, as
+    items of the nightly catalog by the round's plan (parcel M4X2),
+    with the box's CPU as the fallback; and the tool sweeps all
+    thirteen fp32 routines, M1's six and M2's three among them.
 - **Their order:** M2's study can run beside M1's build; M4 follows
   M2 (step 6's plan asked only that it follow L4, which step 6
   built); M3 comes last, as step 6's plan has it.
