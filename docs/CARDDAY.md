@@ -2018,8 +2018,8 @@ default, 1 for all; 0 for none); a difference is a value mismatch named `ORACLE`
 `image <name> <attr>: sha256 <image and bank>, I instructions, K words` an attribute, and
 `<op> <mode>: device S s, oracle S s, L lanes a call`. Exit 0 when V and F are zero, 1 when not (and after `  library call failed`),
 2 for a usage, image, open or load failure, with no verdict line. Negative controls (each must exit 1): `CFT_SOAK_SABOTAGE=1` flips
-the low bit of the first unmarked lane's result of every call (a deliberate difference from the brief's "first result", approved by the lead: a marked first lane would only make a wrong guess, which fails nothing), `=2` a flag bit of its byte, `=3` clears bit 7 of every byte, which
-only the call's STATUS check sees (and says so on stderr, and sabotages nothing, in a slice with no marked lane).
+the low bit of the first unmarked lane's result of every call (a deliberate difference from the brief's "first result", approved by the lead: a marked first lane would only make a wrong guess, which fails nothing), `=2` a flag bit of its byte, `=3` clears bit 7 of every byte: the call's STATUS check sees that wherever a lane was marked,
+and a cleared lane is then judged as unmarked, so one on the image's `.marks` list is also a flag mismatch and one whose guess was wrong a value mismatch (in a slice with no marked lane it sabotages nothing, and says so on stderr).
 
 **What it does not claim.** No slice is "every argument": a run covers exactly [lo, hi). It is not a proof of the routine, only a
 comparison with MPFR over the lanes that ran, and MPFR 4.1.0 and 4.2.2 are both correctly rounded, so the verdict does not depend on

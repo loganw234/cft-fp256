@@ -58,8 +58,10 @@
  * verdict.
  *
  * Negative controls, after the library computes (CFT_SOAK_SABOTAGE; each must exit 1): =1 flips the low bit of the first
- * unmarked lane's result of every call; =2 flips a flag bit of that lane's byte; =3 clears bit 7 of every byte, which only the
- * call's STATUS check can see (and which does nothing, and says so on stderr, in a slice with no marked lane).
+ * unmarked lane's result of every call; =2 flips a flag bit of that lane's byte; =3 clears bit 7 of every byte: the call's
+ * STATUS check sees that wherever a lane was marked, and a cleared lane is then judged as unmarked, so one on the image's
+ * .marks list is also a flag mismatch and one whose guess was wrong a value mismatch (in a slice with no marked lane it does
+ * nothing, and says so on stderr).
  */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #  define _POSIX_C_SOURCE 200112L
