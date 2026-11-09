@@ -478,7 +478,7 @@ def test_shape(fmt):
         "fp256": (203, 77, 15)}[fmt.name]
 
 
-def test_the_audit_is_the_studys_and_sterbenz_bias_is_red_only_there():
+def test_the_audit_is_the_studys_and_sterbenz_bias_is_red_in_audit_core_and_constants():
     want = {"fp64": (-7.3, 44.0), "fp128": (-5.1, 46.0),
             "fp256": (-5.8, 46.0)}
     for fmt in FORMATS:
@@ -491,9 +491,9 @@ def test_the_audit_is_the_studys_and_sterbenz_bias_is_red_only_there():
         assert (t["lanes"], t["premise"], t["inexact"], t["past"]) == (
             214, 86, 24, 24)
         assert round(t["largest"], 1) == want[fmt.name][1]
-    # and on atan's own lanes the plant is red in nothing but the audit
-    # (the core's Kk and the constants see it, the pools, structured lanes,
-    # bound and specials do not)
+    # and the plant is red in the audit, the core (Kk's contract) and the
+    # constants (MSEL), and in no check of atan's own lanes (pools, seq,
+    # bound, structured, specials and shape are green)
     red = I.red_checks("sterbenz_bias")
     assert set(red) == {"audit", "core", "constants"}
 
@@ -689,8 +689,8 @@ def test_every_check_has_a_plant_red_in_it_and_every_plant_is_red_somewhere():
     # and a clean test for each check
     for name in ("test_pools", "test_seq", "test_bound", "test_structured",
                  "test_specials", "test_shape", "test_core",
-                 "test_the_audit_is_the_studys_and_sterbenz_bias_is_red_only_"
-                 "there", "test_constants_in_process"):
+                 "test_the_audit_is_the_studys_and_sterbenz_bias_is_red_in_"
+                 "audit_core_and_constants", "test_constants_in_process"):
         assert callable(globals()[name]), name
 
 
