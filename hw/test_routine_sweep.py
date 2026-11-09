@@ -207,7 +207,8 @@ def account_problems(built, skipped):
 
 def digest_judge(built, table):
     """The build step's rule (hw/card_stress.py, `routine images`): every row of the table must be among the built names with an equal digest, in the table's
-    order - a row the generator skipped, or whose digest differs, fails by name; a built name with no row is NAMED and does not fail. (failures, named)."""
+    order - a row the generator skipped, or whose digest differs, fails by name (so does a table whose order is not the generator's); a built name with no row is NAMED
+    and does not fail. Returns (failures, named)."""
     d = dict(built)
     fails = []
     for n, dg in table.items():
@@ -323,7 +324,7 @@ def group_build(tool, log, tree, work, imgs, manifest):
     check("build: `list` has thirteen rows, five images for exactly the generator's built names (in the tool's order) and `no image` for exactly the names it skipped",
           len(rows) == 13 and [r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built] and noimg == skipped and not account_problems(built, skipped),
           f"{rows} {built} {skipped}")
-    check("build: RED - the `list` check above is red when the generator's skipped names are one short (a routine `list` calls `no image` that the account built), and when a built name is dropped",
+    check("build: RED - the `list` check above, evaluated on lists in memory, is red when the generator's skipped names are one short (`list` says `no image` for a name the account did not skip), and when a built name is dropped",
           not (noimg == skipped[1:] and len(skipped) > 0) and not ([r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built[1:]]), "")
     rc, out, err = tool.raw("list", imgs=os.path.join(work, "nowhere"))
     check("build: `list` with no images directory says `no image` thirteen times", rc == 0 and out.count("no image") == 13, out[:200])
@@ -355,7 +356,8 @@ def group_images(tool, tree, work, imgs, manifest):
           "BUILT in the tool's order, and together the thirteen", account_problems(built, skipped) == [], f"{account_problems(built, skipped)} {built} {skipped}")
     check("images: the manifest has an image line for each (built name, attribute) - 45 with nine - with its three sha256, dag_digest and commit",
           len(image_line.findall(manifest)) == 5 * len(built), f"{len(image_line.findall(manifest))} for {len(built)} built")
-    # each derived check shown able to fail, on doctored input in scratch (send-back 1 of parcel M4X2): the checks above and below, run on a doctored copy
+    # send-back 1 of parcel M4X2: the RED checks below evaluate the conditions of the checks above on doctored input - one on a doctored COPY of the images directory
+    # (work/img-red), the others on doctored lists and on a manifest string held in memory; the digest judge's reds and greens, on doctored tables, follow them.
     red_dir = os.path.join(work, "img-red")
     shutil.copytree(imgs, red_dir)
     for ext in ("cftp", "bank", "marks"):
@@ -369,7 +371,8 @@ def group_images(tool, tree, work, imgs, manifest):
           any("neither built nor skipped" in x for x in account_problems(built[1:], skipped)), "")
     check("images: RED - an image line dropped: the manifest's image lines are not 5 for each built name",
           len(image_line.findall(manifest.replace(image_line.findall(manifest)[0] + "\n", "", 1))) != 5 * len(built), "")
-    check("images: GREEN - a doctored manifest with one more built name (an atan `digest` line, atan taken off the skipped lines) has a whole account",
+    check("images: GREEN - while atan is skipped: lists with one more built name (an atan `digest` line, atan taken off the skipped lines) have a whole account "
+          "(when atan is built the lists are the real ones and this repeats the account check)",
           account_problems(built + ([("atan", "00000000")] if "atan" in skipped else []), [n for n in skipped if n != "atan"]) == [], "")
     # parcel M4X2: the generator's `digest` lines against hw/card_stress_lib.py's table of them, which the card driver holds its build step to: a moved fragment
     # fails the gate at its merge and not a night. The judge is a function, so that it is shown red on a doctored table as well as green on the real one.
@@ -379,13 +382,13 @@ def group_images(tool, tree, work, imgs, manifest):
     doctored["exp"] = doctored["exp"][:-1] + ("0" if doctored["exp"][-1] != "0" else "1")
     check("images: every row of hw/card_stress_lib.py's ROUTINE_DIGESTS is among the generator's `digest` lines with an equal digest, in the table's order (the build step's rule); "
           f"a built name with no row is named and does not fail ({named_ or 'none today'})", not fails_ and len(L.ROUTINE_DIGESTS) > 0, f"{fails_} {mdig} {L.ROUTINE_DIGESTS}")
-    check("images: ... and the same judge is red on a table with one digit of exp's digest changed, on one with a row the generator skipped, and on one in another order; "
-          "the table with a row dropped is green and names the built name it lacks",
+    check("images: ... and the same judge is red on a table with one digit of exp's digest changed, on one with a row the generator skipped (a name never built, "
+          "when it skipped none) and on one in another order; the table with a row dropped is green and names the built name it lacks",
           digest_judge(mdig, doctored)[0] and digest_judge(mdig, dict(L.ROUTINE_DIGESTS, **{(skipped or ["nonesuch"])[0]: "00000000"}))[0]
           and digest_judge(mdig, dict(reversed(list(L.ROUTINE_DIGESTS.items()))))[0]
           and digest_judge(mdig, {k: v for k, v in L.ROUTINE_DIGESTS.items() if k != "tan"}) == ([], ["tan"] + [n for n, _ in mdig if n not in L.ROUTINE_DIGESTS]), "")
-    check("images: ... and green, naming the extra, on a manifest with one more built name than the table (an atan `digest` line)",
-          digest_judge(mdig + [("atan", "00000000")], L.ROUTINE_DIGESTS) == ([], named_ + ["atan"]) if "atan" not in dict(mdig) else True, "")
+    check("images: ... and green, naming the extra, on built names with one more than the table has: a name that can never be built or tabled (nonesuch), added to the real lists",
+          digest_judge(mdig + [("nonesuch", "00000000")], L.ROUTINE_DIGESTS) == ([], named_ + ["nonesuch"]), "")
     ok = os.path.exists(os.path.join(tree, "host", "positive-run"))
     if not ok:
         skip("images: positive-run", "did not build")
