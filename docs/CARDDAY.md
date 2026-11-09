@@ -1957,6 +1957,88 @@ steady rates on the card are not measured (their clean runs were 2.00 to 4.12 s,
 them). A tool built without MPFR refuses the wide modes as an unknown op
 rather than by a sentence of its own, because that build is the 0192ab11 object.
 
+### The routine sweep (added 2026-11-09, parcel M4X): every argument of a routine, by name, against MPFR, slice by slice
+
+`routine-sweep` runs a math-library routine at fp32 over a slice of its 2^32 arguments, on libcft as the **compiled program** (the
+shape the compiler inlines: QUIET, the body, ENDQUIET, RAISE of the flag word, the result deposited), and compares every lane in
+bits and flags with MPFR. It exists because fp32's bound has no budget (Logan's answer 3 on M4's study): its evidence is the box's
+samples and an exhaustive sweep of the 2^32 arguments of each function, and nothing could run such a sweep. It is the soaks' form
+(host/tools/divsqrt_soak.c) so that the card can run it slice by slice: a verdict line, the first sixteen disagreements, the
+backend chosen by `CFT_SOAK_ARTIFACT` (unset: the software backend, which is the CPU fallback), `CFT_XRT_TILES` honoured by the
+library, a run that keeps no state (resume is the driver's). Parcel M4X2 makes it an item of the nightly catalog; the first card run
+is the lead's, below.
+
+**Build and images.** On the box: `make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt MPFR=1 MPFR_PREFIX=DIR routine-sweep`, then
+`ldd routine-sweep | grep xrt` in host/ (without `XRT=1` the tool opens no artifact, and every image on the box fails at once: the
+XRT=1 trap of CLAUDE.md). It is a target of its own, not in `all`, and always linked with MPFR and GMP. Its images are made by
+`python3 -B host/tools/gen_sweep_images.py --out DIR [--names exp,sin] [--attrs rne,...] [--plant NAME] [--bound-shift S]` (DIR must
+not exist), which writes for each name and attribute `<name>-fp32-<attr>.cftp` (the program), `.bank` (its constants) and `.marks`
+(the lanes that must mark), and `manifest.txt` (name, attribute, instructions, words, the sha256 of each file, `dag_digest`, the
+commit, and a `digest` line a name). The tool reads them from `CFT_SWEEP_IMAGES`, else from `sweep-images/` beside the binary
+(a `sweep-images/` directory in host/ is ignored by git). atan, asin, acos and atan2 have an image only once parcels M4F1 and M4F2 are merged;
+until then the generator skips and names them, and the tool says `no image`.
+
+**Running.**
+
+    routine-sweep <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>
+    routine-sweep oracle <op> <rne|rtz|rdn|rup|rmm>     hex lanes on stdin; "lane bits flags" a line out; no device, no image
+    routine-sweep list                                  the thirteen, each with its digest or `no image`
+
+`<op>` is `<name>-f32` (exp, exp2, expm1, log, log2, log1p, sin, cos, tan, atan, asin, acos) or `atan2-f32-x<8 hex digits>` (x
+fixed, y swept: r0 the lanes' y, r1 the fixed x), and may end `-d<8 hex digits>`, the first 32 bits of the sha256 of the five
+attributes' image and bank bytes (image then bank, rne to rmm); a digest that is not the images' is exit 2, which is how a slice is
+tied to the fragment it ran. `[lo, hi)` is 0 <= lo < hi <= 2^32, decimal or 0x. A call is 16,384 lanes (`-DLANES=n` at build,
+`CFT_SWEEP_LANES` at run): one `cft_program_run_ex` with `lane_flags`, `counts`, `flags_out` and `bus_out` asked for.
+
+**What a lane is held to.** Unmarked: its bits are MPFR's (a NaN is the canonical quiet NaN, 0x7fc00000) and its byte's [4:0] are
+MPFR's flags (`ieee_tfn_oracle`, host/tools/mpfr_tfn.h: mpfr-check's own transcendental oracle, moved there). Marked (byte bit 7: a
+lane whose last bit the routine's own test could not decide): counted, and its guess compared; a wrong guess is counted and named and
+**does not fail the slice**, because the replay decides a marked lane. A lane on the image's `.marks` list that is not marked is a
+flag mismatch; a mark not on the list is counted as `off the list` and fails nothing. Each call is held as `check_r24` holds one:
+the OR of the bytes is `flags_out`, STATUS[6] is set exactly when a byte's bit 7 is, no byte has bits 6 or 5, every count is 1, STATUS
+has no other bit; a failure is a flag mismatch named by the call's range.
+
+**The word `all`** runs the five attributes in one job: the images loaded once, each call run five times, each lane evaluated once
+by MPFR. One MPFR evaluation for the five attributes is what keeps the oracle cheap: MEASURED on the software backend (WSL cft2204, `all` over 2^18 lanes, niced, one process) it took 0.28 to 0.78 s a routine for 1,310,720 cases, 0.2 to 0.6 us a case, against 110 to 313 s for the software tile. The fast
+path: y = f(x) truncated to p + 1 bits by RNDZ with its ternary, at MPFR's widest exponents; where y is a number, the ternary is not
+zero, MPFR's overflow and underflow are clear and 2^-125 <= |y| < 2^127, every attribute's answer follows from y's last kept bit and
+its sign, the flags are exactly inexact, and no tie is possible. Every other lane (exact, special, subnormal, overflowing) takes
+`ieee_tfn_oracle` under each attribute. `CFT_SWEEP_ORACLE_CHECK=N` runs that beside the fast path on every Nth encoding (4096 by
+default, 1 for all; 0 for none); a difference is a value mismatch named `ORACLE`.
+
+**What it prints.** stdout, the verdict `hw/card_stress_lib.py`'s `SOAK_LINE` matches and no other line does:
+
+    exp-f32 all: 81920 cases, 0 value mismatches, 0 flag mismatches, 16384 encodings, 0 skipped
+    exp-f32 all: 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), 0 off the list, 0 guesses wrong
+      MARK rtz a=0x33ffffff guess=0x3f800000 right
+
+(cases = 5 E under `all`; an attribute not run is `-` in the second line; `  MISMATCH <mode> a=0x.. lib=0x.. mpfr=0x..`,
+`  FLAGS <mode> a=0x.. lib=0x.. mpfr=0x..` and `  MARK ...` lines, sixteen of each at most); stderr, `soaking the software backend` (or
+`DEVICE: <artifact>`) as the soaks print it, `oracle: MPFR <v> with GMP <v>, mpfr_ieee.h's emulation`, one
+`image <name> <attr>: sha256 <image and bank>, I instructions, K words` an attribute, and
+`<op> <mode>: device S s, oracle S s, L lanes a call`. Exit 0 when V and F are zero, 1 when not (and after `  library call failed`),
+2 for a usage, image, open or load failure, with no verdict line. Negative controls (each must exit 1): `CFT_SOAK_SABOTAGE=1` flips
+the low bit of the first unmarked lane's result of every call (a deliberate difference from the brief's "first result", approved by the lead: a marked first lane would only make a wrong guess, which fails nothing), `=2` a flag bit of its byte, `=3` clears bit 7 of every byte, which
+only the call's STATUS check sees (and says so on stderr, and sabotages nothing, in a slice with no marked lane).
+
+**What it does not claim.** No slice is "every argument": a run covers exactly [lo, hi). It is not a proof of the routine, only a
+comparison with MPFR over the lanes that ran, and MPFR 4.1.0 and 4.2.2 are both correctly rounded, so the verdict does not depend on
+which was linked (the `oracle:` line says which was). A marked lane is not decided here: the replay does that. The software
+backend's rate is the software tile's; **nothing below is the card's**.
+
+**The first card run (the lead's; a daytime slot ending by 17:50; rev8q, nothing else on the card).** What each step should print is
+from the software runs of M4X, 2026-11-09; the card's figures are **not measured**.
+1. Software on the box, then tile 1 alone (`CFT_SOAK_ARTIFACT=... CFT_XRT_TILES=1`), the same slices: `exp-f32` under `all` over the
+   five 9-lane slices `[lane-4, lane+5)` of exp's marking lanes 0x33ffffff, 0x347ffffe, 0x34fffffc, 0xb4800001, 0xb5000002. Each
+   should print `exp-f32 all: 45 cases, 0 value mismatches, 0 flag mismatches, 9 encodings, 0 skipped` and
+   `exp-f32 all: 3 marked (rne 0, rtz 1, rdn 1, rup 1, rmm 0), 0 off the list, 0 guesses wrong`; the software and tile verdict and marks
+   lines must be equal, 15 marks in all, none off the list.
+2. `CFT_SOAK_SABOTAGE=1` once, on one of those slices: exit 1, a `MISMATCH` line for each of the four unmarked attributes.
+3. `tan-f32` under `all` over 2^20 lanes (the largest program, 998 instructions): expect `5242880 cases ... 1048576 encodings`; read
+   `device s` against `oracle s`. COMPUTED, not measured on the card: a tile runs a routine at about 1/(0.98 ns x instructions) per lane-attribute (BENCHMARKS.md's revision-6 figure, not measured on revision 8), 998 instructions for tan, so about 1.0M cases/s; the tool runs a call and then checks it, so device and oracle times add in one process, and the software run's tan oracle (0.44 s for 2^18 lanes, 0.34 us a case) would be about a quarter of it.
+4. Four processes, one a tile (`CFT_XRT_TILES=1..4`), disjoint 2^24 slices of `exp-f32`: expect `83886080 cases ... 16777216 encodings`
+   from each; read lanes a second a tile, with the oracle beside it. COMPUTED, not measured: exp's 387 instructions give about 2.6M cases/s a tile, and the software run's exp oracle (0.51 s for 2^18 lanes, 0.39 us a case) adds about as much time again in each process, so about 1.3M cases/s a process is what to compare the card's figure with.
+
 ### The soak at a larger pass size (added 2026-10-20): how to build it, what it prints, what it gives up
 
 **Why.** `cft_div`, `cft_sqrt`, `cft_rint` and `cft_scaleb` are composed of `cft_run` passes over

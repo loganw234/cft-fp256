@@ -915,16 +915,29 @@ rate-probe$(EXE): tools/rate_probe.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/rate_probe.c libcft.a -o $@ \
 	  $(XRTLIBS) $(LDLIBS) -lm
 
+# The routine sweep (parcel M4X, 2026-11-09): every argument of a routine, by name, run through libcft as the compiled program and
+# compared in bits and flags with MPFR, in the soaks' form (tools/routine_sweep.c's header). A target of its own, not in `all`, as
+# the soaks and rate-probe are, and always linked with MPFR and GMP as mpfr-check is: its oracle is tools/mpfr_tfn.h, mpfr-check's
+# own, which builds on MPFR 4.1.0 for the thirteen routines it sweeps. MPFR_PREFIX=DIR takes DIR/include and DIR/lib as the soaks
+# do. On a box that will open an artifact: `make -C host XRT=1 XRT_ROOT=... MPFR=1 MPFR_PREFIX=DIR routine-sweep`, then
+# `ldd host/routine-sweep | grep xrt` (without XRT=1 it opens none: CLAUDE.md). -DLANES=n at build sets the lanes a call.
+# The images it runs are host/tools/gen_sweep_images.py's, read from CFT_SWEEP_IMAGES or sweep-images/ beside the binary.
+routine-sweep$(EXE): tools/routine_sweep.c tools/mpfr_tfn.h tools/mpfr_ieee.h libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include) -fno-math-errno \
+	  tools/routine_sweep.c libcft.a -o $@ $(XRTLIBS) $(LDLIBS) \
+	  $(if $(MPFR_PREFIX),-L$(MPFR_PREFIX)/lib )-lmpfr -lgmp -lm
+
 # Convenience alias for Windows, where the real target carries .exe.
 # Guarded: with EXE empty the alias would be a circular self-edge.
 ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
 clause5-soak: clause5-soak$(EXE)
 rate-probe: rate-probe$(EXE)
+routine-sweep: routine-sweep$(EXE)
 mpfr-check: mpfr-check$(EXE)
 mp-err-check: mp-err-check$(EXE)
 cft-bench-peers: cft-bench-peers$(EXE)
-.PHONY: divsqrt-soak clause5-soak rate-probe mpfr-check mp-err-check cft-bench-peers
+.PHONY: divsqrt-soak clause5-soak rate-probe routine-sweep mpfr-check mp-err-check cft-bench-peers
 endif
 
 # ====================================================================
@@ -1074,7 +1087,7 @@ clean-soak-chunk:
 # reaches fp128/fp256. Needs libmpfr/libgmp (mingw64 carries them as
 # gcc dependencies; Linux wants libmpfr-dev). See the tool's header
 # for the RMM construction and the flag-derivation policy.
-mpfr-check$(EXE): tools/mpfr_check.c tools/mpfr_ieee.h tools/mpfr_c5.h libcft.a
+mpfr-check$(EXE): tools/mpfr_check.c tools/mpfr_ieee.h tools/mpfr_c5.h tools/mpfr_tfn.h libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 
@@ -1601,6 +1614,7 @@ clean:
 	      cft-bench-peers cft-bench-peers.exe \
 	      divsqrt-soak divsqrt-soak.exe clause5-soak clause5-soak.exe \
 	      rate-probe rate-probe.exe \
+	      routine-sweep routine-sweep.exe \
 	      mpfr-check mpfr-check.exe mp-err-check mp-err-check.exe \
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
