@@ -308,6 +308,17 @@ def group_images(tool, tree, work, imgs, manifest):
     check("images: the manifest has an image line for each of the 45 (name, attribute) with its three sha256, dag_digest and commit",
           len(re.findall(r"^image \S+ \S+ instructions \d+ words \d+ image_sha256 [0-9a-f]{64} bank_sha256 [0-9a-f]{64} "
                          r"marks_sha256 [0-9a-f]{64} dag_digest [0-9a-f]{64} commit \S+$", manifest, re.M)) == 45, "")
+    # parcel M4X2: the generator's `digest` lines against hw/card_stress_lib.py's table of them, which the card driver holds its build step to: a moved fragment
+    # fails the gate at its merge and not a night. The judge is a function, so that it is shown red on a doctored table as well as green on the real one.
+    mdig = re.findall(r"^digest (\w+) ([0-9a-f]{8})$", manifest, re.M)
+    agrees = lambda table: mdig == list(table.items())            # noqa: E731
+    doctored = dict(L.ROUTINE_DIGESTS)
+    doctored["exp"] = doctored["exp"][:-1] + ("0" if doctored["exp"][-1] != "0" else "1")
+    check("images: the generator's nine `digest` lines equal hw/card_stress_lib.py's ROUTINE_DIGESTS, name and digest and order, and that table has nothing else",
+          len(mdig) == len(NINE) == len(L.ROUTINE_DIGESTS) and agrees(L.ROUTINE_DIGESTS), f"{mdig} {L.ROUTINE_DIGESTS}")
+    check("images: ... and the same judge is red on a table with one digit of exp's digest changed, on one with a routine dropped, and on one in another order",
+          not agrees(doctored) and not agrees({k: v for k, v in L.ROUTINE_DIGESTS.items() if k != "tan"})
+          and not agrees(dict(reversed(list(L.ROUTINE_DIGESTS.items())))), "")
     ok = os.path.exists(os.path.join(tree, "host", "positive-run"))
     if not ok:
         skip("images: positive-run", "did not build")
