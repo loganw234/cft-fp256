@@ -374,7 +374,8 @@ and holds no figure of its own.</p>
       var b = group(c, "base"), w = group(c, "wide"), rt = group(c, "routine");
       var rows = w ? [b ? ["base items", b, "base"] : null, ["wide-format items", w, "wide"]] : [["all items", c.total, null]];
       // parcel M4X2: a class with routine items has a row for that group too, after the base and wide-format rows, and its total is no row of its own
-      if (rt) rows = [b ? ["base items", b, "base"] : null, w ? ["wide-format items", w, "wide"] : null, ["routine items", rt, "routine"]];
+      var baseRow = b ? ["base items", b, "base"] : null;
+      if (rt) rows = [baseRow, w ? ["wide-format items", w, "wide"] : null, ["routine items", rt, "routine"]];
       return rows;
     }
     function finish(c, g) {

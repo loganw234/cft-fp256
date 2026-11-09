@@ -7147,6 +7147,11 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     red("missing", {"CFT_STANDIN_LIST_MISSING": "exp"}, "mpfr routine-sweep", ("exp: `routine-sweep list` says", "4 of 5 images found"), "an image the tool cannot find (list: four of the five)")
     red("mpfr41", {"CFT_STANDIN_MPFR": "4.1.0"}, "mpfr routine-sweep", ("names MPFR 4.1.0", "the pin is 4.2.2"), "an oracle line naming MPFR 4.1.0")
     red("nolist", {"CFT_STANDIN_NO_LIST": "1"}, "mpfr routine-sweep", ("`routine-sweep list` exited 2", "no `list`"), "a routine-sweep from before `list`")
+    sc = os.path.join(env.tmp, "routine-scenario.json")
+    with open(sc, "w") as fh:
+        json.dump([{"leg": "soak", "op": "exp-f32-d043b3bb5", "nth": [1], "do": "offlist"}], fh)
+    red("marks", {"CFT_STANDIN_SCENARIO": sc, "CFT_STANDIN_STATE": os.path.join(env.tmp, "routine-scenario-state")}, "mpfr routine-sweep", ("marks", "1 off the list"),
+        "marks that are not the smoke's (one lane off the list, where the smoke has three right ones on it)")
     E = rd("routine-build-extra", ["--mpfr-prefix", pfx], {"FAKE_GEN_EXTRA": "digest atan2 12345678"})
     s = E.steps.get("routine images") or {}
     c("routine build: a manifest digest the table lacks (atan2, built before it has an item) is SAID in the step and does not fail it",
@@ -7154,10 +7159,78 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     return out
 
 
+def routine_fe_checks(src: str = HERE) -> list:
+    """python/figure_extracts.py's rule for the routine op words (parcel M4X2), read from routine_sweep.c's op grammar: a routine op word is a tile op by a pattern and not by the
+    table of fifty-one; held here as the pytest file holds it (python/tests/test_figure_extracts.py), on the copy of the code under test (a plant has its own)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    fe_path = os.path.join(src, "figure_extracts.py")
+    if not os.path.exists(fe_path):
+        fe_path = os.path.join(ROOT, "python", "figure_extracts.py")
+    spec = importlib.util.spec_from_file_location("m4x2_figure_extracts", fe_path)
+    fe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fe)
+    ops = [op for _n, _d in DOC_ROUTINE_DIGESTS for op in [f"{_n}-f32-d{_d}"]]
+    c("routine figure_extracts: the rule - each of the nine op words (and an atan2 word with its x) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
+      all(fe.is_tile_op(op) and op not in fe.STRESS_TILE_OPS for op in ops) and fe.is_tile_op("atan2-f32-x3f800000-d12345678") and not fe.is_tile_op("exp-f32-d043b3bb")
+      and not fe.is_tile_op("exp-f32-d043b3bb5-all") and not fe.is_tile_op("sqrt33") and fe.is_tile_op("sqrt32"), str([op for op in ops if not fe.is_tile_op(op)]))
+    served = set(ops) | {"sqrt32", "rem32"}
+    c("routine figure_extracts: tile_ops_served names the routine ops a run served after the table's, a run that served none gives exactly the table's, and the host ops are the rest",
+      fe.tile_ops_served(served) == ["sqrt32"] + sorted(ops) and fe.tile_ops_served({"sqrt32", "rem32"}) == ["sqrt32"], str(fe.tile_ops_served(served)))
+    reach = {op: "tile" for op in ops}
+    reach.update(sqrt32="tile", rem32="host")
+    try:
+        fe._check_reach(served, reach)
+        ok_reach = True
+    except fe.ExtractError:
+        ok_reach = False
+    bad = dict(reach)
+    bad[ops[0]] = "host"
+    try:
+        fe._check_reach(served, bad)
+        refused = ""
+    except fe.ExtractError as e:
+        refused = str(e)
+    c("routine figure_extracts: the reach check passes the library's tile for every routine op and refuses, by name, a routine op the library calls host (the control)",
+      ok_reach and ops[0] in refused and "OP_REACH and STRESS_TILE_OPS disagree" in refused, refused[:200])
+    return out
+
+
+def routine_makefile_checks(src: str = HERE) -> list:
+    """host/Makefile (parcel M4X2): routine-sweep is relinked every time under MPFR=1, as the soaks are - soak-mpfr-always is among its prerequisites - and not otherwise.
+    Read from make's own database (`make -pn`) of the Makefile under test (a plant has its own): POSIX with make."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    if not POSIX or not shutil.which("make"):
+        skip("routine makefile", "needs POSIX with make")
+        return out
+    mk = os.path.join(src, "Makefile")
+    if not os.path.exists(mk):
+        mk = os.path.join(ROOT, "host", "Makefile")
+
+    def prereqs(*flags):
+        p = subprocess.run(["make", "-C", os.path.join(ROOT, "host"), "-f", mk, "-pn"] + list(flags) + ["routine-sweep"], capture_output=True, text=True, timeout=120)
+        m = [ln for ln in p.stdout.splitlines() if re.match(r"^routine-sweep(?:\.exe)?: ", ln)]
+        return m[0] if m else "(no rule)"
+    with_ = prereqs("MPFR=1")
+    without = prereqs()
+    c("routine makefile: under MPFR=1 routine-sweep's prerequisites include soak-mpfr-always (so a binary linked against another MPFR, or without XRT, is relinked and never taken for the build's)",
+      "soak-mpfr-always" in with_ and "tools/routine_sweep.c" in with_, with_)
+    c("routine makefile: without MPFR=1 they do not (the rule is what it was), and the rule's sources are the same", "soak-mpfr-always" not in without and "tools/routine_sweep.c" in without, without)
+    return out
+
+
 def group_routine(env: Env, src: str = HERE) -> list:
     """Parcel M4X2, the routine items: the catalog and its digests, the marks' parser on the real logs and every damage, the stand-in, the driver's plans and guard, the items served
     and covered in a dry run with their report and reduced night, refused without --mpfr-prefix, and the build step over test doubles (POSIX)."""
-    return (routine_catalog_checks(src) + routine_parser_checks(src) + routine_driver_checks(env, src) + scn_routine_items(env, src) + scn_routine_build(env, src))
+    return (routine_catalog_checks(src) + routine_parser_checks(src) + routine_fe_checks(src) + routine_makefile_checks(src) + routine_driver_checks(env, src)
+            + scn_routine_items(env, src) + scn_routine_build(env, src))
 
 
 def group_wide(env: Env, src: str = HERE) -> list:
@@ -8930,16 +9003,16 @@ def plants(env: Env) -> None:
          [("card_stress_report.py", "    return ITEM_FORMAT.get(item) or (OP_FORMAT.get(op) if isinstance(op, str) else None)", "    return ITEM_FORMAT.get(item)")],
          plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group"]),
         ("HXd: the report puts every item in the base group",
-         [("card_stress_report.py", 'ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}', 'ITEM_GROUP = {n: "base" for n, it in _CATALOG.items()}')],
+         [("card_stress_report.py", 'ITEM_GROUP = {n: it.group for n, it in _CATALOG.items()}', 'ITEM_GROUP = {n: "base" for n, it in _CATALOG.items()}')],
          plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group", "wide: the totals by group are the oracle's"]),
         ("HXd: the report puts every item in the base group (the dry run's wide items)",
-         [("card_stress_report.py", 'ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}', 'ITEM_GROUP = {n: "base" for n, it in _CATALOG.items()}')],
+         [("card_stress_report.py", 'ITEM_GROUP = {n: it.group for n, it in _CATALOG.items()}', 'ITEM_GROUP = {n: "base" for n, it in _CATALOG.items()}')],
          lambda env, src: scn_wide_items(env, src), ["wide items: the report names each item's format in the last column of its row"]),
         ("HXd: a class's totals by group count each item twice",
          [("card_stress_report.py", '"by_group": _by_group(exh, imgs)},', '"by_group": _by_group(exh + exh, imgs)},')],
          plant_report, ["totals by group are over that class's items alone"]),
         ("HXd: a run with no wide item prints the group lines",
-         [("card_stress_report.py", '    if not (isinstance(groups, list) and any(g.get("group") == "wide" for g in groups)):', "    if not isinstance(groups, list):")],
+         [("card_stress_report.py", '    if not (isinstance(groups, list) and any(g.get("group") != "base" for g in groups)):', "    if not isinstance(groups, list):")],
          plant_report, ["wide: and the text of a run with no wide item prints no group line at all"]),
         ("HXd: the coverage by tree leaves the format off its tables",
          [("card_stress_report.py", '+ [_format_text(e.get("format"))]\n                         for e in c["exhaustive"]])', '+ []\n                         for e in c["exhaustive"]])')],
@@ -9567,6 +9640,134 @@ def plants(env: Env) -> None:
         ("PD: [014] How fast takes the newest probe for the shown night's",
          [("nightly.html", ': night.probe ? "Card alone: night "', ': probed === night ? "Card alone: night "')],
          plant_progress, ["glance, the probe on two nights, rows on the first only: How fast names the newest night with rows"]),
+        # -- parcel M4X2 (2026-11-09): the routine items (CARD_STRESS_PLANT='M4X2: ' runs just these). Each puts one defect back; the scenario written for it must go red at the check named.
+        ("M4X2: a routine item is in group base or wide, not routine",
+         [("card_stress_lib.py", '        return ROUTINE_TOOL if self.tool == ROUTINE_TOOL else ("wide" if self.mpfr else "base")', '        return "wide" if self.mpfr else "base"')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: each item runs routine-sweep's"]),
+        ("M4X2: the routine items are left out of the catalog",
+         [("card_stress_lib.py", "        items += routine_items()\n", "        pass\n")],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: the nine routine items follow the 287"]),
+        ("M4X2: exp's digest in the table is not the tool's",
+         [("card_stress_lib.py", '    "exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb"', '    "exp": "043b3bb4", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb"')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),
+        ("M4X2: a routine claim says 'under' an attribute",
+         [("card_stress_lib.py", '    return (f"{space}, each of the five attributes: an unmarked', '    return (f"{space}, under each of the five attributes: an unmarked')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: each claim names the space"]),
+        ("M4X2: an atan2 claim forgets that it is not the whole space of pairs",
+         [("card_stress_lib.py", '                 f"not the whole space of (y, x) pairs")', '                 f"")')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: an atan2 claim says"]),
+        ("M4X2: the marks parser does not count the MARK lines",
+         [("card_stress_lib.py", "    if len(named) != min(total, ROUTINE_SHOW):", "    if False:")],
+         lambda env, src: routine_parser_checks(src), ["routine marks damage: a MARK line gone", "routine marks damage: seventeen MARK lines"]),
+        ("M4X2: the marks parser lets the attributes not sum to the total",
+         [("card_stress_lib.py", "    if sum(n for n in by_attr.values() if n is not None) != total:", "    if False:")],
+         lambda env, src: routine_parser_checks(src), ["routine marks damage: a total that is not the sum"]),
+        ("M4X2: the marks parser lets an attribute that did not run have a number",
+         [("card_stress_lib.py", "    if ran != want_ran:", "    if False:")],
+         lambda env, src: routine_parser_checks(src), ["routine marks damage: a dash under all", "routine marks damage: a number where one attribute"]),
+        ("M4X2: the marks parser lets the WRONG lines disagree with the count",
+         [("card_stress_lib.py", '        if sum(n["wrong"] for n in named) != wrong:', "        if False:")],
+         lambda env, src: routine_parser_checks(src), ["routine marks damage: a WRONG line"]),
+        ("M4X2: the marks parser lets a MARK line be of an attribute whose count it exceeds",
+         [("card_stress_lib.py", "            if k != by_attr[a]:", "            if False:")],
+         lambda env, src: routine_parser_checks(src), ["routine marks damage: the MARK lines of another attribute"]),
+        ("M4X2: the routine slice's parser does not read the marks",
+         [("card_stress_lib.py", "    r = parse_routine_marks(text, op, verdict_mode)\n    v.counts.update(",
+           '    r = {"by_attr": {}, "marked": 0, "off_list": 0, "wrong": 0, "named": [], "not_named": 0, "times": None}\n    v.counts.update(')],
+         lambda env, src: routine_parser_checks(src), ["routine slice damage: a damaged marks line"]),
+        ("M4X2: an off-list mark or a wrong guess fails the slice",
+         [("card_stress_lib.py", '    v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])\n',
+           '    v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])\n    if r["off_list"] or r["wrong"]:\n        v.ok = False\n')],
+         lambda env, src: routine_parser_checks(src), ["routine: an off-list mark and a wrong guess leave the verdict ok"]),
+        ("M4X2: the stand-in prints every attribute's image line under one attribute",
+         [("card_stress_standin.py", "    for a in attrs:\n        ninsn, nwords = ROUTINE_EXP_SIZES[a]", "    for a in ROUTINE_ATTRS:\n        ninsn, nwords = ROUTINE_EXP_SIZES[a]")],
+         lambda env, src: routine_parser_checks(src), ["routine stand-in: under one attribute (rtz)"]),
+        ("M4X2: the stand-in's smoke marks are not the real tool's",
+         [("card_stress_standin.py", '("rup", 0x3f800001))', '("rup", 0x3f800002))')],
+         lambda env, src: routine_parser_checks(src), ["routine stand-in: for the box's slice"]),
+        ("M4X2: --sweep-chunk gives a routine slice a -cN tool",
+         [("card_stress.py", '        if it.tool == L.ROUTINE_TOOL:\n            return os.path.join(self.root, "host", "routine-sweep")', '        if False:\n            return os.path.join(self.root, "host", "routine-sweep")')],
+         lambda env, src: routine_driver_checks(env, src), ["routine plan: under --sweep-chunk"]),
+        ("M4X2: a routine slice's record does not say its group",
+         [("card_stress.py", '                if it.tool == L.ROUTINE_TOOL:\n                    job["sweep"]["group"] = it.group', '                if False:\n                    job["sweep"]["group"] = it.group')],
+         lambda env, src: routine_driver_checks(env, src), ["routine plan: the first slice"]),
+        ("M4X2: the guard does not know routine-sweep",
+         [("card_stress.py", '"clause5_soak", "routine-sweep", "routine_sweep")', '"clause5_soak")'),
+          ("card_stress.py", 'b.startswith(("divsqrt-soak", "clause5-soak", "routine-sweep"))', 'b.startswith(("divsqrt-soak", "clause5-soak"))')],
+         lambda env, src: routine_driver_checks(env, src), ["routine guard:"]),
+        ("M4X2: a routine slice is parsed by the soak's parser alone (the marks are not read)",
+         [("card_stress.py", "            if it.tool == L.ROUTINE_TOOL:\n                # the soak's verdict, then the marks", "            if False:\n                # the soak's verdict, then the marks")],
+         lambda env, src: scn_routine_items(env, src), ["routine items: every routine slice's record carries the marks"]),
+        ("M4X2: a routine job is not handed the images directory",
+         [("card_stress.py", '                env["CFT_SWEEP_IMAGES"] = self.routine_images or ""', "                pass")],
+         lambda env, src: scn_routine_items(env, src), ["routine items: a routine job was handed CFT_SWEEP_IMAGES"]),
+        ("M4X2: a routine item named without --mpfr-prefix is refused as a wide item",
+         [("card_stress.py", "            if it.tool == L.ROUTINE_TOOL:      # parcel M4X2: routine-sweep links", "            if False:      # parcel M4X2: routine-sweep links")],
+         lambda env, src: scn_routine_items(env, src), ["routine refused:"]),
+        ("M4X2: the reducer writes no state by group for a class with a routine row",
+         [("card_stress_progress.py", '            elif any(e["group"] == "routine" for e in seen):', "            elif False:")],
+         lambda env, src: scn_routine_items(env, src), ["routine items: with the flag turned off in a copy, the reducer reads"]),
+        ("M4X2: routine-sweep is not a make target",
+         [("card_stress.py", '(["routine-sweep"] if self.mpfr_prefix else [])', "[]")],
+         lambda env, src: scn_routine_build(env, src), ["routine build A: with --mpfr-prefix routine-sweep is the LAST make target"]),
+        ("M4X2: routine-sweep is not held to ldd",
+         [("card_stress.py", '        if self.mpfr_prefix:\n            exes.append("routine-sweep")', '        if False:\n            exes.append("routine-sweep")')],
+         lambda env, src: scn_routine_build(env, src), ["routine build A: the xrt step holds routine-sweep"]),
+        ("M4X2: the build step does not hold the manifest's digests to the table",
+         [("card_stress.py", "                    if got.get(name) != want:", "                    if False:")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red: a moved fragment", "routine build red: a routine whose digest line"]),
+        ("M4X2: the build step does not hold the manifest's commit to HEAD",
+         [("card_stress.py", "                if len(com) != 1 or (self.head and com[0] != self.head):", "                if False:")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red: a manifest made from another commit"]),
+        ("M4X2: the build step does not read the smoke job's marks",
+         [("card_stress.py", '            if r["by_attr"] != ROUTINE_ORACLE_MARKS or (r["marked"], r["off_list"], r["wrong"]) != (3, 0, 0):', "            if False:")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red: marks that are not the smoke's"]),
+        ("M4X2: the build step does not hold the routine tool's MPFR to the pin",
+         [("card_stress.py", '        if seen.strip() != (self.mpfr_pin or "").strip():', "        if False:")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red: an oracle line naming MPFR 4.1.0"]),
+        ("M4X2: routine-sweep is not relinked every time under MPFR=1",
+         [("Makefile", "libcft.a $(SOAK_MPFR_DEPS)\n\t$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include) -fno-math-errno \\\n\t  tools/routine_sweep.c",
+           "libcft.a\n\t$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include) -fno-math-errno \\\n\t  tools/routine_sweep.c")],
+         lambda env, src: routine_makefile_checks(src), ["routine makefile: under MPFR=1"]),
+        ("M4X2: a routine op word is not a tile op to the figure extracts",
+         [("figure_extracts.py", "    return op in STRESS_TILE_OPS or (isinstance(op, str) and ROUTINE_OP_RE.match(op) is not None)", "    return op in STRESS_TILE_OPS")],
+         lambda env, src: routine_fe_checks(src), ["routine figure_extracts: the rule", "routine figure_extracts: the reach check"]),
+        ("M4X2: the figure extracts' tile ops leave out the routine ops a run served",
+         [("figure_extracts.py", " + sorted(op for op in served_ops if op not in STRESS_TILE_OPS and is_tile_op(op))", "")],
+         lambda env, src: routine_fe_checks(src), ["routine figure_extracts: tile_ops_served"]),
+        ("M4X2: the report puts a routine item in the wide group",
+         [("card_stress_report.py", "ITEM_GROUP = {n: it.group for n, it in _CATALOG.items()}", 'ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}')],
+         plant_report, ["routine: the item is counted over 2^32 encodings in group routine"]),
+        ("M4X2: the report forgets the group an unnamed item's records carry",
+         [("card_stress_report.py", '    return ITEM_GROUP.get(item) or (g if g in GROUPS else None) or "base"', '    return ITEM_GROUP.get(item) or "base"')],
+         plant_report, ["routine: an item the catalog does not name takes its records' group"]),
+        ("M4X2: the report's routine block leaves out the lanes that were off the list or wrong",
+         [("card_stress_report.py", '            if isinstance(n, dict) and (n.get("off_list") or n.get("wrong")):', "            if False:")],
+         plant_report, ["routine: the named lanes are every one"]),
+        ("M4X2: the rates count a routine slice as a rate",
+         [("card_stress_report.py", '    if item and _group_of(item, sw) == "routine":\n        return "routine", None', '    if False:\n        return "routine", None')],
+         plant_report, ["routine: the rates leave the three slices out"]),
+        ("M4X2: the report prints the group lines for the wide group alone",
+         [("card_stress_report.py", '    if not (isinstance(groups, list) and any(g.get("group") != "base" for g in groups)):', '    if not (isinstance(groups, list) and any(g.get("group") == "wide" for g in groups)):')],
+         plant_report, ["routine: the text has a line for the group"]),
+        ("M4X2: the page's glance has no row for the routine group",
+         [("nightly.html", '      if (rt) rows = [baseRow,', '      if (false) rows = [baseRow,')],
+         plant_progress, ["routine page: at a glance"]),
+        ("M4X2: the page lists no routine group in the item list",
+         [("nightly.html", "      if (rout) items = [wide ? items :", "      if (false) items = [wide ? items :")],
+         plant_progress, ["routine page: the item list names the routine group", "routine page: the base items are listed before the routine heading"]),
+        ("M4X2: the page's chart has no line for the routine group",
+         [("nightly.html", "        if (rout && !wide) {", "        if (false) {")],
+         plant_progress, ["routine page: the chart has a line for the routine group"]),
+        ("M4X2: the page's earlier trees say nothing of the routine group",
+         [("nightly.html", '        if (rout) core = (wide ? core + "; " :', '        if (false) core = (wide ? core + "; " :')],
+         plant_progress, ["routine page: an earlier tree"]),
+        ("M4X2: the page's legend does not mention the routine group's line",
+         [("nightly.html", '(d.now.classes.some(function (c) { return group(c, "routine"); }) ? " A class with routine items', '(false ? " A class with routine items')],
+         plant_progress, ["routine page: the chart's legend"]),
+        ("M4X2: the page lists the wide items inside the base group again",
+         [("nightly.html", '      function part(isWide) { return pick(isWide ? "wide" : "base"); }', '      function part(isWide) { return pick("base"); }')],
+         plant_progress, ["routine page: a class with all three groups", "wide page:"]),
     ]
     where = {"nightly.html": os.path.join(ROOT, "site", "nightly.html"), "rate_probe.c": os.path.join(ROOT, "host", "tools", "rate_probe.c"),
              "Makefile": os.path.join(ROOT, "host", "Makefile"), "figure_extracts.py": os.path.join(ROOT, "python", "figure_extracts.py")}
