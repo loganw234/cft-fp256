@@ -43,6 +43,12 @@ log2 and log1p.
     python python/tests/mathlib_runs.py trig-family [--fn sin,cos,tan]
         [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm]
         [--centres N] [--jmax J] [--quick] [--out PATH] | --write | --check
+    python python/tests/mathlib_runs.py inv-pools [--fn atan]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
+        [--step N] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py inv-bound [--fn atan]
+        [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
+        [--guard G] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -144,6 +150,32 @@ sample is a function of --seed, so a run can be repeated.
            pools (1: all). --quick: --step 8, and fp128 under rne and rtz where
            --formats and --attrs are not given (the golden stage's smoke
            run). Not part of `all`
+  inv-pools  atan, asin, acos and atan2 (parcel M4G1 builds atan; the
+           others join as they are built: --fn defaults to every function
+           python/tests/mathlib_inv_harness.py has a pool for): the unary pool
+           (the stage's trig_pool, the vector sets' and test_transcend's brute
+           pool: 333, 285 and 285 arguments at fp64, fp128 and fp256) through
+           every configuration, each lane equal to transcend.py in bits and
+           flag word or marked and on INV_POOL_MARKS; with --seq the fragment
+           as a program on seq.py and as the compiled shape over the same
+           lanes. ESTIMATED (from the golden stage's measured 12 s for the
+           pools, structured lanes and specials of atan at 15
+           configurations, one core of the desktop, BELIEVED about as fast on
+           the box): under 1 minute without --seq, 1 to 2 minutes with it, 100
+           to 150 MB; --step 8 and --quick take less. No code changes for
+           asin, acos or atan2: the lanes, pools and tables come from the
+           harness by function
+  inv-bound  the same functions: |V - f(x)| / Bv under 1, mpmath at 4p + 200
+           bits, at --n placed points of each of the study's regions (edge,
+           big, small, random: python/tests/mathlib_inv_harness.REGIONS; a
+           seed each from --seed on) of each format (3,000 a region at fp64
+           and 1,000 at fp128 and fp256 by default), each lane also against
+           transcend.py. The largest is a sampled lower bound. ESTIMATED
+           (about 5 ms a lane at fp64 and 10 ms at fp256, from the harness's
+           measured 48-point regions: BELIEVED, not yet run at this size):
+           12,000 lanes at fp64 take about 1 minute, 4,000 at fp128 and
+           fp256 about 1 minute each, 100 to 200 MB; --quick is 12 points a
+           region. No code changes for asin, acos or atan2
   trig-bound  sin, cos and tan: |V - f(x)| / Bv under 1, mpmath at 4p + 200
            bits, at --n placed points of each of the study's five regions
            (edge, near, zero, small, random; a seed each from --seed on) of
@@ -1013,6 +1045,91 @@ def cmd_trig_family(a):
     say(f"trig-family: {_memory_line()}")
 
 
+def _inv_harness():
+    import mathlib_inv_harness as I
+    return I
+
+
+def _inv_fns(arg):
+    I = _inv_harness()
+    names = arg.split(",") if arg else [n for n in I.FUNCS
+                                        if n in I.POOL_FNS]
+    for n in names:
+        if n not in I.FUNCS:
+            raise SystemExit(f"--fn {n!r}: one of {', '.join(I.FUNCS)}")
+    return names
+
+
+def _inv_formats(arg, default):
+    I = _inv_harness()
+    names = arg.split(",") if arg else default
+    for n in names:
+        if n not in I.BY_NAME:
+            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256 "
+                             f"(fp32 is parcel M4F1's)")
+    return [I.BY_NAME[n] for n in names]
+
+
+def cmd_inv_pools(a):
+    """The whole unary pool through every configuration of the inverse
+    routines built (parcel M4G1: atan), with --seq the fragment as a program
+    on seq.py and as the compiled shape over the same lanes."""
+    I = _inv_harness()
+    open_out(a.out)
+    step = a.step if a.step else (8 if a.quick else 1)
+    fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in I.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else (
+        [I.RNE, I.RTZ] if a.quick else list(sf.RND_MODES))
+    for fmt in fmts:
+        for fn in _inv_fns(a.fn):
+            xs = list(I.pool(fn, fmt))[::step]
+            for rnd in rnds:
+                f = ml.fragment(fn, fmt, rnd)
+                out, t = I.check_pools(f, xs)
+                note(out)
+                line = (f"inv-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
+                        f"{t.n} lanes, {len(t.marked)} marked (guess right "
+                        f"{t.marked_right}), {len(t.off)} marks off the "
+                        f"list, {len(t.wrong)} wrong unmarked; {len(f)} "
+                        f"instructions, {f.live_max()} live")
+                if a.seq:
+                    out, lanes = I.check_seq(f, xs=xs)
+                    note(out)
+                    line += (f"; seq.py and the compiled shape over "
+                             f"{len(lanes)} lanes: {len(out)} findings")
+                say(line)
+    say(f"inv-pools: {_memory_line()}")
+
+
+def cmd_inv_bound(a):
+    """|V - f(x)| / Bv at placed points of the harness's regions, for the
+    inverse routines built (parcel M4G1: atan), each lane also against
+    transcend.py."""
+    I = _inv_harness()
+    open_out(a.out)
+    sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000}
+    fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in I.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else [I.RNE]
+    for fmt in fmts:
+        n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
+        for fn in _inv_fns(a.fn):
+            for rnd in rnds:
+                b = ml.build(fn, fmt, rnd, guard=a.guard)
+                for k, region in enumerate(I.REGIONS):
+                    xs = I.sample(fn, fmt, region, n, a.seed + k)
+                    out, (worst, main, lanes) = I.check_bound(
+                        b, xs, f"{region} seed {a.seed + k}")
+                    note(out)
+                    say(f"inv-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                        f"{region} seed {a.seed + k}: {lanes} lanes, "
+                        f"{main} main-path, largest |V - {fn}| / Bv = "
+                        f"2^{worst:+.2f} (a sampled lower bound), "
+                        f"{len(out)} findings")
+    say(f"inv-bound: {_memory_line()}")
+
+
 def cmd_all(a):
     s = a.scale
     ns = argparse.Namespace
@@ -1234,6 +1351,33 @@ def main(argv=None):
     p.add_argument("--write", action="store_true")
     p.add_argument("--check", action="store_true")
     p.set_defaults(fn_=cmd_trig_family)
+    p = sub.add_parser("inv-pools")
+    p.add_argument("--fn", help="atan (the functions built, by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
+    p.add_argument("--seq", action="store_true")
+    p.add_argument("--step", type=int, default=0,
+                   help="every this many lanes of the pools (default 1)")
+    p.add_argument("--quick", action="store_true",
+                   help="--step 8, fp128 under rne and rtz by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_inv_pools)
+    p = sub.add_parser("inv-bound")
+    p.add_argument("--fn", help="atan (the functions built, by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne (by default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="points a region (default 3,000 at fp64, 1,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=121,
+                   help="the first region's seed, one more each")
+    p.add_argument("--guard", type=int, help="G, instead of the decided one")
+    p.add_argument("--quick", action="store_true",
+                   help="12 points a region, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_inv_bound)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)

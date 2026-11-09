@@ -253,7 +253,9 @@ def test_fp32_builds_and_a_name_that_is_not_built_is_refused_by_name():
         f = ml.fragment(fn, FP32, RNE)
         assert isinstance(f, routines.Fragment) and (f.op, f.fmt) == (fn, FP32)
         assert ml.build(fn, FP32, RNE).meta["family"] == "triple word"
-    for name in ("sinh", "asin", "atan", "SIN", "sinpi", ""):
+    # parcel M4G1 (the lead's brief): asin and atan are inverse routines now
+    # (atan built, asin M4G2's), so asinh and atanh stand here
+    for name in ("sinh", "asinh", "atanh", "SIN", "sinpi", ""):
         with pytest.raises(ValueError, match=repr(name)) as e:
             ml.fragment(name, FP64, RNE)
         assert "log1p, sin, cos, tan" in str(e.value)       # both tuples

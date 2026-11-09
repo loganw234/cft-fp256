@@ -878,7 +878,11 @@ def test_the_phases_are_in_the_phase_order_after_reduce():
     # "S-head2" and "S-head3" after "S-head", "C-head2" and "C-head3" after
     # "C-head", each in the model's place; the double word's names keep their
     # order
-    six = ("setup", "reduce", "lowword", "tail", "head", "head2", "head3",
+    # parcel M4G1 (the lead's brief): the seven names of the inverse routines
+    # (front, sqrt, index, num, den, atan_s, table) stand in one block after
+    # "reduce" (and the reduction's red- phases, which the filter drops)
+    six = ("setup", "reduce", "front", "sqrt", "index", "num", "den",
+           "atan_s", "table", "lowword", "tail", "head", "head2", "head3",
            "Z", "lookup", "recon", "scale", "fixed-grid",
            "z", "S-tail", "S-head", "S-head2", "S-head3", "C-tail", "C-head",
            "C-head2", "C-head3", "sincos", "select",
