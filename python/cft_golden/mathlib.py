@@ -5702,6 +5702,214 @@ _INV_BUILDERS = {"atan": _build_atan}
 # (M4G2's builders, plants and role checks go at this anchor: assign into
 # _INV_BUILDERS, INV_PLANTS and _INV_ROLE_CHECKS, never edit their literals.)
 
+INV_PLANTS.update({
+    "domain_edge": "|x| > 1 tested as |x| >= 1: +-1 refused (asin and acos)",
+    "u_low_dropped": "u = 1 - x^2's low word left out of the root's "
+                     "residual (asin and acos)",
+    "sqrt_product": "1 - x^2 formed directly, 1 - RN(x^2) by Fast2Sum plus "
+                    "x^2's exact error, unnormalised near |x| = 1 (the "
+                    "study's u_form direct; asin and acos)",
+    "acos_quadrant": "acos's C and sigma with x's sign ignored, as if x were "
+                     "not negative: acos(-x) answered as acos(|x|)",
+})
+
+
+def _asin_acos_front(b: Build, x):
+    """The front asin and acos share, instruction for instruction (cftc's
+    inliner shares their instructions up to C and sigma): |x| and its
+    negation; the root w = sqrt((1 - |x|)(1 + |x|)) as a double word (phase
+    sqrt: both factors exact by Fast2Sum, u = their product as a double word,
+    RSQRT_SEED of u_h kept off zero by the MAX with TINYU = 2^(emin + 2p),
+    Newton y <- y + (y/2)(1 - u_h y^2) until 8 bits doubled reach p + 8, w_h =
+    u_h y, the residual u_h - w_h^2 exact by FMA plus u_l, w_l = it times y/2,
+    Fast2Sum); the swap |x| > w; n and d as double words (n the lesser); x's
+    sign (sx); for acos, xneg (x's sign bit set); then inv_core on the double
+    words. Plants: u_low_dropped (u_l left out of the residual), sqrt_product
+    (u formed as 1 - RN(x^2) plus x^2's exact error, the study's direct form).
+    Probes: uh, ul, wh, wl, nl, dh, dl, and inv_core's. Returns a
+    SimpleNamespace: ax, swap, sx, xneg (None for asin), core."""
+    fmt, p = b.fmt, b.fmt.prec
+    kw = _inv_consts(b)
+    ZERO, ONE, SIGN, ABSM = kw.ZERO, kw.ONE, kw.SIGN, kw.ABSM
+    b.phase = "front"
+    ax = b.iand(x, ABSM)
+    nax = b.ixor(ax, SIGN)
+
+    # ---- w = sqrt(u), u = (1 - |x|)(1 + |x|), as a double word ---------------
+    b.phase = "sqrt"
+    if _act(b, "sqrt_product"):
+        xx = b.mul(ax, ax)
+        nxe = b.fma(nax, ax, xx)                         # xx - x^2
+        uh, ue = b.fast_two_sum(ONE, b.ixor(xx, SIGN))
+        ul = b.add(ue, nxe)
+    else:
+        a1, a1l = b.fast_two_sum(ONE, nax)               # 1 >= |x|
+        b1, b1l = b.fast_two_sum(ONE, ax)
+        uh = b.mul(a1, b1)
+        na1 = b.ixor(a1, SIGN)
+        nul = b.fma(na1, b1, uh)                         # uh - a1 b1
+        nul = b.fma(na1, b1l, nul)                       # - a1 b1l
+        ul = b.fma(a1l, b1, b.ixor(nul, SIGN))           # + a1l b1
+    tinyu = b.const("TINYU", _pow2(fmt, fmt.emin + 2 * p))
+    uc = b.fmax(uh, tinyu)
+    yq = b.ins(sf.OP_RSQRT_SEED, (uc,))
+    nuc = b.ixor(uc, SIGN)
+    HALF = b.const("HALF", _pow2(fmt, -1))
+    bits = 8
+    while bits < p + 8:
+        h = b.mul(nuc, yq)                               # -u y
+        e = b.fma(h, yq, ONE)                            # 1 - u y^2
+        yq = b.fma(b.mul(yq, HALF), e, yq)
+        bits *= 2
+    wh = b.mul(uh, yq)
+    res = b.fma(b.ixor(wh, SIGN), wh, uh)                # uh - wh^2, exact
+    if not _act(b, "u_low_dropped"):
+        res = b.add(res, ul)
+    wl = b.mul(res, b.mul(yq, HALF))
+    wh, wl = b.fast_two_sum(wh, wl)
+    b.probes.update(uh=uh, ul=ul, wh=wh, wl=wl)
+
+    # ---- n <= d: |x| and w, the lesser first ----------------------------------
+    b.phase = "front"
+    swap = b.icmplt(wh, ax)                              # |x| > w
+    nh, nl = b.sel(wh, ax, swap), b.sel(wl, ZERO, swap)
+    dh, dl = b.sel(ax, wh, swap), b.sel(ZERO, wl, swap)
+    sx = b.iand(x, SIGN)
+    xneg = b.icmplt(ABSM, x) if b.meta["fn"] == "acos" else None
+    b.probes.update(nl=nl, dh=dh, dl=dl)
+    core = inv_core(b, nh, dh, nl, dl)
+    return types.SimpleNamespace(ax=ax, swap=swap, sx=sx, xneg=xneg, core=core)
+
+
+def _asin_acos_final(b: Build, x, fr, Vh, Vl):
+    """The final rounding and the specials both functions share, lowest
+    priority first for each (the part of the builders below the recon): the
+    classification, asin's tiny path and +-0, acos(+1) = +0, the domain edge
+    (|x| > 1, the infinities among them: the quiet NaN, invalid) and the
+    NaNs. -> (bits, flag word)."""
+    fmt, p, fn = b.fmt, b.fmt.prec, b.meta["fn"]
+    kw = _inv_consts(b)
+    ZERO, ONE, ABSM = kw.ZERO, kw.ONE, kw.ABSM
+    ax = fr.ax
+    fin = inv_final(b, Vh, Vl, G=b.meta["G"], shift=b.meta["shift"])
+    bits_, fl = fin.R, fin.fl
+    b.phase = "classify"
+    isnan = b.icmplt(kw.INF, ax)
+    issnan = b.sel(ZERO, isnan, b.iand(x, kw.QBIT))
+    iszero = b.icmplt(ax, kw.INT1)
+    b.phase = "special"
+    if fn == "asin":
+        gate = trig_gates(fmt)[0]
+        tiny = ZERO if _act(b, "tiny_gate_off") else \
+            b.icmplt(ax, b.const("GATE", _pow2(fmt, gate)))
+        eps = Fraction(1, 2 ** (p + 2))
+        away = not _act(b, "tiny_side")                  # asin rounds away
+        tb = b.fma(x, b.const("TINY_EPS", _enc(fmt, eps if away else -eps)),
+                   x, b.rnd)
+        if away:
+            un = b.icmplt(ax, kw.MINN)                   # |x| below 2^emin
+        else:
+            un = b.icmplt(b.iand(tb, ABSM), kw.MINN)     # the result below
+        tfl = b.sel(kw.UNFINX, kw.INX, un)
+        bits_ = b.sel(tb, bits_, tiny)
+        fl = b.sel(tfl, fl, tiny)
+        bits_ = b.sel(x, bits_, iszero)                  # +-0, exact
+        fl = b.sel(ZERO, fl, iszero)
+    else:
+        isone = b.cmpeq(x, ONE)                          # acos(1) = +0, exact
+        bits_ = b.sel(ZERO, bits_, isone)
+        fl = b.sel(ZERO, fl, isone)
+    onem = b.const("ONEM", sf.one_bits(fmt) - 1) \
+        if _act(b, "domain_edge") else ONE
+    edge = b.icmplt(onem, ax)
+    bits_ = b.sel(kw.QNAN, bits_, edge)                  # |x| > 1: invalid
+    fl = b.sel(kw.INVALID, fl, edge)
+    bits_ = b.sel(kw.QNAN, bits_, isnan)
+    fl = b.sel(b.sel(kw.INVALID, ZERO, issnan), fl, isnan)
+    return bits_, fl
+
+
+def _build_asin(b: Build, x):
+    """asin(x): n, d = the lesser and the greater of |x| and w = sqrt((1 -
+    |x|)(1 + |x|)) (the front, _asin_acos_front), theta0 = atan(n/d), C =
+    pi/2 and sigma negative under the swap (|x| > w), x's sign on V, then the
+    classification and the specials, lowest priority first: the tiny path
+    (|x| < 2^gs: fma(x, +2^-(p+2), x) under the attribute, away from zero;
+    underflow where |x| is below 2^emin), +-0, |x| > 1 (the quiet NaN,
+    invalid), the NaNs. +-1 are main-path lanes (theta0 = 0 exactly: w = 0).
+    Probes: the front's and the recon's th and tl. Plants beside the
+    core's: u_low_dropped, sqrt_product, domain_edge, tiny_gate_off,
+    tiny_side."""
+    PIO2h, PIO2l = _inv_pio2(b)
+    fr = _asin_acos_front(b, x)
+    kw = _inv_consts(b)
+    b.phase = "recon"
+    Ch = b.sel(PIO2h, kw.ZERO, fr.swap)
+    Cl = b.sel(PIO2l, kw.ZERO, fr.swap)
+    Vh, Vl = inv_recon(b, fr.core.th, fr.core.tl, Ch, Cl, fr.swap, fr.sx)
+    b.probes.update(th=fr.core.th, tl=fr.core.tl)
+    bits_, fl = _asin_acos_final(b, x, fr, Vh, Vl)
+    return b.finish(bits_, fl)
+
+
+def _build_acos(b: Build, x):
+    """acos(x): the same front and core as asin, C = 0 or pi by x's sign under
+    the swap (pi where x < 0), else pi/2, sigma = (not swap) xor (x < 0) (the
+    study's 2.1: x >= 0, swap 0 and +, else pi/2 and -; x < 0, swap pi and
+    -, else pi/2 and +), no sign on V; then the classification and the
+    specials: acos(+1) = +0 exact, |x| > 1 (the quiet NaN, invalid), the
+    NaNs. -1 and +-0 are main-path lanes. Plants beside the core's:
+    u_low_dropped, sqrt_product, domain_edge, acos_quadrant (x's sign ignored
+    in C and sigma). Probes: as asin's."""
+    PIO2h, PIO2l = _inv_pio2(b)
+    hi, lo = _words(b.fmt, _pi(), 2)
+    PIh, PIl = b.const("PIH", hi), b.const("PIL", lo)
+    fr = _asin_acos_front(b, x)
+    kw = _inv_consts(b)
+    ZERO, ONE = kw.ZERO, kw.ONE
+    b.phase = "recon"
+    if _act(b, "acos_quadrant"):
+        Ch, Cl = b.sel(ZERO, PIO2h, fr.swap), b.sel(ZERO, PIO2l, fr.swap)
+        sigc = b.sel(ZERO, ONE, fr.swap)
+    else:
+        cpi_h, cpi_l = b.sel(PIh, ZERO, fr.xneg), b.sel(PIl, ZERO, fr.xneg)
+        Ch, Cl = b.sel(cpi_h, PIO2h, fr.swap), b.sel(cpi_l, PIO2l, fr.swap)
+        sigc = b.ixor(b.sel(ZERO, ONE, fr.swap), fr.xneg)
+    Vh, Vl = inv_recon(b, fr.core.th, fr.core.tl, Ch, Cl, sigc, None)
+    b.probes.update(th=fr.core.th, tl=fr.core.tl)
+    bits_, fl = _asin_acos_final(b, x, fr, Vh, Vl)
+    return b.finish(bits_, fl)
+
+
+_INV_BUILDERS["asin"] = _build_asin
+_INV_BUILDERS["acos"] = _build_acos
+
+
+def _check_asin_acos_common(b, point):
+    """The roles asin and acos share: TINYU = 2^(emin + 2p), emin from the
+    IEEE fields (2 - 2^(ew-1), not fmt.emin), and HALF."""
+    p = b.fmt.prec
+    ew, _mw = _TRIG_FIELDS[b.fmt.name]
+    point("TINYU", Fraction(2) ** (2 - 2 ** (ew - 1) + 2 * p))
+    point("HALF", Fraction(1, 2))
+
+
+def _check_asin_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
+    p = b.fmt.prec
+    w0 = verify("PIO2H", "rn", lo_pi / 2, hi_pi / 2)
+    verify("PIO2L", "rn", lo_pi / 2 - w0, hi_pi / 2 - w0)
+    _check_asin_acos_common(b, point)
+    point("GATE", Fraction(2) ** _check_trig_gate(p, True))
+    point("TINY_EPS", Fraction(1, 2 ** (p + 2)))
+
+
+def _check_acos_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
+    w0 = verify("PIO2H", "rn", lo_pi / 2, hi_pi / 2)
+    verify("PIO2L", "rn", lo_pi / 2 - w0, hi_pi / 2 - w0)
+    w1 = verify("PIH", "rn", lo_pi, hi_pi)
+    verify("PIL", "rn", lo_pi - w1, hi_pi - w1)
+    _check_asin_acos_common(b, point)
+
 
 def _inv_refuse(name, fmt):
     """The refusals by name: fp32, and a name of INV_NAMES not yet built."""
@@ -5893,6 +6101,7 @@ def _check_atan_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
 
 
 _INV_ROLE_CHECKS = {"atan": _check_atan_roles}
+_INV_ROLE_CHECKS.update(asin=_check_asin_roles, acos=_check_acos_roles)  # M4G2
 
 
 def _check_inv_build(b: Build, findings):
