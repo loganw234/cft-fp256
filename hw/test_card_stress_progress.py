@@ -933,6 +933,112 @@ def group_wide_page(base, wide, golden):
     check(stated in te, "wide page: an earlier tree with wide items is listed with both groups' figures, not the class's total", stated)
 
 
+def as_routine(wide, rows=None):
+    """The wide run's data file with its wide group relabelled "routine" (parcel M4X2): the same rows, shares and nights under another group name, as the reducer writes
+    them for a tile class that served routine items. `rows`, if given, relabels only those items (a class with both groups): the class's groups are recomputed from its
+    rows, and the nights' state by group moves the whole wide group only when every row is relabelled (the chart's lines only need the group to be a key there)."""
+    j = json.loads(json.dumps(wide))
+    for c in j["now"]["classes"]:
+        for r in c["items"]:
+            if r.get("group") == "wide" and (rows is None or r["item"] in rows):
+                r["group"] = "routine"
+        if any(g["group"] == "wide" for g in c.get("groups", [])):
+            gs = []
+            for gname in ("base", "wide", "routine"):
+                mine = [r for r in c["items"] if r.get("group") == gname]
+                if mine:
+                    cov, sp = sum(r["covered"] for r in mine), sum(r["space"] for r in mine)
+                    gs.append({"group": gname, "items": len(mine), "complete": sum(1 for r in mine if r["complete"]), "covered": cov, "space": sp,
+                               "pct": (100.0 * cov / sp) if sp else None})
+            c["groups"] = gs
+    if rows is None:
+        for nt in j["nights"]:
+            for cid, gm in (nt["after"].get("groups") or {}).items():
+                if "wide" in gm:
+                    gm["routine"] = gm.pop("wide")
+    return j
+
+
+def group_routine_page(wide):
+    """Parcel M4X2: the page over a tile class with routine items - the routine group at a glance after the base group's, listed as a group of its own after the base items
+    and never inside the base group, a line of its own in a third colour in the chart, the earlier trees' line, the legend and the rule of the groups; and a class with all
+    three groups. The data are the wide run's, relabelled (as_routine): the reducer's own routine file is the dry-run scenario's (hw/test_card_stress.py, routine items)."""
+    if not NODE:
+        return skip("the page with routine items in node", "node is not on PATH")
+    rj = as_routine(wide)
+    rp = os.path.join(TMP, "pg-routine.json")
+    with open(rp, "w", encoding="utf-8") as fh:
+        json.dump(rj, fh)
+    r = page("ok", rp)
+    text = r.get("app", {}).get("text", "")
+    check(r.get("status", {}).get("hidden") is True and r.get("app", {}).get("hidden") is False, "routine page: the run with a routine group is shown", r.get("error"))
+    t2 = next(c for c in rj["now"]["classes"] if c["id"] == "t2")
+    bg, rg = (next(g for g in t2["groups"] if g["group"] == x) for x in ("base", "routine"))
+    rows = next((c_["rows"] for c_ in ((r.get("glance") or {}).get("far") or []) if t2["label"] in c_["head"]), None) or []
+    rrow = next((x for x in rows if x["what"] == "routine items"), None)
+    check([x["what"] for x in rows] == ["base items", "routine items"] and rrow is not None
+          and (rrow["pct"], rrow["count"]) == (js_pct1(rg["covered"], rg["space"]), f"{rg['complete']} of {rg['items']} complete"),
+          "routine page: at a glance the class has a row for the base group and one for the routine group after it, with the group's own share and count - not 'all items', not the wide row", rows)
+    check("Wide-format items" not in text and "wide-format items:" not in text and f"Routine items: {rg['complete']} of {rg['items']} fully covered" in text
+          and f"Base items: {bg['complete']} of {bg['items']} fully covered" in text, "routine page: the item list names the routine group after the base group's heading, and says nothing of wide items")
+    sec = text[text.index("Item by item"):]
+    start = sec.index(f"tile items - {t2['label']}")
+    nxt = [sec.find(k, start + 10) for k in ("tile items - ", "host items - ", "Earlier trees, item by item")]
+    block = sec[start:min([x for x in nxt if x > 0] or [len(sec)])]
+    at = block.find("Routine items:")
+    names_r = [x["item"] for x in t2["items"] if x["group"] == "routine"]
+    names_b = [x["item"] for x in t2["items"] if x["group"] == "base"]
+    check(at > 0 and all(block.find(x) > at for x in names_r) and all(0 < block.find(x) < at for x in names_b),
+          "routine page: the base items are listed before the routine heading and the routine items after it: a routine row is never in the base group", (at, names_r))
+    ch = r["chart"]
+    rl = [ln for ln in ch if ln["titles"] and "(routine items)" in ln["titles"][0]]
+    others = [ln for ln in ch if ln not in rl]
+    check(len(ch) == 5 and len(rl) == 1 and "--s2" in rl[0]["style"] and all("--s2" not in ln["style"] for ln in others),
+          "routine page: the chart has a line for the routine group, in the third colour, and the other four lines are not in it", [(len(ch), ln["style"]) for ln in ch])
+    cov_at = {k: rj["nights"][k - 1]["after"]["groups"]["t2"]["routine"]["covered"] for k in (3, 4)}
+    eq(rl[0]["titles"], [f"tile {t2['label']} (routine items): night {k}, {js_pct1(cov_at[k], rg['space'])} ({n(cov_at[k])} of {n(rg['space'])})" for k in (3, 4)],
+       "routine page: and it starts on the first night the group had anything covered, each point that night's covered figure over the group's own space")
+    check("routine items" in text and "orange" in text and rj["rules"]["groups"] in text,
+          "routine page: the chart's legend tells of the routine group's line, and the notes carry the reducer's rule of the groups")
+    legacy_ = json.loads(json.dumps(rj))
+    legacy_["rules"].pop("groups", None)
+    for c in legacy_["now"]["classes"]:
+        c.pop("groups", None)
+    with open(rp, "w", encoding="utf-8") as fh:
+        json.dump(legacy_, fh)
+    lt = page("ok", rp).get("app", {}).get("text")
+    check(lt is not None and "Routine items:" not in lt,
+          "routine page: a file without the groups' totals draws no routine heading (the page falls back to the class's total, as it does for the wide group)")
+    j = json.loads(json.dumps(rj))
+    for c in j["now"]["classes"]:
+        c["current"] = False
+    with open(rp, "w", encoding="utf-8") as fh:
+        json.dump(j, fh)
+    te = page("ok", rp).get("app", {}).get("text", "")
+    stated = (f"{t2['label']} : {bg['complete']} of {bg['items']} items fully covered, {js_pct1(bg['covered'], bg['space'])} ({n(bg['covered'])} of {n(bg['space'])}); "
+              f"routine items: {rg['complete']} of {rg['items']} items fully covered, {js_pct1(rg['covered'], rg['space'])} ({n(rg['covered'])} of {n(rg['space'])}), nights 2, 3, 4")
+    check(stated in te, "routine page: an earlier tree with routine items is listed with both groups' figures, not the class's total", stated)
+    # a class with all three groups: two of the wide rows relabelled
+    mixed = as_routine(wide, rows={"recip128-win-key-rne", "sqrt128-hard-rne"})
+    with open(rp, "w", encoding="utf-8") as fh:
+        json.dump(mixed, fh)
+    rm = page("ok", rp)
+    mt2 = next(c for c in mixed["now"]["classes"] if c["id"] == "t2")
+    mrows = next((c_["rows"] for c_ in ((rm.get("glance") or {}).get("far") or []) if mt2["label"] in c_["head"]), None) or []
+    mtext = rm.get("app", {}).get("text", "")
+    check([x["what"] for x in mrows] == ["base items", "wide-format items", "routine items"] and "Wide-format items:" in mtext and "Routine items:" in mtext
+          and mtext.index("Wide-format items:") < mtext.index("Routine items:") and [g["group"] for g in mt2["groups"]] == ["base", "wide", "routine"],
+          "routine page: a class with all three groups has a row for each at a glance, and lists wide items before routine items, each as a group of its own", [x["what"] for x in mrows])
+    # a groups field with a bad group is named by the page's validator as before
+    bad = json.loads(json.dumps(rj))
+    bad["now"]["classes"][2]["groups"][1].pop("space")
+    with open(rp, "w", encoding="utf-8") as fh:
+        json.dump(bad, fh)
+    rb = page("ok", rp)
+    check(rb.get("status", {}).get("hidden") is False and "not the shape" in rb["status"]["text"] and "groups of class t2" in rb["status"]["text"],
+          "routine page: a routine group without its space is named as not the shape this page reads, and no figure is shown", rb.get("status"))
+
+
 def group_check(d, text, out):
     # the data file is made by the command itself, so that --check re-derives it in the view it was made in: the command's default reads git of the
     # checkout, whose reasons the labels of a class with a made-up commit carry (the in-process fixture groups read the records alone)
@@ -1599,6 +1705,8 @@ def main():
                 _wrecs, wout, wd = wgot
                 guarded(group_format_guard, wd)
                 guarded(group_wide_page, b4[0], wout, {"clock": LEGACY_CLOCK, "digest": LEGACY_DOM})
+                print("== the routine items' group on the page (parcel M4X2)")
+                guarded(group_routine_page, wout)
         print("== the rates (parcel TP): the file's field, its nights, the page's table")
         guarded(group_rates)
         print("== the committed data file")

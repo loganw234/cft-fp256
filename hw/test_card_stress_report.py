@@ -1864,6 +1864,97 @@ def build_reach_run():
     return fx.records()
 
 
+def build_routine_run(item="exp-f32-d043b3bb5-all", group="routine"):
+    """A one-cycle run of routine slices, records as the driver writes them (parcel M4X2): exp over three slices of 2^20 encodings on the quad's tile 1 -
+    the first with exp's three right marks on the list, the second with twenty marks off the list, sixteen of them named (one WRONG among the sixteen; the
+    counts say two guesses wrong, the second among the four marks no line named), the third with none - and, apart, a sweep leg of an item the catalog does
+    not name (an older digest) whose records say `group`. Returns (records, the item's op)."""
+    op = item[:-4]
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = fx.begin_cycle(T0 + 5, "quad", 1, 3)
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0})])
+    E = 1 << 20
+    named2 = [{"attr": "rne", "lane": 0x3f000000 + i, "guess": 0x3fd30956 + i, "wrong": i == 3, "off_list": True} for i in range(16)]
+    slices = [
+        (0, E, {"marked": 3, "off_list": 0, "guesses_wrong": 0},
+         {"marks": {"by_attr": {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0},
+                    "named": [{"attr": a, "lane": 0x33ffffff, "guess": g, "wrong": False, "off_list": False} for a, g in (("rtz", 0x3f800000), ("rdn", 0x3f800000), ("rup", 0x3f800001))],
+                    "not_named": 0}, "times": {"device_s": 1.5, "oracle_s": 2.25, "lanes_a_call": 16384}}),
+        (E, 2 * E, {"marked": 20, "off_list": 20, "guesses_wrong": 2},
+         {"marks": {"by_attr": {"rne": 20, "rtz": 0, "rdn": 0, "rup": 0, "rmm": 0}, "named": named2, "not_named": 4}, "times": {"device_s": 1.0, "oracle_s": 0.75, "lanes_a_call": 16384}}),
+        (2 * E, 3 * E, {"marked": 0, "off_list": 0, "guesses_wrong": 0},
+         {"marks": {"by_attr": {"rne": 0, "rtz": 0, "rdn": 0, "rup": 0, "rmm": 0}, "named": [], "not_named": 0}, "times": {"device_s": 0.5, "oracle_s": 0.5, "lanes_a_call": 16384}}),
+    ]
+    for lo, hi, mk, extra in slices:
+        sw = {"item": item, "tool": "routine", "op": op, "mode": "all", "reach": "tile", "lo": lo, "hi": hi, "tile": 1, "jobs": 1,
+              "expected_cases": 5 * (hi - lo), "expected_encodings": hi - lo}
+        if group:
+            sw["group"] = group
+        fx.leg("quad", f"sweep-{item}", t, 30, kind="sweep", sweep=sw, tile=1, extra=extra,
+               counts=dict({"cases": 5 * (hi - lo), "value_mismatches": 0, "flag_mismatches": 0, "encodings": hi - lo, "skipped": 0}, **mk),
+               rate={"value": 5 * (hi - lo) / 30.0, "unit": "cases/s"})
+        t += 31
+    fx.end_cycle(t)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=1)
+    return fx.records(), op
+
+
+def group_routine():
+    """Parcel M4X2: the report over routine slices - the third group, its totals and sentence, the routine block (the claim, the marks by attribute, the lanes the tool named that
+    were off the list or wrong, the marks it did not name, the seconds summed), the same under --json, an item the catalog does not name taking its records' group, and a
+    run without routine slices reporting what it always did."""
+    group("routine")
+    recs, op = build_routine_run()
+    S = R.summarize(recs, rev=None)
+    T = R.render(S)
+    ex = S["sweep"]["exhaustive"]
+    check(len(ex) == 1 and ex[0]["item"] == "exp-f32-d043b3bb5-all" and ex[0]["group"] == "routine" and ex[0]["format"] == "fp32" and ex[0]["covered"] == 3 << 20
+          and ex[0]["total"] == EXH, "routine: the item is counted over 2^32 encodings in group routine with the format fp32", ex[:1])
+    eq([(g["group"], g["items"], g["covered"], g["total"]) for g in S["sweep"]["total_exhaustive"]["by_group"]], [("routine", 1, 3 << 20, EXH)],
+       "routine: the totals by group are the routine group alone")
+    check("  group routine: 1 exhaustive item(s) seen; covered 3145728 of 4294967296 encodings" in T
+          and "group routine is the routine sweeps' items (parcel M4X2" in T and "  group base:" not in T and "  group wide:" not in T,
+          "routine: the text has a line for the group and the sentence naming the groups, and none for a group the run has no item of")
+    rr = S["sweep"]["routine"]
+    check(len(rr) == 1 and rr[0]["item"] == "exp-f32-d043b3bb5-all" and rr[0]["slices"] == 3 and rr[0]["marked"] == 23
+          and rr[0]["by_attr"] == {"rne": 20, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0} and rr[0]["off_list"] == 20 and rr[0]["guesses_wrong"] == 2
+          and rr[0]["not_named"] == 4 and rr[0]["device_s"] == 3.0 and rr[0]["oracle_s"] == 3.5 and rr[0]["claim"].startswith("every fp32 x through exp as the compiled program"),
+          "routine: the block's figures are the three slices' sums - 23 marked (rne 20, rtz 1, rdn 1, rup 1), 20 off the list, 2 wrong, 4 not named, device 3.0 s, oracle 3.5 s", rr)
+    named = rr[0]["named"] if rr else []
+    check(len(named) == 16 and all(x["off_list"] for x in named) and sum(1 for x in named if x["wrong"]) == 1 and rr[0]["named_other"] == 3,
+          "routine: the named lanes are every one of the slices' that was off the list or wrong (16 of the second slice), the three right ones on the list counted apart", named[:2])
+    check("  a routine item (parcel M4X2:" in T and "    exp-f32-d043b3bb5-all: every fp32 x through exp as the compiled program (its images' digest 043b3bb5)" in T
+          and "3 slice(s); marked 23 (rne 20, rtz 1, rdn 1, rup 1, rmm 0); off the list 20; guesses wrong 2; marks no MARK line named 4; device 3.000 s, oracle 3.500 s" in T
+          and "rne a=0x3f000003 guess=0x3fd30959 WRONG (off the list)" in T and "rne a=0x3f000000 guess=0x3fd30956 right (off the list)" in T,
+          "routine: the text's block gives the claim, the sums, the marks no MARK line named, the seconds and each named lane (a WRONG one too)", T[T.find("a routine item"):][:900])
+    check("rtz a=0x33ffffff" not in T, "routine: and not the right marks on the list (they are counted, and a MARK line of the tool's, not an exception)")
+    rs = S["rates"]
+    check(rs["left_out"].get("routine") == 3 and rs["seen"] == 3 and rs["used"] == 0 and not rs["rows"] and sum(rs["left_out"].values()) == rs["seen"]
+          and "  routine: 3 - a routine-sweep slice" in T, "routine: the rates leave the three slices out in a bucket of their own, the buckets adding to the legs seen", rs["left_out"])
+    # an item the catalog does not name (an older digest): the records' group, else base
+    for grp, want in (("routine", "routine"), (None, "base"), ("bogus", "base")):
+        r2, _ = build_routine_run("exp-f32-d00000000-all", grp)
+        S2 = R.summarize(r2, rev=None)
+        e2 = S2["sweep"]["exhaustive"]
+        check(len(e2) == 1 and e2[0]["group"] == want, f"routine: an item the catalog does not name takes its records' group ({grp!r}) when it is one of the three, else base: {want}", e2[:1])
+    r3, _ = build_routine_run("exp-f32-d00000000-all", "routine")
+    S3 = R.summarize(r3, rev=None)
+    check(len(S3["sweep"]["routine"]) == 1 and S3["sweep"]["routine"][0]["claim"] is None
+          and "exp-f32-d00000000-all: no claim (an item the catalog does not name)" in R.render(S3), "routine: and its block names it, with no claim, as an item the catalog does not name")
+    # a run with no routine slice: no block, no group line, no bucket, as the report always was
+    old = build_reach_run()
+    So = R.summarize(old, rev=None)
+    To = R.render(So)
+    check(So["sweep"]["routine"] == [] and "routine" not in So["rates"]["left_out"] and "a routine item" not in To and "group routine" not in To and "  routine: " not in To,
+          "routine: a run without a routine slice has an empty routine list, no group line, no block and no rates bucket")
+    eq([g["group"] for g in So["sweep"]["total_exhaustive"]["by_group"]], ["base"], "routine: and its totals by group are the base group alone")
+    # the tree classes: each class's total by group has the routine group, the rows their group
+    cls = [c for k in S["trees"]["classes"] for c in [k]] if isinstance(S.get("trees"), dict) and S["trees"].get("classes") else []
+    check(all(any(g["group"] == "routine" for g in (c["total"].get("by_group") or [])) and all(e["group"] == "routine" for e in c["exhaustive"])
+              for c in cls if c["exhaustive"]), "routine: every tree class that served the item has the routine group in its totals and on its rows", [c["exhaustive"][:1] for c in cls][:1])
+
+
 def group_reach():
     group("reach")
     recs = build_reach_run()
@@ -3218,13 +3309,16 @@ def group_rates():
           "rates: ... and not k times its indices, which is the cases and the skipped slots together (84,943,152)")
     # -- the table of rate ops is held to the catalog both ways: every tile op of the exhaustive and hard levels has one, and none is dead
     cat = LIB.sweep_items(mpfr=True)
-    need = {it.op for it in cat if it.kind == "exhaustive" and it.reach == "tile" and it.level in ("exhaustive", "hard")}
+    need = {it.op for it in cat if it.kind == "exhaustive" and it.reach == "tile" and it.level in ("exhaustive", "hard") and it.tool != "routine"}
     eq(set(R.RATE_OP), need, f"rates: the rate-op table names every op word of the catalog's tile items at the exhaustive and hard levels ({len(need)}) and no other")
     eq({o: R.RATE_OP[o] for o in need}, {o: re.match(r"[a-z]+", o).group(0) for o in need},
        "rates: and each op word's rate op is the operation it names: the word's letters before its digits (the oracle's own parse)")
     eq(sorted(set(R.RATE_OP.values())), sorted(R.RATE_OPS), "rates: and the ops a table lists are exactly the ones the rows can have")
     # -- the other levels' items are out of the rows by the catalog, not by luck: no class or random or host item has an op in the table
     check(not any(it.op in R.RATE_OP for it in cat if it.level in ("class", "random") or it.reach != "tile"), "rates: no class-level, random or host item's op has a rate op")
+    # -- parcel M4X2: the routine items (tile, exhaustive) are left out of the rates by a bucket of their own: no routine op has a rate op, and the catalog has them
+    check(sum(1 for it in cat if it.tool == "routine") == 9 and not any(it.op in R.RATE_OP for it in cat if it.tool == "routine"),
+          "rates: the nine routine items' ops have no rate op (their slices are the 'routine' bucket of left_out)")
     # -- no probe: the card-alone cells are '-' and the text says so; nothing is put in their place
     eq(X["probe"], None, "rates: a run with no probe leg has probe None, not zeros")
     check(all(r["card"] is None for r in X["rows"]) and all(r["card_alone"] == "-" and r["ratio"] == "-" for r in tab if r["tile"] in ("all", "only")),
@@ -3330,6 +3424,7 @@ def main():
         group_telemetry_edges()
         group_json(base)
         group_reach()
+        group_routine()
         group_wide()
         group_rates()
         group_left_out(base)

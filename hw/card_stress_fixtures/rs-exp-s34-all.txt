@@ -1,0 +1,26 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
+image exp rne: sha256 7a7515921e98fe6b55ea8d799991055f9246248227b1e821c8b6af8e86d4a0a7, 387 instructions, 71 words
+image exp rtz: sha256 589329ed0dfe33ecc4f686c8810fefd6517936c769874a07abda47e9d0e30830, 385 instructions, 71 words
+image exp rdn: sha256 281ae5a954a26546d5b6b7d015d90f1c685d0a94251a947819cc9194310c17f7, 385 instructions, 71 words
+image exp rup: sha256 4561b0558c5ed2f4f4a0a683807ea1bf2a10f79f1a0f994265301080e49d1b74, 384 instructions, 70 words
+image exp rmm: sha256 a279877421b78611b0f0328ecf7e20657c4333738b558b37c3916b045d1844f7, 387 instructions, 71 words
+exp-f32 all: device 1.478 s, oracle 0.003 s, 16384 lanes a call
+  MARK rne a=0x3f00000b guess=0x3fd30956 right (off the list)
+  MARK rmm a=0x3f00000b guess=0x3fd30956 right (off the list)
+  MARK rtz a=0x3f00001f guess=0x3fd30965 right (off the list)
+  MARK rdn a=0x3f00001f guess=0x3fd30965 right (off the list)
+  MARK rup a=0x3f00001f guess=0x3fd30966 right (off the list)
+  MARK rtz a=0x3f000030 guess=0x3fd30974 right (off the list)
+  MARK rdn a=0x3f000030 guess=0x3fd30974 right (off the list)
+  MARK rup a=0x3f000030 guess=0x3fd30975 right (off the list)
+  MARK rne a=0x3f000044 guess=0x3fd30984 right (off the list)
+  MARK rmm a=0x3f000044 guess=0x3fd30984 right (off the list)
+  MARK rne a=0x3f000055 guess=0x3fd30993 right (off the list)
+  MARK rmm a=0x3f000055 guess=0x3fd30993 right (off the list)
+  MARK rtz a=0x3f000069 guess=0x3fd309a2 right (off the list)
+  MARK rdn a=0x3f000069 guess=0x3fd309a2 right (off the list)
+  MARK rup a=0x3f000069 guess=0x3fd309a3 right (off the list)
+  MARK rne a=0x3f00008e guess=0x3fd309c2 right (off the list)
+exp-f32 all: 20480 cases, 0 value mismatches, 0 flag mismatches, 4096 encodings, 0 skipped
+exp-f32 all: 529 marked (rne 113, rtz 101, rdn 101, rup 101, rmm 113), 529 off the list, 0 guesses wrong

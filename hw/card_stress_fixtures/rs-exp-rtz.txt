@@ -1,0 +1,7 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
+image exp rtz: sha256 845566d93fd52144ff1ea386be3518243cd580e57def6295bddcabf3308e98c2, 385 instructions, 71 words
+exp-f32-d043b3bb5 rtz: device 0.001 s, oracle 0.000 s, 16384 lanes a call
+  MARK rtz a=0x33ffffff guess=0x3f800000 right
+exp-f32-d043b3bb5 rtz: 9 cases, 0 value mismatches, 0 flag mismatches, 9 encodings, 0 skipped
+exp-f32-d043b3bb5 rtz: 1 marked (rne -, rtz 1, rdn -, rup -, rmm -), 0 off the list, 0 guesses wrong

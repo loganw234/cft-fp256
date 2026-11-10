@@ -922,7 +922,9 @@ rate-probe$(EXE): tools/rate_probe.c libcft.a
 # do. On a box that will open an artifact: `make -C host XRT=1 XRT_ROOT=... MPFR=1 MPFR_PREFIX=DIR routine-sweep`, then
 # `ldd host/routine-sweep | grep xrt` (without XRT=1 it opens none: CLAUDE.md). -DLANES=n at build sets the lanes a call.
 # The images it runs are host/tools/gen_sweep_images.py's, read from CFT_SWEEP_IMAGES or sweep-images/ beside the binary.
-routine-sweep$(EXE): tools/routine_sweep.c tools/mpfr_tfn.h tools/mpfr_ieee.h libcft.a
+# Under MPFR=1 (the card driver's --mpfr-prefix build) it is relinked every time, as the soaks are ($(SOAK_MPFR_DEPS)), so that a binary linked
+# against another MPFR, or without XRT, is rebuilt by it and not taken for the build's (parcel M4X2).
+routine-sweep$(EXE): tools/routine_sweep.c tools/mpfr_tfn.h tools/mpfr_ieee.h libcft.a $(SOAK_MPFR_DEPS)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include) -fno-math-errno \
 	  tools/routine_sweep.c libcft.a -o $@ $(XRTLIBS) $(LDLIBS) \
 	  $(if $(MPFR_PREFIX),-L$(MPFR_PREFIX)/lib )-lmpfr -lgmp -lm

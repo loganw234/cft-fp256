@@ -482,6 +482,100 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
 
 
 # ---------------------------------------------------------------------------
+# routine-sweep   host/tools/routine_sweep.c (parcel M4X), read by parcel M4X2. The verdict line is the soak's (parse_soak reads it, unedited:
+#   routine_sweep.c:1028 prints "%s %s: %llu cases, %llu value mismatches, %llu flag mismatches, %llu encodings, 0 skipped"). Three more lines are the
+#   tool's own, and parse_routine_marks reads them:
+#   the marks line, routine_sweep.c:1041
+#     printf("%s %s: %llu marked (rne %s, rtz %s, rdn %s, rup %s, rmm %s), %llu off the list, %llu guesses wrong\n", ...)
+#     each %s a count, or "-" for an attribute the job did not run (routine_sweep.c:1036-1038: one attribute names itself and four dashes)
+#   a MARK line, routine_sweep.c:691, at most SHOW (16) a job of ANY kind, right ones included (one counter, shown_k)
+#     printf("  MARK %s a=0x%08lx guess=0x%08lx %s%s\n", mode, a, lib, wrong ? "WRONG" : "right", listed ? "" : " (off the list)")
+#   the timing line, on stderr, routine_sweep.c:1045
+#     fprintf(stderr, "%s %s: device %.3f s, oracle %.3f s, %lu lanes a call\n", ...)
+# A lane is MARKED when the program's own bank says its result is a guess (CFT_LANE_MARKED); off the list is a marked lane the images' marks
+# list does not name; WRONG is a guess that is not MPFR's answer. Neither fails a slice: the tool exits 0 for them and so does the driver.
+# ---------------------------------------------------------------------------
+ROUTINE_SHOW = 16
+ROUTINE_MARKS_LINE = re.compile(r"^(\S+) (\S+): (\d+) marked \(rne (\d+|-), rtz (\d+|-), rdn (\d+|-), rup (\d+|-), rmm (\d+|-)\), "
+                                r"(\d+) off the list, (\d+) guesses wrong$", M)
+ROUTINE_MARK_LINE = re.compile(r"^  MARK (rne|rtz|rdn|rup|rmm) a=0x([0-9a-f]{8}) guess=0x([0-9a-f]{8}) (right|WRONG)( \(off the list\))?$", M)
+ROUTINE_TIMING_LINE = re.compile(r"^(\S+) (\S+): device (\d+\.\d{3}) s, oracle (\d+\.\d{3}) s, (\d+) lanes a call$", M)
+
+
+def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]:
+    """The marks of a routine-sweep job, from its marks line and MARK lines, and its timing line if it has one. Raises VerdictError, naming
+    what is wrong, for anything but a log whose lines agree with each other: exactly one marks line, the job's op and mode on it; under `all`
+    five numbers, under one attribute that one and four `-`; the total their sum; off the list and wrong each at most the total; the MARK
+    lines exactly min(total, 16), each of an attribute that ran; and, when the total is 16 or less (so that every mark is shown), the WRONG
+    lines the wrong count, the '(off the list)' lines the off-list count, and each attribute's MARK lines its count.
+    Returns {'by_attr': {attribute: count or None}, 'marked', 'off_list', 'wrong', 'named': [{'attr', 'lane', 'guess', 'wrong', 'off_list'}],
+    'not_named': marks with no MARK line, 'times': {'device_s', 'oracle_s', 'lanes_a_call'} or None}."""
+    m = _one(ROUTINE_MARKS_LINE, text, "routine marks line")
+    if m.group(1) != op or m.group(2) != verdict_mode:
+        raise VerdictError(f"routine marks: the line is for '{m.group(1)} {m.group(2)}', the job was '{op} {verdict_mode}'")
+    total, off, wrong = int(m.group(3)), int(m.group(9)), int(m.group(10))
+    by_attr: Dict[str, Optional[int]] = {a: (None if m.group(4 + i) == "-" else int(m.group(4 + i))) for i, a in enumerate(ROUTINE_ATTRS)}
+    ran = [a for a, n in by_attr.items() if n is not None]
+    want_ran = list(ROUTINE_ATTRS) if verdict_mode == "all" else ([verdict_mode] if verdict_mode in ROUTINE_ATTRS else None)
+    if want_ran is None:
+        raise VerdictError(f"routine marks: '{verdict_mode}' is not a mode of the tool (all or one of {', '.join(ROUTINE_ATTRS)})")
+    if ran != want_ran:
+        raise VerdictError(f"routine marks: the job ran {', '.join(want_ran)} and the marks line gives numbers for "
+                           f"{', '.join(ran) or 'none'} (the rest must be '-')")
+    if sum(n for n in by_attr.values() if n is not None) != total:
+        raise VerdictError(f"routine marks: {total} marked but the attributes' counts sum to "
+                           f"{sum(n for n in by_attr.values() if n is not None)}")
+    if off > total:
+        raise VerdictError(f"routine marks: {off} off the list of {total} marked")
+    if wrong > total:
+        raise VerdictError(f"routine marks: {wrong} guesses wrong of {total} marked")
+    named = [{"attr": x.group(1), "lane": int(x.group(2), 16), "guess": int(x.group(3), 16), "wrong": x.group(4) == "WRONG",
+              "off_list": x.group(5) is not None} for x in ROUTINE_MARK_LINE.finditer(text)]
+    if len(named) != min(total, ROUTINE_SHOW):
+        raise VerdictError(f"routine marks: {len(named)} MARK lines where {total} marked show min({total}, {ROUTINE_SHOW}) = "
+                           f"{min(total, ROUTINE_SHOW)}")
+    for n in named:
+        if by_attr[n["attr"]] is None:
+            raise VerdictError(f"routine marks: a MARK line of {n['attr']}, which this job did not run")
+    if total <= ROUTINE_SHOW:
+        if sum(n["wrong"] for n in named) != wrong:
+            raise VerdictError(f"routine marks: {sum(n['wrong'] for n in named)} WRONG MARK lines where the line says {wrong} guesses wrong")
+        if sum(n["off_list"] for n in named) != off:
+            raise VerdictError(f"routine marks: {sum(n['off_list'] for n in named)} '(off the list)' MARK lines where the line says "
+                               f"{off} off the list")
+        for a in ran:
+            k = sum(1 for n in named if n["attr"] == a)
+            if k != by_attr[a]:
+                raise VerdictError(f"routine marks: {k} MARK lines of {a} where the line says {by_attr[a]} marked")
+    else:
+        for a in ran:
+            if sum(1 for n in named if n["attr"] == a) > by_attr[a]:
+                raise VerdictError(f"routine marks: more MARK lines of {a} than the {by_attr[a]} marked")
+    times = None
+    t = _maybe_one(ROUTINE_TIMING_LINE, text, "routine timing line")
+    if t is not None:
+        if t.group(1) != op or t.group(2) != verdict_mode:
+            raise VerdictError(f"routine timing: the line is for '{t.group(1)} {t.group(2)}', the job was '{op} {verdict_mode}'")
+        times = {"device_s": float(t.group(3)), "oracle_s": float(t.group(4)), "lanes_a_call": int(t.group(5))}
+    return {"by_attr": by_attr, "marked": total, "off_list": off, "wrong": wrong, "named": named, "not_named": total - len(named), "times": times}
+
+
+def parse_routine(text: str, rc: Optional[int], op: str, verdict_mode: str, artifact: Optional[str], expected_cases: Optional[int],
+                  cover: Optional[Dict[str, int]] = None, cpu: bool = False) -> Verdict:
+    """A routine-sweep slice: parse_soak (unedited: the verdict, the backend, the cover rule, the exit status) and then parse_routine_marks,
+    which the log must also pass (else VerdictError, so a parse_error). The default tool only (no pass-size line: chunk=None). The verdict's
+    counts gain marked, off_list and guesses_wrong; its extra gains `marks` (by attribute, the named lanes, how many marks are not named)
+    and `times` (device s, oracle s, lanes a call) when the tool printed its timing line. An off-list mark and a wrong guess leave it ok."""
+    v = parse_soak(text, rc, op, verdict_mode, artifact, expected_cases, cover, cpu=cpu, chunk=None)
+    r = parse_routine_marks(text, op, verdict_mode)
+    v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])
+    v.extra["marks"] = {"by_attr": r["by_attr"], "named": r["named"], "not_named": r["not_named"]}
+    if r["times"] is not None:
+        v.extra["times"] = r["times"]
+    return v
+
+
+# ---------------------------------------------------------------------------
 # rate-probe   host/tools/rate_probe.c (parcel TP, 2026-10-28): the card's rate for each op and format with the oracle off.
 #   The tool's own header holds the grammar; each pattern below is one of its printf lines:
 #     rate-probe: backend DEVICE <artifact> | backend software
@@ -895,6 +989,65 @@ OP_FORMAT.update({
 })
 
 
+# THE ROUTINE ITEMS (parcel M4X2, 2026-11-09): host/tools/routine_sweep.c (parcel M4X) sweeps one fp32 routine of python/cft_golden/mathlib.py,
+# compiled to five programs (one a rounding attribute) by host/tools/gen_sweep_images.py, over every fp32 x, against MPFR, on the card's tile
+# (each lane is a program run, cft_program_run_ex). Its op word is <name>-f32[-x<8 hex>][-d<8 hex>] (routine_sweep.c, parse_op), its one mode
+# `all`, and the item's name is the op word + "-all". THE DIGEST is in the op word, so a moved fragment is a new op and a new item, and
+# coverage, which is keyed by the item's name, starts from nothing for it: the tool refuses a digest that is not its images' (exit 2).
+#
+# ROUTINE_DIGESTS is the one table of them, in the tool's order: the digest `routine-sweep list` prints and gen_sweep_images.py's `digest` lines
+# give, MEASURED by the lead on amd-arc-box at c99df121 (box/tool-m4x/list.out) and held to the generator by hw/test_routine_sweep.py's
+# `images` leg. A routine with no digest has no item: atan, asin, acos and atan2 join when their fp32 programs are built and a later change
+# adds their digests (and the generator's names). HOW A DIGEST MOVES: a changed fragment (the routine's sources in python/cft_golden/mathlib.py,
+# its constants or the compiler's output for it) changes the digest the generator writes; the table is then changed here, with the lead's
+# approval, as python/tests/routine_digests.py is changed; the item it makes is NEW (a new name), its coverage from nothing, and the old
+# item's slices stay in the files that hold them. The build step (hw/card_stress.py, `routine images`) fails by name on a table that disagrees.
+ROUTINE_DIGESTS = {
+    "exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb", "log2": "c274c957",
+    "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e",
+}
+# atan2 is swept as every y for one fixed x, nine x (the lead's, plan.md decision 9), in the lead's order: (the x, what it is)
+ATAN2_X = (
+    (0x3f800000, "1"), (0xbf800000, "-1"), (0x3f800001, "one ulp above 1"), (0x53800000, "2^40"),
+    (0x7f7fffff, "the largest normal"), (0x00800000, "the smallest normal"), (0x00000003, "a subnormal"),
+    (0x3fb504f3, "a full significand, 1.41421..."), (0xc0490fdb, "a full significand, negative, -3.14159..."),
+)
+ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")   # routine_sweep.c's RTNS
+ROUTINE_ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
+ROUTINE_TOOL = "routine"
+# routine_sweep.c's op grammar (parse_op): <name>-f32[-x<8 hex>][-d<8 hex>]; a pattern, not a copy of ROUTINE_DIGESTS
+ROUTINE_OP = re.compile(r"^(%s)-f32(?:-x([0-9a-f]{8}))?(?:-d([0-9a-f]{8}))?$" % "|".join(ROUTINE_NAMES))
+
+
+def routine_op_word(name: str, digest: str, x: Optional[int] = None) -> str:
+    return f"{name}-f32" + (f"-x{x:08x}" if x is not None else "") + f"-d{digest}"
+
+
+def routine_ops(digests: Optional[Dict[str, str]] = None) -> List[Tuple[str, Optional[int], str, str]]:
+    """(name, x, digest, op word) of every routine item for a table of digests (ROUTINE_DIGESTS), in the tool's order; atan2 once an x."""
+    out: List[Tuple[str, Optional[int], str, str]] = []
+    for name, d in (ROUTINE_DIGESTS if digests is None else digests).items():
+        for x in ([a for a, _ in ATAN2_X] if name == "atan2" else [None]):
+            out.append((name, x, d, routine_op_word(name, d, x)))
+    return out
+
+
+OP_REACH.update({op: TILE for _, _, _, op in routine_ops()})          # each lane is a program run on the tile (cft_program_run_ex)
+OP_FORMAT.update({op: "fp32" for _, _, _, op in routine_ops()})
+
+
+def routine_claim(name: str, d: str, x: Optional[int] = None) -> str:
+    """What a pass over a routine item's whole space claims, by space and level; never 'swept'."""
+    if x is None:
+        space = f"every fp32 x through {name} as the compiled program (its images' digest {d})"
+    else:
+        what = dict(ATAN2_X)[x]
+        space = (f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest {d}), "
+                 f"not the whole space of (y, x) pairs")
+    return (f"{space}, each of the five attributes: an unmarked lane's bits and flags equal to MPFR's, a marked lane "
+            f"counted and its guess compared, not decided (L1 over the fp32 slice)")
+
+
 def format_of(op: str) -> str:
     """The format an op computes in, or both ends of a conversion (OP_FORMAT). An op the table does not name is refused BY NAME."""
     try:
@@ -982,6 +1135,12 @@ class Item:
         # the op's random operand stream depends on BATCH (CK's finding ii): its stream identity includes the batch
         self.layout_dependent = kind == "random" and op in LAYOUT_OPS
 
+    @property
+    def group(self) -> str:
+        """The group the report and the page draw the item in (parcel M4X2): 'routine' for a routine-sweep item, else 'wide' if it is one
+        of the mpfr items (HXc's and HXb's), else 'base'. A property, not a field: no older item's vars() gains anything."""
+        return ROUTINE_TOOL if self.tool == ROUTINE_TOOL else ("wide" if self.mpfr else "base")
+
     def argv(self, binary: str, lo: int = 0, hi: int = 0, count: int = 0,
              seed: int = 0) -> List[str]:
         if self.kind == "exhaustive":
@@ -1036,6 +1195,14 @@ class Item:
         if not 0 <= n < SEED_N_LIMIT:
             raise ValueError(f"{self.name}: slice number {n} is outside [0, 2^39), the room the seed gives n")
         return (self.seed_index << 40) | (n << 1) | 1
+
+
+def routine_items(digests: Optional[Dict[str, str]] = None) -> List[Item]:
+    """The routine items of a table of digests (ROUTINE_DIGESTS by default): the nine, in the tool's order; a test passes a table of its own
+    (atan2 among them), after putting its ops into OP_REACH and OP_FORMAT as the module does for the real ones."""
+    return [Item(f"{op}-all", ROUTINE_TOOL, "exhaustive", op, "all", verdict_mode="all", exact=True, per_encoding=len(ROUTINE_ATTRS),
+                 space=EXH, level="exhaustive", whole=(len(ROUTINE_ATTRS) * EXH, 0), mpfr=True, claim=routine_claim(name, d, x))
+            for name, x, d, op in routine_ops(digests)]
 
 
 def sweep_items(scaleb_modes: Iterable[str] = MODES4,
@@ -1173,6 +1340,10 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
                 items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode, verdict_mode=mode, exact=True,
                                   per_encoding=k, space=space, level="exhaustive" if f32 else "class", whole=(k * space, 0),
                                   mpfr=True, claim=f"{wide_c5_claim(op)}, under {mode}"))
+        # Parcel M4X2: the routine items, APPENDED after HXb's 60 so that the 287 keep their places, one an op word (routine_ops): all five
+        # attributes in one job (`all`), five checks an encoding, exactly E encodings and none skipped, so exact, and the whole space is
+        # (5 x 2^32, 0). The tool links the pinned MPFR, so they run only with --mpfr-prefix as the wide items do.
+        items += routine_items()
     for it in items:
         if it.kind == "random":
             if it.name not in RANDOM_SEED_INDEX:

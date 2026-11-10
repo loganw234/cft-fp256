@@ -68,7 +68,9 @@ def test_the_table_is_the_old_eight_the_new_seven_the_wide_thirty_then_the_wide_
 
 
 def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
-    driver = {op for op, reach in csl.OP_REACH.items() if reach == "tile"}
+    # parcel M4X2: the routine op words (nine, each with its digest in the word) are tile ops by a rule of their own, read from routine_sweep.c's op grammar;
+    # the table is the other fifty-one, exactly
+    driver = {op for op, reach in csl.OP_REACH.items() if reach == "tile" and not FE.ROUTINE_OP_RE.match(op)}
     table = set(FE.STRESS_TILE_OPS)
     assert driver == table, (
         f"OP_REACH says tile and the table does not: {sorted(driver - table)}; "
@@ -87,6 +89,30 @@ def test_a_run_that_served_every_item_of_the_catalog_passes_the_reach_check(
     msg = str(exc.value)
     assert "OP_REACH and STRESS_TILE_OPS disagree" in msg
     assert all(op in msg for op in NEW_TILE_OPS), msg
+
+
+def test_the_routine_rule_and_the_drivers_op_reach_say_the_same_of_every_routine_op_word(csl):
+    """Parcel M4X2: the rule (a pattern of the op grammar) matches exactly the routine ops OP_REACH calls tile, both ways, and no op of the table of fifty-one."""
+    routine = {it.op for it in csl.sweep_items(mpfr=True) if it.tool == "routine"}
+    assert len(routine) == 9
+    assert {op for op, reach in csl.OP_REACH.items() if reach == "tile" and FE.ROUTINE_OP_RE.match(op)} == routine
+    assert all(FE.is_tile_op(op) for op in routine) and not any(FE.ROUTINE_OP_RE.match(op) for op in FE.STRESS_TILE_OPS)
+    assert not any(FE.ROUTINE_OP_RE.match(op) for op in csl.OP_REACH if op not in routine)
+    # the rule is the grammar and not the table: a word of the grammar the table does not hold is a tile op, a word outside the grammar is not
+    assert FE.is_tile_op("atan2-f32-x3f800000-dffffffff") and FE.is_tile_op("exp-f32") and not FE.is_tile_op("exp-f32-d043b3bb")
+    assert not FE.is_tile_op("exp-f32-d043b3bb5-all") and not FE.is_tile_op("sqrt33") and not FE.is_tile_op(None)
+    served = routine | {"sqrt32", "rem32"}
+    assert FE.tile_ops_served(served) == ["sqrt32"] + sorted(routine)
+    FE._check_reach(served, csl.OP_REACH)                                # must not raise
+
+
+def test_a_routine_op_called_host_is_refused_by_name(csl):
+    """The control of the rule: the library saying 'host' of a routine op word is a disagreement, by name, as for any op of the table."""
+    op = "exp-f32-d043b3bb5"
+    FE._check_reach({op}, {op: "tile"})
+    with pytest.raises(FE.ExtractError) as exc:
+        FE._check_reach({op}, {op: "host"})
+    assert "OP_REACH and STRESS_TILE_OPS disagree" in str(exc.value) and op in str(exc.value)
 
 
 def _flat(text):

@@ -1627,8 +1627,17 @@ do_soakquick() {
   HOSTMAKE "divsqrt-soak$EXE" || return 1
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
+# Parcel M4X2: the stage also runs the routine sweep's own test (hw/test_routine_sweep.py) on the groups that hold the tool and its images to the card
+# driver's table of digests - `build`, `images` (the generator's `digest` lines equal hw/card_stress_lib.py's ROUTINE_DIGESTS: a moved fragment fails the
+# gate at its merge, not a night), `oracle`, `refuse`, `sabotage`, `plants`, `legs` and `marks`. Not `agree`, `whole`, `fast` or `rate` (by hand), nor
+# `unchanged` (it needs a baseline tree and MPFR 4.2). The test skips itself by name, a SKIP line the runner counts as an inner skip, off POSIX and
+# without MPFR, mpmath or pytest. do_mpfr above is run unchanged and first; its text is what verify/test-inner-skips.sh extracts.
+do_mpfr_stage() {
+  do_mpfr || return 1
+  PY -B "$ROOT/hw/test_routine_sweep.py" --only build,images,oracle,refuse,sabotage,plants,legs,marks
+}
 need host-cc mpfr
-stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals; then the evaluator's error claims, exactly, in GMP and MPFR" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals; then the evaluator's error claims, exactly, in GMP and MPFR; then the routine sweep's tool, images, oracle, refusals, sabotage, plants and marks, and its digests held to the card driver's table (hw/test_routine_sweep.py)" -- do_mpfr_stage
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick

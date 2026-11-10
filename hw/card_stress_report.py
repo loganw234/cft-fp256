@@ -66,6 +66,13 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     line for each group under their `total`, which stays over every item; `total_exhaustive.by_group` and each class's `total.by_group`
     are the same in --json. A run with no wide item prints no group line, so its text differs from the earlier report's in the table
     rows and headers that carry the format alone. Nothing is summed across tree classes: a group is counted inside a class.
+  - THE ROUTINE GROUP (since 2026-11-09, parcel M4X2). A third group, "routine": the items of host/tools/routine_sweep.c (the fp32 routines of
+    python/cft_golden/mathlib.py compiled to programs and run on the tile against MPFR), the catalog's `Item.group`; an item the catalog does not name
+    takes the `sweep.group` its records carry, else "base" (so an item of an older digest stays a routine item). The group lines are printed when
+    any group but base is present. Under the sweep table a routine block gives, for each routine item served, its claim, its slices, its marked lanes
+    by attribute, those off the list, its guesses wrong, the lanes the tool named that were off the list or wrong (every one of every slice), the
+    marks no MARK line named, and the device and oracle seconds summed (`sweep.routine` in --json). The rates leave the routine slices out, as a bucket
+    of their own. A run with no routine item reports as it did.
   - COVERAGE BY TREE (the section after the sweep's; since 2026-10-20). What a slice is evidence
     about depends on what it ran: a TILE item, on the RTL it ran on; a HOST item, on the library's
     source and the compiler. So that section counts a tile item's coverage per RTL tree - the git
@@ -160,8 +167,15 @@ ITEM_CLAIM = {n: it.claim for n, it in _CATALOG.items() if it.claim}
 # (parcel HXc), which exist only in a tool built with MPFR=1, and "base", every other item, including one the catalog does not name. A group is
 # totalled apart, so that the wide items join a class beside the others and do not move their figures.
 ITEM_FORMAT = {n: it.format for n, it in _CATALOG.items()}
-ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}
-GROUPS = ("base", "wide")
+ITEM_GROUP = {n: it.group for n, it in _CATALOG.items()}
+GROUPS = ("base", "wide", "routine")
+
+
+def _group_of(item: str, sw: Any) -> str:
+    """The group of an item: the catalog's (Item.group) for a name it holds; else the `group` its records carry (a routine slice's record says
+    "routine", so an item of an older digest, which the catalog no longer names, stays a routine item); else "base" (parcel M4X2)."""
+    g = sw.get("group") if isinstance(sw, dict) else None
+    return ITEM_GROUP.get(item) or (g if g in GROUPS else None) or "base"
 
 
 def _format_of(item: str, op: Any) -> Optional[str]:
@@ -185,6 +199,46 @@ def _by_group(rows: List[Dict[str, Any]], images: Optional[List[str]] = None) ->
     return out
 
 
+def _routine(sviews: List[Dict[str, Any]], bad_ids: Any) -> List[Dict[str, Any]]:
+    """The routine items' marks (parcel M4X2), over the completed (pass or fail) slices of each: the marks by attribute, those off the list, the guesses
+    wrong, the lanes the tool NAMED that were off the list or wrong (every such lane of every slice: a slice names at most 16 marks of any kind, so
+    `not_named` counts the marks no MARK line named), and the seconds the tool's timing line gave for the device and for the oracle. Read from the records'
+    counts (marked, off_list, guesses_wrong) and extra (marks, times) as the driver wrote them; a record without them adds its slice and nothing else."""
+    acc: Dict[str, Dict[str, Any]] = {}
+    for v in sviews:
+        r = v["r"]
+        sw = r.get("sweep") if isinstance(r.get("sweep"), dict) else {}
+        item = sw.get("item") if isinstance(sw.get("item"), str) and sw.get("item") else None
+        if not item or v["status"] not in ("pass", "fail") or id(r) in bad_ids or _group_of(item, sw) != "routine":
+            continue
+        a = acc.setdefault(item, {"item": item, "claim": ITEM_CLAIM.get(item), "slices": 0, "marked": 0, "by_attr": {k: 0 for k in ROUTINE_ATTRS},
+                                  "off_list": 0, "guesses_wrong": 0, "named": [], "named_other": 0, "not_named": 0, "device_s": 0.0, "oracle_s": 0.0})
+        a["slices"] += 1
+        counts = v["counts"] or {}
+        for k in ("marked", "off_list", "guesses_wrong"):
+            a[k] += _int(counts.get(k)) or 0
+        extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
+        mk = extra.get("marks") if isinstance(extra.get("marks"), dict) else {}
+        for k, n in (mk.get("by_attr") or {}).items():
+            if k in a["by_attr"] and _int(n):
+                a["by_attr"][k] += _int(n)
+        a["not_named"] += _int(mk.get("not_named")) or 0
+        for n in mk.get("named") or []:
+            if isinstance(n, dict) and (n.get("off_list") or n.get("wrong")):
+                a["named"].append({"attr": n.get("attr"), "lane": n.get("lane"), "guess": n.get("guess"), "wrong": bool(n.get("wrong")),
+                                   "off_list": bool(n.get("off_list")), "slice": [sw.get("lo"), sw.get("hi")]})
+            else:
+                a["named_other"] += 1
+        tm = extra.get("times") if isinstance(extra.get("times"), dict) else {}
+        a["device_s"] += _num(tm.get("device_s")) or 0.0
+        a["oracle_s"] += _num(tm.get("oracle_s")) or 0.0
+    for a in acc.values():
+        a["device_s"], a["oracle_s"] = round(a["device_s"], 3), round(a["oracle_s"], 3)
+    return [acc[k] for k in sorted(acc)]
+
+
+ROUTINE_ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
+ROUTINE_NAMED_SHOWN = 200        # named lanes (off the list or wrong) shown per routine item in the text; the JSON has all
 KNOWN = ("pass", "fail", "timeout", "no_device", "parse_error", "skipped", "error")
 SWEEP_ROW = "sweep (all items)"
 SERIES_MAX = 12                  # rates shown per row, evenly picked
@@ -785,6 +839,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
     seen_kind: Dict[str, str] = {}
     seen_reach: Dict[str, Optional[str]] = {}
     seen_op: Dict[str, Any] = {}
+    seen_sw: Dict[str, Any] = {}
     for v in sviews:
         st, sw = v["status"], v["r"].get("sweep")
         sw = sw if isinstance(sw, dict) else {}
@@ -807,6 +862,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
             rch = sw.get("reach")
             seen_reach[item] = rch if rch in (TILE, HOST) else reach_of(sw.get("op"))
             seen_op[item] = sw.get("op")
+            seen_sw[item] = sw
     nc = {k: not_completed.get(k, 0) for k in ("timeout", "no_device", "parse_error")}
     for k, n in not_completed.items():
         if k not in nc:
@@ -823,7 +879,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
             gap = first_gap(iv, space)
             cov = covered(iv)
             base.update(covered=cov, total=space, pct=100.0 * cov / space, intervals=len(merge_intervals(iv)),
-                        first_gap=list(gap) if gap else None, level=ITEM_LEVEL.get(it), group=ITEM_GROUP.get(it, "base"))
+                        first_gap=list(gap) if gap else None, level=ITEM_LEVEL.get(it), group=_group_of(it, seen_sw.get(it)))
             exh.append(base)
         elif it in seeds or seen_kind.get(it) == "random":
             base["max_seed_n"] = seeds.get(it)
@@ -864,6 +920,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
                              "pct": (100.0 * tot_cov / tot_all) if n_exh else None,
                              "complete_items": sum(1 for e in exh if e["covered"] == e["total"]),
                              "by_reach": by_reach, "by_group": _by_group(exh)},
+        "routine": _routine(sviews, bad_ids),
         "random_by_reach": rnd_reach,
         "completed": completed, "failed": failed_slices, "not_completed": nc, "skipped": skipped,
         "outside_coverage": completed - sum(served.values()), "malformed": malformed,
@@ -901,6 +958,7 @@ PROBE_OF = {"recip": "div"}                         # the probe op a rate op is 
 # is what the report prints beside the count.
 RATE_LEFT_OUT = (
     ("skipped", "never ran: a skipped leg has no duration"),
+    ("routine", "a routine-sweep slice (parcel M4X2): a compiled program run on the tile with MPFR beside it in one process, whose device and oracle seconds are in the routine block"),
     ("random", "random items: a count of cases from a seed, not an exhaustive slice (the rates are the exhaustive slices' alone)"),
     ("class", "class level: one case a call (a representative of each class of operand), so a slice times the soak's launch and calls, not a rate"),
     ("host", "host reach (and every slice of the CPU pool): libcft's host code against the CPU, which no tile computes"),
@@ -918,6 +976,8 @@ def _rate_class(v: Dict[str, Any]) -> Tuple[str, Optional[Tuple[Any, ...]]]:
     it = _CATALOG.get(item) if item else None
     if st == "skipped":
         return "skipped", None
+    if item and _group_of(item, sw) == "routine":
+        return "routine", None
     if (it is not None and it.level == "random") or (it is None and ("seed_n" in sw or "seed" in sw or ("count" in sw and "lo" not in sw))):
         return "random", None
     if it is not None and it.level == "class":
@@ -993,7 +1053,7 @@ def _rates(views: List[Dict[str, Any]]) -> Dict[str, Any]:
             "card": None,
         })
     probe = _probe(views, rows)
-    return {"unit": RATE_UNIT, "seen": seen, "used": used, "left_out": {k: left.get(k, 0) for k, _ in RATE_LEFT_OUT}, "rows": rows, "probe": probe}
+    return {"unit": RATE_UNIT, "seen": seen, "used": used, "left_out": {k: left.get(k, 0) for k, _ in RATE_LEFT_OUT if k != "routine" or left.get(k)}, "rows": rows, "probe": probe}
 
 
 def _probe(views: List[Dict[str, Any]], rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1196,7 +1256,7 @@ def _gather(classes: Dict[Tuple[str, str], Dict[str, Any]], kind: str, cl: Dict[
     gathers every slice of a run through this, and tree_class gathers one: the label of a class a run fills alone is the same by construction."""
     c = classes.setdefault((kind, cl["key"]), {"kind": kind, "key": cl["key"], "head": cl["head"], "tail": cl["tail"], "why": [], "said": [],
                                                "prefix": cl.get("prefix"), "commit12": cl.get("commit12"),
-                                               "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}, "fmt": {}})
+                                               "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}, "fmt": {}, "grp": {}})
     if cl["tail"] and not c["tail"]:
         c["tail"] = cl["tail"]                  # a note (a tile tree's 'whether it was modified is not recorded') is the class's if any run's is
     if cl["said"] and cl["said"] not in c["said"]:
@@ -1263,6 +1323,7 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
             cases = _int((r.get("counts") or {}).get("cases")) if isinstance(r.get("counts"), dict) else None
             if "lo" in sw or "hi" in sw:
                 c["fmt"].setdefault(item, _format_of(item, sw.get("op")))
+                c["grp"].setdefault(item, _group_of(item, sw))
                 d = c["iv"].setdefault(item, {})
                 d.setdefault(image, {"iv": [], "slices": 0, "cases": 0})
                 d[image]["iv"].append((int(sw["lo"]), int(sw["hi"])))
@@ -1302,7 +1363,7 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
                             "cases": sum(v["cases"] for v in per.values()), "covered": cov, "total": sp,
                             "pct": 100.0 * cov / sp, "complete": cov == sp,
                             "by_image": {i: covered(per[i]["iv"]) for i in sorted(per, key=img_key)},
-                            "format": c["fmt"].get(item), "group": ITEM_GROUP.get(item, "base")})
+                            "format": c["fmt"].get(item), "group": c["grp"].get(item) or ITEM_GROUP.get(item, "base")})
             rnd = []
             for item in sorted(c["rnd"]):
                 per = c["rnd"][item]
@@ -1839,12 +1900,36 @@ def _group_lines(groups: Any, verb: str, tail: Any = None) -> List[str]:
     """The totals by group, one line a group (base, then wide) and a line saying what a group is - and only when a wide item is among the items, so
     that a run without one is reported as it always was. `verb` is the word of the total line they stand beside ('covered' in the sweep, 'covers' in a
     class); `tail`, given a group, adds to its line (the class's 'by image')."""
-    if not (isinstance(groups, list) and any(g.get("group") == "wide" for g in groups)):
+    if not (isinstance(groups, list) and any(g.get("group") != "base" for g in groups)):
         return []
     L = [f"  group {g['group']}: {g['items']} exhaustive item(s) seen; {verb} {g['covered']} of {g['total']} encodings "
          f"({_pct3(g['covered'], g['total'])}); fully covered {g['complete_items']} of {g['items']}" + (tail(g) if tail else "") for g in groups]
     L.append("  group wide is the wide-format sweeps' items (parcel HXc), which exist only in a tool built with MPFR=1; group base is every other "
-             "item; the total above is over both")
+             "item; group routine is the routine sweeps' items (parcel M4X2: a mathlib routine compiled to a program and run on the tile "
+             "against MPFR); the total above is over all the groups")
+    return L
+
+
+def _routine_text(rows: Any) -> List[str]:
+    """The routine block (parcel M4X2), under the sweep table: for each routine item served, its claim, its slices, the marked lanes by attribute, those
+    off the list, the guesses wrong, the lanes the tool named that were off the list or wrong (every one of every slice, up to ROUTINE_NAMED_SHOWN an item
+    here; --json has all), how many marks no MARK line named (a slice names at most 16 of any kind), and the device and oracle seconds the tool's timing
+    lines gave, summed. A mark is counted and compared, and neither an off-list mark nor a wrong guess fails a slice."""
+    if not rows:
+        return []
+    L = ["  a routine item (parcel M4X2: a routine of python/cft_golden/mathlib.py compiled to five programs, one a rounding attribute, run on the tile "
+         "against MPFR) claims, over its whole space:"]
+    for a in rows:
+        L.append(f"    {a['item']}: {a['claim'] or 'no claim (an item the catalog does not name)'}")
+        by = ", ".join(k + " " + str(a["by_attr"][k]) for k in ROUTINE_ATTRS)
+        L.append(f"      {a['slices']} slice(s); marked {a['marked']} ({by}); off the list "
+                 f"{a['off_list']}; guesses wrong {a['guesses_wrong']}; marks no MARK line named {a['not_named']}; device {a['device_s']:.3f} s, "
+                 f"oracle {a['oracle_s']:.3f} s")
+        for n in a["named"][:ROUTINE_NAMED_SHOWN]:
+            L.append(f"      {n['attr']} a=0x{int(n['lane']):08x} guess=0x{int(n['guess']):08x} {'WRONG' if n['wrong'] else 'right'}"
+                     f"{' (off the list)' if n['off_list'] else ''}")
+        if len(a["named"]) > ROUTINE_NAMED_SHOWN:
+            L.append(f"      ... and {len(a['named']) - ROUTINE_NAMED_SHOWN} more named lanes (--json has all)")
     return L
 
 
@@ -1901,6 +1986,7 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
                      "fp32 slice through the wide rint against the CPU's fp32 rint, an exact identity) claims, over its whole space and "
                      "under its attribute:")
             L += [f"    {op} ({', '.join(attrs)}): {what}" for op, (what, attrs) in wide.items()]
+        L += _routine_text(W.get("routine"))
     else:
         L.append("exhaustive items: none seen")
     L.append("")
@@ -2081,7 +2167,8 @@ def _r_rates(S: Dict[str, Any]) -> List[str]:
     lo = X["left_out"]
     L.append(f"sweep legs seen {X['seen']}, used {X['used']}; left out, each by its reason:")
     for key, why in RATE_LEFT_OUT:
-        L.append(f"  {key}: {lo.get(key, 0)} - {why}")
+        if key in lo:                      # `routine` (parcel M4X2) is there only for a run that has routine slices: a run without them reports as it did
+            L.append(f"  {key}: {lo.get(key, 0)} - {why}")
     rows = X["rows"]
     if not rows:
         L.append("no rate row: no slice of this run qualifies")
