@@ -197,7 +197,9 @@ atan(n/d)) with 0 <= n <= d, built on ONE core, inv_core (a table of N = 8,
 its index from RECIP_SEED with the 63/64 bias, one double-word quotient),
 inv_recon and inv_final; parcel M4G1 builds the core and atan at fp64, fp128
 and fp256, parcel M4G2 asin and acos and parcel M4G3 atan2 on the same three,
-parcel M4F1 fp32 (its triple word). The public names are INV_NAMES,
+parcel M4F1 the core and atan at fp32 (its triple word: private names, its own
+section after atan2's) and parcel M4F2 asin, acos and atan2 there. The public
+names are INV_NAMES,
 INV_FORMATS, INV_LIVE_CAP, INV_PLANTS, inv_cells, inv_rho, plan_inv,
 inv_core, inv_recon, inv_final, build_inv_core and check_inv_constants
 (`--check --only inv`); build() and fragment() accept a name that is built, a
@@ -2738,10 +2740,12 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
     other format has).
 
     atan, asin, acos and atan2 (parcel M4G1; INV_NAMES) are the double word
-    at fp64, fp128 and fp256 (fp32, the triple word, is parcel M4F1's and is
-    refused by name, as is a name not yet built, with the parcel that builds
-    it); `plant` is one of INV_PLANTS, a plant the build cannot reach refused
-    by name. The Build keeps:
+    at fp64, fp128 and fp256; at fp32 atan is the triple word (parcel M4F1:
+    family "triple word", meta K3, K2 and D for K and D, probes Vh, Vl, V2 and
+    the model's, `plant` one of _INV_TW_PLANTS), and asin, acos and atan2 are
+    refused by name as parcel M4F2's, as is a name not yet built, with the
+    parcel that builds it; `plant` is one of INV_PLANTS (_INV_TW_PLANTS at
+    fp32), a plant the build cannot reach refused by name. The Build keeps:
       probes   Vh, Vl, Bv, R, R1, R2, mk, th, tl, tt, Kk, c, nh, P, Nh0, Nh,
                Nl, Dh, Dl, sh, sl, rem0 (th and tl as inv_recon reads them,
                after the front's forcing)
@@ -5253,9 +5257,11 @@ def _build_trig_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
 # reconstruction (inv_recon), the final rounding and in-lane test (inv_final),
 # and with them atan, the first whole function; parcels M4G2 (asin, acos) and
 # M4G3 (atan2) build their front ends on the same three, at the anchors below.
-# fp32 is the triple word, parcel M4F1's. The construction IS the study's model
-# (docs/studies/m4/m4inv.py), ported instruction for instruction; nothing here
-# imports it, and the port is held to it in the parcel's VALIDATION entry.
+# fp32 is the triple word (parcel M4F1: the core and atan, below atan2's
+# section; asin, acos and atan2 there are parcel M4F2's). The construction IS
+# the study's model (docs/studies/m4/m4inv.py), ported instruction for
+# instruction; nothing here imports it, and the port is held to it in the
+# parcel's VALIDATION entry.
 #
 # The phases, in the design's order: front (min and max of |x| and 1, swap),
 # sqrt (asin and acos), index, num, den (the double-word n - c d and d + c n),
@@ -5270,8 +5276,8 @@ INV_EPS_T = Fraction(28, 10000)
 
 # The most values an inverse routine may keep live at once, by function and
 # format (Logan's answer 9 of 2026-10-23): atan 15, asin 16, acos 16, atan2 19
-# at fp64, fp128 and fp256, and 25, 25, 25 and 31 at fp32 (the triple word,
-# parcel M4F1's). One row each: invariants() holds an inverse fragment to its
+# at fp64, fp128 and fp256, and 25, 25, 25 and 31 at fp32 (the triple word:
+# atan's is built, parcel M4F1; the others are parcel M4F2's). One row each: invariants() holds an inverse fragment to its
 # own row and falls back to no other. routines.py does not name these four
 # (ROUTINES, CONTRACT and LIVE_CAP must name exactly cftc's and the language's
 # set, test_routines.py:258), so the caps are kept here until parcel M4C moves
@@ -7284,8 +7290,8 @@ def fragment(name, fmt: FpFormat, rnd: int):
     program's attribute `rnd`, held to invariants(): as routines.fragment()
     returns a division's. `name` is one of NAMES, or one of TRIG_NAMES (held to
     its own cap, TRIG_LIVE_CAP: fp32's is the triple word's, parcel M2F2), or
-    one of INV_NAMES (INV_LIVE_CAP's cap; those not built yet, and fp32, are
-    refused by name); any other is refused by name. The fragment is built once and shared."""
+    one of INV_NAMES (INV_LIVE_CAP's cap; those not built yet, and at fp32
+    all but atan, are refused by name); any other is refused by name. The fragment is built once and shared."""
     if name not in NAMES and name not in TRIG_NAMES             and name not in INV_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "
                          f"so far: "
