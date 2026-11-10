@@ -490,9 +490,10 @@ def test_census():
     out, t = I.check_census_tw()
     assert out == [] and t["marked"] == 0 and t["wrong"] == 0
     assert t["lanes"] == (256 + 4 * 129) * 5       # five attributes
-    # the families have no centre at fp32: every window lane sits 2^15 or more
-    # bounds from its boundary (MEASURED, mpmath at 400 bits): the nearest
-    # lane to a boundary is about 2^-46.9 away, the bound 2^-63
+    # the families have no centre at fp32: every window lane sits 2^12 or more
+    # bounds from its boundary (MEASURED, mpmath at 400 bits): the four
+    # windows' centres are 2^-50.9 to 2^-47.0 from their boundary, their edges
+    # 2^-43.8 to 2^-39.6, and the bound is about 2^-63.4
     d = I.census_distances()
     assert [x[0] for x in d] == ["grid boundary 0", "grid boundary 1",
                                  "midpoint boundary 0", "midpoint boundary 1"]
