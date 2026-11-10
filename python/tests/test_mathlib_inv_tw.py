@@ -209,13 +209,13 @@ def test_the_scheduler_takes_the_depth_first_order_and_the_cap_is_the_measured_m
     assert H.check_reorder(b, f) == []
 
 
-def test_the_lanes_of_the_model_are_the_fragments():
-    """The first words of the pool, the specials and the regions through the
-    fragment, its Build and the pinned shape: the scratch script compared 333
+def test_the_fragment_and_its_build_agree_on_30_random_lanes_and_atan_of_1():
+    """The fragment and the unpruned Build agree on 30 random lanes under rne
+    and rdn, and atan(1) is right. (The comparison with the model is not this
+    test: the scratch script compared 333
     pool, 26 special, 800 region and 772 census lanes under five attributes
     with the model's (result, flag word, Vh, Vl, V2, R, R1, R2) and found 0
-    differences; here the fragment and the unpruned Build agree on the lanes
-    and atan(1) is right."""
+    differences, and nothing in this file imports the model.)"""
     for rnd in (RNE, RDN):
         b, f = I.tw_build_of(rnd), I.tw_fragment_of(rnd)
         for x in I.sample("atan", FP32, "random", 30, 3):
@@ -684,41 +684,47 @@ def test_head3_short_is_a_variant_and_not_a_plant():
 # the plants: each red in its checks and green in the others
 # =====================================================================
 
-# Every row lists EVERY check, red or green (a test fails on a row that omits
-# one). MEASURED by this parcel: python/tests/mathlib_inv_harness.
+# Every row lists EVERY check, red, green or NOT RUN (a test fails on a row that
+# omits one, or that lists a check green that did not run). A check that does
+# not run for a plant is neither red nor green: the core is refused by name
+# ("does not apply") for tiny_gate_off, tiny_side, bound_loose, bound_wide and
+# mark_silenced, which hold no fault the core can reach, and is run on both
+# branches for the other five. MEASURED by this parcel: python/tests/mathlib_inv_harness.
 # red_checks_tw(plant) is the run (pools under rne and rtz, census under rtz,
 # the clean census under all five attributes being test_census's, seq
 # under rne and rtz and once on the bound inflated to G' = 6, bound over the
 # four regions of 48 points and the committed lanes of rem0_fma under rne,
-# specials and shape under all five attributes, core on both branches and
-# constants under rne). The brief expected bound_wide red in pools and census:
+# specials and shape under all five attributes, core on both branches where it
+# runs, and constants under rne). The brief expected bound_wide red in pools and census:
 # it is red in census and constants, and green in pools, whose 333 lanes would
 # each mark with probability about 2^-17 at the bound 2^22 wide (ESTIMATE: 2 Bv
 # over the spacing 2^-24 of results, Bv = 2^-42 |V|). Every plant
 # that changes an instruction or a word count is red in shape.
 CHECKS = I.CHECKS_TW
+NR = ("core",)                     # not run: the core holds no such fault
 PLANTED = [
     ("q2_dropped", ("bound", "shape", "core"),
-     ("pools", "seq", "census", "specials", "constants")),
+     ("pools", "seq", "census", "specials", "constants"), ()),
     ("z2_dropped", ("bound", "shape", "core"),
-     ("pools", "seq", "census", "specials", "constants")),
+     ("pools", "seq", "census", "specials", "constants"), ()),
     ("head3_two", ("bound", "shape", "core", "constants"),
-     ("pools", "seq", "census", "specials")),
+     ("pools", "seq", "census", "specials"), ()),
     ("rem0_fma", ("bound", "shape"),
-     ("pools", "seq", "census", "specials", "core", "constants")),
+     ("pools", "seq", "census", "specials", "core", "constants"), ()),
     ("tiny_gate_off", ("pools", "seq", "specials", "shape", "constants"),
-     ("bound", "census", "core")),
+     ("bound", "census"), NR),
     ("tiny_side", ("pools", "seq", "census", "specials", "shape", "constants"),
-     ("bound", "core")),
+     ("bound",), NR),
     ("table_entry", ("pools", "seq", "bound", "core", "constants"),
-     ("census", "specials", "shape")),
+     ("census", "specials", "shape"), ()),
     ("bound_loose", ("seq", "bound", "constants"),
-     ("pools", "census", "specials", "shape", "core")),
+     ("pools", "census", "specials", "shape"), NR),
     ("bound_wide", ("census", "constants"),
-     ("pools", "seq", "bound", "specials", "shape", "core")),
+     ("pools", "seq", "bound", "specials", "shape"), NR),
     ("mark_silenced", ("seq", "shape"),
-     ("pools", "bound", "census", "specials", "core", "constants")),
+     ("pools", "bound", "census", "specials", "constants"), NR),
 ]
+
 
 
 def _row_id(r):
@@ -726,34 +732,77 @@ def _row_id(r):
 
 
 def _check_row(row):
-    plant, red, green = row
-    assert set(red) | set(green) == set(CHECKS), \
-        (plant, set(CHECKS) - set(red) - set(green))
-    assert not set(red) & set(green), plant
-    assert len(red) + len(green) == len(CHECKS), plant
+    plant, red, green, notrun = row
+    every = set(red) | set(green) | set(notrun)
+    assert every == set(CHECKS), (plant, set(CHECKS) - every)
+    assert not (set(red) & set(green) or set(red) & set(notrun)
+                or set(green) & set(notrun)), plant
+    assert len(red) + len(green) + len(notrun) == len(CHECKS), plant
     assert red, plant
 
 
 @functools.lru_cache(maxsize=None)
+def _run(plant):
+    """(red, not_run) of red_checks_tw(plant)."""
+    not_run = {}
+    red = I.red_checks_tw(plant, not_run=not_run)
+    return red, not_run
+
+
 def _red(plant):
-    return I.red_checks_tw(plant)
+    return _run(plant)[0]
 
 
-def test_the_control_is_green_in_every_check():
-    red = _red(None)
-    assert red == {}, {k: v[:1] for k, v in red.items()}
-
-
-@pytest.mark.parametrize("row", PLANTED, ids=_row_id)
-def test_each_plant_is_red_in_its_checks_and_green_in_the_others(row):
-    plant, red, green = row
-    got = _red(plant)
+def _judge(row):
+    """The plant's run against its row: red checks red, green checks green AND
+    run, not-run checks reported as not run (with the reason)."""
+    plant, red, green, notrun = row
+    got, nr = _run(plant)
     for check in red:
         assert check in got, f"{plant}: {check} stays green"
         assert all(s.startswith(check + ":") or s.startswith("shape: ")
                    for s in got[check]), (plant, check, got[check][:2])
     for check in green:
         assert check not in got, f"{plant}: {check} is red: {got[check][:2]}"
+        assert check not in nr, (f"{plant}: {check} is listed green, but did "
+                                 f"not run: {nr[check][:80]}")
+    assert set(nr) == set(notrun), (plant, sorted(nr), sorted(notrun))
+    for check in notrun:
+        assert nr[check].startswith(check + ": not run (the core holds no "
+                                    "such fault)"), nr[check]
+        assert check not in got, f"{plant}: {check} did not run but is red"
+
+
+def test_the_control_is_green_in_every_check():
+    red, nr = _run(None)
+    assert red == {}, {k: v[:1] for k, v in red.items()}
+    assert nr == {}, "the control runs every check"
+
+
+@pytest.mark.parametrize("row", PLANTED, ids=_row_id)
+def test_each_plant_is_red_in_its_checks_and_green_in_the_others(row):
+    _judge(row)
+
+
+def test_a_check_that_did_not_run_is_not_listed_green():
+    """The row of tiny_side with core listed GREEN, as it was: the core did not
+    run for it, so the judge refuses it by name; so is a row that omits the
+    not-run report, and one that reports a core that ran as not run."""
+    plant, red, green, notrun = next(r for r in PLANTED if r[0] == "tiny_side")
+    assert notrun == ("core",)
+    with pytest.raises(AssertionError, match="core is listed green, but did "
+                       "not run"):
+        _judge((plant, red, green + ("core",), ()))
+    with pytest.raises(AssertionError):
+        _judge((plant, red, green, ()))
+    q = next(r for r in PLANTED if r[0] == "q2_dropped")
+    with pytest.raises(AssertionError):
+        _judge((q[0], ("bound", "shape"), q[2], ("core",)))
+    # and the harness says which checks did not run, for every plant
+    holds_none = {"tiny_gate_off", "tiny_side", "bound_loose", "bound_wide",
+                  "mark_silenced"}
+    for p in TW_PLANTS:
+        assert set(_run(p)[1]) == ({"core"} if p in holds_none else set()), p
 
 
 def test_every_plant_is_in_the_table_and_every_row_lists_every_check():
@@ -765,12 +814,15 @@ def test_every_plant_is_in_the_table_and_every_row_lists_every_check():
     # the row check itself is shown to refuse a row that omits a check, one
     # that names a check red and green, and one red in nothing
     rest = tuple(c for c in CHECKS if c not in ("bound", "pools"))
-    for bad in (("q2_dropped", ("bound",), ("pools",)),
-                ("q2_dropped", ("bound", "pools"), ("pools",) + rest),
-                ("q2_dropped", (), tuple(CHECKS))):
+    for bad in (("q2_dropped", ("bound",), ("pools",), ()),
+                ("q2_dropped", ("bound", "pools"), ("pools",) + rest, ()),
+                ("q2_dropped", ("bound",), ("pools",) + rest, ("core",)),
+                ("q2_dropped", (), tuple(CHECKS), ())):
         with pytest.raises(AssertionError):
             _check_row(bad)
-    _check_row(("q2_dropped", ("bound",), ("pools",) + rest))
+    _check_row(("q2_dropped", ("bound",), ("pools",) + rest, ()))
+    _check_row(("q2_dropped", ("bound",), ("pools",) + tuple(
+        c for c in rest if c != "core"), ("core",)))
 
 
 def test_every_check_has_a_plant_red_in_it_and_every_plant_is_red_somewhere():
@@ -1142,20 +1194,53 @@ def test_the_inv_commands_take_fp32_for_atan_and_refuse_the_others_by_name(
     R.FINDINGS.clear()
 
 
-def test_the_sweep_generator_builds_atan_at_fp32():
-    """atan's five images exist (host/tools/gen_sweep_images.py's `built`), the
-    marks file of each is empty (no lane of atan must mark at fp32: the
-    census), and the generator's image is the compiled shape of the fragment:
-    QUIET, the body, ENDQUIET, RAISE, the result deposited, HALT."""
+def test_the_sweep_generator_builds_atan_at_fp32(tmp_path):
+    """Runs host/tools/gen_sweep_images.py into tmp_path (rc 0) and checks
+    what it wrote: atan's five image files and banks and five EMPTY marks
+    files (no lane of atan must mark at fp32: the census); the manifest's
+    `digest atan` line equal to the manifest's own rule over the five atan
+    images and banks (the first 32 bits of the sha256 of rne to rmm, image
+    then bank); the nine `digest` lines of the other routines equal to
+    hw/card_stress_lib.py's ROUTINE_DIGESTS row for row, atan being the one
+    name the table lacks; asin, acos and atan2 skipped by name. And the
+    program of each atan fragment has 477 instructions and 60 words
+    (MEASURED: the compiled shape adds QUIET, ENDQUIET, RAISE, the deposit and
+    HALT to the body's 472)."""
+    import hashlib
     import importlib.util
-    path = pathlib.Path(__file__).resolve().parents[2] / "host" / "tools" \
-        / "gen_sweep_images.py"
-    src = path.read_text(encoding="utf-8")
-    assert "set(ml._INV_TW_BUILDERS)" in src
+    import subprocess
+    root = pathlib.Path(__file__).resolve().parents[2]
+    out = tmp_path / "imgs"
+    r = subprocess.run([sys.executable, "-B", str(
+        root / "host" / "tools" / "gen_sweep_images.py"), "--out", str(out)],
+        capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    h = hashlib.sha256()
+    for x in ("rne", "rtz", "rdn", "rup", "rmm"):
+        stem = out / f"atan-fp32-{x}"
+        assert stem.with_suffix(".cftp").stat().st_size > 0
+        assert stem.with_suffix(".bank").stat().st_size == 4 * 60
+        assert stem.with_suffix(".marks").read_bytes() == b""
+        h.update(stem.with_suffix(".cftp").read_bytes())
+        h.update(stem.with_suffix(".bank").read_bytes())
+    manifest = (out / "manifest.txt").read_text(encoding="utf-8").splitlines()
+    digests = [ln.split() for ln in manifest if ln.startswith("digest ")]
+    assert [d for d in digests if d[1] == "atan"] == [
+        ["digest", "atan", h.hexdigest()[:8]]]
+    spec = importlib.util.spec_from_file_location(
+        "card_stress_lib", root / "hw" / "card_stress_lib.py")
+    lib = importlib.util.module_from_spec(spec)
+    sys.modules["card_stress_lib"] = lib
+    try:
+        spec.loader.exec_module(lib)
+    finally:
+        sys.modules.pop("card_stress_lib", None)
+    others = {d[1]: d[2] for d in digests if d[1] != "atan"}
+    assert len(others) == 9 and others == dict(lib.ROUTINE_DIGESTS)
+    assert "atan" not in lib.ROUTINE_DIGESTS
+    for n in ("asin", "acos", "atan2"):
+        assert f"skipped {n} not built at fp32" in manifest
+    assert sum(1 for ln in manifest if ln.startswith("image atan ")) == 5
     for rnd in RND:
-        f = I.tw_fragment_of(rnd)
-        prog, bank = H.r24_program(f)
-        assert len(prog.insns) == 477 and len(bank) == 60     # MEASURED
-        assert not any(ml.evaluate(f, x)[1] & MARK
-                       for _l, xs in [("t", I.census_tiny_tw())] for x in xs)
-    assert importlib.util.spec_from_file_location("gen_sweep", path)
+        prog, bank = H.r24_program(I.tw_fragment_of(rnd))
+        assert len(prog.insns) == 477 and len(bank) == 60

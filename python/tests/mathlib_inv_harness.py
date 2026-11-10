@@ -2621,8 +2621,10 @@ def check_seq_tw(rnd, plant=None, shift=0, xs=None, **kw):
     f = tw_fragment_of(rnd, plant, shift)
     if shift and xs is None:
         # the seq slice has 88 lanes at fp32, of which the main path's are few:
-        # at G' = 6 a main-path lane marks with probability about 2^-5, so the
-        # lanes of the regions are added until some mark (MEASURED in the test)
+        # at G' = 6 a main-path lane marks with probability about 2^-5
+        # (ESTIMATE: 2 Bv over the spacing 2^-24 of results, Bv = 2^-30 |V|; the
+        # test counts 5 marks in the 388 lanes below, about 2^-6.3), so the
+        # lanes of the regions are added until some mark
         xs = list(seq_slice(TW_FN, FP32))
         for region, n, seed in (("random", 200, 21), ("edge", 100, 22)):
             xs += sample(TW_FN, FP32, region, n, seed)
@@ -2702,8 +2704,8 @@ def _v32(s, m, e):
 def census_tiny_tw():
     """The study's fam_tiny lanes for atan at fp32 (census.py): +-c 2^-e, c =
     1 to 16, e from max(1, (p + G)/4 - 4) = 12 to -min(gates) + 6 = 19: 256
-    lanes (an even c repeats an odd c's lane at e - 1; kept, as the study's
-    count is)."""
+    lanes (an even c repeats c/2's lane at e - 1; kept, as the study's count
+    is: 144 are distinct, pinned in test_census)."""
     p, G = FP32.prec, ml.GUARD["fp32"]
     lo = max(1, (p + G) // 4 - 4)
     hi = -ml.trig_gates(FP32)[1] + 6          # atan's gate -13 is the lesser
@@ -2948,15 +2950,18 @@ def check_constants_tw(**kw):
 # ---- the plants: every check on every plant -----------------------------------------
 
 def red_checks_tw(plant, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
-                  census_rnds=(RTZ,), bound_n=48):
+                  census_rnds=(RTZ,), bound_n=48, not_run=None):
     """{check: [findings]} for the checks that are RED on `plant` (None: the
     control) at fp32, atan's eight (CHECKS_TW): pools under pool_rnds, seq
     under seq_rnds and, once, on the build with the bound inflated to G' = 6
     (TW_SEQ_SHIFT, rne), bound over the four regions (bound_n points each) and
     the committed lanes of rem0_fma under rne, census under census_rnds,
-    specials and shape under all five attributes, core on both branches (a
-    plant the core cannot reach is refused by name and the check does not run),
-    and constants (rne)."""
+    specials and shape under all five attributes, core on both branches, and
+    constants (rne). A check that does not run for a plant is neither red nor
+    green: the core is refused by name ("does not apply") for a plant the core
+    holds no fault of (tiny_gate_off, tiny_side, bound_loose, bound_wide and
+    mark_silenced), and `not_run`, a dict if given, is filled with {check:
+    reason} for each such check."""
     red = {}
 
     def add(name, found):
@@ -2978,6 +2983,9 @@ def red_checks_tw(plant, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
         except ValueError as e:
             if "does not apply" not in str(e):
                 raise
+            if not_run is not None:
+                not_run["core"] = ("core: not run (the core holds no such "
+                                   f"fault): {e}")
         else:
             add("core", check_core_tw(plant, triple)[0])
     add("constants", check_constants_tw(
