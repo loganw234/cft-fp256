@@ -581,12 +581,14 @@ def check_seq(f, xs=None, evaluator=None, loud=False, post=None, table=None):
 
 def bound_log2(b, x):
     """log2(|V - f(x)| / Bv) for one main-path lane of the build b: V the sum
-    of its probes Vh and Vl, the true value from mpmath at 4p + 200 bits.
+    of its probes Vh and Vl, and V2 where the build has it (fp32's triple
+    word, parcel M4F1), the true value from mpmath at 4p + 200 bits.
     None where V is exact; 999.0 where V is not finite."""
     fmt = b.fmt
-    _res, _fl, pr = b.run(x, ("Vh", "Vl", "Bv"))
+    names = ("Vh", "Vl", "V2") if "V2" in b.probes else ("Vh", "Vl")
+    _res, _fl, pr = b.run(x, names + ("Bv",))
     try:
-        V = value(fmt, pr["Vh"]) + value(fmt, pr["Vl"])
+        V = sum(value(fmt, pr[k]) for k in names)
         Bv = abs(value(fmt, pr["Bv"]))
     except ValueError:
         return 999.0
@@ -2559,4 +2561,434 @@ def red_checks_atan2(plant, fmt=FP64, pool_rnds=(RNE, RTZ),
     for rnd in corner_rnds:
         add("corner", check_corner(fragment_of(fn, fmt, rnd, plant),
                                    b=build_of(fn, fmt, rnd, plant))[0])
+    return red
+
+
+# ---- fp32: the triple word (parcel M4F1) ----
+#
+# fp32 is atan's triple word (cft_golden/mathlib.py's section of that name,
+# docs/studies/M4-invtrig.md 2.8): FP32 is not in FORMATS (INV_FORMATS stays
+# the double word's until parcel M4F2 builds asin, acos and atan2 at fp32), so
+# the tables above hold nothing of it. The checks that are generic (pools, seq,
+# bound, specials, shape) are reused with their fp32 tables given here, and the
+# ones that are not (census, core, constants) are written for it. The checks
+# are atan's, five attributes. The evidence they give is the pools', the sampled
+# regions', the census's and the plants'; fp32's triple word has no budget in
+# this build (Logan's answer 3), so that the bound holds on every argument is
+# the lead's samples on the box and the card's exhaustive sweep, not these.
+
+TW_FN = "atan"
+CHECKS_TW = ("pools", "seq", "bound", "census", "specials", "shape", "core",
+             "constants")
+TW_SEQ_SHIFT = 34            # G' = 6 on the seq check: lanes then mark
+
+
+@functools.lru_cache(maxsize=None)
+def tw_build_of(rnd, plant=None, shift=0):
+    """ml.build("atan", FP32, rnd, plant=plant, bound_shift=shift), once."""
+    return ml.build(TW_FN, FP32, rnd, plant=plant, bound_shift=shift)
+
+
+@functools.lru_cache(maxsize=None)
+def tw_fragment_of(rnd, plant=None, shift=0):
+    """The build's scheduled fragment."""
+    return tw_build_of(rnd, plant, shift).fragment()
+
+
+@functools.lru_cache(maxsize=None)
+def tw_core_of(plant=None, triple=False):
+    """ml._build_inv_core_tw(FP32, ...), once: (n, d) or, triple, the six
+    words (n0, n1, n2, d0, d1, d2)."""
+    return ml._build_inv_core_tw(FP32, plant=plant, triple=triple)
+
+
+# ---- the pools and the seq check: the generic ones, on the triple word --------
+
+def check_pools_tw(rnd, plant=None):
+    """[finding], Tally: pools. The harness's check_pools on atan's pool at
+    fp32, under rnd: no fp32 row of INV_POOL_MARKS, so a mark is off the
+    list."""
+    return check_pools(tw_fragment_of(rnd, plant))
+
+
+def check_seq_tw(rnd, plant=None, shift=0, xs=None, **kw):
+    """[finding], lanes: seq. The harness's check_seq on atan at fp32 under
+    rnd; with `shift` (TW_SEQ_SHIFT: the bound inflated to G' = 6) the lanes
+    that mark are many enough to run STATUS[6] and the byte's mark on the
+    triple word, and a run that marks no lane is a finding of its own. fp32 has
+    no structured lane that marks (STRUCT has no fp32 key, SEQ_MARKED no fp32
+    entry), so the marks here are the inflated bound's."""
+    f = tw_fragment_of(rnd, plant, shift)
+    if shift and xs is None:
+        # the seq slice has 88 lanes at fp32, of which the main path's are few:
+        # at G' = 6 a main-path lane marks with probability about 2^-5
+        # (ESTIMATE: 2 Bv over the spacing 2^-24 of results, Bv = 2^-30 |V|; the
+        # test counts 5 marks in the 388 lanes below, about 2^-6.3), so the
+        # lanes of the regions are added until some mark
+        xs = list(seq_slice(TW_FN, FP32))
+        for region, n, seed in (("random", 200, 21), ("edge", 100, 22)):
+            xs += sample(TW_FN, FP32, region, n, seed)
+        xs = list(dict.fromkeys(xs))
+    out, lanes = check_seq(f, xs=xs, **kw)
+    if shift:
+        n = sum(1 for x in lanes if ml.evaluate(f, x)[1] & MARK)
+        if not n:
+            out = out + [f"seq: atan fp32 {sf.RND_NAMES[rnd]}: the bound "
+                         f"inflated by 2^{shift} marks none of the "
+                         f"{len(lanes)} lanes: the mark is not exercised"]
+    return out, lanes
+
+
+# ---- the bound: the regions, and the committed lanes of rem0_fma ----------------
+
+# The lanes of the plant rem0_fma (the study's 3.6, item 5: the first remainder
+# N0 - q0 D0 by one FMA, the TwoProd error dropped), past the bound by 2^11.4 to
+# 2^12.2 Bv: found by running the plant over 2,000 edge lanes at seed 5 (one
+# lane, 0x404a17f5, the drafter's) and over 6,000 at each of seeds 6 to 9
+# (MEASURED, with the plant's own Build and bound_log2 under rne). THIS LIST IS
+# TAKEN FROM THE PLANTED FRAGMENT, so it holds the fragment and not the
+# definition: each lane is held to an independent predicate, rem0_inexact
+# (N0 - q0 D0 not representable in one word, recomputed in exact rationals from
+# the clean build's probes N0, q0 and D0), and the plant is held equal to the
+# clean build wherever the predicate is false (the test). The FMA is exact where
+# the predicate is false, so the plant differs from the clean build only on lanes
+# where it is true; the pools (333 lanes) and the four regions of 48 points at
+# seed 11 hold none that is past the bound (MEASURED: the plant is green there),
+# and the list is lanes that do. The predicate is the definition, the list is
+# lanes that make it matter. Magnitudes; atan is odd and the sign is added.
+REM0_LANES = (0x404a17f5, 0x404a4da9, 0x404a39e7, 0x3f9b9037, 0x3f9b6cfd,
+              0x3f540f4c, 0x417b1377, 0x40492a17)
+
+
+def rem0_lanes():
+    """REM0_LANES with their signs: 16 lanes."""
+    return [m | s for m in REM0_LANES for s in (0, FP32.sign_mask)]
+
+
+def rem0_inexact(x, rnd=RNE):
+    """Whether N0 - q0 D0 of the lane x is NOT representable in one word, from
+    the CLEAN build's probes N0, q0 and D0 and exact rationals: the first
+    remainder the plant computes by one FMA is then rounded, and the exact one
+    (two words) is not what it gives."""
+    b = tw_build_of(rnd)
+    _r, _f, pr = b.run(x, ("N0", "q0", "D0"))
+    n0, q0, d0 = (value(FP32, pr[k]) for k in ("N0", "q0", "D0"))
+    r = n0 - q0 * d0
+    return ml._dec(FP32, ml._enc(FP32, r)) != r
+
+
+def check_bound_tw(plant=None, n=48, seed=11, extra=None):
+    """[finding], {region: (worst, main-path lanes, lanes)}: bound. The four
+    regions (edge, big, small, random), n points each under rne, each lane
+    under 1 Bv with V = V0 + V1 + V2 (bound_log2) and equal to transcend.py
+    where unmarked; and, as a fifth region "rem0", the committed lanes of
+    rem0_fma (`extra`, or rem0_lanes()): the clean build holds them too. The
+    worst of each region is the largest found, a sampled lower bound."""
+    b = tw_build_of(RNE, plant)
+    regions = dict(placed_points(TW_FN, FP32, n, seed))
+    regions["rem0"] = rem0_lanes() if extra is None else list(extra)
+    out, worst = [], {}
+    for label, xs in regions.items():
+        found, w = check_bound(b, xs, label)
+        out += found
+        worst[label] = w
+    return out, worst
+
+
+# ---- the census: the structured families, at fp32 ----------------------------------
+
+def _v32(s, m, e):
+    return sf.round_pack(FP32, s, m, e, RNE)[0]
+
+
+def census_tiny_tw():
+    """The study's fam_tiny lanes for atan at fp32 (census.py): +-c 2^-e, c =
+    1 to 16, e from max(1, (p + G)/4 - 4) = 12 to -min(gates) + 6 = 19: 256
+    lanes (an even c repeats c/2's lane at e - 1; kept, as the study's count
+    is: 144 are distinct, pinned in test_census)."""
+    p, G = FP32.prec, ml.GUARD["fp32"]
+    lo = max(1, (p + G) // 4 - 4)
+    hi = -ml.trig_gates(FP32)[1] + 6          # atan's gate -13 is the lesser
+    return [_v32(s, c, -e) for e in range(lo, hi + 1) for c in range(1, 17)
+            for s in (0, 1)]
+
+
+def _boundaries_below(K, kind, count=2):
+    """The `count` rounding boundaries of fp32 nearest to K from below, grid
+    points or midpoints (census.py's boundaries_below)."""
+    lo = ml._dec(FP32, ml._enc(FP32, K, RTZ))
+    u = ml._dec(FP32, ml._enc(FP32, K, RTZ) + 1) - lo
+    if kind == "grid":
+        return [lo - j * u for j in range(count)]
+    out = [lo + u / 2 - j * u for j in range(count + 1)]
+    return [b for b in out if b < K][:count]
+
+
+def census_near_tw(J=64):
+    """[(label, boundary, x0, lanes)]: the windows next to pi/2 (census.py's
+    fam_near, atan): x0 = RN(1/(pi/2 - b)) for the two boundaries b nearest
+    pi/2 from below, grid points then midpoints, and the 2J + 1 arguments x0 +
+    j: 516 lanes (J = 64)."""
+    out = []
+    for kind in ("grid", "midpoint"):
+        for i, bd in enumerate(_boundaries_below(ml._pi() / 2, kind)):
+            x0 = ml._enc(FP32, 1 / (ml._pi() / 2 - bd))
+            out.append((f"{kind} boundary {i}", bd, x0,
+                        [x0 + j for j in range(-J, J + 1)]))
+    return out
+
+
+def census_distances():
+    """[(label, log2 |atan(x0) - b|, log2 of the largest |atan(x0 + j) - b|
+    over the window)]: how near each window's lanes sit to the boundary they
+    are placed about, mpmath at 400 bits. The predicate the census lanes are
+    held to, independently of how the lanes were built."""
+    out = []
+    with mpmath.workprec(400):
+        for label, bd, x0, lanes in census_near_tw():
+            d = [abs(mpmath.atan(_mp(value(FP32, x))) - _mp(bd))
+                 for x in lanes]
+            out.append((label, float(mpmath.log(d[len(d) // 2], 2)),
+                        float(mpmath.log(max(d), 2))))
+    return out
+
+
+def check_census_tw(rnds=RND_MODES, plant=None, lanes=None, evaluator=None):
+    """[finding], tally: census. The study's census lanes at fp32 for atan
+    (census_tiny_tw's 256 and census_near_tw's 516, or `lanes`: [(label,
+    [lane])]) through the fragment under each of rnds: every lane UNMARKED
+    (zero marks is the claim: at G = 40 the families have no centre at fp32, as
+    M2F2's TRIG_FAMILY is empty) and equal to transcend.py in bits and flag
+    word. `evaluator` stands for ml.evaluate, for the test that plants a fault
+    in it. tally: lanes (a lane once for each attribute), marked, wrong."""
+    if lanes is None:
+        lanes = [("tiny", census_tiny_tw())] + [
+            (f"near pi/2 {label}", xs) for label, _b, _x0, xs
+            in census_near_tw()]
+    tally = {"lanes": 0, "marked": 0, "wrong": 0}
+    out = []
+    for rnd in rnds:
+        f = tw_fragment_of(rnd, plant)
+        where = f"census: atan fp32 {sf.RND_NAMES[rnd]}"
+        for label, xs in lanes:
+            marked, wrong = [], []
+            for x in xs:
+                bits, fw = (evaluator or ml.evaluate)(f, x)
+                tally["lanes"] += 1
+                if fw & MARK:
+                    marked.append(x)
+                elif (bits, fw) != golden(FP32, rnd, x, TW_FN):
+                    wrong.append(x)
+            tally["marked"] += len(marked)
+            tally["wrong"] += len(wrong)
+            if marked:
+                out.append(f"{where}: {label}: {len(marked)} of {len(xs)} "
+                           f"lanes are marked (zero is the claim), first "
+                           f"{_hexes(marked)}")
+            if wrong:
+                out.append(f"{where}: {label}: {len(wrong)} of {len(xs)} "
+                           f"unmarked lanes differ from transcend.atan, "
+                           f"first {_hexes(wrong)}")
+    return out, tally
+
+
+# ---- the shape --------------------------------------------------------------------
+
+# (instructions, bank words, values live) of atan at fp32 under every attribute:
+# the model's (docs/studies/m4/box-out2/twrun-costs.fp32-tw.out.txt: 472
+# instructions, 60 words, 25 values live scheduled)
+SHAPE_TW = {("atan", "fp32"): [(472, 60, 25)] * 5}
+
+# the model's instructions by phase (the same file)
+_PHASES_ATAN_TW = {"front": 5, "index": 7, "num": 6, "den": 12, "quotient": 52,
+                   "z": 29, "tail": 2, "head2": 26, "head3": 158,
+                   "atan_s": 40, "table": 24, "recon": 68, "final": 27,
+                   "classify": 4, "special": 12}
+
+
+def model_phases_tw(fn, fmt_name):
+    """The model's instructions by phase for atan at fp32."""
+    if (fn, fmt_name) != ("atan", "fp32"):
+        raise ValueError(f"no phases of {fn} at {fmt_name} pinned")
+    return dict(_PHASES_ATAN_TW)
+
+
+def tables_tw(**kw):
+    """The shape check's Tables for fp32's atan (no edit of SHAPE or
+    MODEL_PHASES); `kw` doctors one of them, as Tables does."""
+    return Tables(**dict({"shape": SHAPE_TW, "phases": model_phases_tw}, **kw))
+
+
+def check_shape_tw(plant=None, tables=None, fragments=None):
+    """[finding]: shape. The harness's check_shape on atan at fp32, all five
+    attributes: (472, 60, 25), the phases, the flag words {0x0, 0x1, 0x10, 0x18,
+    0x90}, MIN 1 and MAX 0, check_reorder, INV_LIVE_CAP's fp32 row the measured
+    maximum and a cap one under failing by name."""
+    builds = {(TW_FN, rnd): tw_build_of(rnd, plant) for rnd in RND_MODES}
+    return check_shape(FP32, builds, tables or tables_tw(), fragments)
+
+
+# ---- the core, both branches ------------------------------------------------------
+
+def _tw_low(rng, h):
+    """A low word of h: 0, +-1, +-ulp/2 or random, of either sign, as an
+    encoding (|low| <= ulp(h)/2)."""
+    p = FP32.prec
+    r = rng.choice((0, 1 << (p - 2), -(1 << (p - 2)), 1, -1,
+                    rng.randint(-(1 << (p - 2)), 1 << (p - 2))))
+    return ml._enc(FP32, value(FP32, h) * Fraction(r, 2 ** (2 * p - 1)))
+
+
+def core_lanes_tw(n=60, seed=31, triple=False):
+    """Lanes for the triple-word core alone: (n, d) single words, or with
+    triple three-word operands (n0, n1, n2, d0, d1, d2), the branch asin and
+    acos take (parcel M4F2's: atan cannot reach it, so this is the check that
+    runs it). t = n/d from the cells' edges and at random, d0 with a random
+    exponent from -40 to 40, n0 its product with t, n <= d (a lane is swapped
+    to it), the single-word branch with three lanes t = 1; the low words of
+    either sign."""
+    rng = random.Random(seed * 1000003 + FP32.width + (7 if triple else 0))
+    edges = [e for lo_hi in ml.inv_cells(ml.INV_N) for e in lo_hi
+             if 0 < e <= 1]
+    out = []
+    if not triple:
+        out = [(h, h) for h in (sf.one_bits(FP32),
+                                ml._enc(FP32, Fraction(17, 10)),
+                                ml._enc(FP32, Fraction(3, 10)))]
+    while len(out) < n:
+        d0 = _rand_sig(rng, FP32, rng.randint(-40, 40), 0)
+        if len(out) % 2:
+            t = rng.choice(edges) * (1 + Fraction(rng.randint(-64, 64),
+                                                  2 ** 16))
+        else:
+            t = Fraction(rng.getrandbits(40) + 1, 1 << 40)
+        t = min(t, Fraction(1))
+        n0 = ml._enc(FP32, value(FP32, d0) * t)
+        if not triple:
+            if n0 <= d0:
+                out.append((n0, d0))
+            continue
+        n1, d1 = _tw_low(rng, n0), _tw_low(rng, d0)
+        n2, d2 = _tw_low(rng, n1), _tw_low(rng, d1)
+        N = sum(value(FP32, v) for v in (n0, n1, n2))
+        D = sum(value(FP32, v) for v in (d0, d1, d2))
+        if N > D:
+            n0, n1, n2, d0, d1, d2 = d0, d1, d2, n0, n1, n2
+        if n0 > d0 or sum(value(FP32, v) for v in (n0, n1, n2)) <= 0:
+            continue
+        out.append((n0, n1, n2, d0, d1, d2))
+    return out
+
+
+def check_core_tw(plant=None, triple=False, lanes=None, b=None, runner=None):
+    """[finding], tally: core. _build_inv_core_tw on placed lanes (the
+    single-word branch, or triple=True the three-word one): theta0 = th0 + th1
+    + th2 within 2^-(p+G) theta0 of atan(n/d), mpmath at 4p + 200 bits; 0 <=
+    th0; and the contract of Kk on every lane, k recomputed from t~ in exact
+    rationals (k = min(7, round-half-even(8 (63/64) t~))): Kk's low three bits
+    are k and Kk is the word MAGIC exactly where k = 0. tally: lanes, past, kk,
+    negative, largest (log2 of the largest error over the bound). `runner`
+    stands for b.run(lane, names) -> (res, flags, probes), for the test that
+    doctors a probe."""
+    b = tw_core_of(plant, triple) if b is None else b
+    p, G = FP32.prec, b.meta["G"]
+    lanes = core_lanes_tw(triple=triple) if lanes is None else lanes
+    magic = ml._enc_exact(FP32, Fraction(3, 2) * 2 ** (p - 1))
+    tally = {"lanes": 0, "past": 0, "kk": 0, "negative": 0, "largest": -1e9}
+    first = {}
+    names = ("Kk", "tt", "th0", "th1", "th2")
+    run = runner or b.run
+    with mpmath.workprec(4 * p + 200):
+        for lane in lanes:
+            _a, _b, pr = run(lane, names)
+            tally["lanes"] += 1
+            k = min(7, round(Fraction(8 * 63, 64) * value(FP32, pr["tt"])))
+            if (pr["Kk"] & 7) != k or (pr["Kk"] == magic) != (k == 0):
+                tally["kk"] += 1
+                first.setdefault("kk", lane)
+            if value(FP32, pr["th0"]) < 0:
+                tally["negative"] += 1
+                first.setdefault("negative", lane)
+            half = len(lane) // 2
+            Nn = sum(value(FP32, v) for v in lane[:half])
+            Dd = sum(value(FP32, v) for v in lane[half:])
+            theta = sum(value(FP32, pr[k_]) for k_ in ("th0", "th1", "th2")
+                        if k_ in pr)
+            r = _bound_log2(theta, mpmath.atan(_mp(Nn / Dd)), p, G)
+            if r is not None:
+                tally["largest"] = max(tally["largest"], r)
+                if r > 0:
+                    tally["past"] += 1
+                    first.setdefault("past", lane)
+    where = (f"core: fp32 {'three-word' if triple else 'single-word'}"
+             + (f" plant {plant}" if plant else ""))
+    out = []
+    if tally["past"]:
+        out.append(f"{where}: {tally['past']} of {tally['lanes']} lanes have "
+                   f"|theta0 - atan(n/d)| past 2^-(p+G) theta0, first "
+                   f"{_hexes([first['past']], 1)}, the largest "
+                   f"2^{tally['largest']:+.1f} of the bound")
+    if tally["kk"]:
+        out.append(f"{where}: {tally['kk']} of {tally['lanes']} lanes break "
+                   f"Kk's contract (low bits k, MAGIC exactly where k = 0), "
+                   f"first {_hexes([first['kk']], 1)}")
+    if tally["negative"]:
+        out.append(f"{where}: {tally['negative']} lanes have th0 < 0, first "
+                   f"{_hexes([first['negative']], 1)}")
+    return out, tally
+
+
+# ---- the constants ----------------------------------------------------------------
+
+def check_constants_tw(**kw):
+    """[finding], lines: constants. mathlib._check_inv_tw_constants() in
+    process (fp32, atan)."""
+    lines, findings = ml._check_inv_tw_constants(**kw)
+    return [f"constants: {s}" for s in findings], lines
+
+
+# ---- the plants: every check on every plant -----------------------------------------
+
+def red_checks_tw(plant, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
+                  census_rnds=(RTZ,), bound_n=48, not_run=None):
+    """{check: [findings]} for the checks that are RED on `plant` (None: the
+    control) at fp32, atan's eight (CHECKS_TW): pools under pool_rnds, seq
+    under seq_rnds and, once, on the build with the bound inflated to G' = 6
+    (TW_SEQ_SHIFT, rne), bound over the four regions (bound_n points each) and
+    the committed lanes of rem0_fma under rne, census under census_rnds,
+    specials and shape under all five attributes, core on both branches, and
+    constants (rne). A check that does not run for a plant is neither red nor
+    green: the core is refused by name ("does not apply") for a plant the core
+    holds no fault of (tiny_gate_off, tiny_side, bound_loose, bound_wide and
+    mark_silenced), and `not_run`, a dict if given, is filled with {check:
+    reason} for each such check."""
+    red = {}
+
+    def add(name, found):
+        if found:
+            red.setdefault(name, []).extend(found)
+    for rnd in pool_rnds:
+        add("pools", check_pools_tw(rnd, plant)[0])
+    for rnd in seq_rnds:
+        add("seq", check_seq_tw(rnd, plant)[0])
+    add("seq", check_seq_tw(RNE, plant, TW_SEQ_SHIFT)[0])
+    add("bound", check_bound_tw(plant, bound_n)[0])
+    add("census", check_census_tw(census_rnds, plant)[0])
+    for rnd in RND_MODES:
+        add("specials", check_specials(tw_fragment_of(rnd, plant))[0])
+    add("shape", check_shape_tw(plant))
+    for triple in (False, True):
+        try:
+            tw_core_of(plant, triple)
+        except ValueError as e:
+            if "does not apply" not in str(e):
+                raise
+            if not_run is not None:
+                not_run["core"] = ("core: not run (the core holds no such "
+                                   f"fault): {e}")
+        else:
+            add("core", check_core_tw(plant, triple)[0])
+    add("constants", check_constants_tw(
+        builder=lambda name, f_, r_: tw_build_of(r_, plant),
+        attrs=(RNE,), names=(TW_FN,))[0])
     return red
