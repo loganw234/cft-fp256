@@ -160,6 +160,21 @@ census's 48 arguments) and random ones. Their programs write past r15
 at fp64, fp128 and fp32 (the triple word keeps 23 values live) and so need
 REGS32 there, where the six need it at fp32 alone.
 
+Since parcel M4P (M4's build, wave 3, 2026-11-10) the eighth corpus has a third
+part, run after the trig part at each format that has it: atan, asin, acos and
+atan2, the 60 fragments of parcels M4G1, M4G2 and M4G3 (mathlib.INV_NAMES at
+mathlib.INV_FORMATS, fp64, fp128 and fp256, under each attribute), which had
+run on seq.py alone. Same two shapes, lane counts, masks, comparisons,
+refusals and remote leg, from a stream of their own (INV_SALT), with counters,
+summary, limits, needs and committed-lanes lines of their own, and a reach
+check of its own ("THE ROUTINE CORPUS'S INVERSE PART DID NOT REACH EVERY
+FORM"). The parts are named by a key ("six", "trig", "inv"), where the trig
+part was a boolean. atan2 has two operands: a lane is a pair (y, x) with y in
+stream a and x in stream b, in the model's run and in libcft's, and a mismatch
+prints the pair. Their lanes are python/tests/mathlib_inv_harness.py's, in the
+same five categories (inv_lanes). A format INV_FORMATS lacks (fp32, until
+parcel M4F2) is named in the part's summary line and is no SKIP.
+
     python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
 
 Since revision 8's round 2 (parcel E, 2026-10-05) the corpora can run
@@ -2480,19 +2495,36 @@ TRIG_SOURCES = ("special", "edge", "pool", "centre", "family", "near",
 # float's tan is far under the largest finite number): counted like the
 # others, and not required of the run
 TRIG_NEVER_RAISED = ("divideByZero", "overflow")
+INV_SALT = 0x4D345049                   # "M4PI": the inverse part's own (parcel M4P)
+INV_EDGE_N = 32                         # arguments of each edge region drawn
+INV_EDGE_SEED = 31                      # the first region's seed; the next +1
+# the two IEEE flags atan, asin, acos and atan2 are not expected to raise
+# (|result| is at most pi, and atan2(+-0, +-0) is exact with no flag, IEEE
+# 754's 9.2.1; INFERRED from the definitions, as TRIG_NEVER_RAISED is):
+# counted like the others, and not required of the run
+INV_NEVER_RAISED = ("divideByZero", "overflow")
+# the eighth corpus's parts, by key (parcel M4P: a key where a boolean was):
+# (the label under --device and in a mismatch, the suffix of the "programs
+# compared" line, the word in the limits and needs lines, the salt)
+ROUTINE_PART = {"six": ("routine corpus", "", "", ROUTINE_SALT),
+                "trig": ("routine corpus, trig", " (trig)", "trig ",
+                         TRIG_SALT),
+                "inv": ("routine corpus, inv", " (inv)", "inverse ",
+                        INV_SALT)}
 _ROUTINE = {"progs": {}, "cache": {}, "needs": {}, "sizes": set()}
 
 
 def routine_counters():
     """The eighth corpus's counters - one set for the six, one for the trig
-    part (parcel M2P) - a defaultdict, since it counts lanes by their class
-    and runs by the flags they raised."""
+    part (parcel M2P), one for the inverse part (parcel M4P) - a defaultdict,
+    since it counts lanes by their class and runs by the flags they raised."""
     C = collections.defaultdict(int)
     C["by_format"] = {}
     C["capref"] = collections.Counter()
     C["remote_names"] = collections.Counter()   # what the remote leg named
     C["formats"] = []           # the formats the part ran at
     C["fragments"] = set()      # (format, routine, attribute) it drew
+    C["waiting"] = []           # formats asked for that the part does not build
     return C
 
 
@@ -2678,7 +2710,7 @@ def routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub):
 # the 45 fragments of parcel M2G2a at fp64, fp128 and fp256 under each
 # attribute, which until this part had run on seq.py alone. They go through
 # the same two shapes, lane counts and masks and the same comparisons
-# (routine_corpus, trig=True), from a stream of their own (TRIG_SALT, where the
+# (routine_corpus, part="trig"), from a stream of their own (TRIG_SALT, where the
 # six's is ROUTINE_SALT) so that the six's programs, lanes and masks are what
 # they were at every round count. fp32's are the triple word (parcel M2F2): the
 # loop takes the format from mathlib.TRIG_FORMATS like the others.
@@ -2836,15 +2868,205 @@ def trig_lanes(ml, th, tf, fmt, fn, rnd, n, sub):
     return [x for x, _t in pairs], [t for _x, t in pairs]
 
 
-def run_in_c_routine(lib, dev, prog, bank, xs, keep=None, lf=False):
+# ---- the eighth corpus's third part: atan, asin, acos and atan2 (parcel M4P) --
+#
+# Beside the six and the trig part the routine corpus runs the inverse
+# functions (mathlib.INV_NAMES): the fragments of parcels M4G1, M4G2 and M4G3
+# at the formats of mathlib.INV_FORMATS under each attribute, which until this
+# part had run on seq.py alone (the harness's check_seq). The same two
+# shapes, lane counts, masks, comparisons, refusals and remote leg
+# (routine_corpus, part="inv"), from a stream of their own (INV_SALT) so that
+# the other parts' programs, lanes and masks are what they were at every
+# --math-rounds.
+#
+# atan2 has TWO operands: a lane is a pair (y, x), y in stream a (r0) and x in
+# stream b (r1), in the model's run and in libcft's alike (routine_operands);
+# the lane classes count the first operand under kind_* and the second under
+# kindx_*, and a mismatch prints the pair. The lanes are
+# python/tests/mathlib_inv_harness.py's, in the corpus's five categories:
+#
+#   special  routine_specials and special_rows(fn, fmt)'s lanes; for atan2 half
+#            the rows' pairs and half pairs of the special encodings (both
+#            operands drawn from them)
+#   edge     sample() at each region of REGIONS_BY_FN[fn] but "random" and, for
+#            atan2, at "tinyn", and CORNER's committed pairs
+#   pool     pool(fn, fmt)
+#   struct   "centre": the lanes of the configuration that mark - the
+#            committed lanes (structured_lanes), the pools' marks (pool_marks),
+#            SEQ_MARKED's and, for atan2, RANGE_ROWS' - up to half the quota;
+#            "struct": the rest, lanes beside them (one ulp either side of a
+#            marked lane's operand and, for atan2, RANGE_EDGE's first lane
+#            that does not mark). A configuration with no committed marked
+#            lane (asin under rne and rmm) draws no centre and no neighbour
+#   random   sample() at "random" and raw bit patterns (pairs of them for atan2)
+
+def inv_modules():
+    """mathlib_inv_harness, imported on first use: the lanes of parcels M4G1
+    to M4G3. None wherever routine_modules() is."""
+    if routine_modules() is None:
+        return None
+    if "imods" not in _ROUTINE:
+        import mathlib_inv_harness as ih  # noqa: E402
+        _ROUTINE["imods"] = ih
+    return _ROUTINE["imods"]
+
+
+def routine_part_names(ml, part):
+    """The routines of one part of the eighth corpus."""
+    return {"six": ml.NAMES, "trig": ml.TRIG_NAMES,
+            "inv": ml.INV_NAMES}[part]
+
+
+def routine_part_of(ml, fn):
+    """The part a routine belongs to: "six", "trig" or "inv"."""
+    for part in ROUTINE_PART:
+        if fn in routine_part_names(ml, part):
+            return part
+    raise KeyError(fn)
+
+
+def routine_operands(xs):
+    """(a, b): the lanes' first and second operands as the two streams of a
+    run - a pair (y, x) gives y to stream a and x to stream b (atan2 reads y
+    in r0 and x in r1), an encoding gives itself and b None (a zero stream)."""
+    if xs and isinstance(xs[0], tuple):
+        return [v[0] for v in xs], [v[1] for v in xs]
+    return list(xs), None
+
+
+def lane_text(v):
+    """A lane as a mismatch prints it: x = 0x.. for an encoding, y = 0x.., x =
+    0x.. for a pair; the caller puts it in parentheses."""
+    if isinstance(v, tuple):
+        return f"y = 0x{v[0]:x}, x = 0x{v[1]:x}"
+    return f"x = 0x{v:x}"
+
+
+def inv_special_pools(ih, fn, fmt):
+    """The pools of the special category: one for atan, asin and acos (the
+    special encodings and the rows of special_rows), two for atan2 (the rows'
+    pairs and pairs of the special encodings, both operands from them)."""
+    def make():
+        rows = [v for _label, lanes in ih.special_rows(fn, fmt)
+                for v in lanes]
+        sp = routine_specials(fmt)
+        if fn != "atan2":
+            return [list(dict.fromkeys(sp + rows))]
+        return [list(dict.fromkeys(rows)),
+                list(dict.fromkeys((y, x) for y in sp for x in sp))]
+    return _routine_cached(("ispecial", fmt.name, fn), make)
+
+
+def inv_edge_pool(ih, fn, fmt):
+    """The edge pool: sample() at each region of the function but "random"
+    (and atan2's "tinyn"), INV_EDGE_N arguments of each, and atan2's CORNER."""
+    def make():
+        regions = [r for r in ih.REGIONS_BY_FN[fn] if r != "random"]
+        if fn == "atan2":
+            regions.append("tinyn")
+        out = []
+        for i, region in enumerate(regions):
+            out += ih.sample(fn, fmt, region, INV_EDGE_N, INV_EDGE_SEED + i)
+        if fn == "atan2":
+            out += ih.CORNER[fmt.name]
+        return list(dict.fromkeys(out))
+    return _routine_cached(("iedge", fmt.name, fn), make)
+
+
+def _inv_beside(fmt, lane):
+    """The lanes one ulp (one encoding) either side of a lane: of the
+    argument, or for a pair of each operand in turn."""
+    top = (1 << fmt.width) - 1
+    out = []
+    if isinstance(lane, tuple):
+        for k in (0, 1):
+            for d in (-1, 1):
+                if 0 <= lane[k] + d <= top:
+                    v = list(lane)
+                    v[k] += d
+                    out.append(tuple(v))
+    else:
+        out = [lane + d for d in (-1, 1) if 0 <= lane + d <= top]
+    return out
+
+
+def inv_struct(ih, fn, fmt, rnd):
+    """(marked, beside) of the cell (fn, fmt, rnd): the committed lanes that
+    mark - structured_lanes, the pools' marks (pool_marks), SEQ_MARKED's and,
+    for atan2, RANGE_ROWS' - and the lanes beside them, none of them marked
+    ones: one encoding either side, and for atan2 RANGE_EDGE's first lane
+    that does not mark. Both empty where the cell commits nothing."""
+    def make():
+        marked = list(ih.structured_lanes(fn, fmt, rnd))
+        marked += sorted(ih.pool_marks(fn, fmt.name, sf.RND_NAMES[rnd]))
+        if (fn, fmt.name, rnd) in ih.SEQ_MARKED:
+            marked.append(ih.SEQ_MARKED[(fn, fmt.name, rnd)])
+        if fn == "atan2":
+            marked += [lane for _label, lane in ih.RANGE_ROWS[fmt.name]]
+        marked = list(dict.fromkeys(marked))
+        beside = []
+        for lane in marked:
+            beside += _inv_beside(fmt, lane)
+        if fn == "atan2" and marked:
+            beside.append((ih.RANGE_EDGE[fmt.name] + 1, sf.one_bits(fmt)))
+        have = set(marked)
+        return marked, [v for v in dict.fromkeys(beside) if v not in have]
+    return _routine_cached(("istruct", fmt.name, fn, rnd), make)
+
+
+def inv_lanes(ml, ih, fmt, fn, rnd, n, sub):
+    """(xs, tags): n lanes for a program of fragment (fn, fmt, rnd), atan,
+    asin, acos or atan2 (a lane of atan2 a pair (y, x)), from the stream
+    `sub`, and the source of each - special, edge, pool, centre, struct or
+    random: routine_quotas' lanes of each category, a category short of lanes
+    handing its remainder to the random one, the whole shuffled. The struct
+    category is up to half marked lanes (centre) and the rest lanes beside
+    them (struct)."""
+    q = dict(zip((c for c, _s in ROUTINE_SHARES), routine_quotas(n)))
+    pairs, short = [], 0
+    left = q["special"]
+    sp_pools = inv_special_pools(ih, fn, fmt)
+    for i, pool in enumerate(sp_pools):
+        take = min(left if i == len(sp_pools) - 1 else (left + 1) // 2,
+                   len(pool))
+        pairs += [(x, "special") for x in sub.sample(pool, take)]
+        left -= take
+    short += left
+    for cat, pool in (("edge", inv_edge_pool(ih, fn, fmt)),
+                      ("pool", list(ih.pool(fn, fmt)))):
+        take = min(q[cat], len(pool))
+        pairs += [(x, cat) for x in sub.sample(pool, take)]
+        short += q[cat] - take
+    marked, beside = inv_struct(ih, fn, fmt, rnd)
+    if q["struct"]:
+        m = min(len(marked), max(1, q["struct"] // 2))
+        pairs += [(x, "centre") for x in sub.sample(marked, m)]
+        others = sub.sample(beside, min(q["struct"] - m, len(beside)))
+        pairs += [(x, "struct") for x in others]
+        short += q["struct"] - m - len(others)
+    k = q["random"] + short
+    k_main = k // 2
+    rand = []
+    if k_main:
+        rand += ih.sample(fn, fmt, "random", k_main, sub.getrandbits(30))
+    for _ in range(k - k_main):
+        rand.append((sub.getrandbits(fmt.width), sub.getrandbits(fmt.width))
+                    if fn == "atan2" else sub.getrandbits(fmt.width))
+    pairs += [(x, "random") for x in rand]
+    sub.shuffle(pairs)
+    return [x for x, _t in pairs], [t for _x, t in pairs]
+
+
+def run_in_c_routine(lib, dev, prog, bank, xs, keep=None, lf=False, b=None):
     """-> (deposit bytes, counts, flags, status, lane bytes or None), each
     read back RAW, through cft_program_run_ex with a BANK_EXT program's
-    bank - the input stream xs, zero streams b and c as routines.run gives
-    them - ABI 0.14's mask where `keep` is given and ABI 0.17's lane block
-    where `lf` asks. The deposits, the counts and the block are filled with
-    the caller's pattern (ROUTINE_FILL) first, so that a masked lane's bytes,
-    which the library must leave alone, are told from ones written 0; the
-    library's refusal is a RuntimeError."""
+    bank - the input stream xs, stream b `b` (atan2's x operands; zeros where
+    None, as routines.run gives them) and a zero stream c - ABI 0.14's mask
+    where `keep` is given and ABI 0.17's lane block where `lf` asks. The
+    deposits, the counts and the block are filled with the caller's pattern
+    (ROUTINE_FILL) first, so that a masked lane's bytes, which the library
+    must leave alone, are told from ones written 0; the library's refusal is
+    a RuntimeError."""
     fmt = prog.fmt
     esz = fmt.width // 8
     n = len(xs)
@@ -2861,7 +3083,10 @@ def run_in_c_routine(lib, dev, prog, bank, xs, keep=None, lf=False):
                 b"".join(v.to_bytes(esz, "little") for v in vals),
                 max(1, len(vals) * esz))
 
-        buf_a, buf_b, buf_c = pack(xs), pack([0] * n), pack([0] * n)
+        if b is not None and len(b) != n:
+            raise ValueError(f"stream b has {len(b)} lanes of {n}")
+        buf_a, buf_b, buf_c = (pack(xs), pack([0] * n if b is None else b),
+                               pack([0] * n))
         buf_k = pack(bank)
         ndep = n * prog.max_deposits
         buf_d = ctypes.create_string_buffer(
@@ -2984,24 +3209,31 @@ def routine_rounds(args):
             else max(1, args.trials // 250))
 
 
-def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
-    """The eighth corpus, for one format. Mutates the counters in MR. With
-    `trig` the corpus's second part (parcel M2P): sin, cos and tan, from a
-    stream of their own and lanes of their own, MR being that part's
-    counters (sin, cos and tan are built at all four formats, fp32's the
-    triple word since parcel M2F2)."""
+def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
+    """The eighth corpus, for one format. Mutates the counters in MR. `part`
+    is "six" (M1's routines), "trig" (parcel M2P: sin, cos and tan, built at
+    all four formats, fp32's the triple word since parcel M2F2) or "inv"
+    (parcel M4P: atan, asin, acos and atan2, at the formats of
+    mathlib.INV_FORMATS), each from a stream of its own and lanes of its own,
+    MR being that part's counters. A format the inverse part does not build
+    is named in MR["waiting"] and run for nothing."""
     mods = routine_modules()
     if mods is None:
         return
     ml, har, fam = mods
-    if trig:
+    if part == "trig":
         th, tf = trig_modules()
-    corpus = "routine corpus, trig" if trig else "routine corpus"
-    names = ml.TRIG_NAMES if trig else ml.NAMES
+    if part == "inv":
+        ih = inv_modules()
+        if fmt not in ml.INV_FORMATS:
+            MR["waiting"].append(name)
+            return
+    corpus, suffix, _word, salt = ROUTINE_PART[part]
+    names = routine_part_names(ml, part)
     MR["formats"].append(name)
     rounds = routine_rounds(args)
     rng = random.Random((args.seed * 2654435761 + fmt.width * 40503)
-                        & 0xFFFFFFFF ^ (TRIG_SALT if trig else ROUTINE_SALT))
+                        & 0xFFFFFFFF ^ salt)
     esz = fmt.width // 8
     pat = bytes([ROUTINE_FILL[0]]) * esz
     checked = lanes_done = 0
@@ -3018,9 +3250,11 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                     MR["drawn"] += 1
                     tag = f"{fn} {sf.RND_NAMES[rnd]} {shape}"
                     n = sub.choice(ROUTINE_NS)
-                    if trig:
+                    if part == "trig":
                         xs, tags = trig_lanes(ml, th, tf, fmt, fn, rnd, n,
                                               sub)
+                    elif part == "inv":
+                        xs, tags = inv_lanes(ml, ih, fmt, fn, rnd, n, sub)
                     else:
                         xs, tags = routine_lanes(ml, har, fam, fmt, fn, rnd,
                                                  n, sub)
@@ -3034,11 +3268,14 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                                        MR, corpus):
                         continue
                     zeros = [0] * n
-                    want = mrun(prog, xs, zeros, zeros, bank=bank,
-                                lane_mask=keep)
+                    # the operand streams: a pair (atan2's) gives y to a and
+                    # x to b, in the model's run and in libcft's alike
+                    xs_a, xs_b = routine_operands(xs)
+                    want = mrun(prog, xs_a, zeros if xs_b is None else xs_b,
+                                zeros, bank=bank, lane_mask=keep)
                     try:
                         dep, counts, fl, st, lb = run_in_c_routine(
-                            lib, dev, prog, bank, xs, keep, lf)
+                            lib, dev, prog, bank, xs_a, keep, lf, b=xs_b)
                     except RuntimeError as exc:
                         print(f"  MISMATCH {name} ({corpus}) {tag} "
                               f"n={n}: the model runs this fragment and "
@@ -3094,7 +3331,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                                                "little")
                             if g != want.deposits[j]:
                                 diffs.append(f"deposit[lane {i} slot {s}] "
-                                             f"(x = 0x{xs[i]:x}) model "
+                                             f"({lane_text(xs[i])}) model "
                                              f"0x{want.deposits[j]:x} libcft "
                                              f"0x{g:x}")
                                 break
@@ -3103,7 +3340,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                             n_cmp += 1
                             if lb[i] != want.lane_flags[i]:
                                 diffs.append(
-                                    f"lane byte[{i}] (x = 0x{xs[i]:x}) "
+                                    f"lane byte[{i}] ({lane_text(xs[i])}) "
                                     f"model 0x{want.lane_flags[i]:02x} "
                                     f"libcft 0x{lb[i]:02x}")
                     if compared != len(owned):
@@ -3136,8 +3373,8 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                                 MR["ident"] += 1
                             else:
                                 diffs.append(
-                                    f"model identity: lane {i} (x = "
-                                    f"0x{xs[i]:x}) seq.py deposited "
+                                    f"model identity: lane {i} "
+                                    f"({lane_text(xs[i])}) seq.py deposited "
                                     f"(0x{want.deposits[2 * i]:x}, "
                                     f"0x{want.deposits[2 * i + 1]:x}), "
                                     f"mathlib.evaluate gives "
@@ -3162,13 +3399,24 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                             for line in diffs[:6]:
                                 print(f"    {line}")
                     for i in owned:
-                        MR["kind_" + sf.unpack(fmt, xs[i]).kind] += 1
+                        if part == "inv" and isinstance(xs[i], tuple):
+                            # both operands are counted: y under kind_*, x
+                            # under kindx_*
+                            MR["kind_" + sf.unpack(fmt, xs[i][0]).kind] += 1
+                            MR["kindx_" + sf.unpack(fmt, xs[i][1]).kind] += 1
+                        else:
+                            MR["kind_" + sf.unpack(fmt, xs[i]).kind] += 1
                         MR["cat_" + tags[i]] += 1
-                        if trig and tags[i] in ("centre", "family", "near"):
+                        if part == "trig" and tags[i] in ("centre", "family",
+                                                          "near"):
                             # the lanes of the committed marks and families,
                             # by format and attribute (the entry's table)
                             MR[f"{tags[i]} {name} {sf.RND_NAMES[rnd]}"] += 1
-                        if trig and tags[i] == "edge":
+                        if part == "inv" and tags[i] in ("centre", "struct"):
+                            # the committed marked lanes and the lanes beside
+                            # them, by format and attribute
+                            MR[f"{tags[i]} {name} {sf.RND_NAMES[rnd]}"] += 1
+                        if part == "trig" and tags[i] == "edge":
                             # the range's end, drawn as an edge (not as a
                             # special or a raw pattern, which also reach it)
                             MR["range_end"] += th.past_range(fmt, xs[i])
@@ -3186,7 +3434,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                     per = MR["by_format"].setdefault(name, [0, 0])
                     per[0] += 1
                     per[1] += compared
-    print(f"{name}: {checked} routine-corpus{' (trig)' if trig else ''} "
+    print(f"{name}: {checked} routine-corpus{suffix} "
           f"programs compared, {lanes_done} lanes")
 
 
@@ -3204,19 +3452,20 @@ def routine_caps(lib, dev):
             "the software backend's")
 
 
-def routine_rows(trig):
-    """The sizes of the programs this run built (routine_programs): the six's,
-    or with `trig` sin's, cos's and tan's, each (format, routine, attribute,
-    shape, instructions, bank words, highest register, deposits a lane)."""
-    names = routine_modules()[0].TRIG_NAMES
-    return sorted(r for r in _ROUTINE["sizes"] if (r[1] in names) == trig)
+def routine_rows(part):
+    """The sizes of the programs this run built (routine_programs) of one
+    part - "six", "trig" (sin's, cos's and tan's) or "inv" (atan's, asin's,
+    acos's and atan2's) -, each (format, routine, attribute, shape,
+    instructions, bank words, highest register, deposits a lane)."""
+    names = routine_part_names(routine_modules()[0], part)
+    return sorted(r for r in _ROUTINE["sizes"] if r[1] in names)
 
 
-def routine_limits(caps, trig=False):
+def routine_limits(caps, part="six"):
     """One line: the routines' programs against libcft's own limits - the
     sizes read off the programs this run built, the limits off the library
-    through cft_get_caps. `trig` is the line of sin, cos and tan's."""
-    rows = routine_rows(trig)
+    through cft_get_caps. `part` is the part whose line it is."""
+    rows = routine_rows(part)
     if not rows or caps is None:
         return
 
@@ -3228,7 +3477,7 @@ def routine_limits(caps, trig=False):
     wlo, whi, wat = span(5)
     rlo, rhi, rat = span(6)
     dlo, dhi, _dat = span(7)
-    print(f"the {'trig ' if trig else ''}routines' programs against "
+    print(f"the {ROUTINE_PART[part][2]}routines' programs against "
           f"{caps[3]} limits (cft_get_caps; "
           f"{len(rows)} programs): {ilo} to {ihi} instructions against "
           f"max_insns {caps[0]} (the most: {iat}), {wlo} to {whi} bank words "
@@ -3238,15 +3487,25 @@ def routine_limits(caps, trig=False):
           f"of the {seq.MAX_QUIET_DEPTH} that nest")
 
 
-def routine_summary(MC, what, trig=False):
+def routine_summary(MC, what, part="six"):
     """The summary line of one part of the eighth corpus: the programs run
     through both, the lanes compared, by class and by source, the flags the
     compiled runs raised and the lanes where the model is its own identity.
-    `what` names the part; `trig` gives the sources of sin, cos and tan's
-    lanes (trig_lanes) in the place of the six's."""
+    `what` names the part; `part` gives the sources of sin, cos and tan's
+    lanes (trig_lanes) or of atan, asin, acos and atan2's (inv_lanes) in the
+    place of the six's, and for the inverse part the formats it waits for."""
     by = ", ".join(f"{k} {v[0]} programs and {v[1]} lanes"
                    for k, v in MC["by_format"].items())
-    if trig:
+    if part == "inv":
+        src = (f"{MC['cat_special']} special, {MC['cat_edge']} edge (each "
+               f"region but random, atan2's tinyn and its committed corner), "
+               f"{MC['cat_pool']} pools, {MC['cat_centre']} committed marked "
+               f"lanes, {MC['cat_struct']} beside them, {MC['cat_random']} "
+               f"random; and atan2's second operands (x) by class: "
+               f"{MC['kindx_nan']} NaN, {MC['kindx_inf']} infinite, "
+               f"{MC['kindx_zero']} zero, {MC['kindx_sub']} subnormal, "
+               f"{MC['kindx_norm']} normal")
+    elif part == "trig":
         src = (f"{MC['cat_special']} special, {MC['cat_edge']} edge (the "
                f"reduction's worst arguments and the range's end), "
                f"{MC['cat_pool']} radian pools, {MC['cat_centre']} committed "
@@ -3276,21 +3535,33 @@ def routine_summary(MC, what, trig=False):
             + ", ".join(f"{label} {MC['raised_' + label]}"
                         for label, _b in ROUTINE_FLAGS)
             + f"; {MC['ident']} lanes where seq.py's deposits are "
-            f"mathlib.evaluate's")
+            f"mathlib.evaluate's"
+            + inv_waiting(MC))
 
 
-def routine_needed(trig=False):
+def inv_waiting(MC):
+    """The inverse part's absence at a format, in words (not a SKIP, which
+    fails every --require-all run): '' when every format asked for is built.
+    mathlib.INV_FORMATS decides, so that the clause is empty on its own once
+    parcel M4F2 adds fp32 to it."""
+    if not MC["waiting"]:
+        return ""
+    return (f"; {', '.join(MC['waiting'])}: the inverse part waits for parcel "
+            f"M4F2 (INV_FORMATS has no {', '.join(MC['waiting'])} yet)")
+
+
+def routine_needed(part="six"):
     """One line: the cft_caps.seq_features bits the programs of one part need,
     counted over the programs this run built (routine_needs, the loader's own
     account of an image) - what the remote leg refuses by name where a word
     lacks the bit. A run asking for the lane block needs LANE_FLAGS besides."""
-    names = routine_modules()[0].TRIG_NAMES
+    names = routine_part_names(routine_modules()[0], part)
     progs = [p for key, (_f, stand, comp) in _ROUTINE["progs"].items()
-             if (key[1] in names) == trig for p in (stand[0], comp[0])]
+             if key[1] in names for p in (stand[0], comp[0])]
     if not progs:
         return
     need = collections.Counter(x for p in progs for x in routine_needs(p))
-    print(f"the {'trig ' if trig else ''}routines' programs need "
+    print(f"the {ROUTINE_PART[part][2]}routines' programs need "
           f"({len(progs)} programs; cft_caps.seq_features, its CAPS place): "
           + ", ".join(f"{x} ({T.CAPS_PLACE[x]}) {k}"
                       for x, k in sorted(need.items()))
@@ -3317,15 +3588,42 @@ def trig_family_line(MT):
             + "; ".join(parts))
 
 
-def routine_expected_refusals(trig=False):
+def inv_family_line(MI, ih):
+    """One line: the lanes of atan, asin, acos and atan2 compared that came
+    from the committed marked lanes (centre) and from beside them (struct), by
+    format and attribute, in a round or the rounds run; and the cells that
+    commit no marked lane, which draw none of either (asin under rne and rmm,
+    as it stands)."""
+    parts, none = [], []
+    for name in MI["formats"]:
+        fmt = FORMATS[name]
+        cells = []
+        for rnd in sf.RND_MODES:
+            r = sf.RND_NAMES[rnd]
+            cells.append(f"{r} " + "/".join(str(MI[f"{tag} {name} {r}"])
+                                            for tag in ("centre", "struct")))
+        parts.append(f"{name}: " + ", ".join(cells))
+        for fn in routine_modules()[0].INV_NAMES:
+            bare = [sf.RND_NAMES[rnd] for rnd in sf.RND_MODES
+                    if not inv_struct(ih, fn, fmt, rnd)[0]]
+            if bare:
+                none.append(f"{fn} {name} {'/'.join(bare)}")
+    return ("inverse lanes from the committed marked lanes / beside them, by "
+            "format and attribute: " + "; ".join(parts)
+            + "; cells with no committed marked lane, drawing none: "
+            + (", ".join(none) if none else "none"))
+
+
+def routine_expected_refusals(part="six"):
     """The names the remote leg's refusals must have given, by the programs
-    this run built (the six's, or with `trig` sin's, cos's and tan's): every
+    this run built (the six's, or sin's, cos's and tan's, or the inverse
+    functions'): every
     program needs BANK_PTR and WIDE_CONST (CAPS[6] and CAPS[4]), a compiled
     one FLAG_CONTROL (CAPS2[14]), and a run asking for the block LANE_FLAGS
     (CAPS2[13]); REGS32 (CAPS[5]) only where a program writes past r15 (the
-    six's at fp32, the trig programs' at fp64 and fp128), and a capacity only
-    where a program is past the one the leg lowers."""
-    rows = routine_rows(trig)
+    six's at fp32, the trig programs' at fp64 and fp128, atan2's r18), and a
+    capacity only where a program is past the one the leg lowers."""
+    rows = routine_rows(part)
     want = {"CAPS[4]", "CAPS[6]", "CAPS2[13]", "CAPS2[14]"}
     if any(r[6] > 15 for r in rows):
         want.add("CAPS[5]")
@@ -3336,7 +3634,7 @@ def routine_expected_refusals(trig=False):
     return sorted(want)
 
 
-def routine_remote_refusals(lib, MR, MT=None):
+def routine_remote_refusals(lib, MR, MT=None, MI=None):
     """Every program of the corpus, loaded on a remote handle to a fake server
     whose HELLO publishes a revision-7 tile's word (0x7f1f: no R23, no R24),
     and the same word with one bit cleared, and a revision-8 tile's word at a
@@ -3348,12 +3646,14 @@ def routine_remote_refusals(lib, MR, MT=None):
     trig programs (parcel M2P), which write r25 at fp64 and r16 at fp128; a
     compiled program needs FLAG_CONTROL besides, and a run asking for the lane
     block needs LANE_FLAGS: refused on the client, naming it, before any
-    frame. The six's programs count in MR and the trig programs in MT (their
-    own counters, so that a trig program dropped from this leg is told from
-    the six's still being refused), the leg's own failures in MR."""
+    frame. The six's programs count in MR, the trig programs in MT and the
+    inverse programs (parcel M4P) in MI (their own counters, so that a program
+    of one part dropped from this leg is told from the others still being
+    refused), the leg's own failures in MR."""
     if "mods" not in _ROUTINE or _ROUTINE["mods"] is None:
         return
-    trig_names = routine_modules()[0].TRIG_NAMES
+    ml = routine_modules()[0]
+    counters = {"six": MR, "trig": MT, "inv": MI}
     bits = T.FEATURE_BITS
     tile = 0x7F1F
     rev8 = tile | bits["LANE_FLAGS"] | bits["FLAG_CONTROL"]
@@ -3379,11 +3679,12 @@ def routine_remote_refusals(lib, MR, MT=None):
             continue
         try:
             for key, (_f, stand, comp) in _ROUTINE["progs"].items():
-                C = MT if MT is not None and key[1] in trig_names else MR
+                part = routine_part_of(ml, key[1])
+                C = counters[part] if counters[part] is not None else MR
                 for shape, (prog, pbank) in zip(ROUTINE_SHAPES,
                                                 (stand, comp)):
                     if shape == "stand-alone":
-                        first.setdefault(C is MT, (prog, pbank))
+                        first.setdefault(part, (prog, pbank))
                     absent = [x for x in routine_needs(prog)
                               if not word & bits[x]]
                     over = []
@@ -3430,7 +3731,7 @@ def routine_remote_refusals(lib, MR, MT=None):
             # only where the program loads there: a word without BANK_PTR,
             # WIDE_CONST or REGS32 refuses it at load, which the loop above
             # holds, before a run could ask for anything
-            for C, part in ((MR, False), (MT, True)):
+            for part, C in counters.items():
                 if (C is None or word & bits["LANE_FLAGS"]
                         or part not in first
                         or not all(word & bits[x]
@@ -3460,10 +3761,12 @@ def routine_remote_refusals(lib, MR, MT=None):
                   f"{[hex(o) for o in srv.other_ops]}")
             MR["bad"] += 1
         MR["legs_run"] += 1
-        if MT is not None:
-            MT["legs_run"] += 1
-    for C, what in ((MR, "routine-corpus"), (MT, "trig routine-corpus")):
-        if C is None or (C is MT and not C["formats"]):
+        for C in (MT, MI):
+            if C is not None:
+                C["legs_run"] += 1
+    for C, what in ((MR, "routine-corpus"), (MT, "trig routine-corpus"),
+                    (MI, "inv routine-corpus")):
+        if C is None or (C is not MR and not C["formats"]):
             continue
         by = ", ".join(f"{k} {v}"
                        for k, v in sorted(C["remote_names"].items()))
@@ -3479,8 +3782,9 @@ def main():
     ap.add_argument("--trials", type=int, default=400)
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--math-rounds", type=int, default=None, metavar="N",
-                    help="rounds of the eighth corpus - M1's routines and "
-                         "sin, cos and tan, every fragment of the formats in "
+                    help="rounds of the eighth corpus - M1's routines, "
+                         "sin, cos and tan, and atan, asin, acos and atan2, "
+                         "every fragment of the formats in "
                          "both shapes a round, from fresh lanes - where the "
                          "default is one for each 250 --trials and at least "
                          "one (the module's text)")
@@ -3567,6 +3871,8 @@ def main():
     # six's totals
     MR = routine_counters()
     MT = routine_counters()
+    # ...and its third part's (atan, asin, acos and atan2, parcel M4P)
+    MI = routine_counters()
     if args.math_rounds is not None and args.math_rounds < 1:
         ap.error("--math-rounds takes at least 1")
     try:
@@ -3686,13 +3992,15 @@ def main():
             rev8_corpus(lib, dev, fmt, name, args, R)
             flags_corpus(lib, dev, fmt, name, args, F)
             routine_corpus(lib, dev, fmt, name, args, MR)
-            routine_corpus(lib, dev, fmt, name, args, MT, trig=True)
-        MR["caps"] = MT["caps"] = routine_caps(lib, dev)  # before it closes
+            routine_corpus(lib, dev, fmt, name, args, MT, part="trig")
+            routine_corpus(lib, dev, fmt, name, args, MI, part="inv")
+        # before the handle closes
+        MR["caps"] = MT["caps"] = MI["caps"] = routine_caps(lib, dev)
     finally:
         lib.cft_close(dev)
     rev8_remote_refusals(lib, R)
     flags_remote_refusals(lib, F)
-    routine_remote_refusals(lib, MR, MT)
+    routine_remote_refusals(lib, MR, MT, MI)
     ceiling_bad = deposit_ceiling_remote(lib)
 
     print(f"\n{total} programs run through both implementations, "
@@ -3749,12 +4057,22 @@ def main():
     if MT["total"]:
         # sin, cos and tan (parcel M2P), beside the six
         print(routine_summary(MT, "the routine corpus's trig part (sin, cos "
-                                  "and tan)", trig=True))
-        routine_limits(MT["caps"], trig=True)
-        routine_needed(trig=True)
+                                  "and tan)", "trig"))
+        routine_limits(MT["caps"], "trig")
+        routine_needed("trig")
         print(trig_family_line(MT))
+    if MI["total"]:
+        # atan, asin, acos and atan2 (parcel M4P), beside the other two
+        print(routine_summary(MI, "the routine corpus's inverse part (atan, "
+                                  "asin, acos and atan2)", "inv"))
+        routine_limits(MI["caps"], "inv")
+        routine_needed("inv")
+        print(inv_family_line(MI, inv_modules()))
+    elif MI["waiting"]:
+        print(f"the routine corpus's inverse part ran no program"
+              f"{inv_waiting(MI)}")
     bad += (S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
-            + F["bad"] + MR["bad"] + MT["bad"])
+            + F["bad"] + MR["bad"] + MT["bad"] + MI["bad"])
     if DEVICE is not None:
         # --device: what the device refused by name, corpus by corpus
         by = collections.defaultdict(list)
@@ -3766,7 +4084,8 @@ def main():
                   f"publish, and each was refused by name "
                   f"(CFT_ERR_UNSUPPORTED naming {', '.join(parts)})")
         for MC, what in ((MR, "routine corpus"),
-                         (MT, "routine corpus, trig")):
+                         (MT, "routine corpus, trig"),
+                         (MI, "routine corpus, inv")):
             if MC["capref"]:
                 refs = ", ".join(f"{k} {v}"
                                  for k, v in sorted(MC["capref"].items()))
@@ -3774,7 +4093,7 @@ def main():
                       f"NOT COMPARED - each is past a capacity the device "
                       f"publishes, and each was refused by name "
                       f"(CFT_ERR_UNSUPPORTED naming {refs})")
-        if not by and not MR["capref"] and not MT["capref"]:
+        if not (by or MR["capref"] or MT["capref"] or MI["capref"]):
             print("the device refused no program for a bit it lacks: every "
                   "program was compared")
         bad += DEVICE.bad
@@ -3793,21 +4112,40 @@ def main():
 
     routine_held = sum(MR["capref"].values())
     trig_held = sum(MT["capref"].values())
+    inv_held = sum(MI["capref"].values())
     routine_ran = routine_modules() is not None
     # Each part's verdict phrases are written out whole, not built from a
     # prefix: other files read this one's SOURCE for them. hw/card_stress.py's
     # build step (its `markers`) refuses a tree whose seq_check.py lacks the
     # six's reach phrase (its stale-tree test: every card night is lost), and
     # hw/test_sched.py's fake tree writes it too. An f-string lost it once.
-    for MC, ran, reach, what, trig in (
+    for MC, ran, reach, what, part in (
             (MR, "THE ROUTINE CORPUS DID NOT RUN EVERY FRAGMENT",
              "THE ROUTINE CORPUS DID NOT REACH EVERY FORM",
-             "routine corpus", False),
+             "routine corpus", "six"),
             (MT, "THE ROUTINE CORPUS'S TRIG PART DID NOT RUN EVERY FRAGMENT",
              "THE ROUTINE CORPUS'S TRIG PART DID NOT REACH EVERY FORM",
-             "routine corpus, trig", True)):
-        said = "routine corpus's trig part" if trig else what
-        if not routine_ran or (trig and not MC["formats"]):
+             "routine corpus, trig", "trig"),
+            (MI, "THE ROUTINE CORPUS'S INVERSE PART DID NOT RUN EVERY "
+                 "FRAGMENT",
+             "THE ROUTINE CORPUS'S INVERSE PART DID NOT REACH EVERY FORM",
+             "routine corpus, inv", "inv")):
+        said = {"six": what, "trig": "routine corpus's trig part",
+                "inv": "routine corpus's inverse part"}[part]
+        if not routine_ran:
+            continue
+        if part == "inv" and not MC["formats"]:
+            # the part is run at the formats it builds (INV_FORMATS) that
+            # the run asked for and the device carries: none run is a gap,
+            # not an absence, unless there was none to run
+            asked = [k for k in args.formats
+                     if FORMATS[k] in routine_modules()[0].INV_FORMATS
+                     and (DEVICE is None
+                          or DEVICE.format_mask & (1 << FORMAT_CODE[k]))]
+            if asked:
+                print(f"{ran} - the part ran at none of {', '.join(asked)}")
+                return 1
+        if part != "six" and not MC["formats"]:
             continue
         held_here = sum(MC["capref"].values())
         # the drawn programs against the corpus's own arithmetic: every
@@ -3815,7 +4153,7 @@ def main():
         # every format that was run - so a loop that drops a fragment, a
         # shape or a round is counted short here, whatever else it compares
         mlib = routine_modules()[0]
-        frags = len(mlib.TRIG_NAMES if trig else mlib.NAMES)             * len(sf.RND_MODES)
+        frags = len(routine_part_names(mlib, part)) * len(sf.RND_MODES)
         per_format = frags * len(ROUTINE_SHAPES)
         rounds = routine_rounds(args)
         want_drawn = rounds * per_format * len(MC["formats"])
@@ -3836,7 +4174,7 @@ def main():
         if MC["legs_run"] != ROUTINE_LEGS:
             gaps.append(f"the remote leg ran {MC['legs_run']} of its "
                         f"{ROUTINE_LEGS} servers")
-        unnamed = [nm for nm in routine_expected_refusals(trig)
+        unnamed = [nm for nm in routine_expected_refusals(part)
                    if not MC["remote_names"][nm]]
         if unnamed:
             gaps.append(f"the remote leg never refused by name: "
@@ -3846,14 +4184,22 @@ def main():
             return 1
         if MC["total"] or held_here:
             # sin, cos and tan raise no divideByZero and no overflow
-            # (TRIG_NEVER_RAISED): counted in the summary, not required
+            # (TRIG_NEVER_RAISED), nor do the inverse functions
+            # (INV_NEVER_RAISED): counted in the summary, not required
+            never = {"six": (), "trig": TRIG_NEVER_RAISED,
+                     "inv": INV_NEVER_RAISED}[part]
             flags = [f"raised_{label}" for label, _b in ROUTINE_FLAGS
-                     if not (trig and label in TRIG_NEVER_RAISED)]
-            sources = (["cat_" + t for t in TRIG_SOURCES] if trig else
-                       ["cat_special", "cat_edge", "cat_pool", "cat_centre",
-                        "cat_struct", "cat_random"])
-            if trig and any(mlib.TRIG_RANGE[k] for k in MC["formats"]):
+                     if label not in never]
+            sources = (["cat_" + t for t in TRIG_SOURCES] if part == "trig"
+                       else ["cat_special", "cat_edge", "cat_pool",
+                             "cat_centre", "cat_struct", "cat_random"])
+            if part == "trig" and any(mlib.TRIG_RANGE[k]
+                                      for k in MC["formats"]):
                 sources.append("range_end")     # fp128 and fp256 have a range
+            if part == "inv":
+                # atan2's second operand, by class: nothing else counts it
+                sources += [f"kindx_{k}" for k in
+                            ("nan", "inf", "zero", "sub", "norm")]
             zero = [k for k in (
                 ["blocked", "masked", "lane_bytes", "marked_lanes",
                  "marked_runs", "marked_words", "kind_nan", "kind_inf",
@@ -3933,6 +4279,9 @@ def main():
             if MT["formats"]:
                 corpora.append(("routine corpus, trig",
                                 MT["total"] + trig_held))
+            if MI["formats"]:
+                corpora.append(("routine corpus, inv",
+                                MI["total"] + inv_held))
         for corpus, compared in corpora:
             if total and not compared and not DEVICE.refused_in(corpus):
                 print(f"THE {corpus.upper()} COMPARED NOTHING AND THE DEVICE "
