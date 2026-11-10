@@ -2648,10 +2648,12 @@ def check_seq_tw(rnd, plant=None, shift=0, xs=None, **kw):
 # definition: each lane is held to an independent predicate, rem0_inexact
 # (N0 - q0 D0 not representable in one word, recomputed in exact rationals from
 # the clean build's probes N0, q0 and D0), and the plant is held equal to the
-# clean build wherever the predicate is false (the test). The FMA is exact iff
-# the predicate is false, so neither a pool nor a sampled region of 48 lanes
-# reaches them: the predicate is the definition and the list is lanes that make
-# it matter. Magnitudes; atan is odd and the sign is added.
+# clean build wherever the predicate is false (the test). The FMA is exact where
+# the predicate is false, so the plant differs from the clean build only on lanes
+# where it is true; the pools (333 lanes) and the four regions of 48 points at
+# seed 11 hold none that is past the bound (MEASURED: the plant is green there),
+# and the list is lanes that do. The predicate is the definition, the list is
+# lanes that make it matter. Magnitudes; atan is odd and the sign is added.
 REM0_LANES = (0x404a17f5, 0x404a4da9, 0x404a39e7, 0x3f9b9037, 0x3f9b6cfd,
               0x3f540f4c, 0x417b1377, 0x40492a17)
 

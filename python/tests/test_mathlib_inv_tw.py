@@ -13,7 +13,9 @@ quick enough for the golden stage; the larger runs are
 
 and for every check a planted fault shown red in it, the control green in all
 (mathlib._INV_TW_PLANTS: ten, private), every leg of every check shown failing
-alone on a doctored input, the routing and the refusals, and the port's pins.
+alone on a doctored input (seq's leg for the committed lanes that must mark has
+no lane to run at fp32: it has no structured lane that marks, and says so), the
+routing and the refusals, and the port's pins.
 The port against the model is a scratch script of the parcel's entry (nothing
 here imports docs/studies/m4): the five dag digests, the instructions by phase,
 the words, (K3, K2, D), the TwoSum and Fast2Sum counts, and (result, flag
@@ -209,10 +211,11 @@ def test_the_scheduler_takes_the_depth_first_order_and_the_cap_is_the_measured_m
 
 def test_the_lanes_of_the_model_are_the_fragments():
     """The first words of the pool, the specials and the regions through the
-    fragment, its Build and the pinned shape: the scratch script compared 333 +
-    26 + 800 + 256 lanes under five attributes with the model's (result, flag
-    word, Vh, Vl, V2, R, R1, R2) and found 0 differences; here the fragment
-    and the unpruned Build agree on the lanes and the atan values are right."""
+    fragment, its Build and the pinned shape: the scratch script compared 333
+    pool, 26 special, 800 region and 772 census lanes under five attributes
+    with the model's (result, flag word, Vh, Vl, V2, R, R1, R2) and found 0
+    differences; here the fragment and the unpruned Build agree on the lanes
+    and atan(1) is right."""
     for rnd in (RNE, RDN):
         b, f = I.tw_build_of(rnd), I.tw_fragment_of(rnd)
         for x in I.sample("atan", FP32, "random", 30, 3):
@@ -689,7 +692,8 @@ def test_head3_short_is_a_variant_and_not_a_plant():
 # specials and shape under all five attributes, core on both branches and
 # constants under rne). The brief expected bound_wide red in pools and census:
 # it is red in census and constants, and green in pools, whose 333 lanes would
-# mark with probability about 2^-17 each at the bound 2^22 wide. Every plant
+# each mark with probability about 2^-17 at the bound 2^22 wide (ESTIMATE: 2 Bv
+# over the spacing 2^-24 of results, Bv = 2^-42 |V|). Every plant
 # that changes an instruction or a word count is red in shape.
 CHECKS = I.CHECKS_TW
 PLANTED = [
@@ -1051,6 +1055,18 @@ def test_each_leg_of_constants_can_fail_alone():
     b.meta["rho"] = Fraction(1, 15)
     found = _constants_of(b)
     assert len(found) == 1 and "is not the cells' re-derived" in found[0]
+    # an enclosure that straddles a rounding boundary decides nothing: refused
+    real = ml._check_atan_rational
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(ml, "_check_atan_rational", lambda a, b, bits: (
+            lambda lo_hi: (lo_hi[0], lo_hi[0] + Fraction(1, 2 ** 20)))(
+                real(a, b, bits)))
+        found = _constants_of(ml.build("atan", FP32, RNE))
+    finally:
+        mp.undo()
+    assert any("T0_1: undecidable: the enclosure of atan(1/8) straddles a "
+               "rounding boundary" in s for s in found)
     # the shift moves BREL, and the check reads the build's own
     b = ml.build("atan", FP32, RNE, bound_shift=34)
     assert _constants_of(b) == []

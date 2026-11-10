@@ -6469,7 +6469,8 @@ _INV_TW_BUILDERS = {}     # {name: builder(b, x)}; filled below, after the build
 # study's (m4tw.py PLANTS_TW) that act on atan; rem0_fma is the study's 3.6,
 # item 5, the first version's fault, which the model's final form does not
 # carry; the others are the double word's names (INV_PLANTS), acting here
-# through this builder. head3_short is the study's VARIANT, inside the bound,
+# through this builder. head3_short is the study's VARIANT, inside the bound on
+# the lanes the study sampled (2^-3.37 Bv at the worst, MEASURED on the model),
 # and is not listed.
 _INV_TW_PLANTS = {
     "q2_dropped": "the quotient's third word left out: s in two words",
