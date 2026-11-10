@@ -176,6 +176,35 @@ def test_the_ratio_threshold_is_exact_and_monotone():
         assert F._ratio_threshold(fmt, "directed", -40) == 0
 
 
+def test_the_deep_family_closes_where_tiny_top_says():
+    # the odd multiples of 3 of b bits (the smallest, the middle, the
+    # largest) that have a window under rne or rtz: some up to tiny_top(fmt),
+    # none one or two past it (the study's c of about 2^12 at fp128 and 2^33
+    # at fp256)
+    def windows(fmt, fn, b):
+        lo, hi = 1 << (b - 1), (1 << b) - 1
+        first = lo + (3 - lo) % 6
+        last = hi - (hi - 3) % 6
+        mid = first + ((last - first) // 2) // 6 * 6
+        return sum(any(F.classify(fmt, r, fn, F.tiny_lane(fn, fmt, c, e))
+                       == "mark" for r in (I.RNE, I.RTZ)
+                       for e in F._exponents(fmt, fn, b))
+                   for c in {first, mid, last})
+    assert F.tiny_top(I.FP128) == 12 and F.tiny_top(I.FP256) == 33
+    for fmt in FORMATS[1:]:
+        top = F.tiny_top(fmt)
+        at_top = 0
+        for fn in ("atan", "asin", "atan2"):
+            assert windows(fmt, fn, top - 1) == 3
+            at_top += windows(fmt, fn, top)
+            assert windows(fmt, fn, top + 1) == windows(fmt, fn, top + 2) == 0
+        assert at_top >= 1                # the window is closing at top
+    # and the deep arguments are lanes of those lengths only
+    deep = F.deep_arguments(I.FP128, "atan")
+    assert deep and all(F.classify(I.FP128, I.RNE, "atan", x) != "gated"
+                        for x, _l in deep)
+
+
 # ---- STRUCT: waves 1 and 2's committed lanes held to the predicate -----------------
 
 # the three committed lanes whose d is past M2's fixed 0.7 (the lead's ruling of
@@ -418,6 +447,19 @@ def test_a_listed_lane_the_theory_does_not_demand_fails_family():
     ents = [("ratio", "deep", 12)]
     out, st = F.check_family(f2, ents)
     assert names(out) == {"family"} and "the listed threshold" in out[0]
+
+
+def test_a_claim_of_zero_the_theory_contradicts_fails_family(monkeypatch):
+    fmt = I.FP64
+    f = frag("acos", "fp64", I.RNE)
+    ents = [("zero", "near1", 64)]
+    out, st = F.check_family(f, ents)
+    assert out == [] and st["lanes"] == 128 and st["mark"] == 0
+    real = F.classify
+    monkeypatch.setattr(F, "classify", lambda *a, **k: "mark"
+                        if a[3] == F.one(fmt) - 3 else real(*a, **k))
+    out, st = F.check_family(f, ents)
+    assert names(out) == {"family"} and "claimed to mark nothing" in out[0]
 
 
 def test_windows_fails_on_a_half_width_halved_and_on_doctored_lanes(monkeypatch):

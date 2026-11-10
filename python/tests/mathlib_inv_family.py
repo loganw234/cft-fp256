@@ -52,8 +52,8 @@ the distance from |f| (mpmath at 4p + 200 bits) to the nearest rounding
 boundary of the attribute's class (a float under the directed three, a
 midpoint under rne and rmm), in units of the nominal bound 2^-(p+G) |f|. The
 routine marks a lane when V +- Bv straddles a boundary, and V is within the
-budget's bound of f (mathlib_inv_budget: every cell of the study's 3.2 under
-0.1 Bv at fp64, fp128 and fp256, the largest 0.0730 of margin least), so:
+budget's bound of f (mathlib_inv_budget: the cells of the study's 3.2, each
+under its function's and format's B below, 0.073 Bv at the largest), so:
 
   d < 1 - B             the lane MUST be marked;
   d > 1 + B             the lane must NOT be marked, and is right unmarked;
@@ -94,7 +94,6 @@ import functools
 import math
 import random
 import sys
-import textwrap
 from fractions import Fraction
 from pathlib import Path
 
@@ -570,7 +569,8 @@ def window_edges(fmt, rnd, fn, centre, G=None):
 def tiny_top(fmt, G=None):
     """The bit length of c past which the theory's window closes (about),
     from x^4 < 5 2^-(p+G) against the grid's alignment (the trig family's
-    shape): (p - G + 7) // 6."""
+    shape): (p - G + 7) // 6, which test_mathlib_inv_family.py holds to the
+    sampled c: some have a window up to this bit length and none two past it."""
     G = ml.GUARD[fmt.name] if G is None else G
     return (fmt.prec - G + 7) // 6
 
@@ -865,6 +865,10 @@ def check_family(f, ents, G=None, extra=(), deep=False, evaluator=None):
             out.append(f"family: {tag}: {lab} ({_lane_name(x)}) is unmarked "
                        f"and wrong: got ({bits:#x}, {fw:#x}), want "
                        f"({gb:#x}, {gf:#x})")
+        if fam in ("near1", "diag") and want not in ("clear", "gated"):
+            out.append(f"family: {tag}: {lab} ({_lane_name(x)}) is in a "
+                       f"family claimed to mark nothing and the theory says "
+                       f"{want} (d = {_d(fmt, rnd, fn, x, G):.3f})")
         if fam.endswith(("-centre", "-listed")) and want != "mark":
             out.append(f"family: {tag}: {lab} ({_lane_name(x)}) is LISTED "
                        f"and the theory does not demand it marked (d = "
@@ -1020,8 +1024,9 @@ def check_census_counts(f, family, lanes=None, want=None, evaluator=None,
     """[finding], marks: census_counts. The study's census of `family`
     ("tiny", "near", "near1", "ratio", "diag") through the fragment marks the
     counted lanes (`want`, or census_expect), every lane the theory demands
-    marked (d under 1 - B) is among them, none the theory calls clear, no
-    unmarked lane is wrong and every marked guess is right."""
+    marked (d under 1 - B) is among them, none the theory calls clear, and no
+    unmarked lane is wrong (a marked guess is counted by the caller, not
+    judged)."""
     fmt, rnd, fn = f.fmt, f.rnd, f.op
     if lanes is None:
         lanes = census_lanes(fmt, fn)[family]

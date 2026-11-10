@@ -15,15 +15,19 @@ the SAMPLE'S OWN mean and variance, the cell judged by the exact two-sided
 tail of that count (RateSample.pmf and p_value), a run of cells as the
 independent statistics it holds (rtz, rdn and rup mark the same lanes, rne and
 rmm the same). The model's rate.py takes m from V_h; this takes it from the
-true value (they differ only where V and f straddle a power of two).
+true value (the two agree to V's last bits; they can differ in the
+significand where V and f straddle a power of two).
 
 THE CROWDING SPLIT (send-back 1 of the study's 3.4). The law assumes the true
 value spread over its rounding cell. Where lanes crowd beside pi/4, pi/2,
 3pi/4 or pi (atan of a huge argument, acos of a tiny one, atan2 with one
 operand dominant: their true value is within an ulp of the constant) it does
-not: such a lane marks only if the constant lies within the inflated bound of
-a boundary, and the constants lie 4.0 to 37 inflated bounds from the nearest boundary
-(CROWD_DISTANCES, exact rationals, below). So the lanes whose true value is
+not: a lane beside a constant has its true value within an ulp of it, K
+minus a correction term (1/x, x, y), and it marks where that term moves the
+value within the bound of a boundary, which is the windows of 3.5 and not a
+uniform place in the cell. The constants themselves lie 4.0 to 37 inflated
+bounds from the nearest boundary (CROWD_DISTANCES, exact rationals, below).
+So the lanes whose true value is
 within an ulp of one of the four are JUDGED APART:
 
   the rest   follow the law: the exact two-sided tail of their count, with
@@ -48,7 +52,6 @@ record says what it measured.
 import functools
 import math
 import sys
-from fractions import Fraction
 from pathlib import Path
 
 import mpmath
@@ -290,7 +293,17 @@ def check_rate(fmt, rnd, fn, region="random", n=2000, seed=3,
     pval = min(1.0, 2.0 * min(lo, hi))
     level = H.rate_level(statistics, alpha)
     clo, chi = smp.law_crowd.tails(c_crowd) if smp.law_crowd.n else (1.0, 1.0)
+    # the study's own statistic: every lane (a repeat counted each time) against
+    # the sum of the lanes' probabilities, its sigma the plain binomial one and
+    # then inflated by the multiplicity (repeats mark alike)
+    lane_ps = [smp.p[x] for x in smp.distinct for _ in range(smp.mult[x])]
+    lanes_e = math.fsum(lane_ps)
+    lanes_sd = math.sqrt(math.fsum(q * (1.0 - q) for q in lane_ps))
     st = {"n": smp.n, "distinct": len(smp.distinct), "lanes_marked": c_lanes,
+          "lanes_expected": lanes_e,
+          "lanes_z": (c_lanes - lanes_e) / lanes_sd if lanes_sd else 0.0,
+          "lanes_z_repeats": ((c_lanes - lanes_e) / (lanes_sd * smp.inflation)
+                              if lanes_sd else 0.0),
           "marked": c_all, "rest_n": len(smp.rest), "rest_marked": c_rest,
           "rest_expected": law.mean, "rest_sigma": law.sigma,
           "rest_z": z(c_rest, law), "p": pval, "level": level,
