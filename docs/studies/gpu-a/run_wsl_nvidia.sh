@@ -20,6 +20,8 @@
 #      each card, its plants on each card, and the differential stream
 #      against the first kernel (diff: 2^30 cases on the 5060 Ti, 2^28 on
 #      the 4070, seed 20261110; 200,000 on the CPU, seed 1)
+#   6. the same source through plain nvcc and the study's header (cudahip/,
+#      no HIP): every corpus, both kernels, rmm-as-rne, a 2^28 diff a card
 #
 # Light by design: each card's runs take seconds. Logs go to stdout.
 set -uo pipefail
@@ -87,6 +89,20 @@ for d in ${DEVICES:-1 0}; do
     # 2^30 cases on the 5060 Ti, 2^28 on the 4070, which drives the display
     timeout 60 "$B/nvidia/cft_fma" diff "$([ "$d" = 1 ] && echo 1073741824 || echo 268435456)" 20261110 \
         --device "$d" || rc=1
+done
+echo "== plain nvcc and the study's header (cudahip/), no HIP on the include path"
+bash "$here/build.sh" cuda "$B/cuda" 89 120 | grep -E '^\+ nvcc' || exit 1
+DEFS=-DCFT_GPUA_PLANT_RMM_AS_RNE bash "$here/build.sh" cuda "$B/cuda-plant-rmm" 89 120 > /dev/null || exit 1
+echo "lines of the preprocessed source that name a HIP install: $(nvcc -x cu -E -I"$here/cudahip" \
+    -I"$B/cuda/devsrc" -I"$B/cuda/sha" "$here/cft_fma.hip" | grep -c 'rocm\|nvidia_detail')"
+for d in ${DEVICES:-1 0}; do
+    gpu_state
+    bash "$here/run_checks.sh" "$B/cuda/cft_fma" "cuda-nv$d" "$C" "$O" --device "$d" || rc=1
+    CORPORA="conf-fp256 stream-fp256" bash "$here/run_checks.sh" "$B/cuda/cft_fma" "cuda-nv$d-fixed" \
+        "$C" "$O" --device "$d" --kernel fixed || rc=1
+    plant "cuda rmm-as-rne/nv$d" "$B/cuda-plant-rmm/cft_fma" check "$C/conf-fp256.bin" - --device "$d" || rc=1
+    plant "cuda fixed rmm-as-rne/nv$d" "$B/cuda-plant-rmm/cft_fma" check "$C/conf-fp256.bin" - --device "$d" --kernel fixed || rc=1
+    timeout 60 "$B/cuda/cft_fma" diff 268435456 20261110 --device "$d" || rc=1
 done
 echo "== run_wsl_nvidia.sh $(date '+%F %T'): $([ $rc = 0 ] && echo 'all GREEN, every plant RED' || echo 'SOMETHING WRONG')"
 exit $rc

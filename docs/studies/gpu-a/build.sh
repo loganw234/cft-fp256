@@ -10,7 +10,10 @@
 #                       nothing"
 #           nvidia      HIP over CUDA: hipcc with HIP_PLATFORM=nvidia
 #           amd         HIP over ROCm: hipcc with HIP_PLATFORM=amd
-#   ARCH    nvidia: compute capabilities, default "89 120";
+#           cuda        plain nvcc, no HIP at all: the study's header
+#                       cudahip/hip/hip_runtime.h maps the harness's HIP
+#                       names onto CUDA's (the study, section 3 (b))
+#   ARCH    nvidia, cuda: compute capabilities, default "89 120";
 #           amd: gfx targets, default gfx1102
 #   env     DEFS  extra -D flags, e.g. "-DCFT_BN_LIMBS=38 -DCFT_NO_TRANSCEND",
 #                 or a plant: -DCFT_GPUA_PLANT_RMM_AS_RNE,
@@ -75,6 +78,14 @@ nvidia)
     run hipcc -x cu -isystem "$HIP_PATH/include" -O2 -std=c++17 $G -Xptxas -v $DEFS $XFLAGS $INC \
         -c "$SRC" -o "$OUT/cft_fma.o" 2>&1 | tee "$OUT/resource.log"
     run hipcc $XFLAGS "$OUT/cft_fma.o" "$OUT/sha256.o" -o "$OUT/cft_fma"
+    ;;
+cuda)
+    banner nvcc --version
+    G=""
+    for cc in ${@:-89 120}; do G="$G -gencode arch=compute_$cc,code=sm_$cc"; done
+    run nvcc -x cu -I"$here/cudahip" -O2 -std=c++17 $G -Xptxas -v $DEFS $XFLAGS $INC \
+        -c "$SRC" -o "$OUT/cft_fma.o" 2>&1 | tee "$OUT/resource.log"
+    run nvcc $XFLAGS "$OUT/cft_fma.o" "$OUT/sha256.o" -o "$OUT/cft_fma"
     ;;
 amd)
     export HIP_PLATFORM=amd

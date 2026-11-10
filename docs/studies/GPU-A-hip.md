@@ -25,7 +25,9 @@ Each was checked on two corpora:
 - a seeded stream of 4,000,000 FMAs.
 
 Every output hashes to the golden model's sha256. Three planted faults go
-red on every device they were run on.
+red on every device they were run on. The same source also builds with
+plain nvcc and no HIP at all, through a 52-line header of the study's own,
+with the same hashes on both NVIDIA cards (section 3).
 
 **What the generic port costs.** The first kernel runs `host/src/softfloat.c`
 and `bigint.c` as they are. At fp256 it makes 77 to 175 M FMAs a second,
@@ -62,7 +64,7 @@ kernel (ESTIMATE, sections 8 and 9).
 
 ## 1. What was built
 
-All of it is in `studies/gpu-a/` (2,076 lines of code and runbooks, 385 of
+All of it is in `studies/gpu-a/` (2,155 lines of code and runbooks, 392 of
 captured output).
 
 | file | lines | what it is |
@@ -71,12 +73,13 @@ captured output).
 | `cft_fma.hip` | 752 | the one source: both kernels, the CPU path, the test generator, the harness (`check`, `bench`, `diff`, `info`) |
 | `fma256_fixed.h` | 366 | the second kernel: an fp256 FMA on fixed limbs, a second implementation |
 | `gen_corpus.py` | 231 | the corpora from the golden model; the bit-flip plant; an independent verifier |
-| `build.sh` | 92 | one build line per target: `cpu`, `cpu-libcft`, `nvidia`, `amd` |
+| `build.sh` | 103 | one build line per target: `cpu`, `cpu-libcft`, `nvidia`, `amd`, `cuda` |
+| `cudahip/hip/hip_runtime.h` | 52 | the study's own header, not HIP: the harness's HIP names mapped onto CUDA's, for plain nvcc (section 3) |
 | `run_checks.sh`, `bench.sh`, `hazards.sh` | 27, 28, 90 | every corpus through one build, the rates, the compilers' hazards |
-| `run_wsl_nvidia.sh`, `run_amd.sh` | 92, 84 | the desktop's runbook and the AMD body |
+| `run_wsl_nvidia.sh`, `run_amd.sh` | 108, 84 | the desktop's runbook and the AMD body |
 | `run_rx7600.sh`, `run_mi300x.sh` | 29, 61 | the two AMD runbooks |
 | `toolchain_check.hip` | 56 | the smallest program that proves a toolchain and device |
-| `captured/` | 385 | the corpora's sums, the expected outputs' sums, the final runs' summaries |
+| `captured/` | 392 | the corpora's sums, the expected outputs' sums, the final runs' summaries |
 
 **The harness.** It is one source compiled four ways:
 
@@ -192,7 +195,15 @@ same, and its results and hashes are the same on both.
 
 How one source on CUDA survives this:
 - **(a) HIP 7.2.4, frozen,** is what was installed and what works today. It is three .debs, 0.6 MB, header-only on NVIDIA.
-- **(b) A study header of its own.** It would map the 17 HIP runtime calls the harness uses onto CUDA's under plain nvcc: malloc, memcpy, events, device properties, occupancy, limits, errors. It is not built, because (a) works. ESTIMATE: 60 to 80 lines of `#define`s and two inline functions, with no change to either kernel, since `__global__`, `__host__ __device__`, `threadIdx` and `atomicAdd` are already CUDA's.
+- **(b) A study header of its own, built** (52 lines, `cudahip/hip/hip_runtime.h`, every line written for this study and copied from nothing). Under the name `hip/hip_runtime.h`, so the unchanged source finds it, it maps 27 names onto CUDA's:
+  - three types (`hipError_t`, `hipEvent_t`, `hipFuncAttributes`);
+  - 21 functions and constants (errors, devices, the stack limit, malloc, free, memcpy, memset and its two directions, events, function attributes, occupancy);
+  - `hipDeviceProp_t` with an empty `gcnArchName` beside CUDA's fields, and its `hipGetDeviceProperties`;
+  - `HIP_VERSION`, set to 0 so a log shows this header, not a release.
+
+  `build.sh cuda` compiles with plain nvcc. Its line names no HIP path (`nvcc -x cu -I.../cudahip -O2 ...`), and the preprocessed source names no HIP install. MEASURED on both cards (`captured/desktop-checks.txt`): every corpus's hash equals the HIP 7.2.4 build's for both kernels, rmm-as-rne goes red for both, and a 2^28-case differential on each card shows 0 differing, with the same first-chunk hashes.
+
+  Not covered, because the harness does not use them: HIP streams beyond the default, `hipLaunchKernelGGL` (the source launches with `<<< >>>`), hiprtc, managed memory, textures, cooperative groups, any `hipDeviceProp_t` field CUDA does not have, and AMD (there the source uses ROCm's own HIP).
 - **(c) AMD's `hipother` sources** still live in the ROCm monorepo (`ROCm/rocm-systems`, `projects/hipother`, READ in the develop branch's listing). Building HIP's NVIDIA headers from there at ROCm 10.1's tag is the current route. Not tried.
 
 **The CUDA version.** CUDA 12.9 was chosen over 13.x because HIP 7.2's
@@ -223,7 +234,7 @@ published sum (MEASURED). The ledger records sizes, sums and removal.
 ## 5. Correctness: bit for bit
 
 Every check below is MEASURED in the final runs from the committed scripts:
-- this desktop, 16:07 to 16:11 (`captured/desktop-checks.txt`, `bench.txt`, `hazards.txt`);
+- this desktop, 16:07 to 16:11 (`captured/bench.txt`, `hazards.txt`), and its runbook again 16:25 to 16:28 with section 3 (b)'s step added (`captured/desktop-checks.txt`);
 - the RX 7600 machine, 16:07 to 16:09 (`captured/rx7600-checks.txt`).
 
 Earlier runs of the same scripts gave the same hashes, and the ledger holds
@@ -351,12 +362,9 @@ second on both fp256 corpora.
 
 **Hazards found in the harness and the toolchain,** each fixed or worked
 around and recorded in the ledger:
-- N1 to N3 and `gcnArchName` (section 3).
-- An apostrophe inside `${HIP_PATH:?...}` opened a quote in bash.
-- `hipcc --version | head -1` under `pipefail` stopped the build on SIGPIPE.
-- Python's `write_text` on Windows put CRLF into `build.sh`.
-- An RX 7600 binary built before `--case` existed ignored the flag and timed the wrong thing. The harness now refuses any option it does not know (MEASURED).
-- On the 5060 Ti, single-shot `check` timings of some binaries carried about 300 ms of first-launch cost. This was not explained; it changes no result, and the rates come from `bench`'s warmed medians.
+- N1 to N3 and `gcnArchName` (section 3); in bash, an apostrophe inside `${HIP_PATH:?...}`, `| head` under `pipefail`, and CRLF that Python's `write_text` put into `build.sh` on Windows.
+- A binary built before `--case` existed ignored it and timed the wrong thing. The harness now refuses any option it does not know (MEASURED).
+- On the 5060 Ti, some binaries' single-shot `check` timings carried about 300 ms of first-launch cost. This was not explained; it changes no result, and the rates come from warmed medians.
 
 ## 8. Throughput
 
@@ -492,7 +500,7 @@ remote backends:
 - **Residency, or the speed is lost.** End to end is 31 to 51 M/s against 0.9 to 1.4 G/s kernel only. The backend needs `cft_alloc`'d device copies under `cft.h`'s authority rule, as the card's resident mode has. A program's registers should live on the device, as the sequencer's model already wants: one instruction stream, many lanes, one thread a lane.
 - **The flags.** A call's flags are an OR over its lanes, which atomics compute deterministically, since OR is associative and commutative. `cft_reduce`'s sums keep their fixed tree, a kernel per level, never an atomic add on values.
 - **`host/src`.** E1 behind a `CFT_HD` header (section 2). Nothing else in the arithmetic needs to change for device code (MEASURED by this study's build).
-- **The NVIDIA leg.** HIP 7.2.4 frozen, the study header of section 3 (b), or `hipother` from source. This is Logan's choice (questions).
+- **The NVIDIA leg.** HIP 7.2.4 frozen, the study's header (section 3 (b), built and held to the same hashes), or `hipother` from source. This is Logan's choice (questions).
 - **The gates.**
   - the conformance corpus through the backend, as `--device sw` and the card are run;
   - `host/tests/seq_check.py` through a device handle;
@@ -504,7 +512,7 @@ remote backends:
 ## 11. Questions for Logan
 
 1. **A backend round?** With a specialised fp256 kernel held to libcft's own code on the GPU, a 5060 Ti or RX 7600 runs fp256 FMAs at 2 to 3 times the quad's resident rate, kernel only. Is that worth a round, and which first: fp256 FMA/ADD/SUB/MUL, or fp128 too?
-2. **The NVIDIA leg.** HIP's NVIDIA platform is packaged only up to ROCm 7.2.4. Keep HIP 7.2.4 frozen, build `hipother` from ROCm's sources, write the study's small CUDA header, or drop NVIDIA from the backend?
+2. **The NVIDIA leg.** HIP's NVIDIA platform is packaged only up to ROCm 7.2.4. For a backend, which: keep HIP 7.2.4 frozen, use the study's 52-line CUDA header (built here, same hashes), build `hipother` from ROCm's sources, or drop NVIDIA?
 3. **Specialised kernels in the contract.** The second kernel is a second implementation. Its agreement is evidence by test (73,780 conformance, 1,000,000 stream and 2.4 x 10^9 differential cases), not a proof. Is "generic as reference inside the gates" enough, or should a specialised kernel need a proof (an exhaustive small-format analogue, say)?
 4. **The MI300X.** Which of section 9's runs (a) to (d) are worth its time, if any? Each needs your word.
 5. **The CPU too?** The first kernel's cost on one CPU core is about 450 ns an fp256 FMA, against mpfr+754's 71 ns. Most of it is the portable bignum's bit-at-a-time helpers. Should `host/src` get faster helpers on every platform, behind the same vectors?
@@ -517,22 +525,15 @@ All run from the tree's root, on the machine named. `CORPUS` and `WORK` are
 directories outside the tree.
 
 ```
-# corpora (this desktop, Windows Python 3.12 + mpmath 1.3.0; ~1 min)
-python -B docs/studies/gpu-a/gen_corpus.py conformance CORPUS --jobs 2
-python -B docs/studies/gpu-a/gen_corpus.py stream CORPUS --jobs 2
-(cd CORPUS && sha256sum -c TREE/docs/studies/gpu-a/captured/corpus.sha256)
-# the desktop's NVIDIA leg and both CPU legs (WSL cft-gpu; ~1.5 min)
+# corpora (this desktop, Windows Python 3.12 + mpmath 1.3.0; ~1 min), then checked
+python -B docs/studies/gpu-a/gen_corpus.py conformance CORPUS --jobs 2   # and: stream
+# the desktop (WSL cft-gpu): runbook ~3 min; then bench.sh and hazards.sh as below
 HIP_PATH=/opt/rocm-7.2.4 bash docs/studies/gpu-a/run_wsl_nvidia.sh CORPUS WORK
-bash docs/studies/gpu-a/bench.sh WORK/build/nvidia/cft_fma nv1 CORPUS --device 1
 FORMATS=fp256 bash docs/studies/gpu-a/bench.sh WORK/build/nvidia/cft_fma nv1-fixed \
-    CORPUS --device 1 --kernel fixed          # likewise --device 0 for the 4070
-BLOCKS=1 REPS=3 bash docs/studies/gpu-a/bench.sh WORK/build/cpu/cft_fma cpu CORPUS
-bash docs/studies/gpu-a/hazards.sh cpu CORPUS WORK
-bash docs/studies/gpu-a/hazards.sh nvidia CORPUS WORK --device 1
-# the RX 7600 machine (ROCm 10.1; ~2.5 min): run_rx7600.sh's header lists
-# the copy, then its runbook, bench.sh for both kernels and hazards.sh amd
-# the experiments of section 8 (container, one case a lane)
+    CORPUS --device 1 --kernel fixed   # without the last two words: the first kernel
+bash docs/studies/gpu-a/hazards.sh nvidia CORPUS WORK --device 1   # and: cpu
+# the RX 7600 machine (~2.5 min): the commands in run_rx7600.sh's header
+# section 8's experiments: the container, and one case a lane (cases 5, 4, 1, 2)
 DEFS="-DCFT_BN_LIMBS=38 -DCFT_NO_TRANSCEND" bash docs/studies/gpu-a/build.sh nvidia WORK/l38
-WORK/l38/cft_fma bench CORPUS/stream-fp256.bin --device 1 --block 128
-cft_fma bench CORPUS/stream-fp256.bin --block 128 --lanes 1000000 --case 5   # 5, 4, 1, 2
+WORK/build/nvidia/cft_fma bench CORPUS/stream-fp256.bin --block 128 --lanes 1000000 --case 5
 ```
