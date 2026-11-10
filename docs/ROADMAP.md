@@ -7021,6 +7021,90 @@ If the routines are a small share of the work the card is given, a
 tile for them buys little on that work, and is a performance option for
 routine-heavy jobs, chosen per job like a dedicated-rung build.
 
+### Noted 2026-11-10: a GPU backend through HIP (no dates)
+
+Logan, verbatim, on 2026-11-10: "Would an AMD HIP kernel potentially be
+possible to allow GPUs to run the library?" Then, after the lead's
+answer: "Write it up as a roadmap item".
+
+**How to read this.** As the lists above: no date, no study, no parcel,
+nothing reordered in M4, M3 or the scheduler's parcels, and nothing
+unparked. It is taken up as it becomes convenient. Each figure is READ
+on 2026-11-10 at 3e573825 unless it is marked otherwise.
+
+**Where it would sit.** libcft reaches every device through one
+interface (host/src/backend.h): the software backend (host/src/device.c,
+"the contract"), the card's (host/src/backend_xrt.cpp) and the remote
+one (host/src/backend_remote.c). A HIP backend would be a fourth beside
+them. The sequencer's model, one instruction stream over many lanes
+with a lane mask, is a GPU's: one thread a lane. The certificate
+corpus's conformance test already names "a GPU library" among the
+implementations it serves (docs/CERTIFICATES.md, "As a conformance
+test").
+
+**What already exists on GPUs.** atlas-engine's det library, thirteen
+functions in GLSL at fp32 (docs/ATLAS.md's table: ADD, SUB and MUL at
+fp32, RNE, denormals kept), gives one hash across three GPU vendors. The
+U50's tile and the software backend reproduced an NVIDIA RTX 5060 Ti's
+bytes on every pass of a real render (docs/DETERMINISM.md, 2026-09-18).
+So the contract has held on a GPU at fp32; that says nothing yet of
+fp64 to fp256, of the five attributes or of the flags.
+
+**The arithmetic, by format.**
+- **fp128 and fp256:** no GPU has them in hardware (BELIEVED). The
+  backend would run the software backend's integer arithmetic as device
+  code: host/src/softfloat.c, which program.c's sequencer calls for each
+  operation that is not a control code, on each active lane
+  (`cft_sf_compute`, host/src/program.c:2010). This is where a GPU could
+  matter. ESTIMATE, of low confidence, on two BELIEVED inputs: an fp256
+  FMA in software is of the order of a thousand 32-bit integer
+  operations, and a large GPU does of the order of 10^13 integer
+  operations a second, so of the order of 10^9 to 10^10 fp256 FMAs a
+  second. The quad does 427 M (COMPUTED, above, "Limits, not items"). A
+  256-bit value is eight 32-bit registers and the sequencer keeps 32
+  values a lane; register pressure may cut occupancy far below that.
+- **fp32 and fp64:** the native FMA is correctly rounded (BELIEVED), but
+  the contract also needs rtz, rdn, rup and rmm (no GPU known to the
+  lead offers ties away: BELIEVED), exact IEEE flags (HIP exposes no
+  sticky flags: BELIEVED), and subnormals without flush-to-zero. The
+  faithful start is the softfloat at every format, then a native fast
+  path held equal to it. Only a measurement settles either format.
+
+**What it would change.** docs/BENCHMARKS.md says a GPU "has no answer
+at all" at binary128 and binary256. That is true of the hardware, but an
+emulated path is what the software backend already is. If a GPU's
+integer units beat the U50 at fp256, the card's case becomes latency,
+power and the contract built in gates, rather than throughput. That is
+worth knowing either way.
+
+**Verification, from what exists:**
+- the conformance vectors;
+- host/tests/seq_check.py through a device handle, as `--device sw` and
+  the card are run;
+- the certificate corpus's conformance test;
+- the photograph stage, whose expected bytes are already a GPU's;
+- the fp32 routine sweeps.
+The new hazards to rule out are the compiler's fast-math and FMA
+contraction, flush-to-zero, and reductions by atomics: `cft_reduce`'s
+order must stay a fixed tree.
+
+**Practicalities.** HIP compiles for AMD through ROCm and for NVIDIA
+through CUDA (BELIEVED), so one source could serve both, the RTX 5060 Ti
+among them. Installing ROCm or the HIP SDK is a download, Logan's to
+approve, and the GPU is his to name. The HIP device would publish its
+capability word (CAPS, `seq_features`), and anything it lacks would be
+refused by name.
+
+**First step, a study, software only:** one kernel, the softfloat's
+fp256 FMA under the five attributes, held bit for bit to the golden
+vectors, and its throughput measured against the quad's and one core's.
+That decides whether a backend is worth building.
+
+**The lead's view:** the study first. It touches no RTL and no image,
+so it can run beside the card's work. A backend, if the study says
+yes, would be its own round, with the conformance corpus as its
+acceptance.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
