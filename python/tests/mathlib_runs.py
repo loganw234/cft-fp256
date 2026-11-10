@@ -44,10 +44,10 @@ log2 and log1p.
         [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm]
         [--centres N] [--jmax J] [--quick] [--out PATH] | --write | --check
     python python/tests/mathlib_runs.py inv-pools [--fn atan,atan2]
-        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
+        [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
         [--step N] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py inv-bound [--fn atan,atan2]
-        [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
+        [--formats fp64,fp128,fp256,fp32] [--attrs rne] [--n N] [--seed 121]
         [--guard G] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py inv-corner [--fn atan2]
         [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--n N]
@@ -155,7 +155,10 @@ sample is a function of --seed, so a run can be repeated.
            run). Not part of `all`
   inv-pools  atan, asin, acos and atan2 (parcel M4G1 builds atan, M4G3
            atan2; the others join as they are built: --fn defaults to every
-           function python/tests/mathlib_inv_harness.py has a pool for): the
+           function python/tests/mathlib_inv_harness.py has a pool for; at
+           --formats fp32, the triple word, only atan is built, parcel M4F1's:
+           a function the triple word lacks is refused by name, parcel M4F2's;
+           fp32 is never a default): the
            pool (atan's unary: the stage's trig_pool, the vector sets' and
            test_transcend's brute pool, 333, 285 and 285 arguments at fp64,
            fp128 and fp256; atan2's PAIRS (y, x): the stage's atan2_pairs, the
@@ -180,8 +183,11 @@ sample is a function of --seed, so a run can be repeated.
            size (atan, the defaults: 3,000 points a region at fp64, 1,000 at
            fp128 and fp256, rne; one process, unniced, the desktop shared and
            its load not measured): 93 s, peak memory 51 MB, RESULT: ok;
-           --quick is 12 points a region. atan2's full-size time is in the
-           entry of docs/VALIDATION.md. No code changes for asin or acos
+           --quick is 12 points a region. At --formats fp32 (atan's triple
+           word, parcel M4F1's; 20,000 points a region by default, the
+           study's sample on the box) V is the sum of three words. atan2's
+           full-size time is in the entry of docs/VALIDATION.md. No code
+           changes for asin or acos
   inv-corner  atan2 (parcel M4G3; the study's corner.py): the region `tinyn`,
            send-back 1's corner, a tiny or subnormal |y| against a larger |x|
            that no pool reaches, --n sampled pairs (2,000 at fp64, 500 at fp128,
@@ -1079,14 +1085,24 @@ def _inv_fns(arg):
     return names
 
 
-def _inv_formats(arg, default):
+def _inv_formats(arg, default, fns=()):
+    """The formats asked for. fp32 is the triple word (parcels M4F1: atan, and
+    M4F2: the others): it is accepted where every function in `fns` is built
+    there, and refused by name where one is not."""
     I = _inv_harness()
     names = arg.split(",") if arg else default
     for n in names:
-        if n not in I.BY_NAME:
-            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256 "
-                             f"(fp32 is parcel M4F1's)")
-    return [I.BY_NAME[n] for n in names]
+        if n == "fp32":
+            lacking = [f for f in fns if f not in ml._INV_TW_BUILDERS]
+            if lacking or not fns:
+                raise SystemExit(
+                    f"--formats 'fp32': {', '.join(lacking or ('this',))} "
+                    f"is not built at fp32: fp32 is the triple word, parcel "
+                    f"M4F2's ({', '.join(ml._INV_TW_BUILDERS)} is built)")
+        elif n not in I.BY_NAME:
+            raise SystemExit(f"--formats {n!r}: fp64, fp128, fp256 or fp32 "
+                             f"(fp32 is atan's triple word, parcel M4F1's)")
+    return [I.FP32 if n == "fp32" else I.BY_NAME[n] for n in names]
 
 
 def cmd_inv_pools(a):
@@ -1096,12 +1112,13 @@ def cmd_inv_pools(a):
     I = _inv_harness()
     open_out(a.out)
     step = a.step if a.step else (8 if a.quick else 1)
+    fns = _inv_fns(a.fn)
     fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
-                        [f.name for f in I.FORMATS])
+                        [f.name for f in I.FORMATS], fns)
     rnds = attrs_of(a.attrs) if a.attrs else (
         [I.RNE, I.RTZ] if a.quick else list(sf.RND_MODES))
     for fmt in fmts:
-        for fn in _inv_fns(a.fn):
+        for fn in fns:
             xs = list(I.pool(fn, fmt))[::step]
             for rnd in rnds:
                 f = ml.fragment(fn, fmt, rnd)
@@ -1131,7 +1148,7 @@ def cmd_inv_corner(a):
                          f"function with two operands built)")
     sizes = {"fp64": 2000, "fp128": 500, "fp256": 300}
     fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
-                        [f.name for f in I.FORMATS])
+                        [f.name for f in I.FORMATS], ("atan2",))
     rnds = attrs_of(a.attrs) if a.attrs else (
         [I.RNE, I.RTZ] if a.quick else list(sf.RND_MODES))
     for fmt in fmts:
@@ -1164,13 +1181,14 @@ def cmd_inv_bound(a):
     transcend.py."""
     I = _inv_harness()
     open_out(a.out)
-    sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000}
+    sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000, "fp32": 20000}
+    fns = _inv_fns(a.fn)
     fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
-                        [f.name for f in I.FORMATS])
+                        [f.name for f in I.FORMATS], fns)
     rnds = attrs_of(a.attrs) if a.attrs else [I.RNE]
     for fmt in fmts:
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
-        for fn in _inv_fns(a.fn):
+        for fn in fns:
             for rnd in rnds:
                 b = ml.build(fn, fmt, rnd, guard=a.guard)
                 for k, region in enumerate(I.REGIONS_BY_FN[fn]):
@@ -1409,7 +1427,9 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_trig_family)
     p = sub.add_parser("inv-pools")
     p.add_argument("--fn", help="atan,atan2 (the functions built, by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default), or "
+                                     "fp32 (atan's triple word, parcel "
+                                     "M4F1's: not a default)")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--seq", action="store_true")
     p.add_argument("--step", type=int, default=0,
@@ -1421,11 +1441,13 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_inv_pools)
     p = sub.add_parser("inv-bound")
     p.add_argument("--fn", help="atan,atan2 (the functions built, by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default), or "
+                                     "fp32 (atan's triple word, parcel "
+                                     "M4F1's: not a default)")
     p.add_argument("--attrs", help="rne (by default)")
     p.add_argument("--n", type=int, default=0,
                    help="points a region (default 3,000 at fp64, 1,000 at "
-                        "fp128 and fp256)")
+                        "fp128 and fp256, 20,000 at fp32)")
     p.add_argument("--seed", type=int, default=121,
                    help="the first region's seed, one more each")
     p.add_argument("--guard", type=int, help="G, instead of the decided one")

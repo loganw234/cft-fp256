@@ -185,9 +185,12 @@ def test_an_inverse_fragment_is_held_to_its_own_row_and_to_no_fallback(
 
 
 def test_the_refusals_are_by_name():
-    for name in ml.INV_NAMES:
+    # fp32 is the triple word (parcels M4F1 and M4F2): a name of INV_NAMES
+    # not built at fp32 yet is refused by name, saying whose it is
+    assert "atan" in ml._INV_TW_BUILDERS
+    for name in (n for n in ml.INV_NAMES if n not in ml._INV_TW_BUILDERS):
         for call in (ml.build, ml.fragment):
-            with pytest.raises(ValueError, match="parcel M4F1's") as e:
+            with pytest.raises(ValueError, match="parcel M4F2's") as e:
                 call(name, FP32, RNE)
             assert f"{name} at fp32 is not built" in str(e.value)
     # a name of INV_NAMES not built is refused by name, saying whose it is:
@@ -221,7 +224,9 @@ def test_the_refusals_are_by_name():
     with pytest.raises(ValueError) as e:
         ml.fragment("atanh", FP64, RNE)
     assert "log1p, sin, cos, tan, atan" in str(e.value)
-    with pytest.raises(ValueError, match="parcel M4F1's"):
+    # the double word's core alone: fp32's is the triple word's, built
+    # by _build_inv_core_tw (parcel M4F1), not by build_inv_core
+    with pytest.raises(ValueError, match="triple word"):
         ml.build_inv_core(FP32)
 
 
@@ -1284,8 +1289,8 @@ def test_the_inv_commands_run_at_small_sizes_and_refuse_an_existing_out(
         R.main(["inv-bound", "--quick", "--out", str(out2)])
     R.OUT = None
     R.FINDINGS.clear()
-    with pytest.raises(SystemExit, match="fp32 is parcel M4F1's"):
-        R.main(["inv-pools", "--formats", "fp32"])
+    with pytest.raises(SystemExit, match="parcel M4F2's"):
+        R.main(["inv-pools", "--formats", "fp32", "--fn", "asin"])
     with pytest.raises(SystemExit, match="--fn 'atanh'"):
         R.main(["inv-bound", "--fn", "atanh"])
     # --seq runs the compiled shape over the same lanes

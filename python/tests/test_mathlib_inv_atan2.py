@@ -150,7 +150,7 @@ def test_plants_that_do_not_reach_atan2_are_refused_by_name():
             ml.build(FN, FP64, RNE, plant=plant)
     with pytest.raises(ValueError, match="no_such_plant"):
         ml.build(FN, FP64, RNE, plant="no_such_plant")
-    with pytest.raises(ValueError, match="parcel M4F1's"):
+    with pytest.raises(ValueError, match="parcel M4F2's"):
         ml.build(FN, FP32, RNE)
 
 
@@ -1026,5 +1026,5 @@ def test_the_inv_commands_take_atan2_and_inv_corner_refuses_an_existing_out(
     with pytest.raises(SystemExit, match="the corner is atan2's"):
         R.main(["inv-corner", "--fn", "atan"])
     R.OUT = None
-    with pytest.raises(SystemExit, match="fp32 is parcel M4F1's"):
+    with pytest.raises(SystemExit, match="parcel M4F2's"):
         R.main(["inv-corner", "--formats", "fp32"])
