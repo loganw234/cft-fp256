@@ -6941,20 +6941,20 @@ are docs/VALIDATION.md's ("The cost"; "fp32's triple word at G = 40")
 and the study's (docs/studies/M4-invtrig.md, 2.8).
 
 So hardware for the routines wins only pipelined. One result a cycle
-would beat the lanes about 50 times at fp32 and about 200 times at
-fp256, tile for tile (COMPUTED). An iterative unit would not: a
-shift-and-add one at fp32's working precision (24 + 40 = 64 bits)
-takes about 64 steps, about what the lanes take now, and at fp256's
-(237 + 46 = 283 bits) more than their 203 cycles (ESTIMATE, a bit a
-step).
+would beat the lanes 48 to 125 times at fp32 (exp to tan) and about 200
+times at fp256 (atan), tile for tile (COMPUTED). An iterative unit
+would not, or barely: a shift-and-add one at fp32's working precision
+(24 + 40 = 64 bits) takes about 64 steps against the lanes' 48 to 125,
+and at fp256's (237 + 46 = 283 bits) more than their 203 cycles
+(ESTIMATE, a bit a step).
 
 **Room.** The quad is short of LUTs, not DSPs: q135b used 82.66% of the
 part's LUTs, 86.12% in SLR0, and a fifth tile would not fit (above,
 step 6's plan of record: "The quad's limits are its LUTs and its
 timing"). Probe L kept R21 off the quad, whose room was short, at an
-estimated 4,000 to 15,000 LUTs a tile (above, revision 8's plan of
-record). So hardware for the routines takes a tile's place; it is not
-added beside four.
+estimated 4,000 to 15,000 LUTs a tile, of low confidence (above,
+revision 8's plan of record). So hardware for the routines takes a
+tile's place; it is not added beside four.
 
 **Logan's concept: a tile made for the routines.**
 - **Supporting tiles rather than more of the same.** An image of FMA
