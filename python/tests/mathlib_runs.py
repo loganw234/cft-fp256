@@ -52,6 +52,16 @@ log2 and log1p.
     python python/tests/mathlib_runs.py inv-corner [--fn atan2]
         [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--n N]
         [--seed 101] [--seq] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py inv-budget [--fn atan,asin,acos,atan2]
+        [--formats fp64,fp128,fp256] [--regions random,edge,big,small,diag]
+        [--n N] [--seed 121] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py inv-rate [--fn atan,asin,acos,atan2]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz] [--regions random,edge]
+        [--n N] [--seed 7] [--statistics K] [--alpha A] [--sigmas S]
+        [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py inv-family [--fn atan,asin,acos,atan2]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm]
+        [--centres N] [--quick] [--out PATH] | --write | --check
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -195,6 +205,46 @@ sample is a function of --seed, so a run can be repeated.
            |V - f| / Bv over the lanes tested and the lanes whose Bv
            underflowed. --quick: 12 lanes, fp128 under rne and rtz by
            default. Not part of `all`
+  inv-budget  atan, asin, acos and atan2 (parcel M4G4; the study's 3.2): the
+           first-order budget of mathlib_inv_budget over the harness's placed
+           regions (REGIONS_BY_FN: random, edge, big, small and, for asin,
+           acos and atan2, diag), --n lanes a region (12,000 at fp64 and
+           3,000 at fp128 and fp256 by default, the study's box sizes; seed
+           --seed 121 and one more each region). The lanes are END-WEIGHTED
+           as M1's were: the edge region puts them at the table's cell ends
+           (t within 64/2^16 of each cell's edge, +-2 ulps), big and small at
+           the exponent ends, the diagonal beside the swap. Per cell: the
+           main-path lanes, the instructions that round, the largest error
+           and method error, the capacities, the BOUND and its residual, the
+           sampled worst of inv-bound's check on the same lanes, and THE
+           CELL'S FIGURE, the largest of the bound, the bound with its
+           residual and the sampled worst, called which of them it is (a
+           budget bounds its own sample and a sampled worst is a lower
+           bound). A figure past the B of the families' thresholds
+           (mathlib_inv_family.THRESHOLD_B) is a finding. The attributes' leg
+           runs on the first 60 lanes. --quick: 100 lanes a region, fp128 only. Not
+           part of `all`
+  inv-rate  the same four (parcel M4G4; the study's 3.4): the mark-rate law
+           with the bound inflated to G' = 6, --n lanes of each --regions
+           (random and edge) at --attrs (rne and rtz; 50,000 at fp64 and
+           20,000 at fp128 and fp256 by default), seed --seed 7. The cell is
+           judged on its UNCROWDED distinct lanes by the exact two-sided tail
+           of their count against each lane's own 2^-G' m (the flag rule of
+           rate is --statistics, --alpha, --sigmas); the lanes whose true
+           value is within an ulp of pi/4, pi/2, 3pi/4 or pi are judged
+           apart (a finding only for more marks than the law allows); the
+           repeats of the edge region are said (the multiplicity's
+           inflation of sigma). --quick: 200 lanes, fp128 only. Not part of
+           `all`
+  inv-family  the same four (parcel M4G4; the study's 3.5): per cell the
+           thresholds B gives, the committed STRUCT lanes' d, the study's
+           census at its sizes (tiny, near, near1, ratio, diag) against its
+           counts, every listed centre with its neighbours, the ratio
+           family, the claims of zero and the deep arguments, the windows'
+           exact edges, and the pools' committed marks held to the theory.
+           --write regenerates mathlib_inv_family.INV_FAMILY from the
+           theory; --check holds the committed list to a fresh generation.
+           --quick: --centres 6, fp128 under rne and rtz. Not part of `all`
   trig-bound  sin, cos and tan: |V - f(x)| / Bv under 1, mpmath at 4p + 200
            bits, at --n placed points of each of the study's five regions
            (edge, near, zero, small, random; a seed each from --seed on) of
@@ -1186,6 +1236,184 @@ def cmd_inv_bound(a):
     say(f"inv-bound: {_memory_line()}")
 
 
+def _spread(items, cap):
+    """At most `cap` of the items, spread over the list (all of them for cap
+    0)."""
+    items = list(items)
+    if cap and len(items) > cap:
+        return items[::max(1, len(items) // cap)][:cap]
+    return items
+
+
+def cmd_inv_budget(a):
+    """The first-order budget of the inverse routines (parcel M4G4; the
+    study's 3.2) over the harness's placed regions, each cell's figure."""
+    import mathlib_inv_budget as IB
+    import mathlib_inv_family as IF
+    I = _inv_harness()
+    open_out(a.out)
+    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000}
+    fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in I.FORMATS])
+    for fmt in fmts:
+        n = a.n if a.n else (100 if a.quick else sizes[fmt.name])
+        for fn in _inv_fns(a.fn):
+            regions = (a.regions.split(",") if a.regions
+                       else list(I.REGIONS_BY_FN[fn]))
+            b = ml.build(fn, fmt, I.RNE)
+            attrs = {r: ml.build(fn, fmt, r) for r in sf.RND_MODES}
+            for k, region in enumerate(regions):
+                if region not in I.REGIONS_BY_FN[fn]:
+                    raise SystemExit(f"--regions {region!r}: one of "
+                                     f"{', '.join(I.REGIONS_BY_FN[fn])}")
+                t0 = time.perf_counter()
+                xs = I.sample(fn, fmt, region, n, a.seed + k)
+                out, s = IB.check_budget(b, xs, region, attrs=attrs,
+                                         attr_xs=xs[:60])
+                worst = IB.sampled_worst(b, xs)
+                fig, which = IB.cell_figure(s, worst)
+                B = IF.THRESHOLD_B[(fn, fmt.name)]
+                if fig > B:
+                    out.append(f"budget: {fn} {fmt.name} {region}: the "
+                               f"cell's figure {fig:.4g} Bv is past the B "
+                               f"{B} that the families' thresholds use "
+                               f"(mathlib_inv_family.THRESHOLD_B)")
+                note(out)
+                say(f"inv-budget {fn} {fmt.name} rne {region} seed "
+                    f"{a.seed + k}: {s['lanes']} main lanes of {len(xs)}, "
+                    f"{s['rounding']} instructions round; max |E|/Bv "
+                    f"{s['Emax']:.4g}, max |M|/Bv {s['Mmax']:.4g}, "
+                    f"capacities {s['S_cap']:.4g}, BOUND {s['bound']:.4g} Bv "
+                    f"(+ residual {s['resid']:.3g}), sampled worst "
+                    f"{worst:.4g}; the cell's figure {fig:.4g} Bv "
+                    f"({IB.bits_log2(fig):.2f} bits) is {which}; "
+                    f"{len(out)} findings; {time.perf_counter() - t0:.0f}s")
+    say(f"inv-budget: {_memory_line()}")
+
+
+def cmd_inv_rate(a):
+    """The mark-rate law of the inverse routines with the bound inflated to
+    G' = 6 (parcel M4G4; the study's 3.4), the crowded lanes judged apart."""
+    import mathlib_inv_rate as IR
+    I = _inv_harness()
+    open_out(a.out)
+    sizes = {"fp64": 50000, "fp128": 20000, "fp256": 20000}
+    fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in I.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else [I.RNE, I.RTZ]
+    regions = a.regions.split(",") if a.regions else list(IR.REGIONS)
+    for r in regions:
+        if r not in IR.REGIONS:
+            raise SystemExit(f"--regions {r!r}: one of {', '.join(IR.REGIONS)}")
+    fns = _inv_fns(a.fn)
+    stats = a.statistics or H.rate_statistics(fns, fmts, rnds) * len(regions)
+    for fmt in fmts:
+        n = a.n if a.n else (200 if a.quick else sizes[fmt.name])
+        for fn in fns:
+            for region in regions:
+                for rnd in rnds:
+                    t0 = time.perf_counter()
+                    out, st = IR.check_rate(fmt, rnd, fn, region, n, a.seed,
+                                            statistics=stats, alpha=a.alpha,
+                                            sigmas=a.sigmas)
+                    note(out)
+                    say(f"inv-rate {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                        f"{region} seed {a.seed} G'=6: {st['n']} lanes, "
+                        f"{st['distinct']} distinct, marked {st['marked']} "
+                        f"(all lanes {st['lanes_marked']}) against each "
+                        f"lane's own {st['all_expected']:.1f} "
+                        f"({st['all_z']:+.1f} sigma); the rest "
+                        f"{st['rest_n']} lanes: {st['rest_marked']} against "
+                        f"{st['rest_expected']:.1f} ({st['rest_z']:+.1f} "
+                        f"sigma, tail {st['p']:.2g}); crowded "
+                        f"{st['crowd_n']} lanes: {st['crowd_marked']} "
+                        f"against {st['crowd_expected']:.1f}; repeats "
+                        f"inflate sigma by {st['inflation']:.2f}; wrong "
+                        f"unmarked {st['wrong']}, wrong guesses "
+                        f"{st['guess_wrong']}; "
+                        f"{time.perf_counter() - t0:.0f}s")
+    say(f"inv-rate: {_memory_line()}")
+
+
+def cmd_inv_family(a):
+    """The structured families of the inverse routines (parcel M4G4; the
+    study's 3.5): census counts, every listed centre and its window, the
+    committed STRUCT lanes held to the predicate, the pools' marks."""
+    import mathlib_inv_family as IF
+    I = _inv_harness()
+    if a.write:
+        IF.write()
+        say("INV_FAMILY regenerated into python/tests/mathlib_inv_family.py")
+        return
+    if a.check:
+        found = IF.check_family_list(IF.INV_FAMILY)
+        note(found)
+        n = sum(len(IF.expand(v)) for per in IF.INV_FAMILY.values()
+                for p in per.values() for v in p.values())
+        say(f"inv-family --check: {n} entries in the lists, {len(found)} "
+            f"cells differ from the theory's")
+        return
+    open_out(a.out)
+    fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in I.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else (
+        [I.RNE, I.RTZ] if a.quick else list(sf.RND_MODES))
+    cap = a.centres if a.centres else (6 if a.quick else 0)
+    for fmt in fmts:
+        for fn in _inv_fns(a.fn):
+            must, clear = IF.thresholds(fmt, fn)
+            for rnd in rnds:
+                f = ml.fragment(fn, fmt, rnd)
+                cell = f"{fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+                listed, between = IF.listed_between(fmt, rnd, fn)
+                say(f"inv-family {cell}: B = {IF.THRESHOLD_B[(fn, fmt.name)]}"
+                    f", must mark d < {must:.3f}, must not d > {clear:.3f}; "
+                    f"{listed} listed centres, {between} between 0.7 and "
+                    f"{must:.3f}")
+                out, rep = IF.check_struct(fmt, rnd, fn)
+                note(out)
+                if rep:
+                    say(f"inv-family {cell} struct: {len(rep)} committed "
+                        f"lanes, largest d {max(d for _x, d in rep):.4f}; "
+                        f"{len(out)} findings")
+                for family, lanes in IF.census_lanes(fmt, fn).items():
+                    out, marked = IF.check_census_counts(f, family, lanes)
+                    note(out)
+                    say(f"inv-family {cell} census {family}: {len(lanes)} "
+                        f"arguments, {len(marked)} marked (the study's "
+                        f"{IF.census_expect(fmt, fn, rnd, family)}); "
+                        f"{len(out)} findings")
+                ents = IF.entries(fmt, rnd, fn)
+                every = IF.expand(ents)
+                cen = every
+                if cap:
+                    cen = _spread([c for c in every
+                                   if c[0] in ("tiny", "win")], cap)
+                    ents = [e for e in ents if e[0] not in ("tiny", "win")] \
+                        + [("tiny", c[1], c[2], c[2]) if c[0] == "tiny" else c
+                           for c in cen]
+                out, st = IF.check_family(f, ents, deep=True)
+                note(out)
+                say(f"inv-family {cell} family: {len(cen)} of {len(every)} "
+                    f"centres, {st['lanes']} lanes: theory says mark "
+                    f"{st['mark']} (marked {st['marked_mark']}), clear "
+                    f"{st['clear']} (marked {st['marked_clear']}), either "
+                    f"{st['either']} (marked {st['marked_either']}), gated "
+                    f"{st['gated']}; wrong unmarked {st['wrong']}, wrong "
+                    f"guesses {st['guess_wrong']}")
+                out, n = IF.check_windows(
+                    f, _spread([c for c in IF.expand(ents)
+                                if c[0] in ("tiny", "win")], 40))
+                note(out)
+                say(f"inv-family {cell} windows: {n} lanes at the windows' "
+                    f"exact edges, {len(out)} findings")
+    out, n = IF.check_pool_marks()
+    note(out)
+    say(f"inv-family pools: {n} committed pool marks held to the theory, "
+        f"{len(out)} findings")
+    say(f"inv-family: {_memory_line()}")
+
+
 def cmd_all(a):
     s = a.scale
     ns = argparse.Namespace
@@ -1450,6 +1678,57 @@ def main(argv=None):
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_inv_corner)
+    p = sub.add_parser("inv-budget")
+    p.add_argument("--fn", help="atan,asin,acos,atan2 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--regions", help="the harness's regions of each function "
+                                     "(REGIONS_BY_FN: random, edge, big, "
+                                     "small and, for asin, acos and atan2, "
+                                     "diag; all by default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes a region (default 12,000 at fp64, 3,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=121,
+                   help="the first region's seed, one more each")
+    p.add_argument("--quick", action="store_true",
+                   help="100 lanes a region, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_inv_budget)
+    p = sub.add_parser("inv-rate")
+    p.add_argument("--fn", help="atan,asin,acos,atan2 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz (by default)")
+    p.add_argument("--regions", help="random,edge (both by default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes a cell (default 50,000 at fp64, 20,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--statistics", type=int, default=0,
+                   help="the run's independent statistics K (default: this "
+                        "process's own)")
+    p.add_argument("--alpha", type=float, default=H.RATE_ALPHA)
+    p.add_argument("--sigmas", type=float, default=None,
+                   help="the plain N-sigma line instead of the exact tail")
+    p.add_argument("--quick", action="store_true",
+                   help="200 lanes a cell, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_inv_rate)
+    p = sub.add_parser("inv-family")
+    p.add_argument("--fn", help="atan,asin,acos,atan2 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
+    p.add_argument("--centres", type=int, default=0,
+                   help="at most this many centres a cell, spread over the "
+                        "list (0: all)")
+    p.add_argument("--quick", action="store_true",
+                   help="--centres 6, fp128 under rne and rtz by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.add_argument("--write", action="store_true")
+    p.add_argument("--check", action="store_true")
+    p.set_defaults(fn_=cmd_inv_family)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)
