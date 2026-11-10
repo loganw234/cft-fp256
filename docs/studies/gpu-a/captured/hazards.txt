@@ -1,0 +1,82 @@
+# hazards.sh cpu and nvidia (this desktop, 16:10:15 to 16:11:31), amd (the RX 7600, 16:08:36 to 16:09:30)
+== variant cpu-ubsan-asan: cpu XFLAGS='-O1 -g -fsanitize=undefined,address -fno-sanitize-recover=all'
+run_checks: cpu-ubsan-asan: every corpus run GREEN
+run_checks: cpu-ubsan-asan-fixed: every corpus run GREEN
+== variant cpu-libcft-ubsan-asan: cpu-libcft XFLAGS='-O1 -g -fsanitize=undefined,address -fno-sanitize-recover=all'
+run_checks: cpu-libcft-ubsan-asan: every corpus run GREEN
+== variant cpu-init-pattern: cpu XFLAGS='-ftrivial-auto-var-init=pattern'
+run_checks: cpu-init-pattern: every corpus run GREEN
+run_checks: cpu-init-pattern-fixed: every corpus run GREEN
+== variant cpu-init-zero: cpu XFLAGS='-ftrivial-auto-var-init=zero'
+run_checks: cpu-init-zero: every corpus run GREEN
+run_checks: cpu-init-zero-fixed: every corpus run GREEN
+== variant cpu-O0: cpu XFLAGS='-O0'
+run_checks: cpu-O0: every corpus run GREEN
+run_checks: cpu-O0-fixed: every corpus run GREEN
+== hazards.sh cpu: every variant GREEN on every corpus run
+== variant nv-fastmath: nvidia XFLAGS='--use_fast_math'
+run_checks: nv-fastmath: every corpus run GREEN
+run_checks: nv-fastmath-fixed: every corpus run GREEN
+== variant nv-G: nvidia XFLAGS='-G'
+run_checks: nv-G: every corpus run GREEN
+run_checks: nv-G-fixed: every corpus run GREEN
+========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
+========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
+========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
+========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
+========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
+========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
+========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
+========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
+SASS: 22832 instruction lines
+fpscan: 652 floating-point instruction lines in sass.txt
+== hazards.sh nvidia: every variant GREEN on every corpus run
+== variant amd-fastmath: amd XFLAGS='-ffast-math'
+run_checks: amd-fastmath: every corpus run GREEN
+run_checks: amd-fastmath-fixed: every corpus run GREEN
+== variant amd-O0: amd XFLAGS='-O0'
+run_checks: amd-O0: every corpus run GREEN
+run_checks: amd-O0-fixed: every corpus run GREEN
+== variant amd-init-pattern: amd XFLAGS='-ftrivial-auto-var-init=pattern'
+run_checks: amd-init-pattern: every corpus run GREEN
+run_checks: amd-init-pattern-fixed: every corpus run GREEN
+== variant amd-init-zero: amd XFLAGS='-ftrivial-auto-var-init=zero'
+run_checks: amd-init-zero: every corpus run GREEN
+run_checks: amd-init-zero-fixed: every corpus run GREEN
+ISA: 18983 instruction lines in cft_fma.hip-hip-amdgcn-amd-amdhsa.hipfb.amdgcn.gfx1102.img.lto.s
+fpscan: 3 floating-point instruction lines in cft_fma.hip-hip-amdgcn-amd-amdhsa.hipfb.amdgcn.gfx1102.img.lto.s
+== hazards.sh amd: every variant GREEN on every corpus run
+# floating-point SASS opcodes and local-memory instructions by kernel (cuobjdump -sass of the final nvidia build)
+fp sm_120 _Z15gpua_cmp_kernellPKhS0_S0_S0_PjPy HFMA2 1
+fp sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 378
+fp sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ F2I 1
+fp sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 119
+fp sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ I2F 1
+fp sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ MUFU 1
+fp sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ HFMA2 148
+fp sm_89 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ F2I 1
+fp sm_89 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ I2F 1
+fp sm_89 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ MUFU 1
+lines sm_120 _Z15gpua_cmp_kernellPKhS0_S0_S0_PjPy 148
+lines sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ 9752
+lines sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ 5380
+lines sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ 2568
+lines sm_89 _Z15gpua_cmp_kernellPKhS0_S0_S0_PjPy 148
+lines sm_89 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ 8262
+lines sm_89 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ 10158
+lines sm_89 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ 2468
+local sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ LDL 435
+local sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ STL 2050
+local sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ LDL 163
+local sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ STL 799
+local sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ LDL 2
+local sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ STL 2
+local sm_89 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ LDL 527
+local sm_89 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ STL 913
+local sm_89 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ LDL 521
+local sm_89 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ STL 958
+    563 HFMA2 R#, -RZ, RZ, 0, 0 ;
+     50 HFMA2 R#, -RZ, RZ, 0, 5.9604644775390625e-08 ;
+      6 HFMA2 R#, -RZ, RZ, 0, 9.5367431640625e-07 ;
+      6 HFMA2 R#, -RZ, RZ, 0, 2.384185791015625e-07 ;
+      5 HFMA2 R#, -RZ, RZ, 0, 1.1920928955078125e-07 ;

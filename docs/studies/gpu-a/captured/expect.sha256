@@ -1,0 +1,8 @@
+dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae  conf-fp32.bin (18435 cases, the expected d||flags)
+3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f  conf-fp64.bin (18440 cases, the expected d||flags)
+fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25  conf-fp128.bin (18545 cases, the expected d||flags)
+da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9  conf-fp256.bin (18360 cases, the expected d||flags)
+15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577  stream-fp32.bin (1000000 cases, the expected d||flags)
+dbf29a855c4de2baa79cb4be25624d81b39b30eff64e05b4b88fda6b338ead72  stream-fp64.bin (1000000 cases, the expected d||flags)
+c967ac1ecbee702995bfc2e1739d94e1f0592167073356812b707ea68040e99e  stream-fp128.bin (1000000 cases, the expected d||flags)
+9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7  stream-fp256.bin (1000000 cases, the expected d||flags)
