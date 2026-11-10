@@ -6891,6 +6891,136 @@ it can certify, and item 11 with the next RTL revision, which rebuilds
 and re-proves every image anyway. A new rtl/ tree restarts the card's
 coverage, so RTL items are best gathered into one revision.
 
+### Noted 2026-11-10: the routines in hardware, and a tile made for them (no dates)
+
+Logan, verbatim, on 2026-11-10. First his question: "Once we finalize
+the remainder, would considering some to be hardware blocks in the RTL
+be worthwhile? I was considering if the high cycle count would make it
+worthwhile to have a small hardware segment for the functions to run
+faster but less parallel than the FMA lanes". Then, after the lead's
+answer: "Go ahead and add it as a noted item, as well as a concept for
+a deep single tile with supporting tiles rather than more of the
+original tiles. Possibly a “transcendental tile” which operates
+similarly to the original but specialized for the routines. I’d also
+prefer keeping fp256 capacity for all implemented hardware, so allowing
+it to take up a full tile is a worthwhile trade. A potential design
+could be a 2x2 design with two FMA tiles and two new ones. If the tiles
+could be “swapped” depending on workload as we already allow with
+precisions it could open new possibilities for the device".
+
+**How to read this.** As the list above: no date, no study, no parcel,
+nothing reordered in M4, M3 or the scheduler's parcels, and nothing
+unparked (R21 on the quad stays parked). It is taken up after M4
+closes, as it becomes convenient. "The routines" are the tile's
+programs for the transcendentals: nine built, thirteen once M4 is
+(item 9 above). Each figure is READ on 2026-11-10 at 6ceabb4c, whose
+tree the merge of parcel M4X2 has, unless it is marked otherwise.
+
+**The bar any hardware must beat.** A tile's arithmetic is one
+beat-wide array: eight fp32, four fp64 or two fp128 lanes, or one fp256
+unit, each giving one result a cycle at the shipping MUL_PASSES of 1
+(docs/ARCHITECTURE.md, cft_lanes and "Throughput per mode"), at 135
+MHz. A routine of N instructions so gives one result every N / lanes
+cycles on a tile (COMPUTED, at full rate):
+
+| routine | instructions | cycles a result, a tile |
+|---|---|---|
+| exp, fp32 (rne) | 387 | 48; 59 MEASURED on the card |
+| tan, fp32 | 998 | 125; 142 MEASURED on the card |
+| atan, fp32 | 472 | 59 |
+| atan, fp64 | 176 | 44 |
+| atan, fp128 | 186 | 93 |
+| atan, fp256 | 203 | 203 |
+
+The card's two are the lead's run of the sweep tool on rev8q's first
+tile, 2026-11-09, by its device time under all five attributes:
+exp-f32, 83,886,080 cases in 36.657 s, and tan-f32, 5,242,880 in 5.497
+s (hw/card_stress_fixtures/rs-card-exp-all-2p24.txt and
+rs-card-tan-all.txt, which also give each image's instructions). atan's
+are docs/VALIDATION.md's ("The cost"; "fp32's triple word at G = 40")
+and the study's (docs/studies/M4-invtrig.md, 2.8).
+
+So hardware for the routines wins only pipelined. One result a cycle
+would beat the lanes about 50 times at fp32 and about 200 times at
+fp256, tile for tile (COMPUTED). An iterative unit would not: a
+shift-and-add one at fp32's working precision (24 + 40 = 64 bits)
+takes about 64 steps, about what the lanes take now, and at fp256's
+(237 + 46 = 283 bits) more than their 203 cycles (ESTIMATE, a bit a
+step).
+
+**Room.** The quad is short of LUTs, not DSPs: q135b used 82.66% of the
+part's LUTs, 86.12% in SLR0, and a fifth tile would not fit (above,
+step 6's plan of record: "The quad's limits are its LUTs and its
+timing"). Probe L kept R21 off the quad, whose room was short, at an
+estimated 4,000 to 15,000 LUTs a tile (above, revision 8's plan of
+record). So hardware for the routines takes a tile's place; it is not
+added beside four.
+
+**Logan's concept: a tile made for the routines.**
+- **Supporting tiles rather than more of the same.** An image of FMA
+  tiles and "transcendental tiles" in the quad's area: a deep single
+  tile with supporting tiles, or 2x2, two FMA tiles and two new ones.
+- **Like the original, specialized.** The new tile runs programs as the
+  original does (its sequencer, MODE, flags, marks and the language's
+  programs), with operations for what the routines spend their
+  instructions on. The study's fp32 atan does 22 TwoSums and 31
+  Fast2Sums (its table, 2.8), about 225 of its 472 instructions at six
+  and three each (COMPUTED); arithmetic at the routine's working
+  precision rather than the format's, the polynomial's steps, the
+  tables and the argument reduction are the other candidates.
+- **fp256 in all implemented hardware.** Every tile of either kind takes
+  every format, and the new tile may take a full tile's area for it:
+  "a worthwhile trade", in Logan's words.
+- **Swapped by workload, as precision is chosen now.** Three readings,
+  none tried: per job by image, as the nightly driver already loads
+  rev8q, rev8a and rev8d in turn; per run, a role set like MODE, if one
+  tile's silicon can serve both; or one tile's region reconfigured
+  alone (Vivado's dynamic function exchange), where loading an xclbin
+  today replaces the whole user region (BELIEVED, not tried here).
+
+**How it meets the decision of 2026-08-30** (above, v1, "Why this and
+not trimmed tiles"). That decision kept every tile fp256-capable so
+that precision stays a runtime choice, not a deployment question.
+Logan's condition keeps it: every tile takes every format. What differs
+between tiles is which operations they have, and the host meets that
+between images already: the quad publishes `seq_features` 0x77f1f,
+without R21, and the single 0x7ff1f, with it (docs/HOSTAPI.md), and a
+program needing a bit its device lacks is refused by name. Inside one
+image it is new: capabilities per tile, the scheduler's and the
+partitioner's choice of tile, the conformance argument for a mixed
+device, and the card guard. "Dedicated-rung builds" (above, v1) is the
+nearest earlier idea: an image committed to a workload, chosen per job.
+
+**What it costs in this project's terms.** Each new operation's bits,
+its result, flags and marks, are defined in the golden model first,
+then in libcft's software backend, the RTL with its benches, and on the
+card, equal bit for bit. The contract stays: what the hardware cannot
+decide it marks, and the definition decides it on the host. fp32 can
+be checked on every input by the routine sweep (parcels M4X and M4X2);
+fp64 to fp256 rest on an error budget and samples, as the routines do.
+A new rtl/ tree restarts the card's coverage, so this joins item 11 and
+the fma invalid row (above, "Decided 2026-10-20") in one revision.
+
+**First steps, software only.**
+1. **The routines' share of real work:** instructions in routine bodies
+   against the rest, in the acceptance set's routine entries
+   (programs/acceptance.py, REV8_ROUTINES: five systems at fp64 and
+   fp256) and in the hard workloads. It bounds what any hardware gains
+   on them: at 30%, 1.4 times at most.
+2. **The instruction-level path:** the error-free transformations
+   counted over every routine and format, against what new operations
+   would take. R21's augmentedAddition rounds ties toward zero
+   (docs/SEQUENCER.md, R21), unlike a TwoSum's head, so a routine using
+   it is a new fragment with its own port, not a substitution.
+3. **Then a study:** the new tile's operations and datapath at fp256,
+   its area against a tile's, the three readings of a swap, and the
+   host's side.
+
+**The lead's view:** step 1 decides whether the rest is worth a study.
+If the routines are a small share of the work the card is given, a
+tile for them buys little on that work, and is a performance option for
+routine-heavy jobs, chosen per job like a dedicated-rung build.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
