@@ -1192,12 +1192,17 @@ def schedule_order(f, phases):
     reduction_audit read the build's whole body), so no result moves.
 
     atan, asin and acos (parcel M4G1 builds atan) take the design's order
-    as well, and atan2 the depth-first order: the seven names added to
-    PHASE_ORDER above (front, sqrt, index, num, den, atan_s, table) stand in
-    one block, and with them the phase order keeps more values live than the
-    design's, so that INV_LIVE_CAP's caps (15, 16, 16 and 19 at fp64, fp128
-    and fp256) are reached by the other candidates than the study (its
-    question 9) assumed."""
+    as well at fp64, fp128 and fp256, and atan2 the depth-first order: the
+    seven names added to PHASE_ORDER above (front, sqrt, index, num, den,
+    atan_s, table) stand in one block, and with them the phase order keeps
+    more values live than the design's, so that INV_LIVE_CAP's caps (15, 16,
+    16 and 19 at fp64, fp128 and fp256) are reached by the other candidates
+    than the study (its question 9) assumed. At fp32 (the triple word,
+    parcels M4F1 and M4F2) all four take the depth-first order: it keeps 25,
+    25, 25 and 31 values live for atan, asin, acos and atan2, where the
+    design's order keeps 26, 26, 26 and 33 (atan2's 33 does not fit the 32
+    registers: routines.program places it nowhere) and the ranked order 38,
+    37, 36 and 51 (MEASURED)."""
     best = None
     for order in (_ranked_order(f, phases), _dfs_order(f),
                   list(range(len(f.body)))):
@@ -2743,7 +2748,8 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
     at fp64, fp128 and fp256; at fp32 atan is the triple word (parcel M4F1:
     family "triple word", meta K3, K2 and D for K and D, probes Vh, Vl, V2 and
     the model's, `plant` one of _INV_TW_PLANTS), and asin, acos and atan2 are
-    refused by name as parcel M4F2's, as is a name not yet built, with the
+    the triple word too (parcel M4F2: three-word front, probes u0, wq and W2
+    beside w0, w1 and w2); a name not built is refused by name, with the
     parcel that builds it; `plant` is one of INV_PLANTS (_INV_TW_PLANTS at
     fp32), a plant the build cannot reach refused by name. The Build keeps:
       probes   Vh, Vl, Bv, R, R1, R2, mk, th, tl, tt, Kk, c, nh, P, Nh0, Nh,
@@ -5258,7 +5264,7 @@ def _build_trig_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
 # and with them atan, the first whole function; parcels M4G2 (asin, acos) and
 # M4G3 (atan2) build their front ends on the same three, at the anchors below.
 # fp32 is the triple word (parcel M4F1: the core and atan, below atan2's
-# section; asin, acos and atan2 there are parcel M4F2's). The construction IS
+# section; asin, acos and atan2 there are parcel M4F2's, after M4F1's). The construction IS
 # the study's model (docs/studies/m4/m4inv.py), ported instruction for
 # instruction; nothing here imports it, and the port is held to it in the
 # parcel's VALIDATION entry.
@@ -5267,7 +5273,8 @@ def _build_trig_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
 # sqrt (asin and acos), index, num, den (the double-word n - c d and d + c n),
 # quotient, z, tail, head, atan_s, table, recon, final, classify, special.
 
-INV_FORMATS = (FP64, FP128, FP256)
+INV_FORMATS = (FP64, FP128, FP256, FP32)
+_INV_DW_FORMATS = (FP64, FP128, FP256)   # the double word's: fp32 is the triple word's
 INV_N = 8                               # the table's cells
 INV_BIAS = Fraction(63, 64)             # the index's bias: Sterbenz's premise
 # t~ = n_h RECIP_SEED(d_h): the seed's relative error is below 2^-8.5 =
@@ -5923,12 +5930,12 @@ def _check_acos_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
 
 def _inv_refuse(name, fmt):
     """The refusals by name: a name of INV_NAMES not built at fp32 (the
-    triple word: atan's is parcel M4F1's, the others parcel M4F2's), and a
-    name not yet built."""
+    triple word: its builders are _INV_TW_BUILDERS'), and a name not yet
+    built."""
     if fmt.name == "fp32":
         if name not in _INV_TW_BUILDERS:
             raise ValueError(f"{name} at fp32 is not built: fp32 is the "
-                             f"triple word, parcel M4F2's ("
+                             f"triple word ("
                              f"{', '.join(_INV_TW_BUILDERS)} "
                              f"{'is' if len(_INV_TW_BUILDERS) == 1 else 'are'}"
                              f" built)")
@@ -6237,7 +6244,7 @@ def _inv_coef_check(k):
     return Fraction(1, 2 * k + 1) if k % 2 == 0 else -Fraction(1, 2 * k + 1)
 
 
-def check_inv_constants(builder=None, formats=INV_FORMATS,
+def check_inv_constants(builder=None, formats=_INV_DW_FORMATS,
                         attrs=sf.RND_MODES, names=None):
     """(lines, findings): re-derive every derived constant of every built
     inverse routine at each of `formats` and `attrs` (the section's comment
@@ -6452,8 +6459,8 @@ _INV_ROLE_CHECKS["atan2"] = _check_atan2_roles
 # Build: the core (index, numerator and denominator as expansions, the
 # quotient in three words, z, the tail, the double-word and triple-word head
 # steps, atan(s), the table), the reconstruction, the final through
-# round-to-odd, and atan. Asin, acos and atan2 at fp32 are parcel M4F2's and
-# refused by name. Nothing here is public: the builders and the plants are
+# round-to-odd, and atan. Asin, acos and atan2 at fp32 are parcel M4F2's, in
+# the section after _build_inv_core_tw. Nothing here is public: the builders and the plants are
 # private tables, so that INV_NAMES, INV_FORMATS, INV_PLANTS and __all__ are
 # the double word's, as they were.
 #
@@ -6463,13 +6470,14 @@ _INV_ROLE_CHECKS["atan2"] = _check_atan2_roles
 
 _INV_TW_BUILDERS = {}     # {name: builder(b, x)}; filled below, after the builder
 
-# The faults of the triple word, for build("atan", FP32, rnd, plant=name):
+# The faults of the triple word, for build(name, FP32, rnd, plant=name):
 # {name: what it is}. Each acts through _act; a plant the build cannot reach
 # is refused by name (_check_inv_tw_plant_fired). The first three are the
 # study's (m4tw.py PLANTS_TW) that act on atan; rem0_fma is the study's 3.6,
 # item 5, the first version's fault, which the model's final form does not
 # carry; the others are the double word's names (INV_PLANTS), acting here
-# through this builder. head3_short is the study's VARIANT, inside the bound on
+# through the builders. These ten reach atan (parcel M4F1); the section after
+# _build_inv_core_tw adds asin's, acos's and atan2's (parcel M4F2). head3_short is the study's VARIANT, inside the bound on
 # the lanes the study sampled (2^-3.37 Bv at the worst, MEASURED on the model),
 # and is not listed.
 _INV_TW_PLANTS = {
@@ -6598,8 +6606,7 @@ def _inv_core_tw(b, nv, dv) -> types.SimpleNamespace:
     _itw_theta adds them), sv (s), zv, Pv, Kk, tt, c, q0, nQe (None under the
     plant rem0_fma) and rem0. The Build's probes are s0, s1, s2 (where
     present), rem0, tt, Kk, the model's, and q0, N0 and D0. The three-word branch of num and den is parcel
-    M4F2's (asin, acos): atan cannot reach it, and _build_inv_core_tw holds it
-    alone."""
+    M4F2's (asin, acos): atan and atan2 cannot reach it; asin and acos do."""
     try:
         N, K3, K2, D = (b.meta[k] for k in ("N", "K3", "K2", "D"))
     except KeyError as e:
@@ -6656,7 +6663,7 @@ def _inv_core_tw(b, nv, dv) -> types.SimpleNamespace:
         a_, e_ = b.two_sum(N0, lv1)
         b_, c_ = b.two_sum(e_, lv2)
         a_, b_ = b.fast_two_sum(a_, b_)
-        Nv = [a_, b_, c_]
+        Nv = [a_, b_, None if _act(b, "num_two_words") else c_]
     b.phase = "den"
     Q = b.mul(c, nv[0])
     nF = b.fma(nc, nv[0], Q)                             # Q - c n0
@@ -6952,7 +6959,7 @@ def _check_inv_tw_plant_fired(b):
 def _build_inv_tw(name, fmt, rnd, G, shift, plant):
     """One of _INV_TW_BUILDERS, built at fp32: as _build_inv."""
     b = _inv_setup_tw(name, fmt, rnd, G, shift, plant)
-    b.inputs = ("a",)
+    b.inputs = ("a", "b") if name == "atan2" else ("a",)
     _INV_TW_BUILDERS[name](b, *[("in", n) for n in b.inputs])
     _check_inv_tw_plant_fired(b)
     return b
@@ -6963,7 +6970,7 @@ def _build_inv_core_tw(fmt: FpFormat, rnd: int = RNE, *, G=None, plant=None,
     """The triple-word core alone, as build_inv_core is the double word's: a
     Build whose inputs are ("a", "b") = (n, d), or ("a", "b", "c", "d", "e",
     "f") = (n0, n1, n2, d0, d1, d2) with triple=True (asin's and acos's
-    three-word operands, parcel M4F2's), whose result is theta0's first word
+    three-word operands, asin's and acos's), whose result is theta0's first word
     and whose flags are its second (so nothing compiles it, and Build.run()
     reads it), and whose probes th0, th1 and th2 are theta0 = T + A in three
     words, with the core's. fp32 alone."""
@@ -6984,6 +6991,428 @@ def _build_inv_core_tw(fmt: FpFormat, rnd: int = RNE, *, G=None, plant=None,
         b.probes.update(th2=thv[2])
     _check_inv_tw_plant_fired(b)
     return b.finish(thv[0], thv[1])
+
+
+# ---- fp32: asin, acos and atan2 on the triple word (parcel M4F2) ----
+#
+# asin, acos and atan2 at fp32 are the model's (docs/studies/m4/m4tw.py) on the
+# core parcel M4F1 built, instruction for instruction and in its order. What
+# they add to atan's: asin's and acos's front, u = (1 - |x|)(1 + |x|) as an
+# exact expansion of the four products of two exact double words, renormalised
+# to three words, and its root w in three words (phase sqrt: RSQRT_SEED and
+# Newton, w0, then two corrections from exact residuals: u0 - w0^2 by TwoProd
+# and Sterbenz, and r - 2 w0 w1 with w0 w1 by TwoProd); n and d in three words,
+# which is the core's three-word branch; atan2's front (the prescale keyed on
+# n, the quadrant), its theta0 forced, its exact-quotient rule and its
+# tiny-quotient range, which is 2^(emin+2p+2) here (2^-76 at fp32; the double
+# word's is 2^(emin+p+2), and is the plant range_low). The model's header
+# (m4tw.py:12 and :18) says "u0 - w0^2 by FMA" and "N0 - q0 D0 exact by FMA":
+# that is the first version, and the code (:203 to :205, :289 to :291) is what
+# is ported.
+#
+# The schedule: schedule_order takes the depth-first order for all four at
+# fp32 (25, 25 and 31 values live for asin, acos and atan2; the design's order
+# keeps 26, 26 and 33, and the allocator places atan2's design order nowhere).
+# 31 of the 32 registers leaves a caller one (the study's 2.8).
+#
+# Faults of the triple word added here (the table's comment above says which
+# are the study's): w2_dropped, root_fma, num_two_words and range_low are the
+# triple word's alone; domain_edge, acos_quadrant, prescale_d, signed_zero,
+# side_rule_off, side_rule_sign, range_off and quadrant are the double word's
+# names, acting where the triple word has the same instructions. Not at fp32:
+# u_low_dropped and sqrt_product, because the triple word forms u as the four
+# products of two exact double words and has no "1 - RN(x^2)" to plant.
+
+_INV_TW_PLANTS.update({
+    "w2_dropped": "the root's third word left out: w in two words (the "
+                  "study's w2-dropped; asin and acos)",
+    "root_fma": "the root's residual u0 - w0^2 by one FMA and the TwoProd "
+                "error dropped: inexact when w0 is not faithful (the "
+                "study's 3.6, item 5; asin and acos)",
+    "num_two_words": "the numerator N = n - c d cut to two words (the "
+                     "study's 3.6, item 5's first version; asin and acos)",
+    "range_low": "the tiny-quotient range at the double word's edge "
+                 "2^(emin+p+2), not 2^(emin+2p+2) (the study's range-low; "
+                 "atan2)",
+    "domain_edge": "|x| > 1 tested as |x| >= 1: +-1 refused (asin and acos)",
+    "acos_quadrant": "acos's C and sigma with x's sign ignored, as if x were "
+                     "not negative: acos(-x) answered as acos(|x|)",
+    "prescale_d": "the 2^3p prescale keyed on d, as first designed (send-back "
+                  "1): a tiny n under a large d keeps an inexact remainder",
+    "signed_zero": "atan2(+-0, -0) answered +-0, not +-pi: C from x's sign "
+                   "only where x is not zero",
+    "side_rule_off": "the exact-quotient rule not applied in-lane",
+    "side_rule_sign": "the exact-quotient rule's FMA rounded away from zero, "
+                      "not toward it",
+    "range_off": "the tiny-quotient range not marked",
+    "quadrant": "sigma from the swap alone: x's sign ignored",
+})
+
+
+def _asin_acos_front_tw(b, x):
+    """The front asin and acos share at fp32 (m4tw.py :174 to :226): |x|, its
+    negation; phase sqrt: both factors of u = (1 - |x|)(1 + |x|) exact by
+    Fast2Sum, u as the expansion of their four products (TwoProd for three,
+    one MUL), renormalised to three words; RSQRT_SEED of u0 kept off zero by
+    the MAX with TINYU = 2^(emin+2p), Newton y <- y + (y/2)(1 - u y^2) until 8
+    bits doubled reach p + 8, w0 = u0 y; u0 - w0^2 EXACTLY (w0^2 by TwoProd,
+    u0 less its head exact by Sterbenz: one FMA is exact only for a faithful
+    w0, the study's 3.6, item 5), w1 = it times y/2, then r - 2 w0 w1 - w1^2
+    (w0 w1 by TwoProd, exact by Sterbenz), w2, renormalised; the swap |x| > w;
+    n and d as three words (n the lesser); x's sign; for acos xneg; then the
+    core on them. Plants: root_fma (u0 - w0^2 by one FMA, the TwoProd error
+    dropped), w2_dropped. Probes: w0, w1, w2 (the model's, renormalised) and,
+    beside them, u0, wq (w0 before the renormalisation) and W2 (w0^2's head,
+    not under root_fma). -> SimpleNamespace(ax, swap, sx, xneg, core)."""
+    fmt, p = b.fmt, b.fmt.prec
+    kw = _inv_consts(b)
+    ZERO, ONE, SIGN, ABSM = kw.ZERO, kw.ONE, kw.SIGN, kw.ABSM
+
+    def neg(a):
+        return _itw_neg(b, a)
+
+    def tp(a, c):
+        return _itw_prod(b, a, c)
+    b.phase = "front"
+    ax = b.iand(x, ABSM)
+    nax = neg(ax)
+
+    # ---- w = sqrt(u), u = (1 - |x|)(1 + |x|), in three words -------------------
+    b.phase = "sqrt"
+    a1, a1l = b.fast_two_sum(ONE, nax)                   # 1 >= |x|
+    b1, b1l = b.fast_two_sum(ONE, ax)
+    p0, e0 = tp(a1, b1)
+    p1, e1 = tp(a1, b1l)
+    p2, e2 = tp(a1l, b1)
+    q3 = b.mul(a1l, b1l)
+    l1, errs = _itw_chain(b, [e0, p1, p2])
+    l2 = _itw_plain(b, errs + [e1, e2, q3])
+    u = _itw_renorm(b, p0, l1, l2)
+    uc = b.fmax(u[0], b.const("TINYU", _pow2(fmt, fmt.emin + 2 * p)))
+    yq = b.ins(sf.OP_RSQRT_SEED, (uc,))
+    nuc = neg(uc)
+    HALF = b.const("HALF", _pow2(fmt, -1))
+    bits = 8
+    while bits < p + 8:
+        h = b.mul(nuc, yq)
+        e = b.fma(h, yq, ONE)
+        yq = b.fma(b.mul(yq, HALF), e, yq)
+        bits *= 2
+    hy = b.mul(yq, HALF)                                 # 1/(2 sqrt u)
+    w0 = b.mul(u[0], yq)
+    if _act(b, "root_fma"):
+        # the study's first version (3.6, item 5): one FMA, exact only when w0
+        # is faithful; the TwoProd error is not kept
+        r = b.fma(neg(w0), w0, u[0])
+        rh, errs = _itw_chain(b, [r, u[1]])
+    else:
+        W2, W2e = tp(w0, w0)
+        r = b.sub(u[0], W2)                              # exact
+        rh, errs = _itw_chain(b, [r, neg(W2e), u[1]])
+        b.probes.update(W2=W2)
+    rl = _itw_plain(b, errs + [u[2]])
+    w1 = b.mul(rh, hy)
+    P, Pe = tp(w0, w1)
+    r2 = b.sub(rh, b.add(P, P))
+    r2 = b.sub(r2, b.add(Pe, Pe))
+    if rl is not None:
+        r2 = b.add(r2, rl)
+    r2 = b.fma(neg(w1), w1, r2)
+    w2 = None if _act(b, "w2_dropped") else b.mul(r2, hy)
+    wv_ = _itw_renorm(b, w0, w1, w2)
+    b.probes.update({k: v for k, v in (("w0", wv_[0]), ("w1", wv_[1]),
+                                       ("w2", wv_[2])) if v is not None})
+    b.probes.update(u0=u[0], wq=w0)
+
+    # ---- n <= d: |x| and w, the lesser first --------------------------------------
+    b.phase = "front"
+    swap = b.icmplt(wv_[0], ax)                          # |x| > w
+    nv = [b.sel(wv_[0], ax, swap), b.sel(wv_[1], ZERO, swap),
+          b.sel(wv_[2], ZERO, swap) if wv_[2] is not None else None]
+    dv = [b.sel(ax, wv_[0], swap), b.sel(ZERO, wv_[1], swap),
+          b.sel(ZERO, wv_[2], swap) if wv_[2] is not None else None]
+    sx = b.iand(x, SIGN)
+    xneg = b.icmplt(ABSM, x) if b.meta["fn"] == "acos" else None
+    core = _inv_core_tw(b, nv, dv)
+    return types.SimpleNamespace(ax=ax, swap=swap, sx=sx, xneg=xneg,
+                                 core=core)
+
+
+def _asin_acos_special_tw(b, x, ax, bits_, fl):
+    """The classification and the specials asin and acos share at fp32
+    (m4tw.py :494 to :521), lowest priority first: asin's tiny path (|x| below
+    its gate: fma(x, +2^-(p+2), x) under the attribute, away from zero, with
+    underflow where |x| is below 2^emin) and +-0, acos(+1) = +0, |x| > 1 (the
+    quiet NaN, invalid), the NaNs. -> (bits, flag word)."""
+    fmt, p, fn = b.fmt, b.fmt.prec, b.meta["fn"]
+    kw = _inv_consts(b)
+    ZERO, ONE, ABSM = kw.ZERO, kw.ONE, kw.ABSM
+    b.phase = "classify"
+    isnan = b.icmplt(kw.INF, ax)
+    issnan = b.sel(ZERO, isnan, b.iand(x, kw.QBIT))
+    iszero = b.icmplt(ax, kw.INT1)
+    b.phase = "special"
+    if fn == "asin":
+        gate = trig_gates(fmt)[0]
+        tiny = ZERO if _act(b, "tiny_gate_off") else \
+            b.icmplt(ax, b.const("GATE", _pow2(fmt, gate)))
+        eps = Fraction(1, 2 ** (p + 2))
+        away = not _act(b, "tiny_side")                  # asin rounds away
+        tb = b.fma(x, b.const("TINY_EPS", _enc(fmt, eps if away else -eps)),
+                   x, b.rnd)
+        if away:
+            un = b.icmplt(ax, kw.MINN)                   # |x| below 2^emin
+        else:
+            un = b.icmplt(b.iand(tb, ABSM), kw.MINN)     # the result below
+        tfl = b.sel(kw.UNFINX, kw.INX, un)
+        bits_ = b.sel(tb, bits_, tiny)
+        fl = b.sel(tfl, fl, tiny)
+        bits_ = b.sel(x, bits_, iszero)                  # +-0, exact
+        fl = b.sel(ZERO, fl, iszero)
+    else:
+        isone = b.cmpeq(x, ONE)                          # acos(1) = +0, exact
+        bits_ = b.sel(ZERO, bits_, isone)
+        fl = b.sel(ZERO, fl, isone)
+    onem = b.const("ONEM", sf.one_bits(fmt) - 1) \
+        if _act(b, "domain_edge") else ONE
+    edge = b.icmplt(onem, ax)
+    bits_ = b.sel(kw.QNAN, bits_, edge)                  # |x| > 1: invalid
+    fl = b.sel(kw.INVALID, fl, edge)
+    bits_ = b.sel(kw.QNAN, bits_, isnan)
+    fl = b.sel(b.sel(kw.INVALID, ZERO, issnan), fl, isnan)
+    return bits_, fl
+
+
+def _build_asin_tw(b, x):
+    """asin(x) at fp32 (m4tw.py's build for asin): n, d = the lesser and the
+    greater of |x| and w = sqrt((1 - |x|)(1 + |x|)) in three words (the
+    front), the core, C = pi/2 under the swap (|x| > w) in three words, sigma
+    negative under it, x's sign on V, the final, then the classification and
+    the specials (_asin_acos_special_tw). +-1 are main-path lanes (w = 0).
+    Plants beside the core's: w2_dropped, root_fma, num_two_words,
+    domain_edge, tiny_gate_off, tiny_side."""
+    kw = _inv_consts(b)
+    G, shift = b.meta["G"], b.meta["shift"]
+    fr = _asin_acos_front_tw(b, x)
+    thv = _itw_theta(b, fr.core.Tv, fr.core.Av)
+    PIO2 = _itw_words3(b, "PIO2W", _pi() / 2)
+    Z3 = [kw.ZERO, kw.ZERO, kw.ZERO]
+    Cv = _itw_sel3(b, PIO2, Z3, fr.swap)
+    Vv = _inv_recon_tw(b, thv, Cv, fr.swap, fr.sx)
+    fin = _inv_final_tw(b, Vv, G=G, shift=shift)
+    bits_, fl = _asin_acos_special_tw(b, x, fr.ax, fin.R, fin.fl)
+    return b.finish(bits_, fl)
+
+
+def _build_acos_tw(b, x):
+    """acos(x) at fp32: the same front and core as asin's, C = 0 or pi by x's
+    sign under the swap (pi where x < 0), else pi/2, in three words, sigma =
+    (not swap) xor (x < 0), no sign on V; then acos(+1) = +0, |x| > 1 and the
+    NaNs. Plants beside the core's: w2_dropped, root_fma, num_two_words,
+    domain_edge, acos_quadrant (x's sign ignored in C and sigma)."""
+    kw = _inv_consts(b)
+    ZERO, ONE = kw.ZERO, kw.ONE
+    G, shift = b.meta["G"], b.meta["shift"]
+    fr = _asin_acos_front_tw(b, x)
+    thv = _itw_theta(b, fr.core.Tv, fr.core.Av)
+    PIO2 = _itw_words3(b, "PIO2W", _pi() / 2)
+    PI = _itw_words3(b, "PIW", _pi())
+    Z3 = [ZERO, ZERO, ZERO]
+    if _act(b, "acos_quadrant"):
+        Cv = _itw_sel3(b, Z3, PIO2, fr.swap)
+        sigc = b.sel(ZERO, ONE, fr.swap)
+    else:
+        Cv = _itw_sel3(b, _itw_sel3(b, PI, Z3, fr.xneg), PIO2, fr.swap)
+        sigc = b.ixor(b.sel(ZERO, ONE, fr.swap), fr.xneg)
+    Vv = _inv_recon_tw(b, thv, Cv, sigc, None)
+    fin = _inv_final_tw(b, Vv, G=G, shift=shift)
+    bits_, fl = _asin_acos_special_tw(b, x, fr.ax, fin.R, fin.fl)
+    return b.finish(bits_, fl)
+
+
+def _build_atan2_tw(b, y, x):
+    """atan2(y, x) at fp32, y first (m4tw.py's build for atan2, :146 to :166,
+    :426 to :434, :466 to :493): n, d = min, max of |y| and |x| (swapped where
+    |y| > |x|) as single words, both scaled by 2^3p where n is below
+    2^(emin+3p) (and d is not past 2^(emax-3p-2)) so that the remainders
+    are exact (keyed on n; the plant prescale_d keys it on d, the first
+    design), both by 2^-2 where d is past 2^(emax-1); the core; theta0 forced
+    to 0 where either operand is infinite or zero and to pi/4 where both are
+    infinite; C = pi/2 under the swap, else pi where x's sign bit is set, else
+    0 (three words each); sigma negative where swap differs from x's sign; y's
+    sign on V. Then the specials, lowest priority first: the exact-quotient
+    rule (x's sign bit clear, |y| <= |x|, k = 0, both remainders zero, q0
+    below atan's gate: fma(ss, -2^-(p+2), ss) under the attribute, inexact),
+    the tiny-quotient range (the same two conditions, t~ below 2^(emin+2p+2),
+    2^-76 at fp32: the mark, the bits left), 9.2.1's zeros, the NaNs. Plants
+    beside the core's: prescale_d, signed_zero, quadrant, side_rule_off,
+    side_rule_sign, range_off, range_low."""
+    fmt, p = b.fmt, b.fmt.prec
+    G, shift = b.meta["G"], b.meta["shift"]
+    kw = _inv_consts(b)
+    ZERO, ONE, SIGN, ABSM = kw.ZERO, kw.ONE, kw.SIGN, kw.ABSM
+    INF, INT1, QBIT = kw.INF, kw.INT1, kw.QBIT
+    ga = trig_gates(fmt)[1]                # atan's gate, the rule's ga
+
+    # ---- the front: n <= d, the prescales, the quadrant's conditions ---------
+    b.phase = "front"
+    ay, ax = b.iand(y, ABSM), b.iand(x, ABSM)
+    swap = b.icmplt(ax, ay)                              # |y| > |x|
+    n0, d0 = b.sel(ax, ay, swap), b.sel(ay, ax, swap)
+    # keyed on n (send-back 1): the remainders are about 2^-p n and 2^-2p n,
+    # exact only while n >= 2^(emin+2p+1)
+    DSUB = b.const("DSUB", _pow2(fmt, fmt.emin + 3 * p))
+    if _act(b, "prescale_d"):
+        dsub = b.icmplt(d0, DSUB)
+    else:
+        nsub = b.icmplt(n0, DSUB)
+        dok = b.icmplt(d0, b.const("DOK", _pow2(fmt, fmt.emax - 3 * p - 2)))
+        dsub = b.sel(dok, ZERO, nsub)
+    S3P = b.const("S3P", _pow2(fmt, 3 * p))
+    n1 = b.sel(b.mul(n0, S3P), n0, dsub)
+    d1 = b.sel(b.mul(d0, S3P), d0, dsub)
+    dbig = b.icmplt(b.const("DBIG", _pow2(fmt, fmt.emax - 1) - 1), d0)
+    QTR = b.const("QTR", _pow2(fmt, -2))
+    nv = [b.sel(b.mul(n1, QTR), n1, dbig), None, None]
+    dv = [b.sel(b.mul(d1, QTR), d1, dbig), None, None]
+    xneg = b.icmplt(ABSM, x)                             # x's sign bit set
+    sx = b.iand(y, SIGN)                                 # the result's sign
+
+    core = _inv_core_tw(b, nv, dv)
+
+    # ---- theta0 forced, C and sigma, V = C + sigma theta0 --------------------
+    thv = _itw_theta(b, core.Tv, core.Av)
+    PIO2 = _itw_words3(b, "PIO2W", _pi() / 2)
+    PI = _itw_words3(b, "PIW", _pi())
+    PIO4 = _itw_words3(b, "PIO4W", _pi() / 4)
+    Z3 = [ZERO, ZERO, ZERO]
+    yinf, xinf = b.cmpeq(ay, INF), b.cmpeq(ax, INF)
+    yzero, xzero = b.icmplt(ay, INT1), b.icmplt(ax, INT1)
+    s0z = b.sel(ONE, b.sel(ONE, b.sel(ONE, xzero, yzero), xinf), yinf)
+    both = b.sel(xinf, ZERO, yinf)
+    thv = _itw_sel3(b, Z3, thv, s0z)
+    thv = _itw_sel3(b, PIO4, thv, both)
+    xc = b.sel(ZERO, xneg, xzero) if _act(b, "signed_zero") else xneg
+    Cv = _itw_sel3(b, PIO2, _itw_sel3(b, PI, Z3, xc), swap)
+    sigc = swap if _act(b, "quadrant") else b.ixor(swap, xneg)
+    Vv = _inv_recon_tw(b, thv, Cv, sigc, sx)
+
+    # ---- the final rounding and the in-lane test ----------------------------------
+    fin = _inv_final_tw(b, Vv, G=G, shift=shift)
+    bits_, fl = fin.R, fin.fl
+
+    # ---- the specials, lowest priority first --------------------------------------
+    b.phase = "special"
+    c0 = b.sel(ZERO, b.sel(ZERO, ONE, xneg), swap)       # x > 0 and not swap
+    kz = b.cmpeq(core.Kk, kw.MAGIC)
+    if core.nQe is None:
+        # under the plant rem0_fma the remainder is one FMA, with no error
+        # word (nQe is None): the rule asks rem0 alone
+        ex = b.cmpeq(core.rem0, ZERO)
+    else:
+        ex = b.sel(b.cmpeq(core.nQe, ZERO), ZERO, b.cmpeq(core.rem0, ZERO))
+    small = b.icmplt(core.q0, b.const("GATEA", _pow2(fmt, ga)))
+    side = b.sel(b.sel(b.sel(small, ZERO, ex), ZERO, kz), ZERO, c0)
+    ss = b.ixor(core.q0, sx)
+    eps = Fraction(1, 2 ** (p + 2))
+    tb = b.fma(ss, b.const("SIDE_EPS", _enc(
+        fmt, eps if _act(b, "side_rule_sign") else -eps)), ss, b.rnd)
+    if not _act(b, "side_rule_off"):
+        bits_ = b.sel(tb, bits_, side)
+        fl = b.sel(kw.INX, fl, side)
+    if not _act(b, "range_off"):
+        # the tiny-quotient range, marked: below 2^(emin+2p+2) the third words
+        # of s and V fall under the subnormal grid and Bv under minSub's
+        # neighbourhood, so three words keep only two (send-back 1; the
+        # double word's 2^(emin+p+2) is the plant range_low)
+        tqr = fmt.emin + (p if _act(b, "range_low") else 2 * p) + 2
+        rmk = b.sel(b.icmplt(core.tt, b.const("TQR", _pow2(fmt, tqr))),
+                    ZERO, c0)
+        fl = b.sel(kw.INXM, fl, rmk)
+    zres = b.sel(ZERO, b.sel(ONE, b.sel(b.sel(ZERO, ONE, yinf), ZERO, xinf),
+                             yzero), xneg)
+    bits_ = b.sel(sx, bits_, zres)
+    fl = b.sel(ZERO, fl, zres)
+    ynan, xnan = b.icmplt(INF, ay), b.icmplt(INF, ax)
+    ysn = b.sel(ZERO, ynan, b.iand(y, QBIT))
+    xsn = b.sel(ZERO, xnan, b.iand(x, QBIT))
+    anynan = b.sel(ONE, xnan, ynan)
+    anysn = b.sel(ONE, xsn, ysn)
+    bits_ = b.sel(kw.QNAN, bits_, anynan)
+    fl = b.sel(b.sel(kw.INVALID, ZERO, anysn), fl, anynan)
+    return b.finish(bits_, fl)
+
+
+_INV_TW_BUILDERS["asin"] = _build_asin_tw
+_INV_TW_BUILDERS["acos"] = _build_acos_tw
+_INV_TW_BUILDERS["atan2"] = _build_atan2_tw
+
+
+# the role checks of the three, registered where _check_inv_tw_build asks
+# (atan's are inline there): {name: check(b, tag, verify, point, bits_are,
+# lo_pi, hi_pi)}. Each word is derived again in its own form, from the IEEE
+# fields and p, not from fmt.emin or the generator.
+
+def _no_roles(*_args):
+    """The role check of a routine with none beyond the shared ones."""
+
+
+def _tw_words_exact(verify, roles, lo, hi):
+    """Each role the nearest to what the words before leave of [lo, hi]."""
+    rest_lo, rest_hi = lo, hi
+    for role in roles:
+        w = verify(role, "rn", rest_lo, rest_hi)
+        rest_lo, rest_hi = rest_lo - w, rest_hi - w
+
+
+def _tw_emin(b):
+    ew, _mw = _TRIG_FIELDS[b.fmt.name]
+    return 2 - 2 ** (ew - 1)
+
+
+def _check_asin_acos_tw_common(b, point):
+    """TINYU = 2^(emin+2p) and HALF."""
+    point("TINYU", Fraction(2) ** (_tw_emin(b) + 2 * b.fmt.prec))
+    point("HALF", Fraction(1, 2))
+
+
+def _check_asin_tw_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
+    p = b.fmt.prec
+    _check_asin_acos_tw_common(b, point)
+    point("GATE", Fraction(2) ** _check_trig_gate(p, True))
+    point("TINY_EPS", Fraction(1, 2 ** (p + 2)))
+
+
+def _check_acos_tw_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
+    _check_asin_acos_tw_common(b, point)
+    _tw_words_exact(verify, [f"PIW{i}" for i in range(3)], lo_pi, hi_pi)
+
+
+def _check_atan2_tw_roles(b, tag, verify, point, bits_are, lo_pi, hi_pi):
+    """atan2's words beyond the shared ones: pi and pi/4 in three words each
+    against Machin's enclosure; the powers of two (2^(emin+3p), 2^3p, 2^-2,
+    atan's gate, 2^(emin+2p+2) = 2^-76 at fp32, -2^-(p+2)) as exact points;
+    DOK and DBIG as integers."""
+    fmt, p = b.fmt, b.fmt.prec
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    emax = 2 ** (ew - 1) - 1
+    emin = _tw_emin(b)
+    _tw_words_exact(verify, [f"PIW{i}" for i in range(3)], lo_pi, hi_pi)
+    _tw_words_exact(verify, [f"PIO4W{i}" for i in range(3)], lo_pi / 4,
+                    hi_pi / 4)
+    point("DSUB", Fraction(2) ** (emin + 3 * p))
+    point("S3P", Fraction(2) ** (3 * p))
+    point("QTR", Fraction(1, 4))
+    point("GATEA", Fraction(2) ** _check_trig_gate(p, False))
+    point("TQR", Fraction(2) ** (emin + 2 * p + 2))
+    point("SIDE_EPS", -Fraction(1, 2 ** (p + 2)))
+    bits_are("DOK", (emax - 3 * p - 2 + emax) << mw)
+    bits_are("DBIG", ((emax - 1 + emax) << mw) - 1)
+
+
+_INV_TW_ROLE_CHECKS = {"asin": _check_asin_tw_roles,
+                       "acos": _check_acos_tw_roles,
+                       "atan2": _check_atan2_tw_roles}
 
 
 # ---- fp32: the triple word's constants, checked ------------------------------
@@ -7122,6 +7551,7 @@ def _check_inv_tw_build(b: Build, findings):
     if fn == "atan":
         point("GATE", Fraction(2) ** _check_trig_gate(p, False))
         point("TINY_EPS", -Fraction(1, 2 ** (p + 2)))
+    _INV_TW_ROLE_CHECKS.get(fn, _no_roles)(b, tag, verify, point, bits_are, lo_pi, hi_pi)
     if fn != "inv_core":
         point("BREL", Fraction(2) ** (-(p + G) + b.meta["shift"]))
     unchecked = sorted(set(b.roles) - seen)
@@ -7291,8 +7721,8 @@ def fragment(name, fmt: FpFormat, rnd: int):
     program's attribute `rnd`, held to invariants(): as routines.fragment()
     returns a division's. `name` is one of NAMES, or one of TRIG_NAMES (held to
     its own cap, TRIG_LIVE_CAP: fp32's is the triple word's, parcel M2F2), or
-    one of INV_NAMES (INV_LIVE_CAP's cap; those not built yet, and at fp32
-    all but atan, are refused by name); any other is refused by name. The fragment is built once and shared."""
+    one of INV_NAMES (INV_LIVE_CAP's cap; those not built yet are refused by
+    name); any other is refused by name. The fragment is built once and shared."""
     if name not in NAMES and name not in TRIG_NAMES             and name not in INV_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "
                          f"so far: "
@@ -8711,7 +9141,7 @@ def main(argv=None):
                 print("DIFFERENCE:", fd)
             if "inv" in only:
                 print(f"mathlib --check (inv): {len(_INV_BUILDERS)} routines, "
-                      f"{len(INV_FORMATS)} formats, "
+                      f"{len(_INV_DW_FORMATS)} formats, "
                       f"{len(findings)} differences")
             failed = failed or bool(findings)
         if inv_tw:

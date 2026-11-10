@@ -163,8 +163,8 @@ REGS32 there, where the six need it at fp32 alone.
 Since parcel M4P (M4's build, wave 3, 2026-11-10) the eighth corpus has a third
 part, run after the trig part at each format that has it: atan, asin, acos and
 atan2, the 60 fragments of parcels M4G1, M4G2 and M4G3 (mathlib.INV_NAMES at
-mathlib.INV_FORMATS, fp64, fp128 and fp256, under each attribute), which had
-run on seq.py alone. Same two shapes, lane counts, masks, comparisons,
+mathlib.INV_FORMATS, fp64, fp128, fp256 and, since parcel M4F2, fp32, under
+each attribute), which had run on seq.py alone. Same two shapes, lane counts, masks, comparisons,
 refusals and remote leg, from a stream of their own (INV_SALT), with counters,
 summary, limits, needs and committed-lanes lines of their own, and a reach
 check of its own ("THE ROUTINE CORPUS'S INVERSE PART DID NOT REACH EVERY
@@ -172,8 +172,10 @@ FORM"). The parts are named by a key ("six", "trig", "inv"), where the trig
 part was a boolean. atan2 has two operands: a lane is a pair (y, x) with y in
 stream a and x in stream b, in the model's run and in libcft's, and a mismatch
 prints the pair. Their lanes are python/tests/mathlib_inv_harness.py's, in the
-same five categories (inv_lanes). A format INV_FORMATS lacks (fp32, until
-parcel M4F2) is named in the part's summary line and is no SKIP.
+same five categories (inv_lanes). Since parcel M4F2 the part runs at fp32
+too (the triple word: before it the summary line named fp32 as a format the
+part did not build yet, a by-design absence and no SKIP); the lanes come from
+the same tables, which have fp32 keys in the harness's last section.
 
     python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
 
@@ -2524,7 +2526,6 @@ def routine_counters():
     C["remote_names"] = collections.Counter()   # what the remote leg named
     C["formats"] = []           # the formats the part ran at
     C["fragments"] = set()      # (format, routine, attribute) it drew
-    C["waiting"] = []           # formats asked for that the part does not build
     return C
 
 
@@ -2872,8 +2873,8 @@ def trig_lanes(ml, th, tf, fmt, fn, rnd, n, sub):
 #
 # Beside the six and the trig part the routine corpus runs the inverse
 # functions (mathlib.INV_NAMES): the fragments of parcels M4G1, M4G2 and M4G3
-# at the formats of mathlib.INV_FORMATS under each attribute, which until this
-# part had run on seq.py alone (the harness's check_seq). The same two
+# at the formats of mathlib.INV_FORMATS (fp32 since parcel M4F2) under each
+# attribute, which until this part had run on seq.py alone (the harness's check_seq). The same two
 # shapes, lane counts, masks, comparisons, refusals and remote leg
 # (routine_corpus, part="inv"), from a stream of their own (INV_SALT) so that
 # the other parts' programs, lanes and masks are what they were at every
@@ -3214,9 +3215,8 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
     is "six" (M1's routines), "trig" (parcel M2P: sin, cos and tan, built at
     all four formats, fp32's the triple word since parcel M2F2) or "inv"
     (parcel M4P: atan, asin, acos and atan2, at the formats of
-    mathlib.INV_FORMATS), each from a stream of its own and lanes of its own,
-    MR being that part's counters. A format the inverse part does not build
-    is named in MR["waiting"] and run for nothing."""
+    mathlib.INV_FORMATS, fp32 since parcel M4F2), each from a stream of its
+    own and lanes of its own, MR being that part's counters."""
     mods = routine_modules()
     if mods is None:
         return
@@ -3225,9 +3225,6 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
         th, tf = trig_modules()
     if part == "inv":
         ih = inv_modules()
-        if fmt not in ml.INV_FORMATS:
-            MR["waiting"].append(name)
-            return
     corpus, suffix, _word, salt = ROUTINE_PART[part]
     names = routine_part_names(ml, part)
     MR["formats"].append(name)
@@ -3493,7 +3490,7 @@ def routine_summary(MC, what, part="six"):
     compiled runs raised and the lanes where the model is its own identity.
     `what` names the part; `part` gives the sources of sin, cos and tan's
     lanes (trig_lanes) or of atan, asin, acos and atan2's (inv_lanes) in the
-    place of the six's, and for the inverse part the formats it waits for."""
+    place of the six's."""
     by = ", ".join(f"{k} {v[0]} programs and {v[1]} lanes"
                    for k, v in MC["by_format"].items())
     if part == "inv":
@@ -3535,19 +3532,7 @@ def routine_summary(MC, what, part="six"):
             + ", ".join(f"{label} {MC['raised_' + label]}"
                         for label, _b in ROUTINE_FLAGS)
             + f"; {MC['ident']} lanes where seq.py's deposits are "
-            f"mathlib.evaluate's"
-            + inv_waiting(MC))
-
-
-def inv_waiting(MC):
-    """The inverse part's absence at a format, in words (not a SKIP, which
-    fails every --require-all run): '' when every format asked for is built.
-    mathlib.INV_FORMATS decides, so that the clause is empty on its own once
-    parcel M4F2 adds fp32 to it."""
-    if not MC["waiting"]:
-        return ""
-    return (f"; {', '.join(MC['waiting'])}: the inverse part waits for parcel "
-            f"M4F2 (INV_FORMATS has no {', '.join(MC['waiting'])} yet)")
+            f"mathlib.evaluate's")
 
 
 def routine_needed(part="six"):
@@ -4068,9 +4053,6 @@ def main():
         routine_limits(MI["caps"], "inv")
         routine_needed("inv")
         print(inv_family_line(MI, inv_modules()))
-    elif MI["waiting"]:
-        print(f"the routine corpus's inverse part ran no program"
-              f"{inv_waiting(MI)}")
     bad += (S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
             + F["bad"] + MR["bad"] + MT["bad"] + MI["bad"])
     if DEVICE is not None:

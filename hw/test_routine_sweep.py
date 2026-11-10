@@ -324,8 +324,8 @@ def group_build(tool, log, tree, work, imgs, manifest):
     check("build: `list` has thirteen rows, five images for exactly the generator's built names (in the tool's order) and `no image` for exactly the names it skipped",
           len(rows) == 13 and [r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built] and noimg == skipped and not account_problems(built, skipped),
           f"{rows} {built} {skipped}")
-    check("build: RED - the `list` check above, evaluated on lists in memory, is red when the generator's skipped names are one short (`list` says `no image` for a name the account did not skip), and when a built name is dropped",
-          not (noimg == skipped[1:] and len(skipped) > 0) and not ([r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built[1:]]), "")
+    check("build: RED - the `list` check above, evaluated on lists in memory, is red when `list` says `no image` for a name the account did not skip (a doctored noimg with one built name added), and when a built name is dropped",
+          not (noimg + [built[0][0]] == skipped) and not ([r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built[1:]]), "")
     rc, out, err = tool.raw("list", imgs=os.path.join(work, "nowhere"))
     check("build: `list` with no images directory says `no image` thirteen times", rc == 0 and out.count("no image") == 13, out[:200])
     rc, out, err = tool.raw("exp-f32", 0, 4, "rne")
@@ -564,12 +564,17 @@ def group_refuse(tool, work, imgs):
     refused("a missing attribute", ("exp-f32", 0, 5))
     refused("an unknown attribute", ("exp-f32", 0, 5, "rnx"))
     refused("an unknown name", ("nonesuch-f32", 0, 5, "rne"), "unknown op")
-    skipped_ = gen_account(open(os.path.join(imgs, "manifest.txt")).read())[1]
-    if skipped_:
-        n_ = skipped_[0]
-        refused(f"a name with no image ({n_}, the first the generator skipped)", (f"{n_}-f32" + ("-x3f800000" if n_ == "atan2" else ""), 0, 5, "rne"), f"{n_}-fp32-rne.cftp")
-    else:
-        skip("refuse: a name with no image", "the generator skipped no name (all thirteen are built)")
+    n_ = gen_account(open(os.path.join(imgs, "manifest.txt")).read())[0][-1][0]
+    noimg_dir = os.path.join(work, "img-noimage")
+    shutil.copytree(imgs, noimg_dir)
+    for attr in ("rne", "rtz", "rdn", "rup", "rmm"):
+        os.remove(os.path.join(noimg_dir, f"{n_}-fp32-{attr}.cftp"))
+    refused(f"a name with no image ({n_}, the last the generator built, its five .cftp files removed from a copy of its output)",
+            (f"{n_}-f32" + ("-x3f800000" if n_ == "atan2" else ""), 0, 5, "rne"), f"{n_}-fp32-rne.cftp", imgs=noimg_dir)
+    op_ = f"{n_}-f32" + ("-x3f800000" if n_ == "atan2" else "")
+    rc, text, m = tool.run(op_, 0, 4, "rne")
+    ok, why = judge_run(rc, text, op_, "rne", 0, 4, 1)
+    check(f"refuse: CONTROL - the same op ({n_}) over the generator's own output, its images present, is run to a verdict and not refused", ok, why)
     refused("a name without -f32", ("exp", 0, 5, "rne"), "unknown op")
     refused("atan2 without its x", ("atan2-f32", 0, 5, "rne"), "atan2 takes")
     refused("an x with 7 digits", ("atan2-f32-x3f80000", 0, 5, "rne"), "eight hex")
