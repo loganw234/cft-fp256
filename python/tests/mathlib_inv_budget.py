@@ -392,7 +392,7 @@ def v_words(build, x):
 
 def with_directed_before_v(build, which=None):
     """A copy of the build in which one rounding instruction BEFORE V carries
-    the program's own attribute (the first FMA of the tail, or `which`, an
+    the program's own attribute (the last ADD of the reconstruction, or `which`, an
     instruction index): the fault the attributes' leg exists for. Refused by
     name under rne, where the attribute is the default and the fault changes
     nothing."""
@@ -400,8 +400,8 @@ def with_directed_before_v(build, which=None):
         raise ValueError("the plant 'directed_before_v' does not apply under "
                          "rne: the program's attribute is the default's")
     if which is None:
-        which = next(i for i, (op, _r, _s) in enumerate(build.body)
-                     if op == sf.OP_FMA and build.phase_of[i] == "tail")
+        which = [i for i, (op, _r, _s) in enumerate(build.body)
+                 if op == sf.OP_ADD and build.phase_of[i] == "recon"][-1]
     op, _r, srcs = build.body[which]
     c = copy.copy(build)
     c.body = list(build.body)

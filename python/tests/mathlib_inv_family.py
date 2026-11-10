@@ -733,11 +733,20 @@ def family_lanes(fmt, rnd, fn, ents, G=None):
     for cen in expand(ents):
         if cen[0] in ("tiny", "win"):
             x0 = centre_lane(fn, fmt, cen)
-            add(x0, f"{_label(cen)} centre", cen[0])
+            add(x0, f"{_label(cen)} centre", cen[0] + "-centre")
             add(negated(fn, fmt, x0), f"{_label(cen)} centre (-)", cen[0])
             for lane, lab in neighbours(fmt, fn, cen, G):
                 add(lane, f"{_label(cen)} {lab}", cen[0])
     if fn == "atan2":
+        for en in ents:
+            if en[0] == "ratio":
+                # the listed threshold: its last j is a lane the theory must
+                # demand marked (a threshold one too high lists a lane it does
+                # not)
+                kk = ratio_k(fmt, en[1])
+                add(ratio_lane(fmt, kk, en[2]),
+                    f"2^{kk} / (1 + {en[2]} ulp): the listed threshold",
+                    "ratio-listed")
         for k in RATIO_KS:
             kk = ratio_k(fmt, k)
             for j in range(1, RATIO_JCAP + 1):
@@ -843,7 +852,7 @@ def check_family(f, ents, G=None, extra=(), deep=False, evaluator=None):
     for w in ("mark", "clear", "either", "gated"):
         st[w] = st["marked_" + w] = 0
     tag = f"{fn} {fmt.name} {sf.RND_NAMES[rnd]}"
-    for (x, lab, _fam, want), (bits, fw) in zip(lanes, res):
+    for (x, lab, fam, want), (bits, fw) in zip(lanes, res):
         marked = bool(fw & MARK)
         gb, gf = I.golden(fmt, rnd, x, fn)
         st[want] += 1
@@ -856,6 +865,10 @@ def check_family(f, ents, G=None, extra=(), deep=False, evaluator=None):
             out.append(f"family: {tag}: {lab} ({_lane_name(x)}) is unmarked "
                        f"and wrong: got ({bits:#x}, {fw:#x}), want "
                        f"({gb:#x}, {gf:#x})")
+        if fam.endswith(("-centre", "-listed")) and want != "mark":
+            out.append(f"family: {tag}: {lab} ({_lane_name(x)}) is LISTED "
+                       f"and the theory does not demand it marked (d = "
+                       f"{_d(fmt, rnd, fn, x, G):.3f}, {want})")
         if want == "mark" and not marked:
             out.append(f"family: {tag}: {lab} ({_lane_name(x)}) is inside a "
                        f"window, d = "

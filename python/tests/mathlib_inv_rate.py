@@ -22,7 +22,7 @@ value spread over its rounding cell. Where lanes crowd beside pi/4, pi/2,
 3pi/4 or pi (atan of a huge argument, acos of a tiny one, atan2 with one
 operand dominant: their true value is within an ulp of the constant) it does
 not: such a lane marks only if the constant lies within the inflated bound of
-a boundary, and the constants lie 4 to 10^5 inflated bounds from the nearest
+a boundary, and the constants lie 4.0 to 37 inflated bounds from the nearest boundary
 (CROWD_DISTANCES, exact rationals, below). So the lanes whose true value is
 within an ulp of one of the four are JUDGED APART:
 
@@ -119,6 +119,25 @@ STUDY_DISTANCES = {
               "3pi/4": (2.0e13, 4.0e13), "pi": (2.0e13, 2.5e13)},
     "fp256": {"pi/4": (4.0e13, 4.4e12), "pi/2": (4.0e13, 4.4e12),
               "3pi/4": (1.9e13, 4.0e13), "pi": (4.0e13, 4.4e12)},
+}
+
+
+# crowd_distances(), COMPUTED in exact rationals (pi to 2400 bits) and written
+# here to four figures: {format: {constant: (to a grid point, to a midpoint)}}
+# in units of 2^-(p+G), which divided by 2^(G - G') = 2^38, 2^40, 2^40 are the
+# distances in inflated bounds: 4.01 at the least (fp256, a midpoint beside pi/4,
+# pi/2 and pi: the open cell's constants), 17.6 to 37 for the others. A
+# crowded lane marks only where its true value is within the inflated bound of
+# a boundary, which for the lanes beside a constant is where the lane's own
+# offset from the constant matches one of these. test_mathlib_inv_family.py
+# holds this to a fresh computation and to the study's table to two figures.
+CROWD_DISTANCES = {
+    "fp64": {"pi/4": (6.177e+12, 5.023e+12), "pi/2": (6.177e+12, 5.023e+12),
+             "3pi/4": (6.177e+12, 8.756e+12), "pi": (6.177e+12, 5.023e+12)},
+    "fp128": {"pi/4": (2.017e+13, 2.463e+13), "pi/2": (2.017e+13, 2.463e+13),
+              "3pi/4": (2.017e+13, 3.956e+13), "pi": (2.017e+13, 2.463e+13)},
+    "fp256": {"pi/4": (4.039e+13, 4.413e+12), "pi/2": (4.039e+13, 4.413e+12),
+              "3pi/4": (1.935e+13, 4.039e+13), "pi": (4.039e+13, 4.413e+12)},
 }
 
 
