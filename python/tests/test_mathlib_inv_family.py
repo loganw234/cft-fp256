@@ -237,10 +237,40 @@ def test_the_three_lanes_past_a_fixed_07_are_named_and_pinned():
     for fn in FUNCS:
         for rnd in RND:
             _out, rep = F.check_struct(fmt, rnd, fn)
-            for x, d in rep:
+            for x, d, _b in rep:
                 key = (fn, x & ~fmt.sign_mask if not isinstance(x, tuple)
                        else (x[0] & ~fmt.sign_mask, x[1]))
                 assert d < 0.7 or key in past, (fn, x, d)
+
+
+def test_a_lane_over_b_is_judged_by_its_own_figure(monkeypatch):
+    # B is the largest SAMPLED figure, not a bound: a lane whose own
+    # first-order figure b(x) is over B is judged by 1 - b(x), named
+    fmt = I.FP64
+    table = {"asin": {"fp64": [((I.RTZ,), [0x3e77ffffffffffff])]}}
+    out, rep = F.check_struct(fmt, I.RTZ, "asin", table)
+    assert out == [] and F.over_b(fmt, "asin", rep) == []
+    x, d, b = rep[0]
+    assert b is not None and 0 <= b < F.THRESHOLD_B[("asin", "fp64")]
+    # the same lane with a doctored b(x) of 0.5: 1 - b(x) = 0.5 is under its d
+    monkeypatch.setattr(F, "own_figure", lambda *a: 0.5)
+    out, rep = F.check_struct(fmt, I.RTZ, "asin", table)
+    assert out and names(out) == {"struct"} and "OVER B" in out[0]
+    assert len(F.over_b(fmt, "asin", rep)) == len(rep)
+    out, rep = F.check_listed_figures(fmt, I.RTZ, "asin")
+    assert out and "OVER B" in out[0]
+    monkeypatch.undo()
+    # the real figures: every committed lane and every listed centre has a
+    # b(x) under B at the three formats (MEASURED; the largest b(x) of a
+    # STRUCT lane is 0.0026 Bv at fp64)
+    for f in FORMATS:
+        for fn in FUNCS:
+            for rnd in (I.RNE, I.RTZ):
+                out, rep = F.check_struct(f, rnd, fn)
+                assert out == [] and F.over_b(f, fn, rep) == []
+                if f.name != "fp256":
+                    out, rep = F.check_listed_figures(f, rnd, fn)
+                    assert out == [] and F.over_b(f, fn, rep) == []
 
 
 def test_the_struct_check_fails_on_a_doctored_lane():
@@ -251,7 +281,7 @@ def test_the_struct_check_fails_on_a_doctored_lane():
     table = {"atan": {"fp64": [((I.RNE,), [x])]}}
     out, rep = F.check_struct(fmt, I.RNE, "atan", table)
     assert names(out) == {"struct"} and len(out) == 2     # both signs
-    assert all(d > F.thresholds(fmt, "atan")[0] for _x, d in rep)
+    assert all(d > F.thresholds(fmt, "atan")[0] for _x, d, _b in rep)
     # and the committed table, untouched, is green
     assert F.check_struct(fmt, I.RNE, "atan")[0] == []
 

@@ -622,6 +622,30 @@ def model_lanes(fmt, fn, region):
     return I.sample(fn, fmt, region, MODEL_N[fmt.name], MODEL_SEED)
 
 
+# ---- one lane's own first-order figure --------------------------------------------
+
+def lane_figure(build, lane):
+    """b(x): the lane's OWN first-order figure in Bv, |V_twin - f| / Bv (the
+    method's error at this lane) plus the sum of this lane's capacities
+    |s_i| ulp(v_i) / 2 / Bv of the instructions that round on it (delta_i not
+    0), the budget of one lane and not a maximum over a
+    sample; None where the lane is not on the main path. The cell's figure
+    and B are maxima over SAMPLED lanes, not bounds over all lanes: a lane may
+    have a b(x) over B."""
+    fn, fmt = build.meta["fn"], build.fmt
+    if not I.in_main(fn, fmt, lane):
+        return None
+    an = InvAnalyzer(build)
+    L = an.analyze(lane)
+    with mpmath.workprec(an.prec):
+        M = abs((L.Vex - I.true_value(fn, fmt, lane)) / L.Bv)
+        # the instructions that round on this lane (delta not 0): one that
+        # is exact here adds nothing here, whatever its capacity
+        cap = sum(c / L.Bv for _i, _con, c, d in an.contributions(L)
+                  if d != 0)
+        return float(M + cap)
+
+
 # ---- each cell's figure ----------------------------------------------------------
 
 def sampled_worst(build, xs):

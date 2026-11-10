@@ -129,7 +129,11 @@ THRESHOLD_B = {
 
 
 def thresholds(fmt, fn):
-    """(must, clear) for the function and format: 1 - B and 1 + B."""
+    """(must, clear) for the function and format: 1 - B and 1 + B. B is the
+    largest SAMPLED first-order figure of the function and format (the
+    study's or this tool's, the larger, rounded up), NOT a proved bound over
+    all lanes; a must-mark lane whose own figure b(x) is over B is judged by
+    1 - b(x) (check_struct, check_listed_figures)."""
     B = THRESHOLD_B[(fn, fmt.name)]
     return round(1 - B, 6), round(1 + B, 6)
 RND_NAMES = sf.RND_NAMES
@@ -1063,22 +1067,84 @@ def check_census_counts(f, family, lanes=None, want=None, evaluator=None,
     return out, marked
 
 
+@functools.lru_cache(maxsize=None)
+def _rne_build(fn, fmt_name):
+    """The rne build of fn (V is the same under every attribute: the budget's
+    `attributes` leg)."""
+    return ml.build(fn, I.BY_NAME[fmt_name], sf.RND_RNE)
+
+
+def own_figure(fmt, fn, lane):
+    """b(x): the lane's own first-order figure in Bv (mathlib_inv_budget.
+    lane_figure), None off the main path."""
+    import mathlib_inv_budget as IB
+    return IB.lane_figure(_rne_build(fn, fmt.name), lane)
+
+
 def struct_report(fmt, rnd, fn, table=None):
-    """[(lane, d)]: every lane of the harness's STRUCT for (fn, fmt, rnd)
-    (structured_lanes: each also with its sign flipped), its d under rnd."""
-    return [(x, distance(fmt, rnd, fn, x))
+    """[(lane, d, b)]: every lane of the harness's STRUCT for (fn, fmt, rnd)
+    (structured_lanes: each also with its sign flipped), its d under rnd and
+    its own first-order figure b(x) (None off the main path)."""
+    return [(x, distance(fmt, rnd, fn, x), own_figure(fmt, fn, x))
             for x in I.structured_lanes(fn, fmt, rnd, table)]
+
+
+def _judge_figure(fmt, fn, rnd, lane, d, b, what):
+    """The finding of one must-mark lane, or None: d under 1 - B, and where
+    the lane's own figure b(x) is over B (B is the largest SAMPLED figure of
+    the function and format, not a bound), d under 1 - b(x)."""
+    must, _clear = thresholds(fmt, fn)
+    B = THRESHOLD_B[(fn, fmt.name)]
+    cut = must
+    note = ""
+    if b is not None and b > B:
+        cut = 1 - b
+        note = (f"; its own first-order figure b(x) = {b:.4g} Bv is OVER B = "
+                f"{B}, so it is judged by 1 - b(x) = {cut:.4f}")
+    if not d < cut:
+        return (f"struct: {fn} {fmt.name} {sf.RND_NAMES[rnd]}: the "
+                f"{what} {_lane_name(lane)} has d = {d:.4f}, not under "
+                f"{cut:.4f}{note}")
+    return None
 
 
 def check_struct(fmt, rnd, fn, table=None):
     """[finding], report: struct. Every committed lane of the harness's STRUCT
     (waves 1 and 2's) held to the predicate: d under 1 - B under each of its
-    listed attributes. The predicate shares nothing with the fragment."""
-    must, _clear = thresholds(fmt, fn)
+    listed attributes, and under 1 - b(x) where the lane's own first-order
+    figure is over B. The predicate shares nothing with the fragment. The
+    report is [(lane, d, b)]; a lane over B is named in a finding only when
+    it also fails its cut, and in `over_b` of the report's printer."""
     rep = struct_report(fmt, rnd, fn, table)
-    out = [f"struct: {fn} {fmt.name} {sf.RND_NAMES[rnd]}: the committed lane "
-           f"{_lane_name(x)} has d = {d:.4f}, not under {must:.3f}"
-           for x, d in rep if not d < must]
+    out = []
+    for x, d, b in rep:
+        f = _judge_figure(fmt, fn, rnd, x, d, b, "committed lane")
+        if f:
+            out.append(f)
+    return out, rep
+
+
+def over_b(fmt, fn, rep):
+    """The lanes of a report whose own figure b(x) is over B."""
+    B = THRESHOLD_B[(fn, fmt.name)]
+    return [(x, b) for x, _d, b in rep if b is not None and b > B]
+
+
+def check_listed_figures(fmt, rnd, fn, G=None):
+    """[finding], report: struct. Every must-mark lane of the generated list
+    for (fn, fmt, rnd), its centres (the negatives share their figure and d),
+    with d and its own first-order figure b(x) printed beside B: judged by 1
+    - B, and by 1 - b(x) where b(x) is over B."""
+    out, rep = [], []
+    for cen in expand(entries(fmt, rnd, fn, G)):
+        if cen[0] not in ("tiny", "win"):
+            continue
+        x = centre_lane(fn, fmt, cen)
+        d, b = distance(fmt, rnd, fn, x, G), own_figure(fmt, fn, x)
+        rep.append((x, d, b))
+        f = _judge_figure(fmt, fn, rnd, x, d, b, "listed centre")
+        if f:
+            out.append(f)
     return out, rep
 
 

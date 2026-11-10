@@ -1377,8 +1377,22 @@ def cmd_inv_family(a):
                 out, rep = IF.check_struct(fmt, rnd, fn)
                 note(out)
                 if rep:
+                    bs = [b for _x, _d, b in rep if b is not None]
                     say(f"inv-family {cell} struct: {len(rep)} committed "
-                        f"lanes, largest d {max(d for _x, d in rep):.4f}; "
+                        f"lanes, largest d {max(d for _x, d, _b in rep):.4f}"
+                        f", largest own first-order figure b(x) "
+                        f"{max(bs, default=0.0):.3g} Bv against B "
+                        f"{IF.THRESHOLD_B[(fn, fmt.name)]}; "
+                        f"{len(IF.over_b(fmt, fn, rep))} over B; "
+                        f"{len(out)} findings")
+                out, rep = IF.check_listed_figures(fmt, rnd, fn)
+                note(out)
+                if rep:
+                    say(f"inv-family {cell} listed centres: {len(rep)}, "
+                        f"largest d {max(d for _x, d, _b in rep):.4f}, "
+                        f"largest b(x) {max(b for _x, _d, b in rep):.3g} Bv "
+                        f"against B {IF.THRESHOLD_B[(fn, fmt.name)]}; "
+                        f"{len(IF.over_b(fmt, fn, rep))} over B; "
                         f"{len(out)} findings")
                 for family, lanes in IF.census_lanes(fmt, fn).items():
                     out, marked = IF.check_census_counts(f, family, lanes)

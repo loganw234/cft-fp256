@@ -278,3 +278,24 @@ def test_the_thresholds_b_are_the_studys_cells_rounded_up_to_two_figures():
     for (f, fn, region) in CELLS:
         assert IB.MODEL_FIGURES[(f, fn, region)][4] <= IF.THRESHOLD_B[
             (fn, f)], (f, fn, region)
+
+
+def test_a_lanes_own_figure_is_under_its_samples_bound_and_none_off_path():
+    # b(x) = this lane's method error plus the capacities of the instructions
+    # that round on it: under the bound of any sample that holds the lane
+    for fn, region in (("atan", "edge"), ("atan2", "edge"),
+                       ("acos", "big")):
+        b = _build(fn, "fp64")
+        _out, s, _l = _run(fn, "fp64", region)
+        xs = IB.model_lanes(I.FP64, fn, region)
+        figs = [IB.lane_figure(b, x) for x in xs]
+        assert all(f is not None and f >= 0 for f in figs)
+        assert max(figs) <= s["bound"] * (1 + 1e-12), (fn, max(figs))
+        assert max(figs) > 0
+    # a gated lane has none
+    assert IB.lane_figure(_build("atan", "fp64"), 0) is None
+    assert IB.lane_figure(_build("atan2", "fp64"), (0, 0)) is None
+    # an instruction that does not round on the lane adds nothing, whatever
+    # its capacity: the tiny centre's figure is far under the cell's
+    x = 0x3e68000000000000
+    assert IB.lane_figure(_build("atan", "fp64"), x) < 1e-3
