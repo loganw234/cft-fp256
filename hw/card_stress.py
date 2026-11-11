@@ -231,9 +231,10 @@ QUICK_BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-s
 # are ESTIMATED at 505 to 540 s on the card (the nightly's fifteen: median 464.5 s over 188 passes,
 # docs/CARDDAY.md; the four's software set leg 64 s), so 2400 s is 4.4 to 4.8 times that (COMPUTED
 # from the estimate). The quad's twenty-one, since parcel M4A's two (2026-11-11; the phase follower's
-# 7,997 and 8,605 instructions, which stream), are ESTIMATED at 560 to 620 s on the card (the nineteen's
-# estimate plus the two entries' software set legs, 31.5 s and 21.0 s on the desktop, MEASURED, scaled
-# as the four's were), so 2400 s is about 3.9 to 4.3 times that (COMPUTED from the estimate) and
+# 7,997 and 8,605 instructions, which stream), are ESTIMATED at 604 to 639 s on the card (the nineteen's
+# estimate plus the two entries' software set legs, 56.1 s and 42.5 s on the desktop, MEASURED, 118 s the
+# run, the desktop at 100 per cent; the four's card leg, 64 s, equalled their software leg), so 2400 s is
+# about 3.8 to 4.0 times that (COMPUTED from the estimate) and
 # still covers all twelve routine entries. A timeout is a
 # several-times margin on those, with a floor, because a hang costs only its timeout and a
 # false timeout costs a run (an abandoned run poisons the tile). api-test, dt-i, dt-b,

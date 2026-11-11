@@ -1052,10 +1052,12 @@ printf it matches.
   card leg, rev8q, 2026-11-04, below). The first nightly after the merge has the nineteen's figure.
   **Parcel M4A (2026-11-11) adds the follower's two**, so the quad holds twenty-one: the follower's
   images are 7,997 and 8,605 instructions, past a tile's store of 4,096, and stream; their set leg took
-  31.5 s (fp64) and 21.0 s (fp256) on the software backend (MEASURED, unniced, one process each, the
-  desktop read 12 to 48 per cent by Win32_Processor around the runs), against the four's 64 s. On the
-  card the twenty-one are ESTIMATED at 560 to 620 s, so the 2400 s is 3.9 to 4.3 times that (COMPUTED from
-  the estimate) and still covers all twelve routine entries; the card's own figure is the first nightly's
+  56.1 s (fp64) and 42.5 s (fp256) on the software backend (MEASURED, `--legs set,oracle --only` the two,
+  unniced, one process, 118 s the run, the desktop at 100 per cent by `wmic` before it), against the four's
+  64 s. The four's card leg took 64 s, the same as their software leg, so the two are ESTIMATED at their
+  software 98.6 s on the card, and the twenty-one at 604 to 639 s (the nineteen's 505 to 540 s plus 98.6 s),
+  so the 2400 s is 3.8 to 4.0 times that (COMPUTED from the estimate) and still covers all twelve routine
+  entries; the card's own figure is the first nightly's
   after the merge. The smoke (`--quick`) runs one of them,
   `lotkavolterra-rk4-tangent-fp64`, beside `phi4_extended_fp64`: about 10 s more (COMPUTED, 57 s
   over six), the routine path on the card in the smoke instead of in the long run's first cycle.

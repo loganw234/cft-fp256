@@ -242,9 +242,9 @@ def test_one_structured_lane_a_tile_and_the_rest_of_the_lane_is_the_recipes():
             [t * blk + A.STRUCTURED_LANE for t in range(4)]
         assert not {s["lane"] for s in rec["structured"]} & \
             set(rec["special"])
-        assert [s["function"] for s in rec["structured"]] == \
-            ["atan2", "asin", "acos", "atan"] if n.endswith("64") else \
-            ["atan2", "atan", "asin", "acos"]
+        want = (["atan2", "asin", "acos", "atan"] if n.endswith("64")
+                else ["atan2", "atan", "asin", "acos"])
+        assert [s["function"] for s in rec["structured"]] == want
 
 
 def test_the_entries_build_where_mpmath_cannot_import():
