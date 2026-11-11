@@ -27328,7 +27328,7 @@ For AMD (ROCm 10.1, HIP 7.16.26385, gfx1102) it compiles, rc 0. So the unit and 
 
 **The host's proof.** On this desktop, with mingw64 gcc 16.1.0, `-std=c99 -O2 -Wall -Wextra -Wpedantic -Wshadow`, and TMP and TEMP in Windows form. The final pass ran 08:58:24 to 09:03:35 on the working tree's host/, which is 67beb00b's. The Arduino copy's check and the loopback's four profiles were run again at the commit. The desktop's CPU load was 8 % by Win32_Processor, read once, after the runs; another parcel's verifier was at work on it.
 - **The E1 files.** bigint.o (6,798 bytes) and softfloat.o (16,278) are byte-identical at base and tip. `gcc -E -P` gives 395 and 926 lines at both, and 50 and 79 of them differ, each by one leading space where the empty CFT_HD expands at the head of a line. `diff -w` finds them equal, and so does a comparison with one leading space taken off every line of both. The brief expected the preprocessed text to be identical. It is not, by that space; the objects are. Control: bigint.c with `carry = s >> 31` differs.
-- **program.o.** Its text is 32,664 bytes at the base and 32,856 at the tip, with the same 14 text symbols: the four functions are inlined. By objdump, cft_program_run_ex goes from 2,060 instructions to 2,106 and cft_program_digest from 82 to 114; the other 11 functions are equal.
+- **program.o.** Its text is 32,664 bytes at the base and 32,856 at the tip, with the same 14 text symbols: the four functions are inlined. By function (corrected at send-back 1, whose paragraph below gives the command and the count), 12 of the 13 functions have the same instruction stream at base and tip. Only cft_program_run_ex differs, 1,702 instructions to 1,724 (1,680 to 1,706 without nops), because seq_program_run is inlined into it with the four inlined into seq_program_run.
 - **The pieces**, by the scratch script pieces_check.py. Raw: every one of the 28, located in the base by devcopy's own seq_pieces, is in seq_exec.h byte for byte and in order, with E1 12, BL 1 and ALU 1 and no other edit, and no piece's first line is left in program.c. Preprocessed (`gcc -E -P` of program.c at base and tip): the 12 functions and 4 types are equal once the empty CFT_HD's leading space is removed. CFT_SEQ_ALU and BLOCK_LANES expand to the base's text, so the two macro edits leave nothing to name there; the 12 #define pieces are held by the raw half. Five plants, each refused by name: an operator in seq_run_block, BLOCK_LANES 32, the ALU hook reverted, and a piece missing (raw); an operator in seq_decode (preprocessed).
 - **git's own count** (`git diff --color-moved=plain --color-moved-ws=allow-indentation-change 7e6e62e5 67beb00b`): 772 of program.c's 793 removed lines are moves, and 805 of seq_exec.h's 925 added lines.
 - **make -n.** `make -n -B CC=gcc OS=Windows_NT all api-test.exe device-test.exe remote-test.exe` prints the same 70 lines at base and tip. HIP=0 is the default, and `HIP=0` given explicitly prints the same. `make hip-unit` at HIP=0 refuses by name.
@@ -27340,7 +27340,7 @@ For AMD (ROCm 10.1, HIP 7.16.26385, gfx1102) it compiles, rc 0. So the unit and 
 - **The WebAssembly module's 17 sources**: host/Makefile's SRC as build.sh derives it, and wasm_api.c. `gcc -E -P -std=c99 -O2 -D__EMSCRIPTEN__ -Ihost/include` with a stub emscripten.h, at base and tip:
   - 4 identical: sha256.c, backend_remote.c, build_id.c and wasm_api.c;
   - 12 equal but for the empty CFT_HD's leading space: bigint.c, softfloat.c, and the ten that include their headers;
-  - program.c different, 3,314 lines to 3,347.
+  - program.c different, 3,314 lines to 3,346 (`wc -l`; corrected at send-back 1).
   gcc gave rc 0 on all 34 runs and no output was empty. The control, a line of code added to a copy of wasm_api.c, reads different. **So the module's rebuild is owed. It is the lead's, after the merge.**
 - **Linux** (cft-gpu, gcc 13.3). GPU-A's `build_seq.sh ref`, unchanged, built libcft.a at the tip and at the base, 0 warnings each. seq_ref on 11 program corpora gives byte-identical outputs from the two.
 
@@ -27404,3 +27404,19 @@ For AMD (ROCm 10.1, HIP 7.16.26385, gfx1102) it compiles, rc 0. So the unit and 
 6. `gcc -E -P` of the E1 files differs from the base's by one leading space a line. What is byte-identical is the objects.
 
 GPU time: about a minute on the RTX 5060 Ti, in two sessions, and about 25 s on the RX 7600. Before the commit: `python -B python/check_docs_index.py` rc 0, `python -B python/project_figures.py --check` rc 0, `git diff --check` clean, and the added lines and the message scanned for personal paths and host names: none.
+
+**Send-back 1** (the lead, 2026-11-11, `Data/runs/2026-11-11-gpu-backend/briefs/G1A-sendback-1.md`, after verifier VG1A's pass at 36daa67d: no regression, one wrong answer; corrected in a new commit, no GPU run).
+
+1. **The program.o bullet's per-function counts did not reproduce.** My first count took every line of `objdump -d` that begins with an address. That counts a long instruction's continuation line of raw bytes as an instruction, and it counts the alignment padding before the next function.
+   - Re-measured with mingw64 gcc 16.1.0, the entry's flags and GNU objdump 2.46: `objdump -d --no-show-raw-insn -r program.o` at base and tip, by the scratch script fncount.py. An instruction is a line of a function's body with an address, a tab and a mnemonic. A nop is one whose mnemonic or prefix starts with "nop", or `xchg %ax,%ax`. A function's stream is its non-nop instructions, with the addresses made symbolic and objdump's `# <sym+off>` notes dropped.
+   - 12 of the 13 functions have the same stream at base and tip.
+   - cft_program_run_ex differs: 1,702 instructions to 1,724, which is 1,679 to 1,703 without nops, or 1,680 to 1,706 if the two-byte `xchg %ax,%ax` is kept as an instruction, as VG1A counted.
+   - cft_program_digest is 82 lines to 114 with the same 62 non-nop instructions (63 with the xchg form, VG1A's 63). The 32 more are padding before the next function.
+   - cft_program_load's stream differs only in those notes, which name places in the unlinked object's own layout.
+   - Control: one register changed throughout the tip's dump leaves 6 of the 13 the same.
+   - The bullet above is corrected in place.
+2. **The WebAssembly count.** `gcc -std=c99 -O2 -D__EMSCRIPTEN__ -I<stub> -Ihost/include -E -P host/src/program.c | wc -l` gives 3,314 at the base and 3,346 at 67beb00b. The 3,347 above was an earlier run's count, before the `counts` fix took one declaration out. It is corrected in place.
+3. **Two comments the split made false**, approved by the lead in this pass, now name host/src/seq_exec.h: python/cft_golden/cert.py:67 to :68 (BLOCK_LANES) and bindings/node/make_seq_corpus.py:82.
+   - cert.py is one of the files the vectors' model stamp covers, so the stamp moves. vectors/gen_vectors.py's `model_digest()` is 7935e7cd... at 36daa67d and e2e1c172... at this commit, so verify's vectors_whole regenerates the vectors once.
+   - `python -B -m pytest -p no:cacheprovider -q python/tests/test_cert*.py -n 4`: 209 passed in 25.5 s.
+   - Three more mentions the split made stale were found and left, since they were not approved: host/tools/orbits.c:1849 ("which host/src/program.c keeps in a private enum": the control codes are seq_exec.h's), docs/studies/OPT-D-contract.md:656 and docs/ROUND2.md:342, the last two records of their dates.

@@ -65,7 +65,7 @@ SALT_BYTES = 32
 SEED_BYTES = 32
 
 # The lanes an audit re-runs at once (run_segment): libcft's BLOCK_LANES
-# (host/src/program.c), so that each auditor holds one block's scratch
+# (host/src/seq_exec.h), so that each auditor holds one block's scratch
 # at the certified depth - a constant the page fixes, where the dense
 # seq.run holds every lane's (the lead's decision, 2026-09-29).
 BLOCK_LANES = 64
