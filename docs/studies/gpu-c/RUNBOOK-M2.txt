@@ -23,7 +23,7 @@ it compiles with `ulong` for uint64_t. The risk to bit exactness is only in that
 ## C. chipStar on the Mac as a CPU leg (one source on the arm64 CPU, no Metal; install; 2 to 4 hours, mostly LLVM)
 READ (chipStar docs/MacOS.md): at v1.3.0 the page says "LLVM/Clang (18, 19, or 20) with patches", tested at LLVM 19.0, built from source
 from CHIP-SPV's forks (llvm-project branch `chipStar-llvm-19`; PoCL branch `macos-chipstar`), Homebrew packages, PoCL
-built with `-DENABLE_SPIR=ON`, `CHIP_DEVICE_TYPE=pocl`. (An LLVM 22 is what the `main` branch's page says; use the page of the tag you check out.) Then from this repository
+built with `-DENABLE_SPIR=ON`, `CHIP_DEVICE_TYPE=pocl`. (The `main` branch's page says "20, 21, or 22", with 22 in its example; use the page of the tag you check out.) Then from this repository
 `docs/studies/gpu-c/build_chipstar.sh` and `run_chipstar.sh` (the corpora and plants). Expected: the desktop's hashes
 (da932116...). It proves the one source on arm64, not Metal. The time is an ESTIMATE; nothing like it was run here.
 

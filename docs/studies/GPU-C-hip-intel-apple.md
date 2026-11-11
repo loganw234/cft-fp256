@@ -57,7 +57,7 @@ ordinary integer multiplication in the copy.
 
 | route | what it does | state | one source? |
 |---|---|---|---|
-| chipStar on macOS, docs/MacOS.md | HIP to SPIR-V run by **PoCL on the CPU**; "macOS's built-in OpenCL runtime does not support SPIR-V" | v1.3.0 "adds macOS support"; MacOS.md at v1.3.0: "LLVM/Clang (18, 19, or 20) with patches", tested at LLVM 19.0, built from source from CHIP-SPV's forks (llvm-project branch `chipStar-llvm-19`; PoCL branch `macos-chipstar`), Xcode command-line tools, Homebrew | yes, **CPU only, no Metal** |
+| chipStar on macOS, docs/MacOS.md | HIP to SPIR-V run by **PoCL on the CPU**; "macOS's built-in OpenCL runtime does not support SPIR-V" | v1.3.0's release page: "macOS is now a supported chipStar platform, including Apple CPU Silicon via PoCL"; MacOS.md at v1.3.0: "LLVM/Clang (18, 19, or 20) with patches", tested at LLVM 19.0, built from source from CHIP-SPV's forks (llvm-project branch `chipStar-llvm-19`; PoCL branch `macos-chipstar`), Xcode command-line tools, Homebrew | yes, **CPU only, no Metal** |
 | chipStar native Vulkan backend (README) | SPIR-V for Vulkan compute | experimental, "requires LLVM 24+", Vulkan 1.3 driver, libclc; commits on it as late as 2026-11-10; whether it runs on Apple was **not read** | yes, unproven on Apple |
 | KosmicKrisp (Mesa; LunarG), docs.mesa3d.org, lunarg.com | Vulkan on Metal 4 for Apple Silicon, macOS 26 or later | Vulkan 1.3 conformant, later 1.4 (Phoronix, October 2026); shaderInt64 not read | the Vulkan driver a Vulkan route would use |
 | MoltenVK, github.com/KhronosGroup/MoltenVK | Vulkan on Metal, SPIR-V to MSL at run time | README: "Khronos has deprecated MoltenVK"; community best-effort; Khronos points Apple Silicon at KosmicKrisp | as above |
@@ -216,9 +216,10 @@ space on each pointer (BELIEVED), so a scripted edit, a sibling of devcopy.py's 
 [gpu-c/RUNBOOK-ARC.txt](gpu-c/RUNBOOK-ARC.txt): the card, the install list for amd-arc-box with sizes and sums, the
 bundle, the run, what a failure means, the removal. **Card recommendation: the A750.** READ: the A750 (56A1) is
 supported by the in-kernel i915 driver on Ubuntu 24.04 kernels 6.2 and later; the B580 needs the xe driver and
-kernel 6.11 (initial) to 6.12 (full support) (both READ once, 2026-11-10, with a summarising fetch tool, from
-https://dgpu-docs.intel.com/overview/supported-hardware/i915-driver-gpus.html and .../xe-driver-gpus.html; a second
-reader could not fetch them, so treat as BELIEVED until checked on the box); the box ran kernel 6.8.0-139 (docs/BENCHMARKS.md:67, a
+kernel 6.11 (initial) to 6.12 (full support) (READ by VGPU-C, 2026-11-10, from
+https://dgpu-docs.intel.com/overview/supported-hardware/i915-driver-gpus.html and .../xe-driver-gpus.html: A750 (56A1) initial
+"Kernel 6.0", full "Ubuntu 24.04+ (6.2)"; B580 (E20B) initial "Kernel 6.11", full "Ubuntu 24.04+ (6.12)"; the pages call them
+guidance only, vendor kernels may include backported support); the box ran kernel 6.8.0-139 (docs/BENCHMARKS.md:67, a
 record of 2026-09-08, not re-checked). A B580 would
 need a new kernel on the box that hosts the U50, whose XRT modules follow the kernel. Install default: **nothing
 system-wide**, five Canonical packages (15.6 MB) extracted in a home directory. [gpu-c/RUNBOOK-M2.txt](gpu-c/RUNBOOK-M2.txt):

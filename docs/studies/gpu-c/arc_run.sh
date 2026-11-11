@@ -16,7 +16,7 @@ mkdir -p out; rc=0
 echo "== arc_run.sh $(date '+%F %T') on $(hostname), $CHIP_BE/$CHIP_DEVICE_TYPE device $DEV"
 sha256sum -c --quiet SHA256SUMS || { echo "bundle sums differ: stop"; exit 1; }
 ldd bin/cft_fma | grep -E "not found" && { echo "missing library: stop"; exit 1; }
-clinfo -l 2>&1 | head -8
+command -v clinfo > /dev/null && clinfo -l 2>&1 | head -8 || echo "clinfo not found: skipped (optional)"
 timeout 100 bin/cft_fma info --device $DEV 2>&1 | grep -v "^CHIP" | head -12   # hipDeviceGetLimit may error under chipStar: known
 S() { grep -v "^CHIP"; }
 # expected output hashes (from gen_corpus.py, = the corpus's own 'expect')
