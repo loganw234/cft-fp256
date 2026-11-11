@@ -27532,3 +27532,101 @@ These are wall seconds; the GPU was idle during them.
 11. An XRT=1 build takes "hip:0" as a file to read, through the XRT backend, and does not refuse it by name. backend_xrt.cpp is not this parcel's to edit.
 12. device.c's no-backend sentence changed in the branch without XRT, so the WebAssembly module's sources moved and its rebuild is owed (the lead's, as G1A's was).
 13. Not run here: the card's device-test and seq_check on the U50, the box's gate, and G1C's gates (the conformance replay, seq_check and the certificate corpus through hip:N, the verify stage, the NVIDIA legs, rates against the quad and MPFR).
+
+## 2026-11-11 - parcel G1B2's: resident buffers on a GPU - cft_alloc's buffers kept on the device under cft.h's authority rule, a page at a time (the GPU backend's round 1, Part 2; author G1B2, Opus 5.5)
+
+**What.** `CFT_HIP_BUFFERS_RESIDENT` is 1 (backend.h), so a GPU handle's `cft_caps.buffers_resident` is 1, and backend_hip.cpp implements the buffer seam that Part 1 declined. A `cft_alloc`'d buffer gets ONE device allocation, made at its first binding and never resized, at the mirror's own offsets; its state is kept a page at a time, 256 bytes: STALE (the mirror is the truth), FRESH (the two agree) and DIRTY (a run wrote it, so the device is the truth).
+- A binding uploads the STALE pages its call reads: an input's whole window; an output's whole window under a lane mask; an unmasked output's edge pages only. Each contiguous run of pages goes up in one copy and is marked FRESH only once that copy has completed. A good run leaves its outputs' pages DIRTY.
+- `cft_buffer_from_device` brings DIRTY pages home. `cft_buffer_to_device` stales every page; it is refused (CFT_ERR_INVALID_ARGUMENT, the XRT backend's sentence, nothing changed) while any page is DIRTY.
+- A host write brings the DIRTY pages it touches home whole and stales them. After the write, a DIRTY page it only partly covered comes home around it.
+- A run that fails once a launch may have started leaves the resident buffers it writes LOST. A publish clears that.
+- An input that overlaps an output of the same call in the same buffer is staged, except cft_run's d == a and a program's scratch-in == scratch-out. Overlapping outputs are both staged (docs/HOSTAPI.md, "Two roles, one copy").
+- Plants: `stale-publish`, `no-readback` and `fresh-early`. `CFT_HIP_UPLOAD=fail-fill` is an instrument, and `CFT_HIP_PAGE` sets the page. Plant builds only; malformed values are refused by name.
+The two fixes from VG1B1's notes are in this parcel too. (i) hip-corpus's full mode exits 1 when a result or a flag differs from the corpus's expected values, as the sampled mode already did, and its header says so. (ii) cft_open_ex's refusal of a depth for a GPU says what is true: any non-zero depth is refused, 256 included, and a GPU has no image - the backend fixes the depth. That sentence is under `CFT_ENABLE_HIP` in device.c, so the card's sentence and every other build's text are unchanged.
+
+**Why 256 bytes, not 64 KiB** (accepted by the lead after the first green): device-test's "resident windows stay resident" runs a program over a buffer carved [a | counts | deposits] with n = 64, three times, and requires the stream a to bind resident on runs 2 and 3. With 64 KiB pages the counts - which the library writes on the host every run - share a's page, so a refills every run. Measured on the RX 7600 with `CFT_HIP_PAGE=65536`: that check failed at all four formats (4 failed), and nothing else did. A coarser page can make an unneeded refill and never a missed one, so the size is a residency-economy choice, not a correctness one. Its cost is one byte of state for each 256 bytes of a bound buffer, and a run of STALE pages is still one copy.
+
+**device_test.c, one line** (approved by the lead): check_stale_copies set `card_refuses = xrt && buffers_resident`, so it expected every non-XRT device to accept a publish over unread results. cft.h's rule is a device backend's, and the GPU refuses that publish too, so the line is now `card_refuses = buffers_resident`. Before it, 2 scenarios a format failed on the GPU on that alone; after it, all pass. It changes nothing elsewhere:
+- the software and remote backends report `buffers_resident` 0, so `card_refuses` is 0 either way;
+- an XRT handle has `buffers_resident` 1 exactly when its backend is xrt (device.c's cft_get_caps), so `xrt && buffers_resident` is `buffers_resident` there;
+- `device-test sw -b -n 96` at the tip gives the base's 123 lines but for the build-id line (below).
+
+**Nothing in a HIP=0 build moved.** This desktop, mingw64 gcc 16.1.0, the base a `git archive 38a4aadf` (Part 1's verified tip), the tip the worktree copied without .git, 15:12:51 to 15:22:33:
+- `make -n -B CC=gcc OS=Windows_NT all api-test.exe device-test.exe remote-test.exe`: identical, 70 lines. Builds rc 0, 0 warnings.
+- All 32 objects byte-identical, none differing: device.c's one addition is under `CFT_ENABLE_HIP`, and backend.h's is inside its HIP block.
+- api-test passed. `device-test sw -n 96` (455 lines) and `sw -b -n 96` (123 lines) are equal to the base's but for the build-id line, with device_test.c's `card_refuses` line in the tip.
+- seq_check, the gate's command, at base and tip at once: 220 s and 223 s, rc 0, 59 lines byte-identical.
+- The certificate corpus at the tip copy: 257 checks, 0 failed, 20 skipped (19 "no --tool given", and the history leg, since the copy has no .git). With its cft-segrun: 329 checks, 0 failed, 1 skipped. From the worktree with the tip copy's cft-segrun: 329 checks, 0 failed, 0 skipped.
+- hip-test.exe and hip-corpus.exe build at HIP=0 with 0 warnings. hip-test.exe hip:0 prints the no-backend refusal (rc 0, every leg NOT RUN). On the software handle, hip-corpus.exe gives conf-fp64's 3a8a9b2c... and routines-fp64's 4eb03cc3..., staged and `--resident` alike (the software handle reports 0 resident and 0 staged bindings: its buffers are host memory).
+- The Arduino copy: the proof's `--check` found backend.h and device.c changed, as it must after an edit to a vendored source. `sync.py` then rewrote both and vendor.json, and `--check` gives 36 vendored files, all identical to host/.
+
+**The card's path did not move.** device.c, program.c and divsqrt.c compiled with `-DCFT_ENABLE_XRT` and no XRT installed, at base and tip: rc 0, 0 warnings each. `gcc -E -P` base against tip: 0 lines differ in all three. The GPU's depth sentence and `CFT_HIP_BUFFERS_RESIDENT` exist only where `CFT_ENABLE_HIP` is defined.
+
+**The builds.**
+- The RX 7600 machine (nvidia-box), ROCm, gfx1102, from `git archive` copies of the worktree in ~/g1b2, default and plants: rc 0, 17 s each, 0 warnings. hip-symcheck: 58 symbols against 258 in the 16 host objects, none in both. Later edits were laid over these trees and rebuilt, also with 0 warnings.
+- cft-gpu (this desktop's WSL distro), HIP 7.2.4's NVIDIA layer on CUDA 12.9, HIP_ARCH 120 (the 5060 Ti's alone), in /root/g1b2, from the archive of the worktree at 15:21: default 174 s, plants 197 s, rc 0, 0 warnings. hip-symcheck: 101 symbols against 258 (102 in the plant build), none in both.
+- Resources, sm_120: k_run 40 registers and 4,728 B of stack, k_level 40 / 4,208 B, k_seq 64 / 12,624 B - Part 1's, unchanged; the kernels did not change.
+
+**The devices.** hip:0 in every run, named by `CFT_HIP_INFO=1` on each one (the line now gives the page: "page 256 bytes"). The RX 7600 had amd-smi and ps run before each run, and no other GPU process. The RTX 5060 Ti ran alone (`CUDA_VISIBLE_DEVICES=1`), with nvidia-smi before each run. The RTX 4070 was not used.
+
+**First green on a GPU: the RX 7600, 15:06 to 15:07.**
+- hip-test -l open,alias,buffers: 175 checks, 0 failed. The buffers leg's scenarios, each held to the software handle running the same calls on plain memory:
+  - a publish takes effect, at fp64 and fp256, and a repeat with nothing published binds resident (its counters: one more resident binding, no more staged);
+  - a publish over unread results is refused, `CFT_ERR_INVALID_ARGUMENT` with the XRT sentence, device_authority staying 1; after a read-back the publish is accepted, and the results are kept;
+  - d == a in place: the software handle's bits, and not staged;
+  - an output shifted one element over its own input: the input is staged ("an input that overlaps an output of the same call in this buffer is staged...") and every element reads the published value, the snapshot rule, twice;
+  - a masked program into a resident deposit window, then an unmasked one, then a masked one over a new sentinel: every byte the software handle's;
+  - a reduction's result written into a resident output window on the host, then a run into a moved, unaligned window over it and past it (150 elements from element 103), then another host write beside that window's start, then the read-back: every byte of the 4,800-byte buffer the software sequence's;
+  - sum, dot and the segmented maximum over resident windows from elements 0, 3 and 17: the software handle's; a's bindings 8 resident, 1 staged.
+- device-test hip:0 -b -n 96: 4,824 checks, 0 failed, once the `card_refuses` line was in (before it, 8 failed: the two publish-over-unread scenarios at each format, and nothing else). Stale copies: 101 of 101 scenarios at fp32, 103 of 103 at fp64, 103 of 103 at fp128 and 101 of 101 at fp256, transcript for transcript. "Resident windows stay resident" held at every format: the carved buffer's stream bound resident on its 2nd and 3rd runs, and a masked window was resident after a read-back and refilled after a publish. NOT TESTED by name there: the XRT-only legs (a failed fill's retry - the leg asks for backend "xrt"; S5 and S7's planted tile refusals; the declined outputs).
+- The plants build's buffers and plants legs: 119 checks, 0 failed, with:
+  - CFT_HIP_UPLOAD=fail-fill: the run refused with "the upload of a resident buffer's pages to hip:0 (AMD Radeon RX 7600) was failed on purpose by CFT_HIP_UPLOAD=fail-fill, after the host copy and before the device copy - nothing of this call ran, and the pages stay stale", and the output untouched; the retry gives the software handle's bytes for the new operand; a malformed value (`fill`) is refused by name;
+  - fail-launch: the failed run's resident output is LOST (staged_why "LOST: a run that wrote this resident buffer failed on the device (internal error: cft_run on hip:0 ...: the launch was reported failed after it ran (CFT_HIP_PLANT=fail-launch) ...", device_authority 0); its input is not; reading it back is CFT_ERR_INTERNAL with that sentence; a publish clears the loss;
+  - `CFT_HIP_PAGE` "0", "16", "100", "2097152", "256 ", "0x100", "-256" and "4k" refused by name; CFT_HIP_PLANT's bad names now include "stale" and "fail-fill" (Part 1's "stale-publish" is a plant now).
+- The reduction legs again on the RX 7600, since the staged reduction's stage layout changed with the resident path (15:15 to 15:17, cut as Part 1 cut them): reduce small at each format 7,801; reduce large fp64 and fp256 1,981 each; seg small fp64 49,860; compose small fp64 23,220 - all 0 failed. reduce-carry RED (475 of 7,801 failed) and reduce-flags RED (3,745 of 7,801), as in Part 1.
+
+**Plants first, then green, on both GPUs.**
+| check | plant | RX 7600 (15:08) | RTX 5060 Ti (15:30 to 15:37) |
+|---|---|---|---|
+| hip-test -l buffers | stale-publish | RED, 7 FAIL lines: "cft_buffer_to_device did not take effect - the run used the bytes published before" | RED, the same 7 |
+| hip-test -l buffers | no-readback | RED, 12 FAIL lines: "a resident run differs from the software handle's" | RED, the same 12 |
+| hip-test -l buffers | fresh-early | RED, exactly 1: "the retry after a failed upload: it answered for the OLD bytes - a failed upload left its pages fresh (KL-464's order)" | RED, the same 1 |
+| device-test -b -n 96 | stale-publish | RED, 12 of 4,824 | RED, 12 |
+| device-test -b -n 96 | no-readback | RED, 776 of 4,824 | RED, 776 |
+| hip-corpus conf-fp64 (full mode) | drop-flag | RED, exit 1: 1,532 flags differ from the corpus's expected (fix (i); Part 1's runner counted them and exited 0, as VG1B1 found) | RED, the same |
+| the same | none | GREEN, 3a8a9b2c..., 0 and 0 | (green in the corpora below) |
+Without a plant every one of these is green, above and below.
+
+**Pages.** In the plant build, `CFT_HIP_PAGE=32`: hip-test buffers green (84) and device-test -b green (4,824) on both GPUs. `CFT_HIP_PAGE=65536`: hip-test buffers green on both. device-test -b at 65,536 on the RX 7600 failed only "resident windows stay resident", at all four formats ("the carved buffer's stream was refilled 2 times on its 2nd and 3rd runs - a write beside a window staled it") - the measurement the 256-byte page rests on.
+
+**The corpora with every operand resident** (`hip-corpus --resident`: every array in a buffer from cft_alloc, published before its call and read back after it; the program corpus makes fresh buffers a case). All 15 of GPU-A's corpora but stream-fp256 gave GPU-A's sha256 and exit 0, on both GPUs (the RX 7600 15:10:02 to 15:10:33, the 5060 Ti 15:33 to 15:36): conf fp32 dd3d83be..., fp64 3a8a9b2c..., fp128 fcc92da3..., fp256 da932116...; GPU-A's routines-fp32 a7ff1aef...; routines 0a369fe3..., 4eb03cc3..., 30b7a930..., dd159120...; fuzz 735f6e86..., 347c9957..., e8f855b4..., 9dec942c...; systems 581b9c30...; bench 6cba53d3.... Their counters show the residency: conf-fp32's pass 1 (18,435 single calls at windows of four buffers) 72,588 resident bindings and 1,172 staged; conf-fp256 64,265 and 9,195 (a page is 8 fp256 elements, so a fresh page's first call stages).
+
+**Rates**: through the public API, median of 10 after one warm-up; every result equal to the software handle's; scratch bench rate2.c, not committed. Staged is host arrays in and out. Resident is a, b and c published once in buffers and d a buffer: the call alone, its results left on the device, plus the call followed by `cft_buffer_from_device(d)`.
+- RX 7600 (15:10:44 to 15:11:20, a quiet machine: load 0.7 and the GPU 2% busy before):
+
+| | staged | resident | resident with a read-back each call |
+|---|---|---|---|
+| fp256 FMA, n 4,194,304 | 27.2 M/s | 132.1 M/s (4.9x) | 69.1 M/s |
+| fp256 FMA, n 1,048,576 | 26.8 | 128.7 | 68.5 |
+| fp64 FMA, n 4,194,304 | 112.0 | 627.8 | 302.6 |
+| fp32 FMA, n 4,194,304 | 212.6 | 933.9 | 513.0 |
+| fp256 SUM, n 4,194,304 | 54.6 | 92.1 | - |
+
+  The first resident call, which uploads the operands, took 0.139 s at fp256 and n 4,194,304. The longest resident call after it took 0.051 s.
+- RTX 5060 Ti (15:36 to 15:37, measured UNDER THIS DESKTOP'S LOAD, other parcels' work on it; Part 1's staged fp256 there was 25 to 27 M/s): fp256 FMA, n 4,194,304: staged 16.4 M/s, resident 66.5 M/s (4.1x), with a read-back each call 32.8 M/s; SUM staged 54.7, resident 126.4.
+- A program corpus, systems.bin (8 integrators, 4,608 lanes, one run a case), on the RX 7600, three times each way: 1.5 s staged and 1.5 s resident. A single run a case is compute-bound and uploads its operands once either way, so residency neither helps nor hurts it.
+
+**9P stalls in cft-gpu**, recorded apart from the runs' times (every run watched once a second): 122 s of the 32 runs' 245.6 s were seen in state D on p9_client_rpc, 83 s of them in four runs (14 to 30 s each: the first three, and bench.bin's) while this desktop was busy. No run was stopped; none reached its limit.
+
+**GPU time** (the test binaries' own run times, from their logs): RX 7600 265 s over 49 runs; RTX 5060 Ti 246 s over 32 runs, of which 122 s were 9P stalls. About 8.5 minutes, against the lead's 30. Every run was under 60 s. The RTX 4070 was not used.
+
+**Size**, by numstat over 38a4aadf..afa6c023: 1,763 changed lines (1,555 added, 208 removed). backend_hip.cpp 961, hip_test.c 474, hip_corpus.c 266, device.c 17, backend.h 9, device_test.c 6, and the Arduino copy with vendor.json 30.
+
+**Not run, and known limits.**
+1. The page is 256 bytes (above). A window that shares a page with something the library writes on the host refills that page at its next binding: correct, and at most 256 bytes a page, but not free. A buffer carved at 256-byte boundaries keeps every window resident.
+2. An input that overlaps an output of the same call is staged, so it costs a transfer that a card's per-role copies do not. Two exceptions are resident: cft_run's d == a, and a program's scratch-in == scratch-out. An output shifted over its own input gets the snapshot rule on a GPU, where the software loop's sequential order differs from element 1 on. That case is outside cft.h's aliasing rule, which allows the identical window alone.
+3. A resident run keeps the staged run's chunks (a launch never longer than the staged one), so its per-launch work is the same; whether bigger launches would gain more is round 4's.
+4. Not exercised, because no device ran out: a buffer the device has no memory for (staged, with the hipMalloc failure in staged_why); an upload or a read-back that fails for real (the instrument plants the first; the second poisons the handle by the same path as every failed copy).
+5. device-test's XRT-only legs are NOT TESTED on a GPU by name: a failed fill's retry (hip-test's buffers leg holds the GPU's to the same sequence), the planted tile refusals S5 and S7, and the declined outputs.
+6. The program corpora's --resident runs make fresh buffers for each case, so their bindings are mostly first-use uploads: they check correctness, not economy. The rates above are the economy.
+7. Not run here: the U50, the box's gate, and G1C's gates.

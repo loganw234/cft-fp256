@@ -2238,9 +2238,9 @@ are in docs/REMOTE.md.
 
 ## The GPU backend: a HIP device as a libcft device (2026-11-11)
 
-The GPU backend's round 1, its first part (docs/VALIDATION.md, G1B1's
-entry, has the measurements; docs/studies/GPU-A-hip.md is the study it
-rests on).
+The GPU backend's round 1, its two parts (docs/VALIDATION.md, G1B1's and
+G1B2's entries, has the measurements; docs/studies/GPU-A-hip.md is the
+study it rests on).
 
 ```c
 cft_open("hip:0", 0, &dev);    /* the first GPU the HIP runtime sees */
@@ -2285,45 +2285,101 @@ software executor's capacities with its features less two -
 name**: an index table (device.c, on the clear bit, and `cft_run_ex` with
 a table likewise), augmentedAddition's two control codes (the loader, on
 the clear bit; `augmented.c` does not compile for an NVIDIA device as it
-is, so the unit is built without it), a scratch depth other than the
-software handle's 256 (`cft_open_ex`, as for every device), and
-`cft_get_image_id` - a GPU loads no device image, and what determines its
-bits is this library (`cft_build_id()`) and the device's compiler.
-Augmented addition, the tables and the card's 2,048-slot depth are round
-2's.
+is, so the unit is built without it), any non-zero scratch depth,
+explicit 256 included (`cft_open_ex`: a GPU has no image to fix its
+depth, so the backend fixes it at the software executor's 256 slots, and
+the depth argument is a software handle's to choose - the sentence says
+so; `scratch_depth` 0 opens it), and `cft_get_image_id` - a GPU loads no
+device image, and what determines its bits is this library
+(`cft_build_id()`) and the device's compiler. Augmented addition, the
+tables and the card's 2,048-slot depth are round 2's.
 
-**Buffers, and the authority rule.** Not in this part: `buffers_resident`
-is 0, `cft_alloc` gives host memory as on the software backend, the sync
-calls are no-ops, and every operand of every call is STAGED - copied into
-the handle's own pinned block, uploaded with one copy, and copied back
-with one more. The block is an eighth of the device's free memory at
-open, at most 64 MiB, and a run longer than it holds goes in chunks (an
-element and a lane depend on their own index alone, so a chunk cannot
-reach an answer); a program's chunk starts at a multiple of 8 lanes,
-doubles after a launch under 62 ms and halves after one over 250 ms, so
-no launch runs for seconds. An output a lane mask leaves to the caller -
-deposits, counts, lane bytes, scratch-out - is uploaded first, so the
-masked lanes come back as the caller left them. A scalar operand is read
-once a call, as on a tile: a `d` that aliases it does not feed a later
-element the value an earlier one wrote, where the software loop re-reads
-element 0 (both measured by hip-test). Device-resident buffers under
-cft.h's authority rule are the round's second part.
+**Staging.** An operand that is not a resident buffer's - and every
+operand of the part before buffers - is STAGED: copied into the handle's
+own pinned block, uploaded with one copy, and copied back with one more.
+The block is an eighth of the device's free memory at open, at most 64
+MiB, and a run longer than it holds goes in chunks (an element and a lane
+depend on their own index alone, so a chunk cannot reach an answer); a
+program's chunk starts at a multiple of 8 lanes, doubles after a launch
+under 62 ms and halves after one over 250 ms, so no launch runs for
+seconds - and a resident run keeps the staged run's chunks, so no launch
+is longer than it. An output a lane mask leaves to the caller - deposits,
+counts, lane bytes, scratch-out - is uploaded first, so the masked lanes
+come back as the caller left them. A scalar operand is read once a call,
+as on a tile: a `d` that aliases it does not feed a later element the
+value an earlier one wrote, where the software loop re-reads element 0
+(both measured by hip-test).
+
+**Buffers, and the authority rule.** `buffers_resident` is 1 (the
+round's second part, G1B2). A `cft_alloc`'d buffer gets ONE device
+allocation, the size of its mirror and at the mirror's own offsets, made
+the first time a call binds it and never resized: a GPU has one memory,
+so where the XRT backend keeps a copy per tile and role, this keeps one.
+Its state is kept a PAGE at a time, 256 bytes (eight fp256 elements):
+STALE, the mirror is the truth; FRESH, the two agree; DIRTY, a run wrote
+it and the device is the truth. A binding uploads the STALE pages its call
+reads - an input's whole window, an output's whole window under a lane
+mask, an unmasked output's edge pages alone (the run writes the rest) -
+each contiguous run of them in one copy, marked FRESH only once that copy
+has completed; a good run leaves its outputs' pages DIRTY. Then cft.h's
+rule, page by page: `cft_buffer_from_device` brings the DIRTY pages home
+(a no-op when there are none); `cft_buffer_to_device` moves nothing and
+stales every page, and is REFUSED, `CFT_ERR_INVALID_ARGUMENT` with the
+XRT backend's sentence and nothing changed, while any page is DIRTY; a
+write the library makes on the host brings home the DIRTY pages it
+touches, whole, and stales them, and after it a DIRTY page it only partly
+covered comes home around it; a run that fails once a launch may have
+started leaves every resident buffer it writes LOST - reading it back, or
+any call that reads or writes it, is `CFT_ERR_INTERNAL` with a sentence
+saying so, `cft_buffer_get_info`'s `staged_why` begins "LOST:", and a
+publish clears it. A binding that moved bytes counts as staged in
+`cft_buffer_get_info`, with the reason; one that moved none, as resident.
+The page is 256 bytes, not a larger one, because of device-test's
+"resident windows stay resident": over a buffer carved [a | counts |
+deposits] with n = 64, a 64 KiB page puts the counts, which the library
+writes on the host every run, on a's page, so a refills every run - which
+the check counts as a failure. A coarser page can make an unneeded refill
+and never a missed one, so the size is a residency-economy choice, not a
+correctness one; its cost is one byte of state for every 256 bytes of a
+bound buffer, with a run of STALE pages still one copy. (`CFT_HIP_PAGE`,
+in a plant build, sets 32 bytes to 1 MiB; the buffer legs pass at 32 and
+65,536.)
+
+**Two roles, one copy.** One allocation means two roles of one call can
+share bytes on the device, which the XRT backend's per-role copies never
+do, and lanes run in no fixed order. So an input that overlaps an output
+of the same call in the same buffer is staged - read from the mirror,
+which device.c brings home before any input is read - except where each
+lane reads its own input before it writes its own output and no other
+lane touches either: `cft_run`'s `d == a` (the same window), and a
+program's scratch-in identical to its scratch-out (an integrator's state
+carried in place). A program's deposits are zero-filled before a lane
+reads its inputs, so no input may share them. Two outputs that overlap -
+a program's deposits and scratch-out - are both staged, written into the
+mirror in turn as plain host pointers are. No lane reads what another
+writes, so no answer depends on the order lanes run in. A buffer the
+device has no memory for is staged too, with the allocation's failure in
+`staged_why`.
 
 **Failure.** A device allocation refused before anything ran is
 `CFT_ERR_OUT_OF_MEMORY`, named, and the handle stays usable; so is a
 launch the runtime refuses at the launch for its local memory, with the
-bytes a thread and the resident threads in the sentence. Any other HIP
-failure once a launch may have started poisons the handle: every later
-call is `CFT_ERR_INTERNAL` with "close it and open it again" in
-`cft_last_error()`, the remote and XRT backends' discipline.
+bytes a thread and the resident threads in the sentence; and so is an
+upload at a binding that fails, which happens before any launch of the
+call: the call is `CFT_ERR_INTERNAL` with the failure named, nothing ran,
+and the pages stay STALE, so the next binding uploads them again. Any
+other HIP failure once a launch may have started poisons the handle:
+every later call is `CFT_ERR_INTERNAL` with "close it and open it again"
+in `cft_last_error()`, the remote and XRT backends' discipline - and the
+resident buffers that call wrote are LOST, as above.
 
 **Which GPU ran.** `cft_caps` says `hip`, not which device. Set
 `CFT_HIP_INFO=1` and each open prints one line to stderr: the device's
 name and architecture, its multiprocessors, PCI bus and memory, the HIP
 platform, runtime and driver versions, how many devices are visible (and
 `CUDA_VISIBLE_DEVICES` or `HIP_VISIBLE_DEVICES` when set), and this
-library's `HIP_ARCH`, stage size and kernel resources. A malformed value
-is refused at open by name.
+library's `HIP_ARCH`, stage size, page size and kernel resources. A
+malformed value is refused at open by name.
 
 **One library, one device kind.** The GPU backend implements the XRT
 backend's seam under its own prefix (backend.h renames the `cftx_`
@@ -2338,11 +2394,15 @@ How it is held to the contract: `host/tests/hip_test.c` (the open's
 grammar and caps, the reduction tree against the software handle at every
 n from 1 to 130 and every power of two with its neighbours to 2^18, every
 format, attribute and kind of data, the segmented and composed forms,
-aliasing, two handles, the plants); `host/tests/hip_corpus.c` (study
-GPU-A's corpora through the public API, at GPU-A's and G1A's sums);
-`device-test hip:N`, which takes a GPU as it takes a card; and the plants,
-compiled in only by `HIP_PLANTS=1` and chosen by `CFT_HIP_PLANT`, each of
-which turns one of those red.
+aliasing, two handles, the resident buffers' scenarios, the plants);
+`host/tests/hip_corpus.c` (study GPU-A's corpora through the public API,
+at GPU-A's and G1A's sums, staged or with every operand in a buffer from
+`cft_alloc`, `--resident`); `device-test hip:N` and `device-test hip:N
+-b`, which take a GPU as they take a card; and the plants, compiled in
+only by `HIP_PLANTS=1` and chosen by `CFT_HIP_PLANT` - among them
+`stale-publish`, `no-readback` and `fresh-early` for the buffers, with
+`CFT_HIP_UPLOAD=fail-fill` failing an upload on purpose - each of which
+turns one of those red.
 
 ## The device's on-chip capacities, published (2026-09-07)
 
