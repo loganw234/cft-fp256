@@ -149,13 +149,13 @@ FMAs at binary64, 128 and 256, a square root 18, 20 and 28):
 
 | format, epsilon, passes | form | ADD | MUL | FMA | DIV | SQRT | FMA-equivalents |
 |---|---|---|---|---|---|---|---|
-| binary64, 1e-9, 3.03 | FMA | 3,890 | 2,728 | 641 | 184 | 157 | 11,636 |
-| binary64, 1e-9, 3.03 | REBOUND's | 4,398 | 3,495 | 133 | 992 | 157 | 23,529 |
-| binary128, 1e-9, 8.01 | FMA | 9,438 | 6,497 | 1,688 | 469 | 401 | 30,042 |
-| binary128, 1e-12, 5.66 | FMA | 6,823 | 4,720 | 1,195 | 335 | 286 | 21,557 |
-| binary256, 1e-9, 19.98 | FMA | 22,761 | 15,546 | 4,202 | 1,151 | 988 | 98,207 |
-| binary256, 1e-16, 11.04 | FMA | 12,805 | 8,783 | 2,323 | 641 | 550 | 54,897 |
-| binary256, 1e-16, 11.04 | REBOUND's | 14,659 | 11,737 | 469 | 3,467 | 550 | 130,140 |
+| binary64, 1e-9, 3.025 | FMA | 3,890 | 2,728 | 641 | 184 | 157 | 11,636 |
+| binary64, 1e-9, 3.025 | REBOUND's | 4,398 | 3,495 | 133 | 992 | 157 | 23,529 |
+| binary128, 1e-9, 8.010 | FMA | 9,438 | 6,497 | 1,688 | 469 | 401 | 30,042 |
+| binary128, 1e-12, 5.660 | FMA | 6,823 | 4,720 | 1,195 | 335 | 286 | 21,557 |
+| binary256, 1e-9, 19.980 | FMA | 22,761 | 15,546 | 4,202 | 1,151 | 988 | 98,207 |
+| binary256, 1e-16, 11.035 | FMA | 12,805 | 8,783 | 2,323 | 641 | 550 | 54,897 |
+| binary256, 1e-16, 11.035 | REBOUND's | 14,659 | 11,737 | 469 | 3,467 | 550 | 130,140 |
 
 A substep-pass costs 496, 516 and 692 FMA-equivalents in the FMA form
 (binary64, 128, 256) and 1,029, 1,146 and 1,651 in REBOUND's: **REBOUND's form
@@ -178,16 +178,18 @@ that much faster, but on FMA, ADD and MUL alone it is **x1.54 to x1.67**.
 
 **MEASURED here:** one massless particle on a circular orbit about a unit mass
 (G = M = r = 1, period 2 pi), `ias15_cft`, REBOUND's form, PRS23, `--max-iter 60`,
-200 steps; steps an orbit from the last 100 steps (the step is constant on a
-circular orbit; the two halves agree to 1 %):
+200 steps; steps an orbit as the mean of the two 100-step halves (the step is
+constant on a circular orbit; the halves differ by at most 1.7 %, at 1e-9: 36.5
+and 35.9, and the first half holds the start from the first step of 0.01,
+BELIEVED the cause), passes a step attempt as each run's trailer gives them:
 
 | epsilon | steps an orbit, any format | passes, binary64 | binary128 | binary256 |
 |---|---|---|---|---|
-| 1e-9 (REBOUND's default) | 36.2 | 3.03 | 8.01 | 19.98 |
-| 1e-12 | 96.9 | | 5.66 | 15.02 |
-| 1e-16 | 359.7 | | 4.04 | 11.04 |
-| 1e-20 | 1,330 | | | 8.08 |
-| 1e-24 | 4,987 | | | 7.08 (one rejected step) |
+| 1e-9 (REBOUND's default) | 36.2 | 3.025 | 8.010 | 19.980 |
+| 1e-12 | 96.9 | | 5.660 | 15.015 |
+| 1e-16 | 359.7 | | 4.035 | 11.035 |
+| 1e-20 | 1,330 | | | 8.080 |
+| 1e-24 | 4,987 | | | 7.075 (one rejected step) |
 
 The FMA form gives the same steps and passes (5.645 at binary128 1e-12, 11.035
 at binary256 1e-16). The step is set by epsilon alone, as eps^(-1/7) (x2.68 for
@@ -223,7 +225,7 @@ binary128's round-off is measured by difference, on the same steps.
 |---|---|---|
 | GM | 37.931 x 10^6 km^3 s^-2 | [NASA Saturn fact sheet](https://nssdc.gsfc.nasa.gov/planetary/factsheet/saturnfact.html) |
 | equatorial radius (1 bar) | 60,268 km | the same |
-| J2 | 16,298 x 10^-6 (fact sheet, reference radius not stated); Cassini: 16,290.573 +- 0.028 x 10^-6 | the same; Iess et al. 2019, in [Fortney et al., arXiv:2304.09215](https://arxiv.org/abs/2304.09215), Table IV.1 |
+| J2 | 16,298 x 10^-6 (fact sheet, reference radius not stated); Cassini: 16,290.573 +- 0.028 x 10^-6 | the same; Iess et al. 2019, in [Fortney et al., arXiv:2304.09215](https://arxiv.org/abs/2304.09215), Table 4.1 |
 | J4 | -935.314 +- 0.037 x 10^-6 (Cassini; the table states no reference radius, BELIEVED 60,330 km) | the same table |
 
 The rings, km from Saturn's centre ([NASA ring fact sheet](https://nssdc.gsfc.nasa.gov/planetary/factsheet/satringfact.html)):
@@ -280,9 +282,9 @@ less at 10^5. Close encounters, which shorten steps, are in none of it.
 ### (a) A test-particle ring: Saturn with J2 and J4, six moons, N massless particles
 
 Three parallel shapes (the moons and Saturn are integrated in every system):
-- **a1, one lane a system** (ENSEMBLE.md's ensemble): a lane carries Saturn, six moons and one particle, so each lane does **5.2 to 5.6 times** a lone particle's work (COMPUTED: eight bodies' corrector, 28 pairs). Each lane has its own step and its own passes; inside a wave the passes diverge, and the lanes that converged ride along masked. MEASURED here on eight members spread from r = 1.0 to 1.7: pc_lane_efficiency 0.986 at binary64, 0.93 at binary128 (READ VALIDATION.md:655-657: 0.687 to 0.996 on the gate's families). Steps diverge too: every member takes the same steps per own orbit (36 or 97, MEASURED), so a member at 1.7 needs 2.2 times fewer steps per unit time than one at 1.0 (COMPUTED); lanes sorted by radius keep a wave's members within a narrow annulus.
+- **a1, one lane a system** (ENSEMBLE.md's ensemble): a lane carries Saturn, six moons and one particle, so each lane does **5.2 to 5.6 times** a lone particle's work (COMPUTED: eight bodies' corrector, 28 pairs). Each lane has its own step and its own passes; inside a wave the passes diverge, and the lanes that converged ride along masked. MEASURED here on eight members spread from r = 1.0 to 1.7: pc_lane_efficiency 0.986 at binary64 (epsilon 1e-9) and 0.93 at binary128 (epsilon 1e-12); the table below applies 0.93 to binary128 at 1e-9 and to binary256, ASSUMED there (READ VALIDATION.md:655-657: 0.687 to 0.996 on the gate's families). Steps diverge too: every member takes the same steps per own orbit (35.9 at binary64 and 96.3 at binary128 in the runs' second halves, MEASURED), so a member at 1.7 needs 2.2 times fewer steps per unit time than one at 1.0 (COMPUTED); lanes sorted by radius keep a wave's members within a narrow annulus.
 - **a2, one wave a system:** 57 particles share a step with Saturn and the moons in seven lanes; 57/64 of the lanes carry particles. No divergence inside a wave: one step, one pass count, the reductions (the corrector's maxima, the step's minimum) across 64 lanes in registers.
-- **a3, one system:** all N share one step and one exit test. MEASURED here: one system of 8, 16 and 32 particles takes the innermost particle's step (35.9 steps an orbit at r = 1.0, as one particle alone) at 3.03 to 3.09 passes, so IAS15's global error estimate (max|tmp| over max|at|) did not add passes at these N. But every particle takes the shortest timescale's step: over the C ring to the F ring, uniform in radius, 0.617 of the steps are useful (COMPUTED), and one particle near Pan sets every particle's step (BELIEVED; not run). The maxima are device-wide reductions, a kernel boundary a pass.
+- **a3, one system:** all N share one step and one exit test. MEASURED here: one system of 8, 16 and 32 particles takes the innermost particle's step (35.9 steps an orbit at r = 1.0 in the second half, as one particle alone) at 3.025 to 3.090 passes, so IAS15's global error estimate (max|tmp| over max|at|) did not add passes at these N. But every particle takes the shortest timescale's step: over the C ring to the F ring, uniform in radius, 0.617 of the steps are useful (COMPUTED), and one particle near Pan sets every particle's step (BELIEVED; not run). The maxima are device-wide reductions, a kernel boundary a pass.
 
 The three measures and the time for one orbit of every particle (COMPUTED;
 generic and specialised kept apart):
@@ -296,8 +298,8 @@ generic and specialised kept apart):
 | a2 | binary128, 1e-12 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 5.2 GB, 2.5 % | 0.24 % / 3.0 % | 16 to 38 min | 77 s to 2 min |
 | a2 | binary256, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 8.0 GB, 3.9 % | 0.18 % / 2.3 % | 55 min to 2.2 h | 4 to 8 min |
 | a2 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 8.0 GB, 3.9 % | 0.18 % / 2.2 % | 5.1 to 12.3 h | 25 to 46 min |
-| a1 | binary128, 1e-9 | 10^6 | 1.00 / 1.00 | 0.930; x5.38 | 22.3 GB, 10.8 % | 0.24 % / 3.1 % | 43 min to 1.7 h | 3 to 6 min |
-| a1 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 0.930 (ASSUMED as binary128's); x5.24 | 42.3 GB, 20.5 % | 0.18 % / 2.2 % | 26 h to 2.6 d | 2.1 to 3.9 h |
+| a1 | binary128, 1e-9 | 10^6 | 1.00 / 1.00 | 0.930 (MEASURED at 1e-12, ASSUMED at 1e-9); x5.38 | 22.3 GB, 10.8 % | 0.24 % / 3.1 % | 43 min to 1.7 h | 3 to 6 min |
+| a1 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 0.930 (ASSUMED: binary128's at 1e-12); x5.24 | 42.3 GB, 20.5 % | 0.18 % / 2.2 % | 26 h to 2.6 d | 2.1 to 3.9 h |
 
 The full table, every shape at every N and setting, is the script's output.
 HBM held includes 2.37 GB of the generic kernel's scratch for 466,944 lanes;

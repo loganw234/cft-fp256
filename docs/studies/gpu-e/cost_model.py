@@ -72,7 +72,7 @@ RING = {}   # filled below from the capture's numbers
 # --- Saturn (READ; the study's section 4 gives the URLs) ---
 GM = 37.931e6            # km^3 s^-2, NASA Saturn fact sheet
 R_EQ = 60268.0           # km, same
-J2, J4 = 16290.573e-6, -935.314e-6   # Iess et al. 2019 via arXiv:2304.09215, Table IV.1
+J2, J4 = 16290.573e-6, -935.314e-6   # Iess et al. 2019 via arXiv:2304.09215, Table 4.1
 MOONS = {"Mimas": (2.50349, 186000.), "Pan": (0.00028, 133600.), "Prometheus": (0.01071, 139400.),
          "Pandora": (0.00926, 141700.), "Epimetheus": (0.03514, 151400.), "Janus": (0.12662, 151500.)}  # GM km^3/s^2, a km: JPL SSD
 
@@ -132,7 +132,7 @@ def fmt_s(x):
 RING = {("fp64", 1e-9): (36.2, 3.025), ("fp128", 1e-9): (36.2, 8.010), ("fp128", 1e-12): (96.9, 5.660),
         ("fp128", 1e-16): (359.7, 4.035), ("fp256", 1e-9): (36.2, 19.980), ("fp256", 1e-12): (96.9, 15.015),
         ("fp256", 1e-16): (359.7, 11.035), ("fp256", 1e-20): (1330.4, 8.080), ("fp256", 1e-24): (4986.9, 7.075)}
-LANE_EFF = {"fp64": 0.986, "fp128": 0.93, "fp256": 0.93}  # MEASURED fp64, fp128 (E = 8, r 1.0-1.7); fp256 ASSUMED
+LANE_EFF = {"fp64": 0.986, "fp128": 0.93, "fp256": 0.93}  # MEASURED fp64 at 1e-9, fp128 at 1e-12 (E = 8, r 1.0-1.7); ASSUMED for fp128 at 1e-9 and fp256
 K = 6                    # moons: Mimas, Pan, Prometheus, Pandora, Epimetheus, Janus
 CASES = [("fp64", 1e-9), ("fp128", 1e-9), ("fp128", 1e-12), ("fp256", 1e-9), ("fp256", 1e-16)]
 W_LO, W_HI = 5, 6        # waves a SIMD: GPU-A's gfx942 kernels (READ); an IAS15 kernel's is not known
@@ -176,7 +176,7 @@ def main():
         for form in ("fma", "rebound"):
             ops = tp_step_ops(form, p, K + 1)
             sub = (cost(tp_step_ops(form, p + 1, K + 1), f) - cost(ops, f)) / 7
-            print("   %-6s %-7s %.0e %6.2f | %-6.0f %-6.0f %-5.0f %-5.0f %-4.0f | %-13.0f | %.0f" % (
+            print("   %-6s %-7s %.0e %6.3f | %-6.0f %-6.0f %-5.0f %-5.0f %-4.0f | %-13.0f | %.0f" % (
                 f, form, eps, p, ops.get("add", 0), ops.get("mul", 0), ops.get("fma", 0), ops.get("div", 0),
                 ops.get("sqrt", 0), cost(ops, f), sub))
     force = add(PAIR_TP, J2J4, scale=[K + 1, 1])

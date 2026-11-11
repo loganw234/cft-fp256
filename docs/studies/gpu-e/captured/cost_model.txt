@@ -1,4 +1,4 @@
-# GPU-E, captured 2026-11-11 11:55:28: python -B docs/studies/gpu-e/cost_model.py on this desktop (no inputs; the
+# GPU-E, captured 2026-11-11 13:22:48: python -B docs/studies/gpu-e/cost_model.py on this desktop (no inputs; the
 # script is deterministic). Trimmed: sections 1, 2, 7 and 6 whole; of 5a the a2 rows at N = 1e6;
 # of 5b the binary128 rows; 5c, 4 and the a1/a3 rows omitted (the study's tables carry them).
 == 1. the device (COMPUTED from READ): clock 2.100 GHz, 32-bit issue 4.085e+13 lane-instructions/s
@@ -14,18 +14,18 @@
 
 == 2. one test particle, 7 partners (the planet and 6 moons) and J2+J4: ops a step attempt
    format form    eps     passes | add    mul    fma   div   sqrt | FMA-eq a step | a substep-pass
-   fp64   fma     1e-09   3.02 | 3890   2728   641   184   157  | 11636         | 496
-   fp64   rebound 1e-09   3.02 | 4398   3495   133   992   157  | 23529         | 1029
-   fp128  fma     1e-09   8.01 | 9438   6497   1688  469   401  | 30042         | 516
-   fp128  rebound 1e-09   8.01 | 10784  8624   342   2532  401  | 66119         | 1146
-   fp128  fma     1e-12   5.66 | 6823   4720   1195  335   286  | 21557         | 516
-   fp128  rebound 1e-12   5.66 | 7773   6206   244   1806  286  | 47263         | 1146
-   fp256  fma     1e-09  19.98 | 22761  15546  4202  1151  988  | 98207         | 692
-   fp256  rebound 1e-09  19.98 | 26117  20941  845   6231  988  | 233537        | 1651
-   fp256  fma     1e-16  11.04 | 12805  8783   2323  641   550  | 54897         | 692
-   fp256  rebound 1e-16  11.04 | 14659  11737  469   3467  550  | 130140        | 1651
-   fp256  fma     1e-24   7.08 | 8397   5790   1492  415   356  | 35723         | 692
-   fp256  rebound 1e-24   7.08 | 9586   7662   303   2243  356  | 84366         | 1651
+   fp64   fma     1e-09  3.025 | 3890   2728   641   184   157  | 11636         | 496
+   fp64   rebound 1e-09  3.025 | 4398   3495   133   992   157  | 23529         | 1029
+   fp128  fma     1e-09  8.010 | 9438   6497   1688  469   401  | 30042         | 516
+   fp128  rebound 1e-09  8.010 | 10784  8624   342   2532  401  | 66119         | 1146
+   fp128  fma     1e-12  5.660 | 6823   4720   1195  335   286  | 21557         | 516
+   fp128  rebound 1e-12  5.660 | 7773   6206   244   1806  286  | 47263         | 1146
+   fp256  fma     1e-09 19.980 | 22761  15546  4202  1151  988  | 98207         | 692
+   fp256  rebound 1e-09 19.980 | 26117  20941  845   6231  988  | 233537        | 1651
+   fp256  fma     1e-16 11.035 | 12805  8783   2323  641   550  | 54897         | 692
+   fp256  rebound 1e-16 11.035 | 14659  11737  469   3467  550  | 130140        | 1651
+   fp256  fma     1e-24  7.075 | 8397   5790   1492  415   356  | 35723         | 692
+   fp256  rebound 1e-24  7.075 | 9586   7662   303   2243  356  | 84366         | 1651
    fp256 FMA form: the force is 79% of a substep-pass; div and sqrt are 74% of the force
    specialised x6.7 on every op gains x6.7; on FMA/ADD/MUL only, div and sqrt generic: x1.54
    specialised x30.0 on every op gains x30.0; on FMA/ADD/MUL only, div and sqrt generic: x1.67
