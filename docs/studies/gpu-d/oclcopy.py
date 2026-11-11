@@ -25,9 +25,11 @@ match, stops the build here rather than slipping into the text:
   O4  cft_sf_reduce (the reduction tree) between #if 0 and #endif, on the
       blank lines around it: it recurses, OpenCL C has no recursion, and
       PoCL refused the whole program for it at link time. NOT syntax only:
-      it takes a function out. Nothing in the text calls it (its only calls
-      are its own), which derive() checks: outside the excluded lines the
-      name appears once, as the prototype in softfloat.h.
+      it takes a function out. Nothing in the text uses it (its only calls
+      are its own), which derive() checks: in the code outside the excluded
+      lines (comments and strings blanked) the identifier appears once, as
+      the prototype in softfloat.h, so a call in any spelling or a use by
+      address is refused.
   I   each #include line made a comment: the files are joined in include
       order instead (each keeps its guard), and <stdint.h>, <stddef.h> and
       <limits.h> are the shim's typedefs or OpenCL C's own size_t, INT_MAX.
@@ -37,9 +39,17 @@ byte for byte at every build (with CFT_HD empty it is OpenCL C), so it
 cannot drift from GPU-A's. The kernel file around it is this study's.
 Each part is preceded by #line, so a compiler names the original file and
 line. --check derives the whole text again and compares byte for byte.
+
+Recursion is refused by a scan of the text, because no compiler here checks
+it whole: PoCL flagged cft_sf_reduce but builds other recursive functions,
+and Apple's and AMD's compilers built the text with cft_sf_reduce in it.
+no_recursion() takes every definition (a name, its parameter list, then a
+brace), the defined names its body calls, and searches that graph for a
+cycle, at every build.
 """
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -109,14 +119,59 @@ def edit_files(files):
     return out, counts
 
 
-def no_caller(text):
-    """O4's function must have no caller left: outside its #if 0 the name
-    appears once in the whole text, as softfloat.h's prototype."""
-    lo, hi = text.index(b"#if 0 /* O4"), text.index(b"#endif /* O4 */")
-    n = (text[:lo] + text[hi:]).count(b"cft_sf_reduce(")
+def code_only(text):
+    """What a compiler sees of the text, for the two scans: O4's excluded
+    lines removed, comments and string and character literals blanked."""
+    if b"#if 0 /* O4" in text:
+        lo, hi = text.index(b"#if 0 /* O4"), text.index(b"#endif /* O4 */")
+        text = text[:lo] + text[hi:]
+    t = text.decode("ascii")
+    return re.sub(r"/\*.*?\*/|//[^\n]*|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'",
+                  lambda m: re.sub(r"[^\n]", " ", m.group(0)), t, flags=re.S)
+
+
+def no_caller(code):
+    """O4's function must have no use left: the identifier appears once in
+    the code, as softfloat.h's prototype (a call in any spelling counts)."""
+    n = len(re.findall(r"\bcft_sf_reduce\b", code))
     if n != 1:
-        raise ValueError(f"O4: cft_sf_reduce( appears {n} times outside the excluded "
-                         f"lines, not once (a caller was added?)")
+        raise ValueError(f"O4: cft_sf_reduce appears {n} times in the code outside the "
+                         f"excluded lines, not once (a use was added?)")
+
+
+KEYWORDS = {"if", "for", "while", "switch", "return", "sizeof"}
+
+
+def no_recursion(code):
+    """No function calls itself, directly or through others. Every definition
+    is a name, a parameter list and a brace; its edges are the defined names
+    its body calls; a cycle is refused by name. Returns (functions, calls)."""
+    defs = {}
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\([^;{}()]*\)\s*\{", code):
+        if m.group(1) in KEYWORDS:
+            continue
+        depth, j = 0, m.end() - 1
+        for j in range(m.end() - 1, len(code)):
+            depth += {"{": 1, "}": -1}.get(code[j], 0)
+            if depth == 0:
+                break
+        defs[m.group(1)] = code[m.end() - 1:j + 1]
+    calls = {f: {c for c in re.findall(r"\b([A-Za-z_]\w*)\s*\(", body) if c in defs}
+             for f, body in defs.items()}
+    state = {}
+
+    def visit(f, path):
+        state[f] = 1
+        for g in sorted(calls[f]):
+            if state.get(g) == 1:
+                raise ValueError("recursion in the text: " + " -> ".join(path + [f, g]))
+            if not state.get(g):
+                visit(g, path + [f])
+        state[f] = 2
+    for f in sorted(defs):
+        if not state.get(f):
+            visit(f, [])
+    return len(defs), sum(len(v) for v in calls.values())
 
 
 def lane(hip):
@@ -147,7 +202,9 @@ def derive(files, hip, kernel):
     parts.append(b'#line %d "cft_fma.hip"\n' % first + lane_text)
     parts.append(b'#line 1 "fma_kernel.cl"\n' + kernel)
     text = b"".join(parts)
-    no_caller(text)
+    code = code_only(text)
+    no_caller(code)
+    no_recursion(code)
     return text, counts
 
 
@@ -187,6 +244,18 @@ def selftest(files, hip, kernel):
             ("hip", hip.replace(b"rnd = CFT_SF_RNE;", b"rnd = CFT_SF_RTZ;", 1)),
         "a caller of the excluded cft_sf_reduce in the kernel (O4's check)":
             ("kernel", kernel + b"int x(void) { return cft_sf_reduce(0, 0, 0, 0, 0, 0, 0, 0, 0, 0); }\n"),
+        "the same caller written `cft_sf_reduce (`, spaced":
+            ("kernel", kernel + b"int x(void) { return cft_sf_reduce (0, 0, 0, 0, 0, 0, 0, 0, 0, 0); }\n"),
+        "cft_sf_reduce used by address":
+            ("kernel", kernel + b"void x(void) { (void)&cft_sf_reduce; }\n"),
+        "a function in the kernel that calls itself (the call-graph scan)":
+            ("kernel", kernel + b"static int r1(int k) { return k ? r1(k - 1) : 0; }\n"),
+        "a static mutual pair (the call-graph scan)":
+            ("kernel", kernel + b"static int r3(int k);\nstatic int r2(int k) { return k ? r3(k - 1) : 0; }\n"
+                                b"static int r3(int k) { return k ? r2(k - 1) : 0; }\n"),
+        "the text without O4, cft_sf_reduce back in (the call-graph scan alone)":
+            ("scan", good.replace(b"#if 0 /* O4: recursive, and OpenCL C has no recursion; nothing "
+                                  b"calls it */\n", b"\n", 1).replace(b"#endif /* O4 */\n", b"\n", 1)),
         "one byte of the written text changed":
             ("text", good.replace(b"half_ = 1;", b"half_ = 2;", 1)),
     }
@@ -203,6 +272,9 @@ def selftest(files, hip, kernel):
                 check(good, derive(files, val, kernel)[0])
             elif kind == "kernel":
                 check(good, derive(files, hip, val)[0])
+            elif kind == "scan":
+                assert val != good
+                no_recursion(code_only(val))
             else:
                 check(val, good)
             print(f"selftest: plant '{what}' PASSED - the check is broken")
@@ -235,9 +307,12 @@ def main():
         if not a.check:
             Path(a.out).write_bytes(text)
         check(Path(a.out).read_bytes(), text)
+        nf, nc = no_recursion(code_only(text))
         print(f"oclcopy: {len(ORDER)} files + gpua_fma_lane + fma_kernel.cl -> {Path(a.out).name}: "
               f"edits {', '.join(f'{k} {n}' for k, n in sorted(counts.items()))}, "
               f"no other difference; {len(text)} bytes, sha256 {hashlib.sha256(text).hexdigest()}")
+        print(f"oclcopy: the text's call graph: {nf} functions, {nc} calls between them, no cycle; "
+              f"cft_sf_reduce named once outside O4's lines (its prototype)")
     except (ValueError, OSError) as e:
         print(f"oclcopy: REFUSED: {e}")
         sys.exit(1)

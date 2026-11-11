@@ -32,12 +32,34 @@ program: cft_fma-noO4.cl, 94545 bytes, sha256 4d48953fbb5175956c35750f93a871916e
 build: built, clBuildProgram 1606.4 ms (this process's first build; a runtime may cache); log empty
 program: cft_fma-noO4.cl, 94545 bytes, sha256 4d48953fbb5175956c35750f93a871916eafe3f146983a4231ee887011c11388; build options "-cl-std=CL1.2"
 build: built, clBuildProgram 137.7 ms (this process's first build; a runtime may cache); log empty
-== oclcopy.py --selftest, in cft-gpu (06:13):
+== oclcopy.py and its --selftest, in cft-gpu (06:57, the send-back's oclcopy.py; the text unchanged):
+oclcopy: 5 files + gpua_fma_lane + fma_kernel.cl -> cft_fma.cl: edits I 7, O1 2, O2 7, O3 1, O4 2, no other difference; 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d
+oclcopy: the text's call graph: 66 functions, 165 calls between them, no cycle; cft_sf_reduce named once outside O4's lines (its prototype)
 selftest: plant 'host/src's table line changed (O1 finds 0)' refused: edit O1 in src/softfloat.c: '\nconst cft_fmt_desc cft_sf_formats[4] = {' found 0 times, not 1
 selftest: plant 'a second `half >>= 1;` in host/src (O2 finds 2)' refused: edit O2 in src/softfloat.c: 'half >>= 1;' found 2 times, not 1
 selftest: plant 'an include added to bigint.h (the text would miss it)' refused: an #include survived the edits: #include <string.h>
 selftest: plant 'the lane edited in cft_fma.hip (the check of the old text)' refused: the text's line 8 is not the derivation's: ' *   cft_fma.hip dc3ae2259d435a6087ddc719d605a0e9396c60bf (gpua_fma_lane, line 68)'
-selftest: plant 'a caller of the excluded cft_sf_reduce in the kernel (O4's check)' refused: O4: cft_sf_reduce( appears 2 times outside the excluded lines, not once (a caller was added?)
+selftest: plant 'a caller of the excluded cft_sf_reduce in the kernel (O4's check)' refused: O4: cft_sf_reduce appears 2 times in the code outside the excluded lines, not once (a use was added?)
+selftest: plant 'the same caller written `cft_sf_reduce (`, spaced' refused: O4: cft_sf_reduce appears 2 times in the code outside the excluded lines, not once (a use was added?)
+selftest: plant 'cft_sf_reduce used by address' refused: O4: cft_sf_reduce appears 2 times in the code outside the excluded lines, not once (a use was added?)
+selftest: plant 'a function in the kernel that calls itself (the call-graph scan)' refused: recursion in the text: r1 -> r1
+selftest: plant 'a static mutual pair (the call-graph scan)' refused: recursion in the text: r2 -> r3 -> r2
+selftest: plant 'the text without O4, cft_sf_reduce back in (the call-graph scan alone)' refused: recursion in the text: cft_sf_reduce -> cft_sf_reduce
 selftest: plant 'one byte of the written text changed' refused: the text's line 2334 is not the derivation's: '            half_ = 2;'
 selftest: honest text accepted, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d
-selftest: OK, 6 plants refused by name
+selftest: OK, 11 plants refused by name
+== PoCL 7.2's recursion check (06:58): the text plus one uncalled recursive function, stack 64 MB
+-- PoCL 7.2, stack 65536 KB: the text plus static int gpud_r(int k) { return k ? gp... (r-static.cl)
+build: built, clBuildProgram 86.0 ms (this process's first build; a runtime may cache); log empty
+rc=0
+-- PoCL 7.2, stack 65536 KB: the text plus int gpud_q(int k) { return k ? gpud_q(k ... (r-proto.cl)
+build: built, clBuildProgram 43.4 ms (this process's first build; a runtime may cache); log empty
+rc=0
+-- PoCL 7.2, stack 65536 KB: the text plus static int gpud_s(int k) { return k > 1 ... (r-static2.cl)
+build: built, clBuildProgram 1490.3 ms (this process's first build; a runtime may cache); log empty
+rc=0
+-- PoCL 7.2, stack 65536 KB: the text plus int gpud_p(int k) { return k > 1 ? gpud_... (r-proto2.cl)
+build: FAILED, clBuildProgram 1476.3 ms (this process's first build; a runtime may cache); log below
+Recursion detected in function: 'gpud_p'
+-> Infringing function: 'gpud_p'
+rc=3

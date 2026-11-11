@@ -25,8 +25,8 @@ own arithmetic** by a scripted, checked copy, and anything else is named a secon
    (d = 0, flags 0x80), and none carried a wrong value. The cause is not pinned (section 6). A
    one-attribute change in a scratch variant moved the fault, and then 1,503 lanes did carry wrong
    values, so "it fails loudly" cannot be relied on there.
-3. **The text is libcft's**: GPU-A's device copy, made OpenCL C by 19 exact, counted replacements of
-   four kinds plus the include lines (section 3). One kind, O4, is **not syntax only**: it takes the
+3. **The text is libcft's**: GPU-A's device copy, made OpenCL C by 19 exact, counted replacements: 7
+   include lines and 12 of four kinds (section 3). One kind, O4, is **not syntax only**: it takes the
    recursive reduction tree out, because PoCL refused the whole program for it. The lane is GPU-A's
    `gpua_fma_lane`, taken from `cft_fma.hip` byte for byte at every build.
 4. **On the RX 7600 the same arithmetic runs at the same speed through either runtime** (MEASURED, one
@@ -36,18 +36,19 @@ own arithmetic** by a scripted, checked copy, and anything else is named a secon
    RX 7600. It needs only libOpenCL.so.1 and Intel's runtime, with libigdfcl1. Nothing ran on an Intel
    GPU: that run is the lead's, on amd-arc-box ([gpu-d/RUNBOOK-ARC.txt](gpu-d/RUNBOOK-ARC.txt)).
 
-## 2. What was built ([gpu-d/](gpu-d/), 1,121 lines)
+## 2. What was built ([gpu-d/](gpu-d/), 1,307 lines)
 
 | file | lines | what it is |
 |---|---|---|
-| `oclcopy.py` | 247 | devcopy.py's output to ONE OpenCL C text: the edits counted, the lane extracted, `--check`, `--selftest` |
+| `oclcopy.py` | 322 | devcopy.py's output to ONE OpenCL C text: the edits counted, the lane extracted, the call-graph scan, `--check`, `--selftest` |
 | `fma_kernel.cl` | 36 | the kernel: one work-item a lane, global bytes to private and back, the descriptor out of `__constant` |
 | `cft_fma_ocl.c` | 473 | the host harness, C and the OpenCL 1.2 API, one source for Linux and macOS |
 | `build_ocl.sh` | 34 | devcopy.py, oclcopy.py, then the harness and libcft's `sha256.c` by `cc` |
 | `ocl_run.sh` | 77 | one device's checks: plants first, six corpora, the rate (Linux, or macOS's bash 3.2) |
 | `make_bundle.sh` | 28 | the Arc bundle, built in cft-gpu |
 | `RUNBOOK-ARC.txt` | 35 | the lead's run on amd-arc-box |
-| `captured/` | 191 | go/no-go builds, the PoCL rehearsal, the M2 Pro, the RX 7600 |
+| `rp_probe.c` | 83 | diagnosis only, never the route: the reduced case of section 6, with a host plant |
+| `captured/` | 219 | go/no-go builds, the PoCL rehearsal, the M2 Pro, the RX 7600 |
 
 GPU-A's `devcopy.py`, `cft_fma.hip` (its lane only), `gen_corpus.py` and `build.sh` are used as they are.
 
@@ -78,16 +79,29 @@ refuses the copy and names the edit (devcopy's discipline):
 - PoCL 7.2 refused the program without it: "Recursion detected in function: 'cft_sf_reduce'". OpenCL C
   1.2 has no recursion.
 - The FMA never reaches the function: in the copy its only calls are its own two recursive ones. oclcopy
-  checks this at every build: outside the excluded lines the name may appear once in the whole text,
-  as softfloat.h's prototype.
+  checks this at every build. In the code outside the excluded lines, with comments and strings
+  blanked, the identifier may appear once, as softfloat.h's prototype.
 - PoCL alone enforced the rule. The same text without O4 (sha256 `4d48953f...`) built on Apple's and
   AMD's compilers with empty logs.
-- With O4, PoCL builds the program. PoCL flagged an uncalled function, so its check covers every
-  function, and no function left in the text recurses.
+- With O4, PoCL builds the program. PoCL's check is not complete (MEASURED, 06:58; and VGPU-D's
+  cases). I appended one uncalled recursive function to the text at a time:
+  - PoCL flagged a non-static, non-tail recursive one ("Recursion detected in function: 'gpud_p'"),
+    which is cft_sf_reduce's kind;
+  - it built a static one, and tail-recursive ones of either kind.
+- **No function left in the text recurses** (COMPUTED by oclcopy at every build, not left to a
+  compiler).
+  - Method: definitions are a name, a parameter list and a brace. Their edges are the defined names
+    each body calls. The scan runs on the code with comments and strings blanked and O4's lines
+    removed, and searches the graph for a cycle.
+  - Result: 66 functions, 165 calls, no cycle.
+  - Its plants: it refuses the text without O4 for "cft_sf_reduce -> cft_sf_reduce", a function that
+    calls itself, and a static mutual pair.
 
 **O4's known limit:** a later routine that calls `cft_sf_reduce` cannot go through this route until the
-reduction has a non-recursive form. oclcopy refuses such a caller at build time (the selftest's plant
-below).
+reduction has a non-recursive form. oclcopy refuses such a use at build time wherever the identifier is
+written, because it counts the identifier as a token. The selftest refuses a call, a spaced call
+`cft_sf_reduce (`, and a use by address. A name assembled by token pasting would not be seen; the
+call-graph scan below covers recursion, not that.
 
 **The lane is not a copy.** At every build `gpua_fma_lane` is taken from `cft_fma.hip` byte for byte,
 from the line starting `CFT_HD static void gpua_fma_lane(` (line 68) through its closing brace (line
@@ -96,15 +110,16 @@ they are GPU-A's code too. `fma_kernel.cl` is this study's: it copies a lane's o
 memory into private bytes and back, and the descriptor out of the `__constant` table, because libcft's
 functions take private pointers. GPU-A passed the descriptor by value for the same reason.
 
-**How a change in host/src shows** (MEASURED, `oclcopy.py --selftest`, six plants, each refused by name,
-captured/go-nogo.txt):
+**How a change in host/src shows** (MEASURED, `oclcopy.py --selftest`, eleven plants, each refused by
+name, captured/go-nogo.txt):
 
 | change | how it shows |
 |---|---|
 | a line an edit matches is changed | the count is 0, not 1: refused |
 | a second match appears | the count is 2: refused |
 | a new `#include` | refused ("an #include survived the edits") |
-| a caller of `cft_sf_reduce` | refused by O4's check |
+| a use of `cft_sf_reduce`: a call, a spaced call, by address | refused by O4's token count |
+| a recursive function, or a mutual pair | refused by the call-graph scan, naming the cycle |
 | the lane changes in `cft_fma.hip` | the text's sha256 changes, and `--check` of an old text refuses it |
 | the written text is edited | `--check` refuses it, naming the line |
 
@@ -162,12 +177,14 @@ sha256, 0 results and 0 flags differing). On all three devices the plants differ
 GPU-A's, by attribute rne/rtz/rdn/rup/rmm:
 - flip: 1 result (0/0/0/1/0), and its output is the golden one;
 - rmm-as-rne: 51 results (0/0/0/0/51);
-- drop-flag: 1,452 flags (290/291/290/291/290). Full hashes: captured/*.txt and GPU-A's `captured/expect.sha256`. Device names and compile times:
+- drop-flag: 1,452 flags (290/291/290/291/290).
+
+Full hashes: captured/*.txt and GPU-A's `captured/expect.sha256`. Device names and compile times:
 - PoCL: "cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F". Cold builds 1.2 to 1.8 s, then a first
   launch of 0.7 to 1.3 s (it compiles per work-group size); 34 to 61 ms from its cache.
 - RX 7600: "gfx1102". Cold 1.50 to 1.53 s, 19 ms from comgr's cache; first launch 14 ms.
-- M2 Pro: "Apple M2 Pro". 128 to 220 ms cold, 2.4 ms when cached; first launch 6 to 12 ms, so no
-  large compile hides at the first launch.
+- M2 Pro: "Apple M2 Pro". 128 to 220 ms cold, 2.4 ms when cached. The first launch took 6 to 12 ms
+  here and up to 16.1 ms in VGPU-D's runs (READ), so no large compile hides at the first launch.
 
 **Apple at default options** (MEASURED, captured/m2pro.txt). Every differing lane is a refusal, d = 0
 and flags 0x80: `cft_sf_compute` returned nonzero, and the harness counts that as a difference.
@@ -176,35 +193,43 @@ and flags 0x80: `cft_sf_compute` returned nonzero, and the harness counts that a
 - The other conformance formats: fp32 3,104, fp64 3,314, fp128 3,459.
 - Repeated runs give identical counts. `--wg 32` and `--wg 1` give the same 3,447.
 
-The pattern fits the rounding increment: rtz never rounds up, and `sf_round_at` refuses only if
-`cft_bn_inc` carries out of a 2,048-bit container (BELIEVED, from the code; not shown).
+The stream's pattern fits the rounding increment: rtz never rounds up and refuses nothing there, and
+`sf_round_at` refuses only if `cft_bn_inc` carries out of a 2,048-bit container. Conformance does not
+fit it wholly, with 29 refusals under rtz. BELIEVED, from the code; not shown.
 
-**Diagnosis, scratch variants only, never the route** (06:03 to 06:05, seconds of the Mac's GPU):
+**Diagnosis, scratch variants only, never the route** (06:03 to 06:05 and 06:57, seconds of the Mac's
+GPU in all):
 - `__attribute__((optnone, noinline))` on any one of nine functions turned conf-fp256 GREEN. They were
   `cft_bn_inc`, `sf_round_at`, `sf_round_pack`, `cft_bn_shr`, `cft_bn_low_nonzero`, `sf_round_up`,
   `cft_bn_bit`, `sf_fma` and the lane. So did all of bigint.c, or either half of softfloat.c.
-- `noinline` alone moved the fault rather than curing it: on `cft_bn_bit`, 3,322 lanes differed and
-  1,819 were refused; on `cft_bn_inc`, 485 refusals, 97 under each attribute; on `sf_fma` and the lane,
-  no change.
+- `noinline` alone, on one function at a time:
+  - on `sf_round_at`, `sf_round_pack` and `cft_bn_low_nonzero`, conf-fp256 turned GREEN;
+  - on `sf_round_up` it got worse: 4,793 refused, by attribute 1,160/153/1,156/1,164/1,160. VGPU-D
+    found the same;
+  - on `cft_bn_bit` and `cft_bn_inc` it moved: 3,322 differed with 1,819 refused, and 485 refused, 97
+    under each attribute;
+  - on `sf_fma` and the lane, nothing changed.
 - In the `cft_bn_bit` variant **1,503 lanes carried a wrong value that was not a refusal**: d = 0 and
   flags 0x00 where the golden model gives a non-zero result (case 9: want `4000080...`, flags 0x10).
+- The reduced case, [gpu-d/rp_probe.c](gpu-d/rp_probe.c) (committed, diagnosis only). A probe kernel
+  added to the text runs `cft_sf_round_pack` alone, the call the refusing path makes. It ran 4,096 fp256
+  lanes shaped like `sf_fma`'s far path (a 239-bit significand, a sticky bit, every attribute) against
+  libcft's own `softfloat.c` on the Mac's CPU (06:57; each line names its build options):
+  - AGREES at `-cl-std=CL1.2` and at `-cl-std=CL1.2 -cl-opt-disable`;
+  - its plant shows it can fail: with the host's rup lanes computed as rtz it DIFFERS on 377 lanes,
+    all under rup, at both options.
 
-- A reduced case, also scratch, in a probe kernel appended to the text: `cft_sf_round_pack` alone, the
-  call the refusing path makes. It ran 4,096 fp256 lanes shaped like `sf_fma`'s far path (a 239-bit
-  significand, a sticky bit, every attribute) against libcft's own `softfloat.c` on the Mac's CPU. It
-  AGREES at default options and with `-cl-opt-disable` (06:25). The fault needs the larger inlined
-  kernel.
-
-So no single function's own code is to blame. Marking any one optnone is a cure, which does not
-localise. The lead's two conditions for calling it Apple's miscompile were not met: one function
-pinning it, and a reduced case of that function differing at default against the host. **The cause
-stays BELIEVED, with these candidates, not chosen between:**
-- (a) a fault in Apple's optimiser on the fully inlined kernel: 64-bit operations lowered to 32-bit
-  pairs, the carry chain, 64-bit division or remainder;
+**`cft_sf_round_pack` alone agrees on 4,096 lanes; the other functions were not reduced; the cause
+stays unpinned.** Marking any one of nine functions optnone cures, which does not localise, and the one
+reduced case agrees. So the ruling's second condition, a reduced case that differs at default against
+the host, is not met. **The cause stays BELIEVED, with these candidates, not chosen between:**
+- (a) a fault in Apple's optimiser: 64-bit operations lowered to 32-bit pairs, the carry chain, 64-bit
+  division or remainder;
 - (b) undefined behaviour in the source that UBSan and ASan cannot see, strict aliasing first. Against
-  (b), MEASURED: the copy has no union, no `memcpy` and no pointer cast but `reduce_leaf`'s byte reads,
-  which O4 leaves uncalled, so there is no type-pun on the limbs. GPU-A's UBSan, ASan and
-  `-ftrivial-auto-var-init` runs of the same copy were clean (READ, GPU-A section 7).
+  (b), MEASURED by a text search (grep) of the copy: no union, no `memcpy`, and no pointer cast but
+  `reduce_leaf`'s byte reads, which O4 leaves uncalled; so no type-pun on the limbs. GPU-A's UBSan,
+  ASan and `-ftrivial-auto-var-init` runs were clean (READ, GPU-A section 7). They ran on GPU-A's device
+  copy (E1), not on this text with its O edits.
 
 The discriminating test the lead suggested, `-cl-strict-aliasing` on the RX 7600, ran GREEN, but AMD's
 compiler warned "OpenCL C version 1.2 does not support the option" (MEASURED). It discriminates
@@ -257,6 +282,12 @@ MEASURED: 132,403,803 bytes, sha256 `1da16f887be1f5a49d1eef900cb51410b37fa6dbe95
 Unpacked in a fresh directory and run on PoCL: ALL AS EXPECTED (captured/pocl-rehearsal.txt). Copied to
 the RX 7600 machine and run there unchanged: ALL AS EXPECTED.
 
+The bundle is not byte-reproducible, and a rebuild differs in the harness binary's bytes. VGPU-D's
+rebuild had the same size and the same contents but the binary, and sha256 `096efb32...` (READ,
+VGPU-D). The binary embeds its build path, `/root/gpu-d/tree/docs/studies/gpu-d/cft_fma_ocl.c`, from
+the `CK` macro's `__FILE__` (MEASURED, `strings`). That is one cause; others are not excluded. Check a
+rebuilt bundle by its SHA256SUMS and its run, not by the tarball's digest.
+
 **libigdfcl1: yes, BELIEVED needed.** This route hands NEO OpenCL C source, which NEO compiles through
 its OpenCL C front end. GPU-C's route handed it SPIR-V. GPU-C's install list already holds the package,
 so the box needs nothing beyond that list. The planted builds are build options, so no planted binary
@@ -277,9 +308,12 @@ GPU.
     Apple's optimiser question on top. ESTIMATE 3 to 5 days, low confidence.
   - OpenCL C 2.0 makes an unqualified pointer generic (BELIEVED). With `-cl-std=CL2.0` on AMD, Intel
     and PoCL, the same copied executor would probably need no address-space edit. The host side is a
-    port of `cft_seq.hip`'s 693 lines, most of them harness. ESTIMATE 1 to 2 days. Basis: this study's
-    FMA path went from the first line of oclcopy.py to GREEN on the third device in 28 minutes (05:40
-    to 06:08), with a harness of 473 lines.
+    port of `cft_seq.hip`'s 693 lines, most of them harness. ESTIMATE 1 to 2 days, **on a thin basis**:
+    - this study's FMA path went from the first line of oclcopy.py to GREEN on the third device in 28
+      minutes (05:40 to 06:08), with a harness of 473 lines;
+    - the runner's host side is larger, its program images and scratch have no OpenCL counterpart yet,
+      and its device side has not been compiled once;
+    - the 1 to 2 days is a judgment, not a measurement.
   - Its atomics, OR and min, are `atomic_or` and `atomic_min` on global 32-bit integers: core since
     OpenCL 1.1 (BELIEVED). Apple lists `cl_khr_global_int32_extended_atomics` (MEASURED, `info`).
 - **Not covered:** GPU-A's second kernel (`fma256_fixed.h`), the `diff` stream, the hazard runs, NVIDIA's

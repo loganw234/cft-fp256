@@ -65,7 +65,13 @@ v17-noinline-cft_bn_inc: build 138.9 ms; 485 results and 485 flags differ, 485 r
 1503 lanes differ and are NOT refusals (flags != 0x80); by attribute [375, 0, 0, 753, 375]
   case 9 rnd 0: got 0000000000000000000000000000000000000000000000000000000000000000 flags 0x00
            want 4000080000000000000000000000000000000000000000000000000000000000 flags 0x10
-== a reduced case (06:25, printed to the terminal, verbatim): cft_sf_round_pack alone in a probe kernel,
-== far-path-shaped fp256 lanes, against libcft's softfloat.c on the Mac's CPU; default options, then -cl-opt-disable
-rp_probe: 4096 lanes of cft_sf_round_pack alone: 0 differ from libcft on this CPU (by rnd 0/0/0/0/0); refused: GPU 0, host 0: AGREES
-rp_probe: 4096 lanes of cft_sf_round_pack alone: 0 differ from libcft on this CPU (by rnd 0/0/0/0/0); refused: GPU 0, host 0: AGREES
+== round 3 (06:57): noinline alone on four more functions
+v18-noinline-sf_round_at: build 133.7 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v19-noinline-sf_round_pack: build 133.9 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v20-noinline-cft_bn_low_nonzero: build 132.8 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v21-noinline-sf_round_up: build 132.8 ms; 4793 results and 4793 flags differ, 4793 refused, by attribute 1160/153/1156/1164/1160: RED
+== the reduced case, gpu-d/rp_probe.c (06:57): cft_sf_round_pack alone against libcft on the Mac's CPU, and its plant
+rp_probe: build options "-cl-std=CL1.2": 4096 lanes of cft_sf_round_pack alone, 0 differ from libcft on this CPU (by rnd 0/0/0/0/0): AGREES
+rp_probe: build options "-cl-std=CL1.2 -cl-opt-disable": 4096 lanes of cft_sf_round_pack alone, 0 differ from libcft on this CPU (by rnd 0/0/0/0/0): AGREES
+rp_probe: build options "-cl-std=CL1.2", host plant rup-as-rtz: 4096 lanes of cft_sf_round_pack alone, 377 differ from libcft on this CPU (by rnd 0/0/0/377/0): DIFFERS
+rp_probe: build options "-cl-std=CL1.2 -cl-opt-disable", host plant rup-as-rtz: 4096 lanes of cft_sf_round_pack alone, 377 differ from libcft on this CPU (by rnd 0/0/0/377/0): DIFFERS
