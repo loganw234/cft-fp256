@@ -7,11 +7,14 @@ error cudaErrorStreamDetached) with no CUDA_VERSION guard, so it does not
 compile against CUDA 12.9.  This wraps those pieces in
 `#if CUDA_VERSION >= 13010` in the INSTALLED copy (the sources are not
 touched).  Usage: patch_cuda12.py PATH_TO_nvidia_hip_runtime_api.h
+Keeps the original beside it as PATH.orig (not overwritten if present).
 Prints what it wrapped; exits 1 if an anchor is missing."""
-import sys, re
+import sys, os, shutil
 
 path = sys.argv[1]
 s = open(path).read()
+if not os.path.exists(path + ".orig"):
+    shutil.copy2(path, path + ".orig")
 GUARD = "#if CUDA_VERSION >= 13010  /* GPU-B C1 */\n"
 n = 0
 

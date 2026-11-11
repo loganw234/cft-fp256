@@ -5,6 +5,8 @@
 # GPU-B step 3c: toolchain_check and the fp256 conformance corpus on the
 # RTX 5060 Ti (CUDA device 1 in this desktop's order), for the builds made
 # by build.sh and build_hip_nv.sh.  gpu_run.sh OUTROOT CORPUS_DIR [DEVICE]
+# OUTROOT holds tc_plain and tc_hipcc (build_tc.sh), plain/ (build.sh plain)
+# and hipcc-build/ (build.sh hipcc).
 # nvidia-smi before each run; a card with another compute process is waited
 # for (up to 60 s), then the run is skipped and said so.
 OUT=${1:?OUTROOT}; C=${2:?CORPUS_DIR}; D=${3:-1}
