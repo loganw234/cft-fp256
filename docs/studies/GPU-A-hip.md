@@ -482,7 +482,7 @@ The block size (64, 128, 256) moves no rate by more than its spread.
 
 **The roadmap's ESTIMATE** (10^9 to 10^10 on a large GPU, low confidence),
 against the measurements:
-- Its basis was about 1,000 32-bit operations an fp256 FMA. The first kernel spends about 38,000 lane-instruction slots per FMA (COMPUTED: 1.32 x 10^13 slots a second on the 5060 Ti at 2.87 GHz, over 346 M FMAs a second with every lane on one case). The second has about 14,900 slots per FMA at that rate (COMPUTED: the card's issue rate over the measured FMA rate), the slots available, not a measure of what it spends: part 2 bounds what it needs at about 4,200 per FMA-class instruction, inside fp256 exp (P2.5).
+- Its basis was about 1,000 32-bit operations an fp256 FMA. The first kernel has about 38,000 lane-instruction slots per FMA at that rate (COMPUTED: 1.32 x 10^13 slots a second on the 5060 Ti at 2.87 GHz, over 346 M FMAs a second with every lane on one case), the slots available; that it spends them is not shown. Part 2's generic path is consistent with that figure, not well under it: on the 5060 Ti, fp256 exp at 2.64 M lane-programs a second is 3.27 x 10^8 FMA-class instructions a second (124 a program), at most about 40,000 slots each (COMPUTED from the MEASURED rate, at exp's 4,096 typical arguments, where the 346 M is one case on every lane: the inputs differ). The second has about 14,900 slots per FMA at that rate (COMPUTED: the card's issue rate over the measured FMA rate), the slots available, not a measure of what it spends: part 2 bounds what it needs at about 4,200 per FMA-class instruction, inside fp256 exp (P2.5).
 - The ESTIMATE was an order of magnitude high for the generic port. The specialised kernel straddles its floor on mid-range cards: 0.80 to 1.46 x 10^9 by device and batch (the answer gives which is where).
 
 **What limits the first kernel** (MEASURED; desktop and RX 7600 experiments in
@@ -490,7 +490,7 @@ the ledger):
 - **Not the container.** 38 limbs make 146 M/s against 143 to 145 at 64 on the 5060 Ti, and 82.9 against 78.1 on the RX 7600. The code touches only `n` limbs.
 - **Not occupancy.** It is 100 % at blocks 64 to 256 on every card, and the block size moves nothing.
 - **Divergence, by 2.1 to 3.5 times.** With every lane on one case (near with like signs, near with unlike signs close, near with unlike signs apart, far), the 5060 Ti makes 302 to 419 M/s and the RX 7600 168 to 273 M/s, against 143 and 78 for the mixed stream.
-- **The instruction count of a portable bignum.** Loops of data-dependent length, bit-at-a-time helpers (`u32_bitlen`, `sf_set_field`), and every limb in local memory: thousands of LDL/STL and scratch instructions statically.
+- **The instruction count of a portable bignum**, BELIEVED, not shown to be what limits it. The static facts: loops of data-dependent length, bit-at-a-time helpers (`u32_bitlen`, `sf_set_field`), and every limb in local memory: thousands of LDL/STL and scratch instructions statically.
 
 **What limits the second kernel:**
 - Divergence costs 0 to 7 % at 1M lanes (one case a lane: 903 to 957 M/s on NVIDIA, 1.46 to 1.48 G/s on the RX 7600).
@@ -862,7 +862,7 @@ rate inside exp:
 - The 5060 Ti runs 25.6 M fp256 exp lane-programs a second. That is at least 3.17 x 10^9 executions of the second kernel's code a second, through FMA, ADD, SUB and MUL.
 - That means at most about 4,200 slots per FMA-class instruction on average, in fp256 exp at these arguments (COMPUTED from the MEASURED 25.6 M lane-programs a second).
 - This bounds those 124 instructions' kinds together. ADD and MUL may run shorter paths when an operand is exactly 1 or 0, so it is not a general FMA's cost.
-- So part 1's 14,900 slots per FMA, taken on part 1's own stream (`gen_corpus.py stream` replicated), were the slots available at that rate, not what the FMA spends.
+- So part 1's 14,900 slots per FMA, taken on part 1's own stream (`gen_corpus.py stream` replicated), were the slots available at that rate, not what the FMA spends. Its first kernel's 38,000 is likewise the slots available, and the generic path here is consistent with it: at most about 40,000 per FMA-class instruction in fp256 exp (section 8).
 - Part 1's BELIEVED "issue-bound" on NVIDIA is contradicted.
 - The inputs differ between the two measurements: part 1's stream against exp's 4,096 uniform arguments.
 - On the RX 7600 the comparison goes the other way: 0.9 x 10^9 FMA-class instructions a second inside exp, against part 1's 1.38 G/s at 1.5M lanes or fewer. MEASURED; not explained.
