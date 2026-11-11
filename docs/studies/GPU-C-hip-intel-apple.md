@@ -13,6 +13,25 @@ Markings: MEASURED (run here, 2026-11-10), READ (with URL or path; read 2026-11-
 the GPU runs **libcft's own arithmetic**, by GPU-A's scripted copy. A route that needs the arithmetic rewritten
 in another language is a **second implementation**, said so, with its cost, and ranked below.
 
+**A note of 2026-11-11, the lead's: the Arc A750 ran this study's bundle** (the study's text stays as written).
+Logan swapped an Arc A750 into amd-arc-box after the night's card run. The U50 came back at its bus address,
+ready by `xbutil examine`, and the kernel is unchanged; i915 drives the A750 with its GuC and HuC firmware loaded.
+- **The first run failed before any arithmetic** (MEASURED). chipStar found "Intel(R) Arc(TM) A750 Graphics", but
+  the program build failed with an empty log. The cause (MEASURED, `ldd`): Intel's runtime loads its compiler
+  libraries at run time, and Canonical's libigc.so.1 needs libLLVM-14.so.1 and libLLVMSPIRVLib.so.14, and
+  libigdfcl.so.1 needs libopencl-clang.so.14. **Section 7's install list was incomplete:** its check covered the
+  ICD's direct links, not the libraries it loads. Four more Canonical packages are needed, extracted the same way
+  at Logan's word: libllvm14t64 1:14.0.6-19build4 (24,054,108 bytes), libclang-cpp14t64 1:14.0.6-19build4
+  (12,096,576), libllvmspirvlib14 14.0.8-1~ubuntu0.24.04.1 (755,584) and libopencl-clang14 14.0.0-4build2
+  (103,806). gpu-c/RUNBOOK-ARC.txt is corrected.
+- **With them, the bundle of section 4.4, unchanged, is ALL AS EXPECTED on the A750** (MEASURED):
+  - the three plants RED at GPU-A's planted outputs;
+  - conf-fp32 to conf-fp256 GREEN (fp256 `da932116...`) and stream-fp256 GREEN (`9c7f2f6e...`, 1M lanes);
+  - the program runner's six corpora GREEN against libcft's references, 0 refused, and its two plants RED;
+  - fp256 FMA at 5.41e7 a second, kernel median of 10 at 1M lanes, block 128 (2.69e7 end to end);
+  - the first launch of each binary JIT-compiles its SPIR-V, about 29 to 32 s.
+  No i915 hang or reset was logged, and the U50 was present and ready afterwards.
+
 ## 1. The answer first
 
 1. **Intel.** MEASURED: GPU-A's `cft_fma.hip` and `cft_seq.hip`, **unchanged**, built by the scripted device

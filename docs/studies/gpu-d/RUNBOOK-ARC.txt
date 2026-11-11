@@ -7,6 +7,9 @@
    which that list holds: it is NEO's OpenCL C front end, and this harness hands the runtime OpenCL C
    source, not SPIR-V (BELIEVED: NEO compiles source through it; not run on the box). libigc1 is needed
    as for chipStar. The box's ocl-icd-libopencl1 (2.3.2) is the loader the binary links against.
+   2026-11-11: section 1's list needs the four rows GPU-C's runbook added that day (the compiler libraries'
+   own LLVM 14, Clang 14 and SPIR-V libraries); without them this route's build fails with OpenCL error -6
+   (MEASURED on the A750, then ALL AS EXPECTED with them: the GPU-D study's dated note).
 
 1. Copy and check (the bundle is in cft-gpu at /root/gpu-d/ocl-bundle.tar.gz):
      sha256sum ocl-bundle.tar.gz   # 1da16f887be1f5a49d1eef900cb51410b37fa6dbe95d0ad1d30a7fe0a17b3536

@@ -12,6 +12,21 @@ Markings: MEASURED (run here, 2026-11-11), READ (with its path or URL), COMPUTED
 basis), BELIEVED (not checked); "not run" is said. The rule of GPU-A holds: the device runs **libcft's
 own arithmetic** by a scripted, checked copy, and anything else is named a second implementation.
 
+**A note of 2026-11-11, the lead's: the Arc A750 ran this study's bundle** (the study's text stays as written).
+After Logan swapped an Arc A750 into amd-arc-box, the bundle of section 7, unchanged, ran there through Intel's
+runtime from Canonical's archive. That needed the four packages GPU-C's runbook adds the same day (its dated
+note): without them the build failed with OpenCL error -6 in 0.2 ms, log empty (MEASURED). With them, the run is
+**ALL AS EXPECTED** (MEASURED):
+- platform "Intel(R) OpenCL Graphics", OpenCL 3.0; device "Intel(R) Arc(TM) A750 Graphics", NEO driver 23.43.027642,
+  448 compute units;
+- clBuildProgram 2.2 s cold and 1.3 ms cached, log empty, `-cl-std=CL1.2`, the text `02efcc15...`;
+- the three plants RED at GPU-A's planted outputs;
+- conf-fp32 to conf-fp256 and stream-fp32 and stream-fp256 (1M lanes each) GREEN at their hashes, each confirmed
+  by gen_corpus.py verify;
+- fp256 FMA at 5.18e7 a second, kernel median of 10 at 1M lanes, work-group 1024 (2.69e7 end to end), against
+  5.41e7 for GPU-C's chipStar build on the same card.
+That this route needs libigdfcl1 itself stays BELIEVED: it was present in both runs.
+
 ## 1. The answer
 
 1. **One OpenCL C text and one C host harness run libcft's FMA bit for bit on three devices** (MEASURED):

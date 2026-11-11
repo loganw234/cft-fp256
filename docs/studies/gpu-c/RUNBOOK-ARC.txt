@@ -1,4 +1,4 @@
-# Runbook: the Arc on amd-arc-box (for the lead; written 2026-11-10, nothing here was run on the box)
+# Runbook: the Arc on amd-arc-box (for the lead; written 2026-11-10; run on the box 2026-11-11, the study's dated note)
 
 Goal: GPU-A's cft_fma.hip and cft_seq.hip, unchanged, on an Intel Arc GPU through chipStar and Intel's
 OpenCL runtime, and the fp256 conformance hash
@@ -32,12 +32,24 @@ Ubuntu 24.04). Sizes MEASURED on the desktop with `apt-get download`, 2026-11-10
 | libigdfcl1 | 1.0.15468.25-2ubuntu0.1 | 94434 |
 | libigdgmm12 | 22.3.17+ds1-1ubuntu1 | 145046 |
 | libze-intel-gpu1 (optional: Level Zero; chipStar's L0 backend is not built here) | 23.43.27642.40-1ubuntu3 | 2332024 |
+| libllvm14t64 (added 2026-11-11: libigc.so.1 and libigdfcl.so.1 load it) | 1:14.0.6-19build4 | 24054108 |
+| libclang-cpp14t64 (added 2026-11-11: libopencl-clang14 needs it) | 1:14.0.6-19build4 | 12096576 |
+| libllvmspirvlib14 (added 2026-11-11: libigc.so.1 loads it) | 14.0.8-1~ubuntu0.24.04.1 | 755584 |
+| libopencl-clang14 (added 2026-11-11: libigdfcl.so.1 loads it) | 14.0.0-4build2 | 103806 |
+
+**Corrected 2026-11-11 (the lead, on the A750):** the first four rows alone are not enough. Intel's runtime loads
+its compiler libraries at run time, and they need the last four rows: without them a program build fails with an
+empty log (chipStar) or OpenCL error -6 (an OpenCL C build). Check them before a run, as well as the ICD:
+`LD_LIBRARY_PATH=$L ldd $L/libigc.so.1 $L/libigdfcl.so.1 | grep "not found"` must print nothing, where
+L=~/gpuc-neo/root/usr/lib/x86_64-linux-gnu. The download line below takes all eight.
 
 No root, no dpkg database change, no ICD in /etc, XRT untouched:
 ```
 mkdir -p ~/gpuc-neo/debs ~/gpuc-neo/root ~/gpuc-neo/vendors && cd ~/gpuc-neo/debs
-apt-get download intel-opencl-icd libigc1 libigdfcl1 libigdgmm12     # needs apt lists, no root
-sha256sum *.deb                      # compare with the ledger's sums (5b95f0d6.., 5727c98f.., 1b17e072.., ede68478..)
+apt-get download intel-opencl-icd libigc1 libigdfcl1 libigdgmm12 \
+  libllvm14t64 libclang-cpp14t64 libllvmspirvlib14 libopencl-clang14   # needs apt lists, no root
+sha256sum *.deb                      # compare with the ledger's sums (5b95f0d6.., 5727c98f.., 1b17e072.., ede68478..;
+                                     # the four added rows 610cf473.., bc7b3b3d.., 9b0e9780.., 9227e163..)
 for d in *.deb; do dpkg -x $d ../root; done
 echo ~/gpuc-neo/root/usr/lib/x86_64-linux-gnu/intel-opencl/libigdrcl.so > ~/gpuc-neo/vendors/intel.icd
 export OCL_ICD_VENDORS=~/gpuc-neo/vendors LD_LIBRARY_PATH=~/gpuc-neo/root/usr/lib/x86_64-linux-gnu
@@ -45,7 +57,8 @@ clinfo -l        # must list the Arc. clinfo is optional and not in the bundle: 
                  # present, `command -v clinfo`); installing it (apt install clinfo) would be a system change, so it is not part of the default path
 ```
 On the desktop the extraction was run: the ICD loads and its libraries resolve; with no Intel GPU clinfo shows
-0 platforms, as it must. Not run: any of it on an Intel GPU.
+0 platforms, as it must. Not run then: any of it on an Intel GPU. (2026-11-11: "its libraries resolve" covered the
+ICD's direct links only; the compiler libraries it loads at run time needed the four added rows, above.)
 
 **Fallbacks, each a decision for Logan:**
 (a) the same packages system-wide, `sudo apt install intel-opencl-icd` (adds /etc/OpenCL/vendors/intel.icd, about
