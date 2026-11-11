@@ -2236,6 +2236,114 @@ runs the replay and one workload chain both ways; and `verify/run.sh`'s
 five workloads' chains across a Windows-to-WSL boundary, and the rates
 are in docs/REMOTE.md.
 
+## The GPU backend: a HIP device as a libcft device (2026-11-11)
+
+The GPU backend's round 1, its first part (docs/VALIDATION.md, G1B1's
+entry, has the measurements; docs/studies/GPU-A-hip.md is the study it
+rests on).
+
+```c
+cft_open("hip:0", 0, &dev);    /* the first GPU the HIP runtime sees */
+```
+
+One more spelling of `cft_open`'s artifact, in a build made with
+`make -C host HIP=1` - on ROCm as it stands, or on HIP 7.2.4's NVIDIA
+layer with `HIP_PLATFORM=nvidia HIP_ROOT=/opt/rocm-7.2.4`, and `HIP_ARCH`
+naming the GPUs the build carries code for (default `89 120`, the RTX
+4070 and the RTX 5060 Ti, on nvidia; `gfx1102`, the RX 7600, on amd). The
+artifact is `hip:` and the device's number in decimal, nothing else:
+`hip`, `hip:`, `hip:x`, `hip:0x1`, `hip:1 ` and `hip:-1` are
+`CFT_ERR_INVALID_ARGUMENT` with the grammar in `cft_last_error()`; a
+number at or past the runtime's count is `CFT_ERR_NO_DEVICE`, naming the
+count; `index` is 0, since `hip:N` names the device. A device whose
+architecture the build carries no code for is refused at open by name -
+its kernels do not load there - and so is a runtime that finds no GPU. A
+build without the backend answers `hip:0` with `CFT_ERR_NO_DEVICE` and a
+sentence saying `HIP=1` builds it.
+
+**What runs on the GPU is this library.** `backend_hip.cpp` is one device
+translation unit that includes the tree's own `bigint.c`, `softfloat.c`
+and `seq_exec.h` (G1A made them compile for a GPU as they are): an
+element is `cft_sf_compute`, as the software loop runs it; a reduction is
+softfloat.c's tree run one level a launch - neighbours paired, a trailing
+odd element carried up unchanged, the result `cft_reduce`'s bit for bit
+because every left child of that tree is a perfect aligned subtree - and
+a range too long for one launch's memory is cut only at nodes of its
+tree; a program lane is seq_exec.h's four per-lane functions around
+`seq_run_block`, one thread a lane, run on the program `cft_program_load`
+validated (`cft_seq_run_io.prog`, which program.c sets), never a second
+parse of the image. Flags are an OR over lanes, a block's word first and
+then one atomic; no value is ever added atomically. The software handle is
+the definition the backend's tests hold it to, element by element and
+flag by flag.
+
+**What it publishes**: every format (mask 15) and the seven opcode groups,
+`tiles` 1, `device_version` 0, flags readable, backend `"hip"`, and the
+software executor's capacities with its features less two -
+`seq_features` 0x75f1f, the software handle's 0x7ff1f without
+`CFT_SEQ_FEAT_INDEXED` and `CFT_SEQ_FEAT_AUGADD`. **What it refuses, by
+name**: an index table (device.c, on the clear bit, and `cft_run_ex` with
+a table likewise), augmentedAddition's two control codes (the loader, on
+the clear bit; `augmented.c` does not compile for an NVIDIA device as it
+is, so the unit is built without it), a scratch depth other than the
+software handle's 256 (`cft_open_ex`, as for every device), and
+`cft_get_image_id` - a GPU loads no device image, and what determines its
+bits is this library (`cft_build_id()`) and the device's compiler.
+Augmented addition, the tables and the card's 2,048-slot depth are round
+2's.
+
+**Buffers, and the authority rule.** Not in this part: `buffers_resident`
+is 0, `cft_alloc` gives host memory as on the software backend, the sync
+calls are no-ops, and every operand of every call is STAGED - copied into
+the handle's own pinned block, uploaded with one copy, and copied back
+with one more. The block is an eighth of the device's free memory at
+open, at most 64 MiB, and a run longer than it holds goes in chunks (an
+element and a lane depend on their own index alone, so a chunk cannot
+reach an answer); a program's chunk starts at a multiple of 8 lanes,
+doubles after a launch under 62 ms and halves after one over 250 ms, so
+no launch runs for seconds. An output a lane mask leaves to the caller -
+deposits, counts, lane bytes, scratch-out - is uploaded first, so the
+masked lanes come back as the caller left them. A scalar operand is read
+once a call, as on a tile: a `d` that aliases it does not feed a later
+element the value an earlier one wrote, where the software loop re-reads
+element 0 (both measured by hip-test). Device-resident buffers under
+cft.h's authority rule are the round's second part.
+
+**Failure.** A device allocation refused before anything ran is
+`CFT_ERR_OUT_OF_MEMORY`, named, and the handle stays usable; so is a
+launch the runtime refuses at the launch for its local memory, with the
+bytes a thread and the resident threads in the sentence. Any other HIP
+failure once a launch may have started poisons the handle: every later
+call is `CFT_ERR_INTERNAL` with "close it and open it again" in
+`cft_last_error()`, the remote and XRT backends' discipline.
+
+**Which GPU ran.** `cft_caps` says `hip`, not which device. Set
+`CFT_HIP_INFO=1` and each open prints one line to stderr: the device's
+name and architecture, its multiprocessors, PCI bus and memory, the HIP
+platform, runtime and driver versions, how many devices are visible (and
+`CUDA_VISIBLE_DEVICES` or `HIP_VISIBLE_DEVICES` when set), and this
+library's `HIP_ARCH`, stage size and kernel resources. A malformed value
+is refused at open by name.
+
+**One library, one device kind.** The GPU backend implements the XRT
+backend's seam under its own prefix (backend.h renames the `cftx_`
+functions to `cfth_` under `CFT_ENABLE_HIP`), so device.c's device code
+serves both, and a build holds a card or a GPU: `HIP=1 XRT=1` is refused
+by the Makefile. Because the unit compiles `softfloat.c` again, as C++,
+`make HIP=1` holds the objects to having no defined symbol in common
+(`hip-symcheck`, which `libcft.a` and the shared library wait for, with
+`hip-symcheck-plant` showing it can fail).
+
+How it is held to the contract: `host/tests/hip_test.c` (the open's
+grammar and caps, the reduction tree against the software handle at every
+n from 1 to 130 and every power of two with its neighbours to 2^18, every
+format, attribute and kind of data, the segmented and composed forms,
+aliasing, two handles, the plants); `host/tests/hip_corpus.c` (study
+GPU-A's corpora through the public API, at GPU-A's and G1A's sums);
+`device-test hip:N`, which takes a GPU as it takes a card; and the plants,
+compiled in only by `HIP_PLANTS=1` and chosen by `CFT_HIP_PLANT`, each of
+which turns one of those red.
+
 ## The device's on-chip capacities, published (2026-09-07)
 
 Item 3 of docs/studies/OPT-D-contract.md, and the defect its section
