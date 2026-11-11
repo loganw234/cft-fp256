@@ -1,4 +1,4 @@
-# hazards.sh cpu and nvidia (this desktop, 16:10:15 to 16:11:31), amd (the RX 7600, 16:08:36 to 16:09:30)
+# hazards.sh cpu (this desktop, 16:10:15 to 16:11:31), amd (the RX 7600, 16:08:36 to 16:09:30); nvidia rerun at send-back 1 (this desktop, the 5060 Ti, 17:05:41 to 17:06:25), check lines left out as for the others
 == variant cpu-ubsan-asan: cpu XFLAGS='-O1 -g -fsanitize=undefined,address -fno-sanitize-recover=all'
 run_checks: cpu-ubsan-asan: every corpus run GREEN
 run_checks: cpu-ubsan-asan-fixed: every corpus run GREEN
@@ -20,17 +20,37 @@ run_checks: nv-fastmath-fixed: every corpus run GREEN
 == variant nv-G: nvidia XFLAGS='-G'
 run_checks: nv-G: every corpus run GREEN
 run_checks: nv-G-fixed: every corpus run GREEN
-========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
-========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
-========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
-========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
-========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
-========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
-========= Error: Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator
-========= Error: Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation
+not run: compute-sanitizer on conf-fp32 (Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator )
+not run: compute-sanitizer on conf-fp64 (Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator )
+not run: compute-sanitizer on conf-fp128 (Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator )
+not run: compute-sanitizer on conf-fp256 (Device not supported. Please refer to the "Supported Devices" section of the sanitizer documentation Failed to initialize WDDM debugger interface. Please run EnableDebuggerInterface.bat as an administrator )
 SASS: 22832 instruction lines
+    646 HFMA2
+      2 MUFU.RCP
+      2 I2F.U64.RP
+      2 F2I.U64.TRUNC
 fpscan: 652 floating-point instruction lines in sass.txt
-== hazards.sh nvidia: every variant GREEN on every corpus run
+HFMA2 by kernel (count, architecture, kernel, instruction):
+      1 sm_120 _Z15gpua_cmp_kernellPKhS0_S0_S0_PjPy HFMA2 R#, -RZ, RZ, 0, 0
+    333 sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 R#, -RZ, RZ, 0, 0
+     33 sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 R#, -RZ, RZ, 0, 5.9604644775390625e-08
+      4 sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 R#, -RZ, RZ, 0, 2.384185791015625e-07
+      4 sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 R#, -RZ, RZ, 0, 9.5367431640625e-07
+      3 sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 R#, -RZ, RZ, 0, 1.1920928955078125e-07
+      1 sm_120 _Z15gpua_fma_kernel12cft_fmt_descilPKhS1_S1_S1_PhS2_ HFMA2 R#, -RZ, RZ, 0, 7.62939453125e-06
+     86 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, 0, 0
+     16 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, 0, 5.9604644775390625e-08
+      4 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, +QNAN , -8188
+      4 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, 0, 0.0004880428314208984375
+      3 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, +QNAN , -8192
+      2 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, 0, 1.1920928955078125e-07
+      2 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, 0, 2.384185791015625e-07
+      2 sm_120 _Z15gpua_gen_kernel12cft_fmt_descmllPhS0_S0_S0_ HFMA2 R#, -RZ, RZ, 0, 4.76837158203125e-07
+    143 sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ HFMA2 R#, -RZ, RZ, 0, 0
+      2 sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ HFMA2 R#, -RZ, RZ, 0, 1.1920928955078125e-06
+      2 sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ HFMA2 R#, -RZ, RZ, 0, 9.5367431640625e-07
+      1 sm_120 _Z16gpua_f256_kernellPKhS0_S0_S0_PhS1_ HFMA2 R#, -RZ, RZ, 0, 5.9604644775390625e-08
+== hazards.sh nvidia: every variant that ran GREEN on every corpus run; NOT RUN, so not counted green: compute-sanitizer(conf-fp32) compute-sanitizer(conf-fp64) compute-sanitizer(conf-fp128) compute-sanitizer(conf-fp256)
 == variant amd-fastmath: amd XFLAGS='-ffast-math'
 run_checks: amd-fastmath: every corpus run GREEN
 run_checks: amd-fastmath-fixed: every corpus run GREEN

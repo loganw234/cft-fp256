@@ -33,7 +33,9 @@
  * Preprocessor switches, each the study's to name: CFT_GPUA_CPU (the CPU
  * build: no HIP header, no kernel), CFT_GPUA_LIBCFT_C (libcft's own C
  * linked), and two plants that exist to make the comparison go red:
- * CFT_GPUA_PLANT_RMM_AS_RNE and CFT_GPUA_PLANT_DROP_FLAG=<flag bit>.
+ * CFT_GPUA_PLANT_RMM_AS_RNE and CFT_GPUA_PLANT_DROP_FLAG=<flag bit>, in
+ * both kernels; CFT_GPUA_PLANT_FIXED_RMM_AS_RNE plants the second alone, so
+ * that `diff` goes red (fma256_fixed.h).
  * Nothing in this file tests which GPU vendor it is compiled for.
  */
 #include <stdint.h>

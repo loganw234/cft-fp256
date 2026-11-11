@@ -14,7 +14,12 @@
 #           and =zero (an uninitialised read changes a result), -O0
 #   nvidia  --use_fast_math and -G (device code unoptimised); compute-
 #           sanitizer memcheck on the conformance corpora when it is
-#           installed; the SASS scanned for floating-point instructions
+#           installed; the SASS scanned for floating-point instructions,
+#           and every HFMA2 listed by kernel with its operands
+#
+# A leg that does not run (compute-sanitizer absent, or printing no ERROR
+# SUMMARY because it refused the device) is "not run: ..." by name with the
+# reason it printed, and the verdict names it: it is never counted green.
 #   amd     -ffast-math, -O0, -ftrivial-auto-var-init=pattern and =zero; the
 #           ISA (--save-temps) scanned for floating-point instructions
 set -uo pipefail
@@ -26,6 +31,7 @@ W=$(cd "$W" && pwd); C=$(cd "$C" && pwd)       # the ISA step compiles elsewhere
 B=$W/hz; O=$W/hz-out
 ARCHS=${ARCHS:-}
 rc=0
+notrun=""
 variant() {     # variant NAME TARGET XFLAGS [harness flags]
     local name=$1 target=$2 x=$3
     shift 3
@@ -57,15 +63,36 @@ nvidia)
     variant nv-G nvidia "-G" "$@"
     if command -v compute-sanitizer > /dev/null; then
         for f in conf-fp32 conf-fp64 conf-fp128 conf-fp256; do
-            compute-sanitizer --tool memcheck --print-limit 5 "$B/nv-fastmath/cft_fma" check \
-                "$C/$f.bin" - "$@" 2>&1 | grep -E "^check|ERROR SUMMARY|=========" | cut -c1-200
+            out=$(compute-sanitizer --tool memcheck --print-limit 5 "$B/nv-fastmath/cft_fma" check \
+                "$C/$f.bin" - "$@" 2>&1); src=$?
+            sum=$(grep -m1 -E "ERROR SUMMARY: [0-9]+ error" <<< "$out")
+            # "========= Error: ..." is the tool's own failure (a refused device,
+            # no debugger interface), which it counts in its ERROR SUMMARY while
+            # the program runs uninstrumented: not run. A memcheck finding is not
+            # an "Error:" line, and a summary without one is the tool's verdict.
+            if [ -z "$sum" ] || grep -qE "^=+ Error:" <<< "$out"; then
+                why=$(grep -E "^=+ Error:" <<< "$out" | sed 's/^=* *Error: *//' | sort -u | tr '\n' ' ' | cut -c1-240)
+                echo "not run: compute-sanitizer on $f (${why:-no ERROR SUMMARY, exit $src})"
+                notrun="$notrun compute-sanitizer($f)"
+                continue
+            fi
+            grep -E "^check" <<< "$out" | cut -c1-200
+            echo "compute-sanitizer $f: $sum, exit $src"
+            case "$sum" in *"ERROR SUMMARY: 0 errors"*) [ "$src" = 0 ] || rc=1 ;; *) rc=1 ;; esac
         done
     else
         echo "not run: compute-sanitizer (not installed)"
+        notrun="$notrun compute-sanitizer"
     fi
     cuobjdump -sass "$W/build/nvidia/cft_fma" > "$O/sass.txt" 2>&1 || cuobjdump -sass "$B/nv-fastmath/cft_fma" > "$O/sass.txt"
     echo "SASS: $(grep -cE '^\s+/\*[0-9a-f]{4}\*/' "$O/sass.txt") instruction lines"
     fpscan "$O/sass.txt" '\b(FADD|FFMA|FMUL|FSETP|FSET|FMNMX|FCHK|FRND|F2I|F2F|I2F|I2FP|F2IP|MUFU|DADD|DFMA|DMUL|DSETP|DMNMX|HADD2|HFMA2|HMUL2|HSETP2|FSWZADD)(\.[A-Z0-9_.]+)?\b'
+    # every HFMA2 by architecture and kernel, its registers as R#: count, form
+    echo "HFMA2 by kernel (count, architecture, kernel, instruction):"
+    awk '/code for sm_/ { arch = $3 } /Function :/ { fn = $3 }
+         /HFMA2/ { l = $0; sub(/.*HFMA2/, "HFMA2", l); sub(/ *;.*/, "", l);
+                   gsub(/R[0-9]+/, "R#", l); print arch, fn, l }' "$O/sass.txt" \
+        | sort | uniq -c | sort -k2,3 -k1,1rn
     ;;
 amd)
     ARCHS=${ARCHS:-gfx1102}
@@ -86,5 +113,7 @@ amd)
     ;;
 *) echo "PLATFORM is cpu, nvidia or amd"; exit 2 ;;
 esac
-echo "== hazards.sh $P: $([ $rc = 0 ] && echo 'every variant GREEN on every corpus run' || echo 'SOMETHING RED or FAILED')"
+verdict=$([ $rc = 0 ] && echo 'every variant GREEN on every corpus run' || echo 'SOMETHING RED or FAILED')
+[ -z "$notrun" ] || verdict="${verdict/every variant/every variant that ran}; NOT RUN, so not counted green:$notrun"
+echo "== hazards.sh $P: $verdict"
 exit $rc

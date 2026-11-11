@@ -17,7 +17,8 @@
 #           amd: gfx targets, default gfx1102
 #   env     DEFS  extra -D flags, e.g. "-DCFT_BN_LIMBS=38 -DCFT_NO_TRANSCEND",
 #                 or a plant: -DCFT_GPUA_PLANT_RMM_AS_RNE,
-#                 -DCFT_GPUA_PLANT_DROP_FLAG=8
+#                 -DCFT_GPUA_PLANT_DROP_FLAG=8, or the one-sided
+#                 -DCFT_GPUA_PLANT_FIXED_RMM_AS_RNE (the second kernel alone)
 #           ROOT  the tree whose host/ is copied (default: this repository)
 #           XFLAGS  extra flags on every compile and link of the harness and
 #                 the arithmetic (sanitizers, -ftrivial-auto-var-init, fast

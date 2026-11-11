@@ -11,6 +11,12 @@ appendix), **READ** (from a file, a page or a tool), **COMPUTED** (arithmetic on
 the others), **ESTIMATE** (a judgment, with its basis) or **BELIEVED** (taken on
 trust and not checked). "Not run" means not run. It never means passed.
 
+Corrected the same day at send-back 1, after the verifier VGPU-A's first
+pass: the second kernel's range by batch size and the RX 7600's step (with
+VGPU-A's series), hazards.sh's verdict over a sanitizer leg that did not
+run, section 7's list of immediates, and four notes (a one-sided plant, the
+two sessions' spread, the package names, the generator's coverage).
+
 ## The answer
 
 **One HIP source works on both vendors, bit for bit.** MEASURED, results and
@@ -32,12 +38,18 @@ with the same hashes on both NVIDIA cards (section 3).
 **What the generic port costs.** The first kernel runs `host/src/softfloat.c`
 and `bigint.c` as they are. At fp256 it makes 77 to 175 M FMAs a second,
 kernel only (MEASURED). That is 0.18 to 0.41 of the quad's 427 M with
-resident data (READ).
+resident data (READ). The top of both ranges is the RTX 4070 in this study's
+session; the verifier VGPU-A MEASURED 144 M/s on it (0.34 of the quad), with
+the display taking 8 to 19 % of that card (section 8).
 
 **What a specialised kernel reaches.** The second kernel is a second
-implementation of the fp256 FMA on fixed limbs in registers. It makes 0.89
-to 1.38 G a second, kernel only (MEASURED): 2.1 to 3.2 times the quad. It is
-held bit for bit to:
+implementation of the fp256 FMA on fixed limbs in registers. It makes 0.80
+to 1.46 G a second, kernel only (MEASURED), 1.9 to 3.4 times the quad, by
+device and batch size:
+- the RX 7600's 1.38 to 1.46 G/s holds at 1.5M lanes or fewer; it is 1.00 to 1.01 at 2M and 3M lanes and 0.80 to 0.83 at 4M (VGPU-A's MEASURED series, section 8), a step whose cause is not known;
+- the 5060 Ti makes 0.885 to 0.935 G/s at 1M to 4M lanes, and the 4070 0.94 to 1.08 across the two sessions (section 8).
+
+It is held bit for bit to:
 - the same corpora;
 - the first kernel, on 2^30 counter-generated hard cases on the 5060 Ti and on the RX 7600, and 2^28 on the 4070, with 0 differing.
 
@@ -56,30 +68,34 @@ that makes the specialised kernel trustworthy.
 
 **The roadmap's ESTIMATE** said 10^9 to 10^10 fp256 FMAs a second on a large
 GPU. Measured on three mid-range consumer cards:
-- the generic kernel reaches 0.8 to 1.8 x 10^8, an order of magnitude below the ESTIMATE's floor;
-- the specialised kernel reaches 0.9 to 1.4 x 10^9, inside its lower half.
+- the generic kernel reaches 0.8 to 1.8 x 10^8 (the top the 4070's in this study's session, 1.4 in VGPU-A's), an order of magnitude below the ESTIMATE's floor;
+- the specialised kernel reaches 0.80 to 1.46 x 10^9 by device and batch, so it straddles the ESTIMATE's floor of 10^9:
+  - below the floor: the 5060 Ti (0.885 to 0.935), the RX 7600 at 4M lanes (0.80 to 0.83) and the 4070 in VGPU-A's session (0.94);
+  - on it: the RX 7600 at 2M and 3M lanes (1.00 to 1.01);
+  - above it: the RX 7600 at 1.5M lanes or fewer (1.38 to 1.46) and the 4070 in this study's session (1.07 to 1.08);
+  - nothing reaches 1.5 x 10^9, the bottom sixth of the ESTIMATE's decade on a log scale.
 
 The MI300X would most likely land inside the range for the specialised
 kernel (ESTIMATE, sections 8 and 9).
 
 ## 1. What was built
 
-All of it is in `studies/gpu-a/` (2,155 lines of code and runbooks, 392 of
+All of it is in `studies/gpu-a/` (2,189 lines of code and runbooks, 436 of
 captured output).
 
 | file | lines | what it is |
 |---|---|---|
 | `devcopy.py` | 168 | the scripted copy of libcft's arithmetic for device code, and its check (section 2) |
-| `cft_fma.hip` | 752 | the one source: both kernels, the CPU path, the test generator, the harness (`check`, `bench`, `diff`, `info`) |
-| `fma256_fixed.h` | 366 | the second kernel: an fp256 FMA on fixed limbs, a second implementation |
+| `cft_fma.hip` | 754 | the one source: both kernels, the CPU path, the test generator, the harness (`check`, `bench`, `diff`, `info`) |
+| `fma256_fixed.h` | 368 | the second kernel: an fp256 FMA on fixed limbs, a second implementation |
 | `gen_corpus.py` | 231 | the corpora from the golden model; the bit-flip plant; an independent verifier |
-| `build.sh` | 103 | one build line per target: `cpu`, `cpu-libcft`, `nvidia`, `amd`, `cuda` |
+| `build.sh` | 104 | one build line per target: `cpu`, `cpu-libcft`, `nvidia`, `amd`, `cuda` |
 | `cudahip/hip/hip_runtime.h` | 52 | the study's own header, not HIP: the harness's HIP names mapped onto CUDA's, for plain nvcc (section 3) |
-| `run_checks.sh`, `bench.sh`, `hazards.sh` | 27, 28, 90 | every corpus through one build, the rates, the compilers' hazards |
+| `run_checks.sh`, `bench.sh`, `hazards.sh` | 27, 28, 119 | every corpus through one build, the rates, the compilers' hazards |
 | `run_wsl_nvidia.sh`, `run_amd.sh` | 108, 84 | the desktop's runbook and the AMD body |
 | `run_rx7600.sh`, `run_mi300x.sh` | 29, 61 | the two AMD runbooks |
 | `toolchain_check.hip` | 56 | the smallest program that proves a toolchain and device |
-| `captured/` | 392 | the corpora's sums, the expected outputs' sums, the final runs' summaries |
+| `captured/` | 436 | the corpora's sums, the expected outputs' sums, the final runs' summaries, send-back 1's reruns |
 
 **The harness.** It is one source compiled four ways:
 
@@ -186,7 +202,7 @@ name, not by a platform test.
 
 **HIP's NVIDIA platform ends at ROCm 7.2.4** (READ 2026-11-10, the ledger
 holds the listings):
-- The RX 7600 machine runs ROCm 10.1 in AMD's new `amdrocm` packaging (`repo.radeon.com/rocmradeon/apt/26.16`). That repository has no `hipcc`, `hip-runtime-nvidia` or `hipother` package.
+- The RX 7600 machine runs ROCm 10.1 in AMD's new `amdrocm` packaging (`repo.radeon.com/rocmradeon/apt/26.16`). The index of that repository's `pool/main/a/`, the one directory read (15:10), lists no package whose name contains `nvidia`, `hipcc`, `hip-` or `hipother`. That is a statement about package names, not about the compiler: a `hipcc` is present on the RX 7600 machine, outside dpkg's records (`dpkg -S /usr/bin/hipcc` finds no package: READ by the lead), and this study's AMD builds ran a `hipcc` there (HIP 7.16.26385).
 - HIP's current install page (HIP 7.18, ROCm 10.1's documentation) no longer mentions NVIDIA.
 - The last release that packages the NVIDIA platform is 7.2.4 (`repo.radeon.com/rocm/apt/7.2.4`: `hip-runtime-nvidia`, `hipcc-nvidia`).
 
@@ -283,6 +299,16 @@ The plants' outputs hash alike across vendors (MEASURED): rmm-as-rne
 ffe3f2eb..., drop-underflow f0ca15e0.... The same wrong answer is wrong in
 the same bits everywhere.
 
+The built-in plants are compiled into both kernels, so they leave the
+differential of section 6 green. One plant is one-sided:
+`-DCFT_GPUA_PLANT_FIXED_RMM_AS_RNE` changes the second kernel alone. Under it
+`cft_fma diff 16777216 20261110` goes red, 378,784 of 2^24 cases differing on
+the 5060 Ti and on the RX 7600, with the unplanted build at 0 (MEASURED at
+send-back 1, `captured/diff-plant.txt`). Every differing lane is an rmm lane,
+since the plant changes no other. VGPU-A found the same 378,784 with a
+one-sided plant of its own, and 3,494,301 with the flag drop made one-sided
+(VGPU-A's MEASURED, the 5060 Ti).
+
 **Not run:**
 - the plants on cpu-libcft. Its arithmetic is libcft's object code, and the plants live in the harness's lane, which it shares.
 - gfx942. It was built, not run.
@@ -331,6 +357,14 @@ The generator's nine families are, each with a random attribute:
 Its first 2,097,152 inputs hash alike on AMD and NVIDIA (MEASURED), so the
 same cases ran on both vendors. Each diff took under 25 s.
 
+**A known limit of the generator:** it does not aim at cancellation near
+EMIN or EMAX, at a subnormal c at the normal boundary, or at overflow by a
+rounding carry. VGPU-A's own golden corpus of 747,560 cases covers those four
+classes, and both kernels are green on it on the CPU, the 5060 Ti and the
+RX 7600, hash 067880f5... (VGPU-A's MEASURED; its ledger,
+`Data/runs/2026-11-10-gpu-a/ledger/verifier-VGPU-A.md`, item 6, in the
+records, which are not committed).
+
 **What a backend using it would need to stay honest:**
 - the generic kernel built beside it, as its reference inside the gates;
 - the conformance corpus and a differential stream run against both on every build and every device;
@@ -345,7 +379,10 @@ second on both fp256 corpora.
 
 - **Fast math and FMA contraction.** The arithmetic is integer. The default lines are `-O2` (nvcc: `--fmad=true`, no fast math; HIP-Clang: its default `-ffp-contract`). Builds with `--use_fast_math` (nvidia) and `-ffast-math` (amd) are green. The ISA settles it:
   - AMD gfx1102, the whole translation unit: no floating-point instruction in either FMA kernel. The only three, `v_rcp_f32` and two `v_fmamk_f32`, are in the test generator: the compiler's 64-bit modulo by a variable.
-  - NVIDIA: the only floating-point opcode in either FMA kernel is `HFMA2 R, -RZ, RZ, 0, imm`, nvcc's constant move. Its fp16 immediates 2^-24 to 2^-17 are the integers 1, 2, 4, 16 and 128. There are 378 in the first kernel and 148 in the second, on sm_120 only; sm_89 has none. I2F, MUFU.RCP and F2I appear in the generator alone.
+  - NVIDIA: the only floating-point opcode in either FMA kernel is `HFMA2 R, -RZ, RZ, 0, imm`, nvcc's constant move: -0 times 0 plus the immediate pair writes the pair's bits. There are 378 in the first kernel and 148 in the second, on sm_120 only; sm_89 has none. By hazards.sh's listing of every HFMA2 with its operands (MEASURED at send-back 1, `captured/hazards.txt`):
+    - the first kernel's 378: 333 with the immediate 0, and 45 with fp16 subnormals whose bit patterns are the integers 1 (33), 2 (3), 4 (4), 16 (4) and 128 (1);
+    - the second kernel's 148: 143 with 0, and 5 with the integers 1 (1), 16 (2) and 20 (2).
+    I2F, MUFU.RCP and F2I appear in the generator alone, beside 119 HFMA2 of its own. (The study first listed 1, 2, 4, 16 and 128 alone, from the five commonest immediates over the whole binary; the zeros and the 20 were missed.)
 - **Flush to zero.** Irrelevant, since neither FMA kernel computes in floating point. The constant moves have zero inputs, and the fast-math builds, which flush, are green.
 - **Shift counts at or past the width.** `-fsanitize=undefined,address -fno-sanitize-recover=all` on the device copy, on libcft's C and on the second kernel found no report on every corpus.
 - **`long`'s width.** One `1uL` (section 2), whose value fits either width.
@@ -356,7 +393,7 @@ second on both fp256 corpora.
 - **`-O0` and `-G`.** Green on the CPU and AMD, and `-G` (device code unoptimised) on NVIDIA.
 - **Reductions by atomics.** Neither FMA kernel has one. The differential's mismatch counter is an atomic integer sum, which no order can change.
 - **Not run:**
-  - compute-sanitizer: under WSL it asks for `EnableDebuggerInterface.bat` run as administrator, a Windows change that was not made;
+  - compute-sanitizer: under WSL it asks for `EnableDebuggerInterface.bat` run as administrator, a Windows change that was not made, and reports "Device not supported". It still runs the program, uninstrumented, and counts its own two errors. hazards.sh printed those lines under a GREEN verdict; since send-back 1 it names the leg "not run: compute-sanitizer (...)" with the reason printed, and its verdict counts it as not run, never green (`captured/hazards.txt`, the NVIDIA section re-made from a rerun);
   - `-ftrivial-auto-var-init` on NVIDIA, which nvcc does not have;
   - valgrind and MemorySanitizer, which were not installed; the auto-var-init pair stands in.
 
@@ -378,25 +415,42 @@ medians are below, with min/max in `captured/bench.txt`.
 
 Conditions:
 - Clocks were not controlled, and `nvidia-smi` read 2.5 to 2.9 GHz under load.
-- The 4070 drives the display, hence its wider spread.
-- The RX 7600 shared its card with an idle resident llama-server holding 6.1 GB of its 8 GB (Logan's word: sharing is fine). Its runs used at most about 0.7 GB.
+- The 4070 drives the display, hence its wider spread. In VGPU-A's session the display took 8 to 19 % of that card, and VGPU-A MEASURED lower 4070 figures (below).
+- The RX 7600 shared its card with an idle resident llama-server holding 6.1 GB of its 8 GB (Logan's word: sharing is fine). Its runs used at most about 0.7 GB. VGPU-A's batch series in the footnote was taken with the card free.
 - Load averages were 0.1 to 0.6.
-- The CPU figures are one core of this desktop's i5-12400F under WSL, one thread, `-O2`.
+- The CPU figures are one core of this desktop's i5-12400F under WSL, one thread, `-O2`, 3 repetitions. VGPU-A's CPU figures differ from these by up to about 17 % (VGPU-A's MEASURED, 3 repetitions), so a CPU figure here carries that spread.
+
+Two sessions measured the 4070 and disagree by up to 22 % (175.3 against
+143.7). The fp256 table gives VGPU-A's 4070 figures beside this session's;
+the other formats' 4070 figures were measured in this session alone and
+carry the same spread.
 
 **fp256, MEASURED (final runs, block 128).** Kernel only, 1M lanes (4M);
 then end to end at 1M:
 
 | device | first kernel | second kernel | end to end (first / second) |
 |---|---|---|---|
-| RTX 4070 (sm_89, 46 SMs) | 175.3 M/s (172.0) | 1,079 M/s (1,069) | 44.7 / 48.2 M/s |
+| RTX 4070 (sm_89, 46 SMs) | 175.3 M/s (172.0); VGPU-A: 143.7 (136.6) | 1,079 M/s (1,069); VGPU-A: 940 (940) | 44.7 / 48.2 M/s |
 | RTX 5060 Ti (sm_120, 36 SMs) | 143.3 M/s (146.6) | 887 M/s (935) | 34.6 / 40.9 M/s |
 | RX 7600 (gfx1102, 16 "CUs" to HIP) | 77.4 M/s (77.8) | 1,383 M/s (803*) | 31.5 / 51.0 M/s |
 | one CPU core, device copy | 461 ns (366 ns) | 327 ns (314 ns) | - |
 | one CPU core, libcft's C | 450 ns (447 ns) | - | - |
 
-\* The RX 7600's second kernel at 4M lanes is an anomaly: 803 M/s, against
-1,383 M/s at 1M. It is BELIEVED to come from the 1.9 GB of VRAM the resident
-process leaves free. It was not shown.
+\* At 4M lanes the RX 7600's second kernel makes 803 M/s, against 1,383 M/s
+at 1M. **It is a step in the batch size, and not the resident server's
+VRAM.** VGPU-A MEASURED the series with the card free (every run after the
+server was unloaded at 16:45, amd-smi showing 8,120 MB free and no other GPU
+process), kernel only, median of 10:
+
+| lanes | 0.5M | 1M | 1.5M | 2M | 3M | 4M |
+|---|---|---|---|---|---|---|
+| G/s | 1.46 | 1.38 to 1.40 | 1.40 | 1.01 | 1.00 | 0.82 to 0.83 |
+
+At 4M lanes, every lane on one case gives 0.88 G/s, and blocks of 64 to 256
+give 0.83 to 0.84. So the step lies between 1.5M and 2M lanes. **Its cause
+is not known.** NVIDIA shows no such step: the 5060 Ti's second kernel makes
+0.885, 0.918 and 0.935 G/s at 1M, 2M and 4M lanes, and the 4070's 0.94 at 1M
+and at 4M (VGPU-A's MEASURED).
 
 The other formats, first kernel, block 128, kernel only (MEASURED):
 
@@ -414,17 +468,18 @@ The block size (64, 128, 256) moves no rate by more than its spread.
 
 | | 4070 | 5060 Ti | RX 7600 |
 |---|---|---|---|
-| first kernel, times the quad | 0.41 | 0.34 | 0.18 |
-| second kernel, times the quad | 2.5 | 2.1 | 3.2 |
+| first kernel, times the quad | 0.41 (VGPU-A: 0.34) | 0.34 | 0.18 |
+| second kernel, times the quad, 1M lanes | 2.5 (VGPU-A: 2.2) | 2.1 | 3.2 |
+| second kernel, times the quad, 4M lanes | 2.5 (VGPU-A: 2.2) | 2.2 | 1.9 |
 
-- Against `mpfr+754`'s 71 ns a core (READ): the first kernel is 5.5 to 12.4 cores, and the second 63 to 98.
-- Against libcft's own C on one core here (450 ns): the second kernel is 400 to 620 cores.
+- Against `mpfr+754`'s 71 ns a core (READ): the first kernel is 5.5 to 12.4 cores (10.2 at VGPU-A's 4070 figure), and the second 57 to 104 (the RX 7600 at 4M lanes and at 0.5M).
+- Against libcft's own C on one core here (450 ns, with the CPU's spread above): the second kernel is 360 to 660 cores (the same two figures).
 - The end-to-end rates compare with nothing of the card's. The card's 427 M is with resident data, and its per-call path costs about 35 µs a run (READ, the same section). Neither was measured here.
 
 **The roadmap's ESTIMATE** (10^9 to 10^10 on a large GPU, low confidence),
 against the measurements:
 - Its basis was about 1,000 32-bit operations an fp256 FMA. The first kernel spends about 38,000 lane-instruction slots per FMA (COMPUTED: 1.32 x 10^13 slots a second on the 5060 Ti at 2.87 GHz, over 346 M FMAs a second with every lane on one case). The second spends about 14,900.
-- The ESTIMATE was an order of magnitude high for the generic port. It holds for the specialised kernel, which already reaches its floor on mid-range cards.
+- The ESTIMATE was an order of magnitude high for the generic port. The specialised kernel straddles its floor on mid-range cards: 0.80 to 1.46 x 10^9 by device and batch (the answer gives which is where).
 
 **What limits the first kernel** (MEASURED; desktop and RX 7600 experiments in
 the ledger):
@@ -434,9 +489,9 @@ the ledger):
 - **The instruction count of a portable bignum.** Loops of data-dependent length, bit-at-a-time helpers (`u32_bitlen`, `sf_set_field`), and every limb in local memory: thousands of LDL/STL and scratch instructions statically.
 
 **What limits the second kernel:**
-- Divergence costs 0 to 7 % (one case a lane: 903 to 957 M/s on NVIDIA, 1.46 to 1.48 G/s on the RX 7600).
+- Divergence costs 0 to 7 % at 1M lanes (one case a lane: 903 to 957 M/s on NVIDIA, 1.46 to 1.48 G/s on the RX 7600).
 - Its register count holds NVIDIA's occupancy at 33 % (sm_89) and 67 % (sm_120) (MEASURED).
-- On the RX 7600 it moves 130 bytes an FMA at 1.38 G/s, about 180 GB/s (COMPUTED). That is close to the card's 288 GB/s (BELIEVED, its specification), so with operands streamed from memory it is near that card's bandwidth.
+- On the RX 7600 at 1M lanes it moves 130 bytes an FMA at 1.38 G/s, about 180 GB/s (COMPUTED). That is close to the card's 288 GB/s (BELIEVED, its specification). Past the step it moves less (1.0 G/s is 130 GB/s, 0.82 is 107 GB/s, COMPUTED), so that bandwidth does not explain the step.
 - On NVIDIA it uses about a quarter of the memory bandwidth, so it is BELIEVED issue-bound there.
 
 **A tuned kernel** (ESTIMATE, medium-low confidence) might gain 1.5 to 3
@@ -445,13 +500,15 @@ times on NVIDIA:
 - fewer selects in the shifters;
 - `__launch_bounds__` tuned for occupancy.
 
-With resident data it would gain more on AMD, where bandwidth binds.
+With resident data it would gain more on AMD, where at 1M lanes it runs near
+the card's bandwidth.
 
 **The MI300X, ESTIMATE until measured.**
 - **The second kernel: 0.8 to 1.5 x 10^10 a second.** Basis:
   - 304 CUs against the RX 7600's 32, at a similar clock (BELIEVED, the specifications; HIP reports the 7600's as 16, BELIEVED to be its work-group processors);
   - wave64 giving up the per-CU throughput that the 7600's dual issue gives (BELIEVED);
-  - 5.3 TB/s of HBM against 288 GB/s (BELIEVED, the specifications).
+  - 5.3 TB/s of HBM against 288 GB/s (BELIEVED, the specifications);
+  - the RX 7600's rate it scaled, its 1M-lane 1.38 G/s (the 4M figure was then set aside as an anomaly). Scaled the same way from the card's rate past its step (0.80 to 1.0 G/s at 2M to 4M lanes), the range is 0.46 to 1.1 x 10^10. Whether the MI300X has a step, and where, is not known.
 - **The first kernel: 0.5 to 1.2 x 10^9 a second.**
 
 ## 9. The MI300X
@@ -497,7 +554,7 @@ remote backends:
   - The generic kernel (libcft's code under E1) runs every format and opcode the software backend runs, unchanged. It is the reference.
   - Specialised kernels (fp256 FMA first; ADD, SUB and MUL through `sf_steer`'s operand steering; fp128 next) are each held to the reference inside the gates.
   - A device publishes what it has in CAPS and refuses the rest by name, as the card does.
-- **Residency, or the speed is lost.** End to end is 31 to 51 M/s against 0.9 to 1.4 G/s kernel only. The backend needs `cft_alloc`'d device copies under `cft.h`'s authority rule, as the card's resident mode has. A program's registers should live on the device, as the sequencer's model already wants: one instruction stream, many lanes, one thread a lane.
+- **Residency, or the speed is lost.** End to end is 31 to 51 M/s against 0.80 to 1.46 G/s kernel only (by device and batch). The backend needs `cft_alloc`'d device copies under `cft.h`'s authority rule, as the card's resident mode has. A program's registers should live on the device, as the sequencer's model already wants: one instruction stream, many lanes, one thread a lane.
 - **The flags.** A call's flags are an OR over its lanes, which atomics compute deterministically, since OR is associative and commutative. `cft_reduce`'s sums keep their fixed tree, a kernel per level, never an atomic add on values.
 - **`host/src`.** E1 behind a `CFT_HD` header (section 2). Nothing else in the arithmetic needs to change for device code (MEASURED by this study's build).
 - **The NVIDIA leg.** HIP 7.2.4 frozen, the study's header (section 3 (b), built and held to the same hashes), or `hipother` from source. This is Logan's choice (questions).
@@ -511,13 +568,13 @@ remote backends:
 
 ## 11. Questions for Logan
 
-1. **A backend round?** With a specialised fp256 kernel held to libcft's own code on the GPU, a 5060 Ti or RX 7600 runs fp256 FMAs at 2 to 3 times the quad's resident rate, kernel only. Is that worth a round, and which first: fp256 FMA/ADD/SUB/MUL, or fp128 too?
+1. **A backend round?** With a specialised fp256 kernel held to libcft's own code on the GPU, a 5060 Ti or RX 7600 runs fp256 FMAs at 1.9 to 3.4 times the quad's resident rate, kernel only, by batch size (the RX 7600's 3.2 to 3.4 holds at 1.5M lanes or fewer, 1.9 at 4M). Is that worth a round, and which first: fp256 FMA/ADD/SUB/MUL, or fp128 too?
 2. **The NVIDIA leg.** HIP's NVIDIA platform is packaged only up to ROCm 7.2.4. For a backend, which: keep HIP 7.2.4 frozen, use the study's 52-line CUDA header (built here, same hashes), build `hipother` from ROCm's sources, or drop NVIDIA?
 3. **Specialised kernels in the contract.** The second kernel is a second implementation. Its agreement is evidence by test (73,780 conformance, 1,000,000 stream and 2.4 x 10^9 differential cases), not a proof. Is "generic as reference inside the gates" enough, or should a specialised kernel need a proof (an exhaustive small-format analogue, say)?
 4. **The MI300X.** Which of section 9's runs (a) to (d) are worth its time, if any? Each needs your word.
 5. **The CPU too?** The first kernel's cost on one CPU core is about 450 ns an fp256 FMA, against mpfr+754's 71 ns. Most of it is the portable bignum's bit-at-a-time helpers. Should `host/src` get faster helpers on every platform, behind the same vectors?
 6. **This desktop's distro `cft-gpu`.** Keep it for the verifier and a later round, or remove it after the merge?
-7. **The RX 7600 machine's resident llama-server** holds 6.1 GB of the card. Is it to stay? It may explain the 4M-lane anomaly.
+7. **The RX 7600 machine's resident llama-server** holds 6.1 GB of the card. Is it to stay?
 
 ## Appendix: commands
 
@@ -536,4 +593,7 @@ bash docs/studies/gpu-a/hazards.sh nvidia CORPUS WORK --device 1   # and: cpu
 # section 8's experiments: the container, and one case a lane (cases 5, 4, 1, 2)
 DEFS="-DCFT_BN_LIMBS=38 -DCFT_NO_TRANSCEND" bash docs/studies/gpu-a/build.sh nvidia WORK/l38
 WORK/build/nvidia/cft_fma bench CORPUS/stream-fp256.bin --block 128 --lanes 1000000 --case 5
+# send-back 1: the one-sided plant (section 5), then the diff it turns red
+DEFS=-DCFT_GPUA_PLANT_FIXED_RMM_AS_RNE bash docs/studies/gpu-a/build.sh nvidia WORK/plant
+WORK/plant/cft_fma diff 16777216 20261110 --device 1
 ```

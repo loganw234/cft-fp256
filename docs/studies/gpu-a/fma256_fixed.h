@@ -262,7 +262,9 @@ CFT_HD static void f256_fma_lane(const uint8_t *pa, const uint8_t *pb, const uin
     uint32_t out[8], fl = 0;
     int i, bad = 0, done = 1;
     f_unpack(pa, &ua); f_unpack(pb, &ub); f_unpack(pc, &uc);
-#ifdef CFT_GPUA_PLANT_RMM_AS_RNE
+/* CFT_GPUA_PLANT_FIXED_RMM_AS_RNE is the one-sided plant: this kernel
+ * alone, so `cft_fma diff` must go red (send-back 1). */
+#if defined(CFT_GPUA_PLANT_RMM_AS_RNE) || defined(CFT_GPUA_PLANT_FIXED_RMM_AS_RNE)
     if (rnd == CFT_SF_RMM)
         rnd = CFT_SF_RNE;
 #endif
