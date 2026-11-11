@@ -20,7 +20,8 @@ best_program, the text, the assembler and the internal check (verify), then
 seq.py against routines.GOLDEN, which is transcend.py's:
 
 * the tables: cftc.MATH, ir.ROUTINES and ARITY, emit.ROUTINE_SOURCE and the
-  manifest's RADIAN name the nine as routines.py does, in the language's
+  manifest's RADIAN name the nine as routines.py does (and, since M4's
+  build, the four after them: test_cftc_invtrig.py), in the language's
   order, with no mpmath imported by a program without them;
 * each of the three at every format and attribute (60 images) compiles,
   passes the internal check and runs on seq.py equal to the golden function
@@ -66,6 +67,7 @@ from lang_mathform import NO_MPMATH, have_mpmath  # noqa: E402
 SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
 THREE = ("sin", "cos", "tan")
 NINE = SIX + THREE
+FOUR = ("atan", "asin", "acos", "atan2")    # test_cftc_invtrig.py's
 FMT_NAMES = ("fp32", "fp64", "fp128", "fp256")
 RND_NAMES = sf.RND_NAMES
 needs_mpmath = pytest.mark.skipif(not have_mpmath(), reason=NO_MPMATH)
@@ -79,17 +81,18 @@ def test_the_tables_name_the_three_as_routines_routines_py_does():
     unavailable`); emit.ROUTINE_SOURCE names every routine (a looped call's
     comment is a KeyError otherwise); ir.ROUTINES is the routines; and
     ir.ARITY, whose order is the manifest's graph_by_op, holds the three of
-    arity one directly after log2 and before neg, the place the language
-    gives them (test_routines.py pins the whole of it to lang.OPS)."""
-    assert cftc.MATH == R.BUILT == NINE
+    arity one directly after log2, then the four (M4's), and neg, the place
+    the language gives them (test_routines.py pins the whole of it to
+    lang.OPS)."""
+    assert cftc.MATH == R.BUILT == NINE + FOUR
     assert set(emit.ROUTINE_SOURCE) == set(R.ROUTINES) == \
-        {"div", "sqrt", *NINE}
+        {"div", "sqrt", *NINE, *FOUR}
     assert [emit.ROUTINE_SOURCE[op] for op in THREE] == \
         ["mathlib's sin", "mathlib's cos", "mathlib's tan"]
     assert ir.ROUTINES == frozenset(R.ROUTINES)
     names = list(ir.ARITY)
     at = names.index("log2")
-    assert names[at + 1:at + 5] == ["sin", "cos", "tan", "neg"]
+    assert names[at + 1:at + 9] == ["sin", "cos", "tan", *FOUR, "neg"]
     assert [ir.ARITY[op] for op in THREE] == [1, 1, 1]
     assert manifest.RADIAN == THREE
     assert set(manifest.RADIAN) <= set(cftc.MATH)
@@ -111,7 +114,8 @@ try:
     sys.exit(1)
 except ImportError:
     pass
-assert cftc.MATH == R.BUILT and list(R.ROUTINES)[-3:] == ["sin", "cos", "tan"]
+assert cftc.MATH == R.BUILT and list(R.ROUTINES)[-7:-4] == [
+    "sin", "cos", "tan"]
 assert R.LIVE_CAP["sin"] == {"fp32": 23, "fp64": 26, "fp128": 17,
                              "fp256": 16}
 # division's fragment needs no mpmath; one of the nine's is an ImportError

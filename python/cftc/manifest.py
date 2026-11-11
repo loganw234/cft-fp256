@@ -28,6 +28,9 @@ FLAG_WORDS = ((sf.FLAG_INVALID, "invalid"), (sf.FLAG_DIVZERO, "divideByZero"),
 # manifest carries only where its step holds one of them: a step with the
 # six alone, or with division and root, says what it said before M2's build.
 RADIAN = ("sin", "cos", "tan")
+# and the inverse routines (M4's build), likewise: a manifest of a step
+# without atan, asin, acos and atan2 says what it said before M4's build.
+INVERSE = ("atan", "asin", "acos", "atan2")
 
 # What each template's step advances the independent variable by, over
 # RN(h): k times the h-scaled constant of factor f. rk4's update is
@@ -252,10 +255,12 @@ def build(c):
         # (M1's build, item 4) add theirs, a step with none of the six
         # omitting it; sin, cos and tan (M2's build) add a sentence of their
         # own only where the step holds one of them, so that a manifest
-        # without them is what it was
+        # without them is what it was; atan, asin, acos and atan2 (M4's
+        # build) likewise add a sentence of their own
         math = [op for op in calls if op not in ("div", "sqrt")]
-        six = [op for op in math if op not in RADIAN]
+        six = [op for op in math if op not in RADIAN + INVERSE]
         radian = [op for op in math if op in RADIAN]
+        inverse = [op for op in math if op in INVERSE]
         source, flags = [], ("each runs in a quiet region and raises exactly "
                              "its operation's flags: revision 8's flag "
                              "control, QUIET, ENDQUIET and RAISE "
@@ -280,6 +285,12 @@ def build(c):
                       "cannot decide the last bit, and mark the lane as the "
                       "six do (R23's byte [7], STATUS[6]; docs/LANGUAGE.md, "
                       "\"A marked lane\")")
+        if inverse:
+            flags += ("; the math library's atan, asin, acos and atan2 "
+                      "likewise set the raised word's bit 7 where their "
+                      "in-lane test cannot decide the last bit, and mark "
+                      "the lane as the six do (R23's byte [7], STATUS[6]; "
+                      "docs/LANGUAGE.md, \"A marked lane\")")
         m["routines"] = {
             "calls": calls,
             "per_call": {op: len(held_fragment(op, fmt, g.rnd))

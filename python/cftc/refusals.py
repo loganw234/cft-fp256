@@ -22,11 +22,12 @@ so a writer meets one form of refusal from the parser to the image:
                      immediate a segment's steps are
   halving-underflow  an h-scaled constant whose exact halving
                      underflows, so no step-halving bank holds it
-  routine-unavailable  a run-time node of the math library's nine (exp,
-                     expm1, exp2, log, log1p, log2, sin, cos, tan) on a
-                     host without mpmath, through which the golden
-                     generator (cft_golden/mathlib.py) derives the
-                     routine's constants (M1's build, item 4, and M2's):
+  routine-unavailable  a run-time node of the math library's thirteen
+                     (exp, expm1, exp2, log, log1p, log2, sin, cos, tan,
+                     atan, asin, acos, atan2) on a host without mpmath,
+                     through which the golden generator
+                     (cft_golden/mathlib.py) derives the routine's
+                     constants (M1's build, item 4, M2's and M4's):
                      the one name that depends on the HOST - with mpmath
                      the same source and target compile, or are refused by
                      another name such as target-feature. Raised after the
@@ -39,7 +40,8 @@ so a writer meets one form of refusal from the parser to the image:
 and one of the language's own: `bank-capacity`, the bank's 512 on every
 device, which the checker raises for params and constants and the
 compiler for the words of the routines it inlines (C4, and the six's
-since M1's build, item 4) - one limit, one name, the cause in the
+since M1's build, item 4, the three's since M2's and the four's since M4's)
+- one limit, one name, the cause in the
 sentence.
 
 Until parcel C4 an eighth, `runtime-routine`, refused a run-time division

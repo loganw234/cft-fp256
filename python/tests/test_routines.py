@@ -32,7 +32,14 @@ against the contract and against divfull.
   while mathlib.LIVE_CAP stays the six's 21, 13, 13 and 13); `sinh` is the
   name a fragment of no routine takes now; and all 220 fragments - the
   60 of the three, the six's 120, division's and root's 40 - are what they
-  were at 19de866c, digest for digest (routine_digests.py).
+  were at 19de866c, digest for digest (routine_digests.py);
+* the fifteen (M4's build, wave 4): atan, asin, acos and atan2 join ROUTINES
+  after tan, in the language's order; their fragments are mathlib.py's own,
+  under the six's contract and a live cap of their own per function and
+  format (a row of LIVE_CAP each, which mathlib.INV_LIVE_CAP views); atan2
+  is the first routine of two inputs beside division, ("a", "b") = (y, x);
+  and their 80 fragments are what they were at 21b98aec, digest for digest
+  (routine_digests_inv.py), beside the 220 of the eleven at 19de866c.
 """
 
 import hashlib
@@ -51,6 +58,7 @@ from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden.softfloat import RND_MODES  # noqa: E402
 
 from routine_digests import DIGESTS  # noqa: E402
+from routine_digests_inv import DIGESTS_INV  # noqa: E402
 from routine_pools import div_pairs, sqrt_xs  # noqa: E402
 
 FORMATS = (FP32, FP64, FP128, FP256)
@@ -171,40 +179,49 @@ def test_each_specialisation_rule_planted_wrong_is_red(plant, monkeypatch):
     assert red, f"{plant}: green on the pools"
 
 
-# ---- the eight (M1's build, item 4), the eleven (M2's, item 5) -------------
-# routines.py names the eleven, hands out the nine's fragments from mathlib.py
-# by name, and holds every fragment to ONE statement of what it may be, per
-# routine: the six's widened (the mark, RDN, RUP and the program's
-# attribute, more live), the three's the same under live caps of their own,
-# division's and root's C4's, not loosened.
+# ---- the eight (M1's build, item 4), the eleven (M2's, item 5), the fifteen
+# (M4's) --------------------------------------------------------------------
+# routines.py names the fifteen, hands out the thirteen's fragments from
+# mathlib.py by name, and holds every fragment to ONE statement of what it
+# may be, per routine: the six's widened (the mark, RDN, RUP and the
+# program's attribute, more live), the three's and the four's the same under
+# live caps of their own, division's and root's C4's, not loosened.
 
 SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
 THREE = ("sin", "cos", "tan")
 NINE = SIX + THREE
 ELEVEN = ("div", "sqrt", *NINE)
+FOUR = ("atan", "asin", "acos", "atan2")
+THIRTEEN = NINE + FOUR
+FIFTEEN = ("div", "sqrt", *THIRTEEN)
 HAVE_MPMATH = importlib.util.find_spec("mpmath") is not None
 needs_mpmath = pytest.mark.skipif(
-    not HAVE_MPMATH, reason="the nine's fragments are built through mpmath "
+    not HAVE_MPMATH, reason="the thirteen's fragments are built through mpmath "
     "(python/cft_golden/mathlib.py), and python has no mpmath module")
 RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
 
 
-def test_the_eleven_are_routines():
-    """ROUTINES, the arity map, is division, root, the six and sin, cos and
-    tan, in that order; cftc's ir.ROUTINES is the same set; the nine take
-    one input, `a`; division's and root's are read from divfull's programs
-    and the nine's are not (read() refuses them by name); and a name that is
-    no routine, `sinh`, is refused by name by fragment()."""
+def test_the_fifteen_are_routines():
+    """ROUTINES, the arity map, is division, root, the six, sin, cos and
+    tan, and atan, asin, acos and atan2, in that order; cftc's ir.ROUTINES
+    is the same set; the thirteen take one input, `a`, but atan2's two, `a`
+    and `b`, as division's; division's and root's are read from divfull's
+    programs and the thirteen's are not (read() refuses them by name); and a
+    name that is no routine, `sinh`, is refused by name by fragment()."""
     from cftc import ir
-    assert list(R.ROUTINES) == list(ELEVEN)
-    assert R.ROUTINES == {"div": 2, "sqrt": 1, **{op: 1 for op in NINE}}
+    assert list(R.ROUTINES) == list(FIFTEEN)
+    assert R.ROUTINES == {"div": 2, "sqrt": 1, **{op: 1 for op in NINE},
+                          "atan": 1, "asin": 1, "acos": 1, "atan2": 2}
     assert ir.ROUTINES == frozenset(R.ROUTINES)
-    assert R.READ == ("div", "sqrt") and R.BUILT == NINE
+    assert R.READ == ("div", "sqrt") and R.BUILT == THIRTEEN
     assert R.INPUTS == {"div": ("a", "b"), "sqrt": ("a",),
-                        **{op: ("a",) for op in NINE}}
+                        **{op: ("a",) for op in NINE},
+                        "atan": ("a",), "asin": ("a",), "acos": ("a",),
+                        "atan2": ("a", "b")}
+    assert all(len(R.INPUTS[op]) == R.ROUTINES[op] for op in R.ROUTINES)
     assert set(R.GOLDEN) == set(R.ROUTINES)
-    for op in NINE:
+    for op in THIRTEEN:
         with pytest.raises(ValueError, match="mathlib.py builds"):
             R.read(op, FP64, RNE)
     for call in (R.fragment, R.read):
@@ -217,7 +234,8 @@ def test_the_routines_are_in_the_languages_order():
     lang.graph.OPS filtered to the routines, and cftc's ir.ARITY, whose
     order the manifest's graph_by_op reads, is OPS itself item for item.
     Both hold only with the language that has sin, cos and tan after log2
-    (M2L's), so this test is red on a tree without it."""
+    (M2L's) and atan, asin, acos and atan2 after tan (M4L's), so this test
+    is red on a tree without them."""
     from cft_golden import lang
     from cftc import ir
     assert list(R.ROUTINES) == [op for op in lang.OPS if op in R.ROUTINES]
@@ -225,10 +243,11 @@ def test_the_routines_are_in_the_languages_order():
 
 
 @needs_mpmath
-@pytest.mark.parametrize("op", NINE)
-def test_the_nine_are_mathlibs_fragments_by_name(op):
+@pytest.mark.parametrize("op", THIRTEEN)
+def test_the_thirteen_are_mathlibs_fragments_by_name(op):
     """routines.fragment hands out mathlib.fragment's own object, unchanged,
     at every format and attribute, and it holds its routine's statement;
+    its inputs are the routine's (R.INPUTS: ("a",), or atan2's ("a", "b"));
     the golden function is transcend's."""
     from cft_golden import mathlib as ml
     from cft_golden import transcend
@@ -236,12 +255,18 @@ def test_the_nine_are_mathlibs_fragments_by_name(op):
         for rnd in RND_MODES:
             f = R.fragment(op, fmt, rnd)
             assert f is ml.fragment(op, fmt, rnd)
-            assert (f.op, f.fmt, f.rnd, f.inputs) == (op, fmt, rnd, ("a",))
+            assert (f.op, f.fmt, f.rnd, f.inputs) == (op, fmt, rnd,
+                                                      R.INPUTS[op])
             assert R.invariants(f) == []
             assert R.invariants(f) == ml.invariants(f)
     x = sf.one_bits(FP64) + 12345
-    assert R.GOLDEN[op](FP64, x, RDN) == transcend.compute(FP64, op, x, 0,
-                                                           RDN)
+    if op == "atan2":
+        y = sf.one_bits(FP64) + 777
+        assert R.GOLDEN[op](FP64, y, x, RDN) == transcend.compute(
+            FP64, op, y, x, RDN)
+    else:
+        assert R.GOLDEN[op](FP64, x, RDN) == transcend.compute(
+            FP64, op, x, 0, RDN)
 
 
 def test_one_statement_per_routine():
@@ -254,7 +279,10 @@ def test_one_statement_per_routine():
     the six's contract under caps of their own, each row's four values
     pinned: 23, 26, 17 and 16 live at fp32, fp64, fp128 and fp256, which
     mathlib.py's TRIG_LIVE_CAP views (the same dicts) while its LIVE_CAP
-    stays the six's."""
+    stays the six's. The four's are the six's contract too, each row's four
+    values pinned (Logan's answer 9 of 2026-10-23): atan 25, 15, 15 and 15,
+    asin and acos 25, 16, 16 and 16, atan2 31, 19, 19 and 19, at fp32,
+    fp64, fp128 and fp256, which mathlib.py's INV_LIVE_CAP views."""
     assert set(R.CONTRACT) == set(R.LIVE_CAP) == set(R.ROUTINES)
     c4 = R.Contract(R.FLAG_WORDS, (RNE, RTZ), False)
     for op in ("div", "sqrt"):
@@ -276,17 +304,27 @@ def test_one_statement_per_routine():
         assert R.CONTRACT[op] == six
         assert R.LIVE_CAP[op] == {"fp32": 23, "fp64": 26, "fp128": 17,
                                   "fp256": 16}
+    for op in FOUR:
+        assert R.CONTRACT[op] == six
+    assert R.LIVE_CAP["atan"] == {"fp32": 25, "fp64": 15, "fp128": 15,
+                                  "fp256": 15}
+    assert R.LIVE_CAP["asin"] == R.LIVE_CAP["acos"] == {
+        "fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16}
+    assert R.LIVE_CAP["atan2"] == {"fp32": 31, "fp64": 19, "fp128": 19,
+                                   "fp256": 19}
     if HAVE_MPMATH:
         from cft_golden import mathlib as ml
         assert ml.LIVE_CAP == {"fp32": 21, "fp64": 13, "fp128": 13,
                                "fp256": 13}
         assert ml.TRIG_LIVE_CAP == {op: R.LIVE_CAP[op] for op in THREE}
         assert all(ml.TRIG_LIVE_CAP[op] is R.LIVE_CAP[op] for op in THREE)
+        assert ml.INV_LIVE_CAP == {op: R.LIVE_CAP[op] for op in FOUR}
+        assert all(ml.INV_LIVE_CAP[op] is R.LIVE_CAP[op] for op in FOUR)
         assert ml.FLAG_WORDS == R.MARKED_FLAG_WORDS
         assert ml.flag_words is R.flag_words
 
 
-@pytest.mark.parametrize("op", ELEVEN)
+@pytest.mark.parametrize("op", FIFTEEN)
 def test_every_cap_row_names_all_four_formats(op):
     """A format left out of a row is no cap at that format, silently:
     invariants() holds a fragment to LIVE_CAP.get(op, {}).get(format) only
@@ -312,6 +350,64 @@ def test_the_threes_caps_are_the_measured_maximum_with_no_slack(op, fmt):
     assert R.invariants(f) == []
     assert R.invariants(f, live_cap=cap - 1) == [
         f"{cap} values live at once, past {cap - 1}"]
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt", FORMATS, ids=lambda f: f.name)
+@pytest.mark.parametrize("op", FOUR)
+def test_the_fours_caps_are_the_measured_maximum_with_no_slack(op, fmt):
+    """The cap of each of the four at a format is the most values live any
+    of its five fragments there keeps (MEASURED: 15, 16, 16 and 19 at fp64,
+    fp128 and fp256, 25, 25, 25 and 31 at fp32), and that fragment fails a
+    cap one under by name - so a cap row lowered by one, or a fragment
+    growing past it, is red here and in routines.fragment()."""
+    cap = R.LIVE_CAP[op][fmt.name]
+    frags = [R.fragment(op, fmt, rnd) for rnd in RND_MODES]
+    most = max(f.live_max() for f in frags)
+    assert most == cap, (op, fmt.name, [f.live_max() for f in frags])
+    f = next(f for f in frags if f.live_max() == cap)
+    assert R.invariants(f) == []
+    assert R.invariants(f, live_cap=cap - 1) == [
+        f"{cap} values live at once, past {cap - 1}"]
+
+
+def test_atan2_is_the_one_built_routine_of_two_inputs():
+    """The inputs of the thirteen built routines: atan2's are ("a", "b") -
+    y, then x, mathlib's own names - and the other twelve's ("a",); the
+    golden function of atan2 takes (fmt, a, b, rnd) as sf.div's does and
+    the others (fmt, a, rnd) (R.GOLDEN's shapes, checked by calling them,
+    atan2 with one operand short)."""
+    two = [op for op in R.BUILT if len(R.INPUTS[op]) == 2]
+    assert two == ["atan2"] and R.INPUTS["atan2"] == ("a", "b")
+    assert all(R.INPUTS[op] == ("a",) for op in R.BUILT if op != "atan2")
+    one = sf.one_bits(FP64)
+    twice = one + (1 << 52)            # 2: the exponent one above
+    if HAVE_MPMATH:
+        assert R.fragment("atan2", FP64, RNE).inputs == ("a", "b")
+        assert R.GOLDEN["atan2"](FP64, one, twice, RNE) != \
+            R.GOLDEN["atan2"](FP64, twice, one, RNE)
+        assert len(R.GOLDEN["atan"](FP64, one, RNE)) == 2
+    assert len(R.GOLDEN["div"](FP64, one, twice, RNE)) == 2
+    with pytest.raises(TypeError):
+        R.GOLDEN["atan2"](FP64, one, RNE)    # one operand short
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op", FOUR)
+def test_the_four_fragments_are_what_they_were_at_21b98aec(op):
+    """All 80 fragments of atan, asin, acos and atan2, digest for digest as
+    the tree at 21b98aec made them (routine_digests_inv.py: that commit's
+    mathlib.fragment, which routines.fragment hands out unchanged), at every
+    format and attribute, fp32's included. Adding the four to the routines
+    moved no fragment. (The 220 of the eleven are held, at 19de866c, by
+    test_the_fragments_are_what_they_were_at_19de866c.)"""
+    assert set(DIGESTS_INV) == set(FOUR)
+    for fmt in FORMATS:
+        assert len(DIGESTS_INV[op][fmt.name]) == len(RND_MODES)
+        for rnd in RND_MODES:
+            got = fragment_digest(R.fragment(op, fmt, rnd))
+            assert got == DIGESTS_INV[op][fmt.name][rnd], \
+                f"{op} {fmt.name} {sf.RND_NAMES[rnd]}"
 
 
 def _named(f, op):
@@ -422,7 +518,8 @@ def test_a_fragment_of_no_routine_is_refused_by_name():
     f = _named(R.fragment("div", FP64, RNE), "sinh")
     assert R.invariants(f) == ["'sinh' is not a routine, so no statement "
                                "holds it: div, sqrt, exp, expm1, exp2, log, "
-                               "log1p, log2, sin, cos, tan"]
+                               "log1p, log2, sin, cos, tan, atan, asin, acos, "
+                               "atan2"]
     assert R.invariants(f, contract=R.C4_CONTRACT) == []
 
 

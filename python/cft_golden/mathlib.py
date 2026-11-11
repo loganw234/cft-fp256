@@ -5283,18 +5283,14 @@ INV_EPS_T = Fraction(28, 10000)
 
 # The most values an inverse routine may keep live at once, by function and
 # format (Logan's answer 9 of 2026-10-23): atan 15, asin 16, acos 16, atan2 19
-# at fp64, fp128 and fp256, and 25, 25, 25 and 31 at fp32 (the triple word:
-# atan's is built, parcel M4F1; the others are parcel M4F2's). One row each: invariants() holds an inverse fragment to its
-# own row and falls back to no other. routines.py does not name these four
-# (ROUTINES, CONTRACT and LIVE_CAP must name exactly cftc's and the language's
-# set, test_routines.py:258), so the caps are kept here until parcel M4C moves
-# them, as M2 kept its caps in this module until M2C.
-INV_LIVE_CAP = {
-    "atan": {"fp32": 25, "fp64": 15, "fp128": 15, "fp256": 15},
-    "asin": {"fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16},
-    "acos": {"fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16},
-    "atan2": {"fp32": 31, "fp64": 19, "fp128": 19, "fp256": 19},
-}
+# at fp64, fp128 and fp256, and 25, 25, 25 and 31 at fp32 (the triple word).
+# One row each: invariants() holds an inverse fragment to its own row and
+# falls back to no other. The table is routines.LIVE_CAP's four rows since
+# M4's cftc build (parcel M4C): routines.py names atan, asin, acos and atan2
+# among its fifteen routines, and this is a VIEW of those rows - the same
+# dicts, under the name this module's tests have read - so a cap is stated
+# once and the two cannot part (TRIG_LIVE_CAP's form).
+INV_LIVE_CAP = {name: routines.LIVE_CAP[name] for name in INV_NAMES}
 
 # who builds what: a name of INV_NAMES not yet in _INV_BUILDERS is refused by
 # name, saying whose it is
