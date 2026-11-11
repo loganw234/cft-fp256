@@ -1530,8 +1530,16 @@ def glance_of(j, clock_ms):
                 (f"; {plural(none, 'open item has', 'open items have')} no estimate" if none else ""))
     far = []
     for c in cur:
-        b, w = grp(c, "base"), grp(c, "wide")
-        spec = ([("base items", b, "base")] if b else []) + [("wide-format items", w, "wide")] if w else [("all items", c["total"], None)]
+        b, w, rt = grp(c, "base"), grp(c, "wide"), grp(c, "routine")
+        # as the page does (site/nightly.html, rowsOf): a class with routine items has the base row if present, the wide row if present, then the routine
+        # row, and its total is no row; a class with wide items and none routine has the base row and the wide row; else the total (parcel M4X2's oracle
+        # built only the base and wide rows: fixed by parcel M4CAT, 2026-11-11)
+        if rt:
+            spec = ([("base items", b, "base")] if b else []) + ([("wide-format items", w, "wide")] if w else []) + [("routine items", rt, "routine")]
+        elif w:
+            spec = ([("base items", b, "base")] if b else []) + [("wide-format items", w, "wide")]
+        else:
+            spec = [("all items", c["total"], None)]
         first = c["nights"][0]
         far.append({"head": norm(f"{c['kind']} items - {c['label']} - since night {first} ({j['nights'][first - 1].get('date') or '-'}), "
                                  f"{plural(len(c['nights']), 'night', 'nights')}" + ("" if c["served"] else "; no slice has completed under it yet")),
@@ -1636,6 +1644,11 @@ def glance_files():
             top = max(r["estimate"]["nights_left"] for r in est) + 11
             est[-1]["estimate"] = dict(est[-1]["estimate"], nights_left=top, date=(datetime.date.fromisoformat(sp["nights"][-1]["date"]) + datetime.timedelta(days=top)).isoformat())
             files.append(("the estimates spread, the latest not the first", sp, after(sp, 7200)))
+    if "wide items" in GLANCE:
+        # parcel M4CAT: a file whose current tile class has routine items (the wide run's, relabelled as the routine page's group does), so that the glance's
+        # routine row is held by a made file and not only by the committed one
+        rj = as_routine(GLANCE["wide items"])
+        files.append(("a tile class with routine items", rj, after(rj, 7200)))
     if "rates and a probe" in GLANCE:
         base = GLANCE["rates and a probe"]
         empty, none, later = (json.loads(json.dumps(base)) for _ in range(3))
