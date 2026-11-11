@@ -146,18 +146,18 @@ there), went into cft-gpu **beside** 12.9: 12 component packages (nvcc,
 cudart-dev, crt, cccl, profiler-api, driver-dev and what they pull in; all 12
 are in apt's own Install line for that run). Download 94.5 MB (apt: "Need to
 get 94.5 MB"; the 12 sizes sum to 94,472,504 bytes), 384 MB of disk by apt's
-estimate ("After this operation"), 370 MB as `du` measured
+estimate ("After this operation"), 370 MiB as `du -sh` measured
 `/usr/local/cuda-13.3`; versions, sizes, index sums and those lines are in
 `captured/cuda13-packages.txt`. One package of the family, `cuda-toolkit-config-common`
 13.3.29, was already there from the 12.9 install and is not among the 12. apt's plan
 was read first: 12 installs, 0 removals, no `cuda`, `cuda-drivers` or `nvidia-*`
 (MEASURED). **One side effect, undone:** the packages joined the `cuda`
 alternatives group at a higher priority, so `/usr/local/cuda` pointed at 13.3
-for at most about 14 s: apt's `history.log` gives this install Start-Date
-18:21:04 and End-Date 18:21:10, and the alternatives lines are in its output
-(they carry no time of their own), so the link cannot have moved before
-18:21:04; I set it back to 12.9 by hand (manual mode) by 18:21:18, when the
-next command printed its clock. (18:20:50 was only when my script started.) A run started in that window would have used 13.3; GPU-A's legs
+for 8 s, by `/var/log/alternatives.log` (READ; the lead's correction after
+VGPU-B's pass 4): the link group `cuda` moved to `/usr/local/cuda-13.3` at
+18:21:10, inside apt's run (Start-Date 18:21:04, End-Date 18:21:10), and was
+set back to 12.9 by hand (manual mode) at 18:21:18; `cuda-13` stays in auto mode at 13.3.
+(18:20:50 was only when my script started.) A run started in that window would have used 13.3; GPU-A's legs
 use 12.9. Every run below names `/usr/local/cuda-13.3` itself.
 
 Prefix `/opt/gpu-b13`, work directory `~/gpu-b13`, RTX 5060 Ti only, `nvidia-smi`
