@@ -2,19 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Routines inlined (C4): a division's, a square root's and - since M1's
 build, item 4 - each of the math library's six's nodes, and - since M2's
-build - its sin's, cos's and tan's, replaced by their fragments
-(cft_golden/routines.py, which hands out the nine's from mathlib.py).
+build - its sin's, cos's and tan's, and - since M4's build - its atan's,
+asin's, acos's and atan2's, replaced by their fragments
+(cft_golden/routines.py, which hands out the thirteen's from mathlib.py).
 
 A tile has no divide, square-root, exponential, logarithm or radian
 instruction. The compiler carries the language's `div` and `sqrt` nodes, and
-`exp`, `expm1`, `exp2`, `log`, `log1p`, `log2`, `sin`, `cos` and `tan`, as
-ROUTINES: the schedulers
+`exp`, `expm1`, `exp2`, `log`, `log1p`, `log2`, `sin`, `cos`, `tan`, `atan`,
+`asin`, `acos` and `atan2`, as ROUTINES: the schedulers
 order the lowered step with each routine node one node, and then, for
 each candidate order, expand() replaces each routine node at its place by
 its fragment - divfull's or sqrtfull's instructions, specialised at the
 program's attribute, or the math library's fragment, built at it - bound
 to the node's operands, followed by a RAISE of the fragment's flag word
-(which, for one of the nine, may carry the mark in bit 7, and so mark the
+(which, for one of the thirteen, may carry the mark in bit 7, and so mark the
 lane). The allocator takes the result as the
 straight-line step it always takes, so a routine's registers come from
 it like any value's, and Belady's rule spills around a routine what the
@@ -30,7 +31,7 @@ step keeps live across it.
 * SHARING: a routine's instructions are hash-consed across instances by
   opcode, attribute and operands - two divisions by one divisor share
   its classification, seed and Newton steps, every division of 1 its
-  dividend's, and two of the math library's nine of one operand what
+  dividend's, and two of the math library's thirteen of one operand what
   their fragments compute alike of it (exp(x) and expm1(x) a
   classification, say; sin(x), cos(x) and tan(x) their reduction and
   polynomials) - after routines.simplify, which binding a

@@ -11,7 +11,7 @@ the two renderers, and the three derivative rules. Here:
                    lang.OPS (the place is byte-relevant: the canonical
                    form's "; operations:" line counts nodes in OPS's
                    order, and cftc's ir.ARITY mirrors it); the IR form;
-                   `transcendental` still refused for the other 26
+                   `transcendental` still refused for the other 22
   the golden       a lane's result is transcend.compute's for the node's
   functions        own name under the program's attribute, bits and flags
   the folds        sin(0) and tan(0) are 0 and cos(0) is 1, of a constant
@@ -80,17 +80,19 @@ SYSTEMS = REPO / "programs" / "systems"
 
 def test_the_three_are_nodes_between_log2_and_neg():
     """Named as transcend.py names them, each of one operand, directly
-    after log2 and before neg in lang.OPS, in the order sin, cos, tan -
-    the place M2C's ir.ARITY mirrors and the canonical form's operations
-    line counts by - and in graph.TRANSCEND, which puts them in ROUNDED and
-    in the interpreter's table."""
+    after log2 in lang.OPS, in the order sin, cos, tan, the next four the
+    inverse names (M4's build) - the place M2C's ir.ARITY mirrors and the
+    canonical form's operations line counts by - and in graph.TRANSCEND,
+    which puts them in ROUNDED and in the interpreter's table."""
     ops = list(lang.OPS)
     k = ops.index("log2")
-    assert ops[k + 1:k + 5] == ["sin", "cos", "tan", "neg"]
+    assert ops[k + 1:k + 9] == ["sin", "cos", "tan", "atan", "asin", "acos",
+                                "atan2", "neg"]
     assert ops[:k + 1] == ["fma", "add", "sub", "mul", "div", "sqrt", "exp",
                            "expm1", "exp2", "log", "log1p", "log2"]
     assert lang_graph.TRANSCEND == ("exp", "expm1", "exp2", "log", "log1p",
-                                    "log2", "sin", "cos", "tan")
+                                    "log2", "sin", "cos", "tan", "atan",
+                                    "asin", "acos", "atan2")
     for fn in THREE:
         assert fn in transcend.TRANSCEND_FNS and lang.OPS[fn] == 1
         assert fn in lang_graph.ROUNDED
@@ -139,15 +141,16 @@ def test_the_graph_bytes_write_the_three():
     assert "(1 add, 1 exp, 1 log2, 1 neg)" in lang.render_canonical(plain)
 
 
-def test_transcendental_is_still_raised_for_the_other_26():
-    """sin, cos and tan left the reserved list; the other 26 stay on it,
-    refused `transcendental` at run time and `irrational-constant` of a
-    constant, for the rounds after M2."""
+def test_transcendental_is_still_raised_for_the_other_22():
+    """sin, cos and tan left the reserved list, and atan, asin, acos and
+    atan2 after them (M4's build); the other 22 stay on it, refused
+    `transcendental` at run time and `irrational-constant` of a constant,
+    for the rounds after M4."""
     rest = {"exp10", "log10", "pow", "pown", "powr", "rootn", "hypot",
-            "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
-            "asinpi", "acospi", "atanpi", "atan2pi", "sinh", "cosh", "tanh",
-            "asinh", "acosh", "atanh", "cbrt", "rsqrt"}
-    assert len(rest) == 26 and set(lang_check.TRANSCENDENTAL) == rest
+            "sinpi", "cospi", "tanpi", "asinpi", "acospi", "atanpi",
+            "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+            "cbrt", "rsqrt"}
+    assert len(rest) == 22 and set(lang_check.TRANSCENDENTAL) == rest
     for name in sorted(rest):
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = {name}(x)", state="x"))

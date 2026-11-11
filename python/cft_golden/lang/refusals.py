@@ -64,8 +64,9 @@ CATALOGUE = {
     "bank-capacity": "more than 512 params and constants - and, the "
                      "compiler's count, with the words of the routines it "
                      "inlines for a division, a root (C4) or one of the "
-                     "math library's nine (M1's six, M2's sin, cos and "
-                     "tan): the bank holds 512 on every device",
+                     "math library's thirteen (M1's six, M2's sin, cos and "
+                     "tan, M4's atan, asin, acos and atan2): the bank holds "
+                     "512 on every device",
     # -- equations, indices, the step ---------------------------------
     "missing-equation": "a state component with no equation",
     "duplicate-equation": "a state component with two equations",
@@ -105,18 +106,21 @@ CATALOGUE = {
     # the compiler refused them `runtime-routine` until parcel C4 carried
     # them as inlined routines, and that name went too. exp, expm1, exp2,
     # log, log1p and log2 are operations since M1's build, item 3,
-    # 2026-10-15, and sin, cos and tan since M2's build, 2026-11-02:
-    # `transcendental` refuses the rest of the reserved list)
+    # 2026-10-15, sin, cos and tan since M2's build, 2026-11-02, and
+    # atan, asin, acos and atan2 since M4's build: `transcendental`
+    # refuses the rest of the reserved list)
     "transcendental": "a transcendental function the language does not "
                       "have (pow, sinh and the rest of the reserved "
                       "list), at run time",
     "irrational-constant": "a square root of a constant that is no "
                            "rational's square (2, or a negative one); exp, "
-                           "expm1, exp2, log, log1p, log2, sin, cos or tan "
-                           "of a constant whose value is irrational or not "
-                           "real (exp(1), log(2), log(-1), sin(1)); or any "
-                           "other transcendental of a constant, which the "
-                           "language does not have yet",
+                           "expm1, exp2, log, log1p, log2, sin, cos, tan, "
+                           "atan, asin, acos or atan2 of constants whose "
+                           "value is irrational or not real (exp(1), "
+                           "log(2), log(-1), sin(1), atan(1), asin(2), "
+                           "atan2(1, 1)); or any other transcendental of a "
+                           "constant, which the language does not have "
+                           "yet",
     "power": "^ or **",
     "not-equal": "!=",
     "chained-comparison": "a comparison of a comparison, unparenthesised",
@@ -188,10 +192,12 @@ COMPILER_REFUSALS = {
     "halving-underflow": "an h-scaled constant whose exact halving "
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
-    # M1's build, item 4 (cftc's output version 6), and M2's for sin, cos
-    # and tan (version 7): the one that depends on the host
+    # M1's build, item 4 (cftc's output version 6), M2's for sin, cos
+    # and tan (version 7) and M4's for atan, asin, acos and atan2 (version
+    # 8): the one that depends on the host
     "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p, log2, "
-                           "sin, cos or tan on a host without mpmath, "
+                           "sin, cos, tan, atan, asin, acos or atan2 on a "
+                           "host without mpmath, "
                            "through which the routine's fragment is built: "
                            "it depends on the host, and with mpmath the "
                            "same source and target compile or are refused "

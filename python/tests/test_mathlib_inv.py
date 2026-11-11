@@ -154,8 +154,9 @@ def test_the_caps_are_logans_answer_9():
         "asin": {"fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16},
         "acos": {"fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16},
         "atan2": {"fp32": 31, "fp64": 19, "fp128": 19, "fp256": 19}}
-    # routines.py names none of the four: the caps are kept here until M4C
-    assert not set(ml.INV_NAMES) & set(routines.LIVE_CAP)
+    # a view of routines.LIVE_CAP's four rows since M4C: the same dicts
+    for op in ml.INV_NAMES:
+        assert ml.INV_LIVE_CAP[op] is routines.LIVE_CAP[op]
 
 
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)

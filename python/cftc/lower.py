@@ -43,15 +43,15 @@ nothing else (docs/ROADMAP.md, step 3: literal evaluation):
    Only slots an instruction addresses are in it. The halved bank halves
    every h-scaled slot exactly and leaves every other one alone.
    Then, where the step divides, takes a root (C4) or computes one of
-   the math library's nine (M1's build, item 4, and M2's), the WORDS its
-   routines read (cft_golden/routines.py): one slot for each distinct bit
-   pattern, routine by routine in the eleven's one order - routines.
-   ROUTINES', the language's (lang.graph.OPS filtered): div, sqrt, exp,
-   expm1, exp2, log, log1p, log2, sin, cos, tan - each routine's words in
-   its fragment's own order (divfull's for the division) and only those
-   not already in a slot: so the division's words come first, then the
-   root's that are new, as before the six, and a step without the three
-   has the bank it had. They are
+   the math library's thirteen (M1's build, item 4, M2's and M4's), the
+   WORDS its routines read (cft_golden/routines.py): one slot for each
+   distinct bit pattern, routine by routine in the fifteen's one order -
+   routines.ROUTINES', the language's (lang.graph.OPS filtered): div, sqrt,
+   exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos,
+   atan2 - each routine's words in its fragment's own order (divfull's for
+   the division) and only those not already in a slot: so the division's
+   words come first, then the root's that are new, as before the six, and a
+   step without the three or the four has the bank it had. They are
    raw encodings at the format, an infinity,
    -0, NaNs and integers among them, which no constant of the language
    can be. A word is never h-scaled, never halved, never a param and
@@ -316,9 +316,9 @@ def layout(graph, nodes, outs, param_bits=None, words=()):
 
 
 def routines_of(nodes):
-    """The routines a step holds, in the eleven's one order
+    """The routines a step holds, in the fifteen's one order
     (cft_golden/routines.py's ROUTINES: div, sqrt, the six, then sin, cos
-    and tan)."""
+    and tan, then atan, asin, acos and atan2)."""
     from cft_golden import routines as R
     held = {nd.op for nd in nodes}
     return [op for op in R.ROUTINES if op in held]
@@ -334,7 +334,7 @@ def names_and(names):
 
 def routine_words(graph, nodes, loop_words=()):
     """[Slot]: the words the step's routines read, one slot a bit pattern
-    - routine by routine in the eleven's order, each one's in its
+    - routine by routine in the fifteen's order, each one's in its
     fragment's order (the division's in divfull's), then the call loop's
     that are new (module docstring) - each naming every (routine, word) it
     is; a call loop's as ("loop", name)."""

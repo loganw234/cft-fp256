@@ -1278,11 +1278,11 @@ class Definition:
         """Does evaluating the graph reach a golden function decided
         through mpmath's enclosures? Only a node in TRANSCEND_OPS does: the
         math library's six, which the language has since M1's build, item
-        3 (2026-10-15), and sin, cos and tan, since M2's build (2026-11-02);
-        its division and root are softfloat's (L4). A tangent section
-        reaches them too, where a rule writes r again - and sin's and cos's
-        write a routine of their own, cos(a) and sin(a), that the primal
-        need not hold."""
+        3 (2026-10-15), sin, cos and tan, since M2's build (2026-11-02), and
+        atan, asin, acos and atan2, since M4's build; its division and root
+        are softfloat's (L4). A tangent section reaches them too, where a
+        rule writes r again - and sin's and cos's write a routine of their
+        own, cos(a) and sin(a), that the primal need not hold."""
         for name in ("step", "tangent_step"):
             sec = self.graph.section(name)
             if sec is not None and any(op in TRANSCEND_OPS
@@ -1311,13 +1311,15 @@ class Definition:
 
 # The language's node operations whose golden function is decided through
 # mpmath (transcend.py): the math library's six since M1's build, item 3
-# (2026-10-15), and sin, cos and tan since M2's build (2026-11-02). The
-# compiler carries the six since item 4, so a certificate can name a compiled
+# (2026-10-15), sin, cos and tan since M2's build (2026-11-02), and atan,
+# asin, acos and atan2 since M4's build. The compiler carries the six since
+# item 4, so a certificate can name a compiled
 # source holding one (python/tests/test_cert2.py makes some); no committed
 # corpus case holds one. python/tests/test_cert2.py pins it to the language's
 # own list, lang.graph.TRANSCEND.
 TRANSCEND_OPS = frozenset({"exp", "expm1", "exp2", "log", "log1p", "log2",
-                           "sin", "cos", "tan"})
+                           "sin", "cos", "tan", "atan", "asin", "acos",
+                           "atan2"})
 
 
 def _mpmath_version():

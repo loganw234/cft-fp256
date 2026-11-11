@@ -600,7 +600,7 @@ boundary 4 97b13a863e53b048507f81dde2cdff286320f5eab726fc5aa0ea8900c8a5dfc4
 
 case markstep-fp64
 what version 2's replay case and docs/CERTIFICATES.md's version-2 example, byte for byte: markstep, defined by its source, 3 lanes, 3 segments of 4 steps; segment 1 marks lanes 0 and 1, lane 0's last bit wrong, and the golden writer replays both by the definition (replay 1 marked 2 changed 1); the counter's drift; audited with every segment run by the source's interpreter too
-certificate certificates/markstep-fp64/markstep-fp64.cert a62eac3696ada64513a4b76e36593e772fc19e99df86d0841106ec7931526eb7
+certificate certificates/markstep-fp64/markstep-fp64.cert 7abf3812af6c3d4ef0821cf40b6cd456ca12ef66ba22e7a7419b0e8a73b2bde0
 version 2
 mode open
 depth 256
@@ -634,7 +634,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case lorenz63-rk4-fp64-sourced
 what Lorenz-63 compiled from programs/systems/lorenz63-rk4-fp64.cftl by cftc for sw: 3 lanes, a main run of 3 segments, a half-step run of 6 on the compile's half bank (its h-slots the compile's), and a wider-source run of 3 - the source compiled at fp128; the wider-source estimate, whose wider run has the source's constants rounded at fp128 where version 1's carries the fp64 bank's widened, and the step-halving estimate
-certificate certificates/lorenz63-rk4-fp64-sourced/lorenz63-rk4-fp64-sourced.cert 02f6e1a20c78ffc505f8782a5f203a40111d0b59fe2035d74d1c1a47f9b038d7
+certificate certificates/lorenz63-rk4-fp64-sourced/lorenz63-rk4-fp64-sourced.cert 1b01b6eae4d8239459f43e88f97f74c99c6e98bceafd61a88bbc38007d23e8a5
 version 2
 mode open
 depth 256
@@ -761,7 +761,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case lorenz63-rk4-fp64-rebuilt
 what Lorenz-63 compiled by cftc, 2 lanes, 2 segments, its initial state made by the shake-box generator: its audit is handed the source and no state, recompiles the image, regenerates the initial state and re-runs every segment - rebuilt
-certificate certificates/lorenz63-rk4-fp64-rebuilt/lorenz63-rk4-fp64-rebuilt.cert 8d8b2bbf39f83de8f24ff9dbcdca9aa8ae0b11fbd0e20683a94d1c428927629f
+certificate certificates/lorenz63-rk4-fp64-rebuilt/lorenz63-rk4-fp64-rebuilt.cert 5f6bd48d2601df81945cb2dacebff4b2ab53d821a32109f37f59b81b28de0c78
 version 2
 mode open
 depth 256
@@ -790,7 +790,7 @@ boundary 2 80a130a6d64d076381609a03f740ea76981bcdef46e7da5a9d26550c1764daf0
 
 case markstep-fp64-other-b
 what markstep on a bank whose b is 1/4, not its source's 1/7: an honest certificate of another map, whose marked lanes the writer replays by the source; it holds together, and the definition re-run of segment 0 refuses it definition-end
-certificate certificates/markstep-fp64-other-b/markstep-fp64-other-b.cert d61e6db1fbbf01f5ee41086b06f6a186371c4e8b868aa7d4671cdfdf29deec7f
+certificate certificates/markstep-fp64-other-b/markstep-fp64-other-b.cert 9a0ba1844b3a8ffbd7e76e7a99ee06612b3544b3643028908d87c7d1909f60e1
 version 2
 mode open
 depth 256
@@ -824,7 +824,7 @@ raw 1 1531dcfdfc5cd5bdaa5dfe4b94695887b941e4c681c682988178dfe9a41aacee 609f5d0e8
 
 case markstep-fp64-loud
 what markstep on a bank whose no-mark word is 1, so that every lane raises invalid each step: the map's values with other flags; the definition re-run of segment 2 refuses it definition-flags
-certificate certificates/markstep-fp64-loud/markstep-fp64-loud.cert 225017c0f62583be62357ed47d44fe311df6c5e9d438d69c62b7c6022910381c
+certificate certificates/markstep-fp64-loud/markstep-fp64-loud.cert 099d98cabdb2a6e4ffa9bbde89de7173c6d8a2e65703332d887dd94ef8aa4847
 version 2
 mode open
 depth 256
@@ -858,7 +858,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 4b17bbff8
 
 case v2-marked
 what a segment line's STATUS with the mark, STATUS[6] (from markstep-fp64; refused marked)
-certificate certificates/v2-controls/v2-marked.cert 35e0472f5626846f5120fa41d72226592a54c5465be4ca8ea7264a61404aa96a
+certificate certificates/v2-controls/v2-marked.cert 8284a9d27d116656a42a07ba5252db529f2321b96cb6eacfc588b4b8aa7dd2cf
 version 2
 mode open
 depth 256
@@ -892,7 +892,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-replay-lane-flags
 what replay lines in a run that says lane-flags no (from markstep-fp64; refused replay-lane-flags)
-certificate certificates/v2-controls/v2-replay-lane-flags.cert 1a0ad153c409ff743c7cac1f1aceb729887336dac019502dec19c15566485606
+certificate certificates/v2-controls/v2-replay-lane-flags.cert 6782cb1f75fc6a2a7a61415126fedf1aacb05381c8445d7edf5160224172f451
 version 2
 mode open
 depth 256
@@ -926,7 +926,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-replay-source
 what replay lines in a run that names no source (from markstep-fp64; refused replay-source)
-certificate certificates/v2-controls/v2-replay-source.cert 55dab995a0877f31bef05308e44459a231fd03f4e2efd9af95eb49d90d68f287
+certificate certificates/v2-controls/v2-replay-source.cert 104f40047cd2845825509b4c3f7e7dd3e7e4b80cd528e601880b1ff7a30ad2d1
 version 2
 mode open
 depth 256
@@ -960,7 +960,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-replay-method
 what a run with replay lines and no replay-method line (from markstep-fp64; refused replay-method)
-certificate certificates/v2-controls/v2-replay-method.cert 507c2e32d1fd4f431cb615392cfef74b17628807ca4b4dcfe90941a573b4f80f
+certificate certificates/v2-controls/v2-replay-method.cert 59c9ab81858a4c94c07e4ee42e9e8d7bc315ac0e30f89373d825f558c772e3a4
 version 2
 mode open
 depth 256
@@ -994,7 +994,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-provenance-order
 what started after finished (from markstep-fp64; refused provenance-order)
-certificate certificates/v2-controls/v2-provenance-order.cert e6baacf527d9ef4d486ec8fbdfaba01210edf4a766936e6a9a29805f43698455
+certificate certificates/v2-controls/v2-provenance-order.cert 3d27af635f056616b1df796ea1f707d25359e2da8c0a86e2bba0f010db4fb83a
 version 2
 mode open
 depth 256
@@ -1198,7 +1198,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-source-digest
 what a source handed with one byte changed (from markstep-fp64; refused source-digest)
-certificate certificates/v2-controls/v2-source-digest.cert a62eac3696ada64513a4b76e36593e772fc19e99df86d0841106ec7931526eb7
+certificate certificates/v2-controls/v2-source-digest.cert 7abf3812af6c3d4ef0821cf40b6cd456ca12ef66ba22e7a7419b0e8a73b2bde0
 version 2
 mode open
 depth 256
@@ -1232,7 +1232,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-source-refused
 what a source the language refuses (step mapp), named and handed (from markstep-fp64; refused source-refused)
-certificate certificates/v2-controls/v2-source-refused.cert 37c752608d79563151cee567dc8bd4edba505dea0b8b050a6d213816cc46aff2
+certificate certificates/v2-controls/v2-source-refused.cert 1e5635fb6f5adaf86226c93d98cb3d3bd3d95c8abfd8f6092850837294e7f7c8
 version 2
 mode open
 depth 256
@@ -1266,7 +1266,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-source-format
 what the fp128 compile certified as a main run of the fp64 source (from lorenz63-rk4-fp64-sourced; refused source-format)
-certificate certificates/v2-controls/v2-source-format.cert c51d402bfc1a1000c2f3cfd822374a9b31a90984d7468ec217055eba06359439
+certificate certificates/v2-controls/v2-source-format.cert 8071648ac0f050dbaf4fc4d3d29946831bc9760bb7b3e43bc1243c43b6b65354
 version 2
 mode open
 depth 256
@@ -1296,7 +1296,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-source-graph
 what another system's step graph named (from lorenz63-rk4-fp64-sourced; refused source-graph)
-certificate certificates/v2-controls/v2-source-graph.cert 6ede941449653aaa747a91eaeb65d83315d8436c5f838d71ddb522d98451a646
+certificate certificates/v2-controls/v2-source-graph.cert b04c80c72b71f8865bb6978c487f0dfcaa3f36622c766960f906b15cbacd83a0
 version 2
 mode open
 depth 256
@@ -1352,7 +1352,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-source-param
 what a source param in a spelling that is not the language's canonical one, rho 28.0 (from lorenz63-rk4-fp64-sourced; refused source-param)
-certificate certificates/v2-controls/v2-source-param.cert 93278e1f006ca2740090aee18f01b2d1622bd11e55f3ef5d59d9b1432144ef67
+certificate certificates/v2-controls/v2-source-param.cert 5fd28dfe85dc1caec3e9136614257f3aaf36393cc36ba76f77f85d78bf8e24ac
 version 2
 mode open
 depth 256
@@ -1408,7 +1408,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-source-shape
 what the Lorenz-63 run naming markstep's source, whose lane is two slots to its three (from lorenz63-rk4-fp64-sourced; refused source-shape)
-certificate certificates/v2-controls/v2-source-shape.cert 4d9515064866492972c2457e73e8fc6f7df74e5f21c1b1dddd8866fd0f54b914
+certificate certificates/v2-controls/v2-source-shape.cert 774126f8b0c091327c61d2bb69595cd1074455a33354793187cf06fe1dc6aefd
 version 2
 mode open
 depth 256
@@ -1439,7 +1439,7 @@ boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
 
 case v2-source-image
 what the steps restated: the recompile's image is not the run's (from lorenz63-rk4-fp64-sourced; refused source-image)
-certificate certificates/v2-controls/v2-source-image.cert 6b38701cebd3dc42100b0cc427f90e8d7d6961d28c72baa779d6e96ab13c3db5
+certificate certificates/v2-controls/v2-source-image.cert 3d0223b1814b0e9fd1e30b8df40d282c4e430d055865d13bd11b4720228963f4
 version 2
 mode open
 depth 256
@@ -1495,7 +1495,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-compiler-differs
 what another compiler named, whose recompile differs: the auditor's own limit (from lorenz63-rk4-fp64-sourced; refused compiler-differs)
-certificate certificates/v2-controls/v2-compiler-differs.cert 0cf6ffbd57cc8734bf778cb0e4c8c91c9e0e1790207662840dd5923ebca2dcc3
+certificate certificates/v2-controls/v2-compiler-differs.cert b8ae690a219a64b875e12476ade9c8f2509345cd32204bcf63fc8e5094eb3a10
 version 2
 mode open
 depth 256
@@ -1551,7 +1551,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-source-missing
 what the replay's source not handed (from markstep-fp64; refused source-missing)
-certificate certificates/v2-controls/v2-source-missing.cert a62eac3696ada64513a4b76e36593e772fc19e99df86d0841106ec7931526eb7
+certificate certificates/v2-controls/v2-source-missing.cert 7abf3812af6c3d4ef0821cf40b6cd456ca12ef66ba22e7a7419b0e8a73b2bde0
 version 2
 mode open
 depth 256
@@ -1730,7 +1730,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-aux-source
 what the wider-source run compiled for another target (from lorenz63-rk4-fp64-sourced; refused aux-source)
-certificate certificates/v2-controls/v2-aux-source.cert 26c990b519b5890eb3080b99cf0c896134579164e7f7dfe1fb881c41fb5c4f16
+certificate certificates/v2-controls/v2-aux-source.cert 360daede1834d45014258337e83dcf3779ab49f1252264424bae994c5a8d434f
 version 2
 mode open
 depth 256
@@ -1818,7 +1818,7 @@ boundary 5 01a2a470d594bfe459452ee6a248a790cdb4edae2d40a38e912c129628e69b8c
 
 case v2-replay-missing
 what the replay line and its method dropped: the re-run still marks (from markstep-fp64; refused replay-missing)
-certificate certificates/v2-controls/v2-replay-missing.cert bfd5529dda7c3394645c350a9a34fc8725ad8efa38d0b19671cc5e5c009c70e6
+certificate certificates/v2-controls/v2-replay-missing.cert f8f31aa4ebea4034f0581adfe11676e6c2550067931ab8cb8da3ffe6c1e74c55
 version 2
 mode open
 depth 256
@@ -1852,7 +1852,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-replay-unmarked
 what a replay line for segment 0, which marks no lane (from markstep-fp64; refused replay-unmarked)
-certificate certificates/v2-controls/v2-replay-unmarked.cert e280c8f2a1fc8895ba02576e7e59a5bc2cbe6a91ba414795035b8650ad7f8bb5
+certificate certificates/v2-controls/v2-replay-unmarked.cert 7ab90d53e52ec74ad1264af22a408ff7abdf3b6cdd160dc324dd74590126d717
 version 2
 mode open
 depth 256
@@ -1886,7 +1886,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-replay-raw
 what raw-end the hash of the corrected end (from markstep-fp64; refused replay-raw)
-certificate certificates/v2-controls/v2-replay-raw.cert 95b7fc2aa175ad2f8444dcbd94dd2cf69554cf4c6aa2fcb9609ef6078c8e91c4
+certificate certificates/v2-controls/v2-replay-raw.cert 46f3235aec11166c40531652b81ab184f7c6ac071f0be0810a457a11ea875791
 version 2
 mode open
 depth 256
@@ -1920,7 +1920,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-replay-changed
 what changed one more than the replay changes (from markstep-fp64; refused replay-changed)
-certificate certificates/v2-controls/v2-replay-changed.cert fc40e75c464392993e44d94efc530fa326d416ea48f169e221e1a0a323a7e723
+certificate certificates/v2-controls/v2-replay-changed.cert f6d4433bc4e7c8636cb12be59d0a901f815347179c71a6564a1095d62b2b7948
 version 2
 mode open
 depth 256

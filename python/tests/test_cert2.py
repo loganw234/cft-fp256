@@ -1706,7 +1706,8 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     from cft_golden.lang import constants as K
     F = Fraction
     assert cert2.TRANSCEND_OPS == {"exp", "expm1", "exp2", "log", "log1p",
-                                   "log2", "sin", "cos", "tan"}
+                                   "log2", "sin", "cos", "tan", "atan",
+                                   "asin", "acos", "atan2"}
     assert cert2.TRANSCEND_OPS == set(lang.graph.TRANSCEND)
     text = ("system s\nformat fp64\nstate x, y\ntangent v\nnext x = x\n"
             "next y = y + exp(x)\nstep map\n")

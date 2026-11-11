@@ -26,14 +26,15 @@ attribute, for the four that round). The segment must:
   whose others are the same.
 
 A step that divides or takes a root (C4), or computes one of the math
-library's nine (M1's build, item 4, and M2's), holds each routine to its
-FRAGMENT, which the check takes from the golden model itself
-(cft_golden/routines.py, which hands out the nine's from mathlib.py) - not
+library's thirteen (M1's build, item 4, M2's and M4's), holds each routine
+to its FRAGMENT, which the check takes from the golden model itself
+(cft_golden/routines.py, which hands out the thirteen's from mathlib.py) - not
 from the compiler's inlining - and holds first to its routine's
 statement of what a fragment may be (routines.invariants: its flag
 word's values, its attributes, its live values, every instruction
 reading a word or one of its values; division's and root's C4's, the
-six's widened, and the three's the six's under live caps of their own),
+six's widened, and the three's and the four's the six's under live caps of
+their own),
 as made for this graph's format and attribute. It then
 instantiates the fragment over the node's operand symbols: each instruction a symbol
 (its opcode, its own attribute where it rounds, its operands; a word the
@@ -49,7 +50,7 @@ instruction share its symbol, as the image computes it once. Then:
   cannot reach FLAGS and a language node's flags cannot be lost;
 * each routine node's flag word is RAISEd exactly once, outside every
   region, and nothing else is raised - so a mark, which only a flag word
-  of the nine's can carry (routines.CONTRACT), reaches the lane exactly
+  of the thirteen's can carry (routines.CONTRACT), reaches the lane exactly
   where its routine's word sets it;
 * regions are balanced within the step, and none stands outside it.
 

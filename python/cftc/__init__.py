@@ -82,6 +82,26 @@ generated sources without sin, cos or tan (256 images, 41 of them
 looped, only that line moving, and 74 refusals, identical). The pack's
 21 sources were not compiled at both trees, and for them, as for any
 other source outside those sets, it is believed, not shown (2026-11-02).
+8 is the math library's atan, asin, acos and atan2 (M4's build, 2026-11-11;
+the language at 1.3): a source that names any of them - at run time, or
+folded where its operands are the constants atan(0), asin(0), acos(1) and
+atan2(0, c) for c >= 0 - which 7 refused, compiles, each run-time call an
+inlined routine, mathlib.py's fragment; atan2 is the second routine of two
+inputs, y then x, after division. For each source of the sets measured
+below, 8 writes the same images, banks and text files as 7, and its
+manifests say version 8; nothing else in them moved (a manifest's routines
+block carries the four's own sentence only where its step holds one of the
+four). That is what parcel M4C measured, at both trees (the base
+21b98aec's and its tip, the language's 1.3 merged): the 51 .cftl files
+committed at 21b98aec outside the hard-workload pack (55 at the tip, the
+phase follower's sources and canonical forms added; 153 compiles on sw,
+u50-rev8 and u50-rev7 at 3 steps: 122 images, only each manifest's version line moving, and 31 refusals,
+identical) and 330 compiles of 110 generated sources without the four
+(226 images, 20 of them on sw looped, only that line moving, and 104
+refusals, identical; the generated sources are tools of the parcel's
+scratch, not committed). The pack's 21 sources were not compiled at both
+trees, and for them, as for any other source outside those sets, it is
+believed, not shown (2026-11-11).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -116,28 +136,35 @@ take past 512 is `bank-capacity`. Until C4 such a system was refused
 `runtime-routine`, a name that went with it.
 
 The math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
-items 3 and 4, 2026-10-15) and its sin, cos and tan (M2's build) are
-routines too: each run-time node is inlined as its fragment, which the
+items 3 and 4, 2026-10-15), its sin, cos and tan (M2's build) and its
+atan, asin, acos and atan2 (M4's build) are routines too: each run-time node is inlined as its fragment, which the
 golden model's generator builds (cft_golden/mathlib.py; routines.fragment
 hands it out by name), quiet, then a RAISE of its flag word - its
 operation's IEEE flags in [4:0] and, where its in-lane test cannot decide
 the last bit, the MARK in [7], which marks the lane (R23's [7],
 STATUS[6]): the lane's value is then the routine's best guess, which the
-definition replays (docs/LANGUAGE.md, "A marked lane"). The nine's words
-are bank slots of the routine kind as division's are, after them in the
-eleven's one order (routines.ROUTINES, the language's: div, sqrt, the
-six, sin, cos, tan); the internal check holds each instance to its
-fragment and each fragment to its routine's statement
-(routines.invariants), division's and root's C4's, the six's widened, and
-the three's the six's under live caps of their own (routines.LIVE_CAP: 23,
-26, 17 and 16 at fp32, fp64, fp128 and fp256). sin's and cos's fragments
-hold MIN and MAX (their clamp) against bank words, which no other routine
-does: the emitter writes them, the assembler takes them and the internal
-check holds them as any instruction (python/tests/test_cftc_trig.py). A
+definition replays (docs/LANGUAGE.md, "A marked lane"). The thirteen's
+words are bank slots of the routine kind as division's are, after them in
+the fifteen's one order (routines.ROUTINES, the language's: div, sqrt, the
+six, sin, cos, tan, atan, asin, acos, atan2); the internal check holds
+each instance to its fragment and each fragment to its routine's
+statement (routines.invariants), division's and root's C4's, the six's
+widened, and the three's and the four's the six's under live caps of
+their own (routines.LIVE_CAP: 23, 26, 17 and 16 at fp32, fp64, fp128 and
+fp256 for each of the three; 25, 15, 15 and 15 for atan, 25, 16, 16 and 16
+for asin and acos, 31, 19, 19 and 19 for atan2). atan2 is the one routine
+of two inputs besides division: its fragment's inputs are (y, x), bound
+in that order to the node's operands, so a call loop's record is two
+slots for it. sin's and cos's fragments hold two MIN and two MAX (their
+clamp), asin's and acos's one of each and atan's and atan2's one MIN,
+against bank words (MEASURED at the four formats under rne), which no
+other routine does: the emitter writes them, the assembler takes them and
+the internal check holds them as any instruction (python/tests/
+test_cftc_trig.py, test_cftc_invtrig.py). A
 function of a constant folds in the language, exactly, or is refused there
 by name, and so compiles as the constant it is. The generator derives its
 constants through mpmath, so on a host without it a source whose graph
-holds a run-time node of the nine is refused `routine-unavailable` - by
+holds a run-time node of the thirteen is refused `routine-unavailable` - by
 name, never an ImportError or an internal error - after the refusals that
 depend on the arguments alone
 (segment-steps, target-format, a run value's) and before anything builds
@@ -160,7 +187,18 @@ every k from 0 to 20 with the construction `next x = f(x) + y0 + ... +
 y(k-1); next y(i) = y(i) * x` (program.spill_slots), 2026-11-02; at fp64
 from k = 19 the allocator's chosen candidate pins no component and
 spill_slots reads 0 again, the loads and stores of the homes being the
-cost (python/tests/test_cftc_trig.py holds the thresholds).
+cost (python/tests/test_cftc_trig.py holds the thresholds). For the four
+(M4's build) the same rule holds, MEASURED at every k from 0 to 20 in the
+same way (atan2's construction adds a second operand's own state, `next x
+= (x / w) + y0 + ... ; next w = w * x`, the division swapped for atan2):
+the first spill comes at k = 15, 14, 14 and 11 at fp64, fp128 and fp256
+for atan, asin, acos and atan2, and at k = 5 at fp32 for atan, asin and
+acos (live 15, 16, 16 and 19 at fp64 to fp256, 25 at fp32 for those
+three). atan2's fp32 fragment keeps 31 live, past the allocator's 29
+registers, and the image spills at k = 0 (2 slots; MEASURED, it compiles,
+passes the internal check and runs as the golden function), then one more
+a value to k = 14, then 2 again from k = 15 (python/tests/
+test_cftc_invtrig.py holds every vector).
 
 A step whose routines, inlined, would pass 32,768 instructions - a
 revision-7 tile's instruction memory, a constant of the compiler's that
@@ -256,7 +294,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 7               # the output version: the module docstring, outputs.py
+VERSION = 8               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -491,18 +529,20 @@ def _call_loops(g, pb, src, low0, prog0):
     return low, prog, looped
 
 
-# The math library's nine (the six, M1's build, item 4, 2026-10-15; and sin,
-# cos and tan, M2's build), in the language's order: each run-time node a
+# The math library's thirteen (the six, M1's build, item 4, 2026-10-15; sin,
+# cos and tan, M2's build; and atan, asin, acos and atan2, M4's), in the
+# language's order: each run-time node a
 # routine whose fragment mathlib.py builds, through mpmath (the module
 # docstring). It is cft_golden/routines.py's BUILT, which
 # python/tests/test_cftc_trig.py pins it to: a routine left out of this
 # tuple would be an ImportError on a host without mpmath, where the rule is
 # `routine-unavailable`.
-MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan")
+MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan",
+        "atan", "asin", "acos", "atan2")
 
 
 def math_nodes(graph):
-    """The nine a step graph holds as run-time nodes, in MATH's order - what
+    """The thirteen a step graph holds as run-time nodes, in MATH's order - what
     a compilation of it needs mpmath for. A fold is a constant, and needs
     none."""
     found = set()
@@ -515,7 +555,7 @@ def math_nodes(graph):
 
 def refuse_unavailable(graph, source=None):
     """`routine-unavailable` where the graph holds a run-time node of the
-    nine and mpmath does not import here: the routine's fragment cannot be
+    thirteen and mpmath does not import here: the routine's fragment cannot be
     built on this host (the module docstring). Otherwise nothing. Line
     None: the cause is the host, not a line of the source."""
     ops = math_nodes(graph)

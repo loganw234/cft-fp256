@@ -3,25 +3,26 @@
 """The routines the compiler inlines, as relocatable fragments: run-time
 division and square root (step 6, parcel C4), the math library's exp,
 expm1, exp2, log, log1p and log2 (M1's build, item 4), and its sin, cos
-and tan (M2's build).
+and tan (M2's build), and its atan, asin, acos and atan2 (M4's build).
 
-THE ELEVEN. ROUTINES, the arity map, names them in the language's own
-order (lang.graph.OPS: div, sqrt, the six, then sin, cos and tan), and
-that order is the one order of the eleven wherever cftc needs one - the
-bank's words, the call loop's batches (python/cftc/lower.py, callloop.py)
-- so division's and root's places, the six's, and every image without
-the three, are what they were. Division's and root's fragments are READ
-from divfull's programs here, below. The other nine are BUILT by the math
-library's golden generator, mathlib.py, and fragment() hands them out by
-name (Logan's answer to M1's question 11, and M2's decision 5):
+THE FIFTEEN. ROUTINES, the arity map, names them in the language's own
+order (lang.graph.OPS: div, sqrt, the six, sin, cos and tan, then atan,
+asin, acos and atan2), and that order is the one order of the fifteen
+wherever cftc needs one - the bank's words, the call loop's batches
+(python/cftc/lower.py, callloop.py) - so division's and root's places,
+the six's, the three's, and every image without the four, are what they
+were. Division's and root's fragments are READ from divfull's programs
+here, below. The other thirteen are BUILT by the math library's golden
+generator, mathlib.py, and fragment() hands them out by name (Logan's
+answer to M1's question 11, M2's decision 5 and M4's decision 7):
 mathlib.fragment's own object, unchanged. mathlib.py derives its
 constants through mpmath and imports it at its top, so this module
-imports mathlib only inside fragment(), for one of the nine: a program
-without them - and the compiler compiling one - never imports mpmath.
-What a fragment of each must be is ONE statement, per routine, below
-("what is proved of every fragment"): division's and root's as C4
+imports mathlib only inside fragment(), for one of the thirteen: a
+program without them - and the compiler compiling one - never imports
+mpmath. What a fragment of each must be is ONE statement, per routine,
+below ("what is proved of every fragment"): division's and root's as C4
 measured them, the six's widened as M1's question 12 answers, and the
-three's the six's contract under caps of their own.
+three's and the four's the six's contract under caps of their own.
 
 The language has `a / b` and `sqrt(a)` as operations, correctly rounded
 with exactly the flags softfloat's div and sqrt raise (docs/LANGUAGE.md,
@@ -36,7 +37,8 @@ programs/MANIFEST, host/src/divfull_images.h and programs/check.py hold.
 
 A Fragment, for an operation, a format and the program's attribute:
 
-  inputs    ("a", "b") for div, ("a",) for sqrt and for each of the nine:
+  inputs    ("a", "b") for div and for atan2 (y, then x: mathlib's own
+            names), ("a",) for sqrt and for each of the other twelve:
             the golden function's operands in its order
   body      straight-line SSA - instruction i defines value i - each
             (opcode, rnd, srcs): rnd is the instruction's OWN attribute
@@ -51,7 +53,7 @@ A Fragment, for an operation, a format and the program's attribute:
   result    the value holding the correctly rounded result
   flags     the value holding the flag word: bits [4:0] exactly the
             operation's IEEE flags in FLAGS's order, [6:5] zero, and [7]
-            zero for division and root and the mark for the nine. A
+            zero for division and root and the mark for the thirteen. A
             division's or a root's is the word divfull deposits second
             today, computed by the same instructions (the special lane's
             word selected over round_pack's), which libcft ORs into its
@@ -96,7 +98,8 @@ so the only flags it raises are the flag word's [4:0]: sf.div's or
 sf.sqrt's, divideByZero included (docs/SEQUENCER.md, R24). A division's
 or a root's bit 7 is never set - division and root decide their last bit
 in-lane, by the exact residual - so they never mark a lane; one of the
-nine's is set where its in-lane test cannot decide the last bit (below).
+thirteen's is set where its in-lane test cannot decide the last bit
+(below).
 flag_words() proves each word's possible values against its routine's
 own statement, below.
 
@@ -136,26 +139,42 @@ Instructions, by format fp32, fp64, fp128 and fp256: sin 939, 406, 382 and
 389; cos 936, 402, 378 and 385; tan 993, 419, 397 and 406; the same under
 every attribute. Live: 23, 26, 17 and 16 for each of the three, under
 every attribute. sin and cos hold two MIN and two MAX each, their clamp,
-which none of the other nine has (MEASURED over all 220: no MIN, MAX,
-MINNUM or MAXNUM elsewhere). Their golden functions are transcend.py's
+which none of the other nine of the eleven has (MEASURED over the 220
+fragments of the eleven, at 19de866c: no MIN, MAX, MINNUM or MAXNUM
+elsewhere than in sin and cos). Their golden functions are transcend.py's
 too.
+
+The four, atan, asin, acos and atan2 (M4's build; mathlib.py builds them
+BESIDE the six and the three, in INV_NAMES, and the study is
+docs/studies/M4-invtrig.md): the same Fragment and the same statement as
+the six's and the three's, under caps of their own (Logan's answer 9 of
+2026-10-23) - atan 15, asin 16, acos 16 and atan2 19 live at fp64, fp128
+and fp256, and 25, 25, 25 and 31 at fp32 (the triple word). atan2 is the
+first built routine of two inputs: ("a", "b") = (y, x), its golden
+function transcend's atan2 with y first. The four hold MIN (and asin and
+acos MAX) against a bank word too: atan one MIN, asin one MIN and one MAX,
+acos one MIN and one MAX, atan2 one MIN (MEASURED in the 16 images at the
+four formats under rne, python/tests/test_cftc_invtrig.py).
 """
 
 from . import asm, divfull, seq
 from . import softfloat as sf
 from .formats import FpFormat
 
-# The eleven, in the language's order (the module docstring): the one order
+# The fifteen, in the language's order (the module docstring): the one order
 # of the routines wherever an order is needed
 ROUTINES = {"div": 2, "sqrt": 1, "exp": 1, "expm1": 1, "exp2": 1, "log": 1,
-            "log1p": 1, "log2": 1, "sin": 1, "cos": 1, "tan": 1}
+            "log1p": 1, "log2": 1, "sin": 1, "cos": 1, "tan": 1,
+            "atan": 1, "asin": 1, "acos": 1, "atan2": 2}
 READ = ("div", "sqrt")                  # read from divfull's programs (C4)
+# mathlib.py's: the six, the three, then the four
 BUILT = ("exp", "expm1", "exp2", "log", "log1p", "log2",
-         "sin", "cos", "tan")           # mathlib.py's: the six, then the three
+         "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
 
 
 def _transcend(name):
-    """The golden function of one of the nine, in GOLDEN's shape: transcend
+    """The golden function of one of the twelve one-input routines of BUILT
+    (atan2's is below), in GOLDEN's shape: transcend
     computes it, correctly rounded with its exact flags, through mpmath -
     which transcend.py imports only when it evaluates, so naming it here
     imports nothing."""
@@ -166,9 +185,18 @@ def _transcend(name):
     return golden
 
 
+def _transcend_atan2(fmt, a, b, rnd):
+    """atan2's golden function, in GOLDEN's two-operand shape (sf.div's):
+    a is y and b is x, transcend's order ("y first as C has it")."""
+    from . import transcend
+    return transcend.compute(fmt, "atan2", a, b, rnd)
+
+
 GOLDEN = {"div": sf.div, "sqrt": sf.sqrt,
-          **{name: _transcend(name) for name in BUILT}}
-INPUTS = {"div": ("a", "b"), **{op: ("a",) for op in ROUTINES if op != "div"}}
+          **{name: _transcend(name) for name in BUILT if name != "atan2"},
+          "atan2": _transcend_atan2}
+INPUTS = {"div": ("a", "b"), "atan2": ("a", "b"),
+          **{op: ("a",) for op in ROUTINES if op not in ("div", "atan2")}}
 ROUNDED = frozenset((sf.OP_FMA, sf.OP_ADD, sf.OP_SUB, sf.OP_MUL))
 
 
@@ -341,7 +369,7 @@ def specialise(f: Fragment):
 
 # ---- what is proved of every fragment -----------------------------------
 #
-# ONE statement for the eleven (M1's build, item 4, and M2's, item 5; Logan's
+# ONE statement for the fifteen (M1's build, item 4, and M2's, item 5; Logan's
 # answer to M1's question 12, "as recommended"): what a routine's fragment
 # may be, stated
 # PER ROUTINE - CONTRACT, the values its flag word may take and the
@@ -357,7 +385,7 @@ def specialise(f: Fragment):
 # program's own attribute inside a routine; more values live; and no
 # instruction reading only the input (which the six keep, by an
 # instruction spent in expm1 and in log1p - parcels MB1 and MB2). One
-# statement shared by all eleven would loosen division's and root's to the
+# statement shared by all fifteen would loosen division's and root's to the
 # six's; so each routine names its own, and division's and root's are C4's
 # exactly - a flag word without the mark, RNE and RTZ, 16 live - so a
 # division that could mark a lane, round under RDN or keep 17 values live
@@ -365,10 +393,13 @@ def specialise(f: Fragment):
 # finest any routine needs: M2's fragments (sin, cos, tan), whose caps
 # Logan approved per function and format on 2026-10-14 (22, 26, 17 and 16,
 # the 22 made 23 by his answer on fp32 of 2026-10-27, docs/ROADMAP.md),
-# are three rows of this table since M2's build, item 5. The values are
-# where C4 and parcels MB1 and MB2 measured and stated them, and parcels
-# M2G2a and M2F2 the three's; mathlib.py keeps views of them: LIVE_CAP, the
-# largest of the six's by format, and TRIG_LIVE_CAP, the three's rows.
+# are three rows of this table since M2's build, item 5, and four more
+# since M4's (Logan's answer 9 of 2026-10-23). The values are
+# where C4 and parcels MB1 and MB2 measured and stated them, parcels
+# M2G2a and M2F2 the three's, and the four's are the caps mathlib.py held
+# its inverse fragments to (parcels M4G1 to M4G3, M4F1 and M4F2).
+# mathlib.py keeps views of them: LIVE_CAP, the largest of the six's by
+# format, TRIG_LIVE_CAP, the three's rows, and INV_LIVE_CAP, the four's.
 
 MARK = seq.RAISE_MARK
 # The values a flag word can take. Division's and root's, by its select
@@ -444,6 +475,11 @@ LIVE_CAP = {
     "sin": {"fp32": 23, "fp64": 26, "fp128": 17, "fp256": 16},
     "cos": {"fp32": 23, "fp64": 26, "fp128": 17, "fp256": 16},
     "tan": {"fp32": 23, "fp64": 26, "fp128": 17, "fp256": 16},
+    # the four (Logan's answer 9 of 2026-10-23)
+    "atan": {"fp32": 25, "fp64": 15, "fp128": 15, "fp256": 15},
+    "asin": {"fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16},
+    "acos": {"fp32": 25, "fp64": 16, "fp128": 16, "fp256": 16},
+    "atan2": {"fp32": 31, "fp64": 19, "fp128": 19, "fp256": 19},
 }
 LIVE_MAX = 16           # C4's name for division's and root's cap: theirs above
 _OWN = object()         # invariants()'s default cap: the routine's own
@@ -453,7 +489,7 @@ def flag_words(f: Fragment):
     """The values the flag word can take, by a walk of its definition: a
     word is its bits, a SELECT the union of its arms, an IAND with the word
     0 is 0, an IOR the set of the pairwise ORs of its operands' (the rule
-    the nine's mark takes: M1's question 12); anything else is unknown
+    the thirteen's mark takes: M1's question 12); anything else is unknown
     (None). Each rule's set holds every value the instruction can give, so
     the walk can only fail to prove a word, never prove a wrong one; on
     division's and root's flag words, which no IOR reaches, it gives what
@@ -489,7 +525,7 @@ def invariants(f: Fragment, live_cap=_OWN, contract=None):
         named held and encodings at the format, each opcode with its
         operands, the result and the flag word values of the body;
       * the flag word's values, by flag_words(), within its routine's
-        CONTRACT: division's and root's never bit 7, the nine's the mark
+        CONTRACT: division's and root's never bit 7, the thirteen's the mark
         only with inexact;
       * at most `live_cap` values live at once: its routine's LIVE_CAP at
         its format by default, None for no cap;
@@ -560,15 +596,15 @@ def invariants(f: Fragment, live_cap=_OWN, contract=None):
 
 
 _CACHE = {}
-_HELD = set()           # the nine's fragments held here once each
+_HELD = set()           # the thirteen's fragments held here once each
 
 
 def fragment(op, fmt: FpFormat, rnd: int):
     """The specialised fragment of `op`, one of ROUTINES, at `fmt` under
     the program's attribute `rnd`, held to its routine's invariants:
-    division's and root's read and specialised here; the nine's
+    division's and root's read and specialised here; the thirteen's
     mathlib.fragment's own object, built (and cached) there, unchanged.
-    Only a request for one of the nine imports mathlib.py, and with it
+    Only a request for one of the thirteen imports mathlib.py, and with it
     mpmath, which it derives its constants through: without mpmath that is
     an ImportError, which the compiler never reaches - it refuses such a
     source `routine-unavailable` first (python/cftc/__init__.py)."""

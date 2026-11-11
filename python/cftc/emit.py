@@ -21,7 +21,7 @@ Only revision-7 instructions are written - the ALU opcodes the
 language's built-ins name, `ior` for a copy, and STL, LDL, REPEAT,
 ENDREP and HALT - so a tile can run every image, unless the step holds a
 routine: it divides or takes a root (C4), or computes one of the math
-library's nine (M1's build, item 4, and M2's; `exp(x): mathlib's exp
+library's thirteen (M1's build, item 4, M2's and M4's; `exp(x): mathlib's exp
 routine, run quiet`, its instructions under up to five attributes,
 `add.rdn` and `add.rup` among them). Then each routine inlined is written
 
@@ -155,13 +155,14 @@ def _src(s):
 
 
 # whose instructions a routine is: divfull's and sqrtfull's (C4), and the
-# math library's generator's (mathlib.py; M1's build, item 4, and M2's, which
-# adds sin, cos and tan). A routine left out is a KeyError in a call loop's
+# math library's generator's (mathlib.py; M1's build, item 4, M2's, which
+# adds sin, cos and tan, and M4's, atan, asin, acos and atan2). A routine
+# left out is a KeyError in a call loop's
 # comment: python/tests/test_cftc_trig.py pins the keys to routines.ROUTINES.
 ROUTINE_SOURCE = {"div": "divfull's", "sqrt": "sqrtfull's",
                   **{op: f"mathlib's {op}" for op in
                      ("exp", "expm1", "exp2", "log", "log1p", "log2",
-                      "sin", "cos", "tan")}}
+                      "sin", "cos", "tan", "atan", "asin", "acos", "atan2")}}
 
 
 def routine_fragment(low, op):
