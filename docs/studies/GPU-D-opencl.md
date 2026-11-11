@@ -36,7 +36,7 @@ own arithmetic** by a scripted, checked copy, and anything else is named a secon
    RX 7600. It needs only libOpenCL.so.1 and Intel's runtime, with libigdfcl1. Nothing ran on an Intel
    GPU: that run is the lead's, on amd-arc-box ([gpu-d/RUNBOOK-ARC.txt](gpu-d/RUNBOOK-ARC.txt)).
 
-## 2. What was built ([gpu-d/](gpu-d/), 1,117 lines)
+## 2. What was built ([gpu-d/](gpu-d/), 1,121 lines)
 
 | file | lines | what it is |
 |---|---|---|
@@ -47,7 +47,7 @@ own arithmetic** by a scripted, checked copy, and anything else is named a secon
 | `ocl_run.sh` | 77 | one device's checks: plants first, six corpora, the rate (Linux, or macOS's bash 3.2) |
 | `make_bundle.sh` | 28 | the Arc bundle, built in cft-gpu |
 | `RUNBOOK-ARC.txt` | 35 | the lead's run on amd-arc-box |
-| `captured/` | 187 | go/no-go builds, the PoCL rehearsal, the M2 Pro, the RX 7600 |
+| `captured/` | 191 | go/no-go builds, the PoCL rehearsal, the M2 Pro, the RX 7600 |
 
 GPU-A's `devcopy.py`, `cft_fma.hip` (its lane only), `gen_corpus.py` and `build.sh` are used as they are.
 
@@ -189,6 +189,12 @@ The pattern fits the rounding increment: rtz never rounds up, and `sf_round_at` 
 - In the `cft_bn_bit` variant **1,503 lanes carried a wrong value that was not a refusal**: d = 0 and
   flags 0x00 where the golden model gives a non-zero result (case 9: want `4000080...`, flags 0x10).
 
+- A reduced case, also scratch, in a probe kernel appended to the text: `cft_sf_round_pack` alone, the
+  call the refusing path makes. It ran 4,096 fp256 lanes shaped like `sf_fma`'s far path (a 239-bit
+  significand, a sticky bit, every attribute) against libcft's own `softfloat.c` on the Mac's CPU. It
+  AGREES at default options and with `-cl-opt-disable` (06:25). The fault needs the larger inlined
+  kernel.
+
 So no single function's own code is to blame. Marking any one optnone is a cure, which does not
 localise. The lead's two conditions for calling it Apple's miscompile were not met: one function
 pinning it, and a reduced case of that function differing at default against the host. **The cause
@@ -305,7 +311,7 @@ GPU.
 
 Not run:
 - any Intel GPU; NVIDIA's OpenCL; GPU-A's second kernel, `diff`, hazards and runner through OpenCL;
-- a reduced case of Apple's fault;
+- a reduced case that reproduces Apple's fault (`cft_sf_round_pack` alone did not);
 - `-cl-strict-aliasing` on PoCL;
 - stream-fp64 and stream-fp128 through this harness (made, not run);
 - `--lanes` beyond 1M.

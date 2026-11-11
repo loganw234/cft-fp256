@@ -65,3 +65,7 @@ v17-noinline-cft_bn_inc: build 138.9 ms; 485 results and 485 flags differ, 485 r
 1503 lanes differ and are NOT refusals (flags != 0x80); by attribute [375, 0, 0, 753, 375]
   case 9 rnd 0: got 0000000000000000000000000000000000000000000000000000000000000000 flags 0x00
            want 4000080000000000000000000000000000000000000000000000000000000000 flags 0x10
+== a reduced case (06:25, printed to the terminal, verbatim): cft_sf_round_pack alone in a probe kernel,
+== far-path-shaped fp256 lanes, against libcft's softfloat.c on the Mac's CPU; default options, then -cl-opt-disable
+rp_probe: 4096 lanes of cft_sf_round_pack alone: 0 differ from libcft on this CPU (by rnd 0/0/0/0/0); refused: GPU 0, host 0: AGREES
+rp_probe: 4096 lanes of cft_sf_round_pack alone: 0 differ from libcft on this CPU (by rnd 0/0/0/0/0); refused: GPU 0, host 0: AGREES
