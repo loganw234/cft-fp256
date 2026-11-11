@@ -137,6 +137,17 @@ static void not_here(int kind, const char *word, const char *what,
         nh_compared++;
 }
 
+/* Does the artifact name an xclbin? Not "sw" (the software backend), a
+ * cft:// URL (a remote device) or "hip:N" (a GPU, the GPU backend): only
+ * an xclbin opens tiles, so only an xclbin takes the legs that plant an
+ * XRT instrument at open, plant the identity's refusals, or hold an
+ * image's identity to its file. */
+static int is_xclbin(const char *artifact)
+{
+    return strcmp(artifact, "sw") != 0 && strncmp(artifact, "cft://", 6) != 0 &&
+           strncmp(artifact, "hip:", 4) != 0;
+}
+
 /* One environment variable, set or removed, on either platform. */
 static void put_env(const char *name, const char *value)
 {
@@ -9381,6 +9392,10 @@ static unsigned char *read_whole(const char *path, size_t *len)
  *   software  refused by name: CFT_ERR_UNSUPPORTED, "software backend",
  *             struct_size 0
  *   remote    refused by name: CFT_ERR_UNSUPPORTED, "remote handle"
+ *   hip       refused by name: CFT_ERR_UNSUPPORTED, "the GPU backend loads
+ *             no device image", struct_size 0 - a GPU loads no image, and
+ *             what decides its bits is this library and the device's
+ *             compiler
  *
  * The by-design refusals have their own planted gate under -i:
  * check_image_plants, below.
@@ -9423,6 +9438,19 @@ static void check_image_identity(cft_device *dev, const char *artifact)
             im.struct_size == 0)
             printf("  image identity (%s): refused by name - %s\n",
                    caps.backend, msg);
+        return;
+    }
+    if (!strcmp(caps.backend, "hip")) {
+        static const char name[] = "the GPU backend loads no device image";
+        CHECK(st == CFT_ERR_UNSUPPORTED && strstr(msg, name) &&
+              im.struct_size == 0,
+              "the GPU's image identity: %s with struct_size %lu - it loads no "
+              "image, and must be refused by name (CFT_ERR_UNSUPPORTED, \"%s\", "
+              "struct_size 0), not answered: \"%s\"", cft_strerror(st),
+              (unsigned long)im.struct_size, name, msg);
+        if (st == CFT_ERR_UNSUPPORTED && strstr(msg, name) &&
+            im.struct_size == 0)
+            printf("  image identity (hip): refused by name - %s\n", msg);
         return;
     }
     if (strcmp(caps.backend, "xrt")) {
@@ -9984,11 +10012,10 @@ int main(int argc, char **argv)
                 argv[0]);
         return 2;
     }
-    if (expect_refusal &&
-        (!strcmp(artifact, "sw") || !strncmp(artifact, "cft://", 6))) {
+    if (expect_refusal && !is_xclbin(artifact)) {
         fprintf(stderr, "--expect-refusal is for an xclbin: the software "
-                "backend and a remote handle refuse the identity for what "
-                "they are, and every run already requires that\n");
+                "backend, a remote handle and a GPU refuse the identity for "
+                "what they are, and every run already requires that\n");
         return 2;
     }
     argv[1] = (char *)artifact;
@@ -10017,7 +10044,7 @@ int main(int argc, char **argv)
     {
         int open_witness = -1;
         char open_why[240] = "";
-        if (strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6)) {
+        if (is_xclbin(argv[1])) {
             cft_device *probe = NULL;
             cft_status ps;
             put_env("CFT_XRT_WITNESS", "busy-open");
@@ -10034,7 +10061,7 @@ int main(int argc, char **argv)
         /* -i: the identity's two by-design refusals, planted - before the
          * handle under test holds the tiles, as the witness is. */
         if (only_id) {
-            if (strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6))
+            if (is_xclbin(argv[1]))
                 check_image_plants(argv[1]);
             else
                 not_here(NH_OTHER, "RUN", "  the planted identity refusals",
@@ -10202,7 +10229,7 @@ int main(int argc, char **argv)
     check_image_identity(sw, NULL);
     check_image_identity(hw, strcmp(argv[1], "sw") ? argv[1] : NULL);
     /* -i on an xclbin: the planted handles' decode, held to this one's. */
-    if (only_id && strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6))
+    if (only_id && is_xclbin(argv[1]))
         check_plant_caps(hw);
     fflush(stdout);
     if (only_id) {

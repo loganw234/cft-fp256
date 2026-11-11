@@ -22,6 +22,46 @@
 
 #include "../include/cft_config.h"   /* CFT_ERRMSG_MAX, CFT_NO_REMOTE */
 
+/* ==== the GPU backend (backend_hip.cpp, host/Makefile's HIP=1) =========
+ * HIP is the second implementer of this header's device seam, under a
+ * prefix of its own. In a build with CFT_ENABLE_HIP every cftx_ name
+ * below is the cfth_ function backend_hip.cpp defines, so device.c's
+ * XRT branches - the buffer registry and bindings, the dot and maxall
+ * compositions, the segmented reduction, the caps word - drive a GPU
+ * without a line of them changed, where a backend kind of its own would
+ * have repeated each of them. The cost, accepted for the GPU backend's
+ * round 1: one libcft holds a card or a GPU, never both, and the
+ * Makefile defines CFT_ENABLE_XRT with CFT_ENABLE_HIP and refuses
+ * HIP=1 with XRT=1. CFT_ENABLE_HIP alone is a hand-made build that
+ * would compile device.c with no backend behind the names, so it is
+ * refused here. */
+#ifdef CFT_ENABLE_HIP
+#  ifndef CFT_ENABLE_XRT
+#    error "CFT_ENABLE_HIP implements backend.h's cftx_ seam and needs CFT_ENABLE_XRT beside it - host/Makefile's HIP=1 defines both"
+#  endif
+#  define cftx_open               cfth_open
+#  define cftx_close              cfth_close
+#  define cftx_image_id           cfth_image_id
+#  define cftx_buffer_create      cfth_buffer_create
+#  define cftx_buffer_destroy     cfth_buffer_destroy
+#  define cftx_buffer_to_device   cfth_buffer_to_device
+#  define cftx_buffer_from_device cfth_buffer_from_device
+#  define cftx_buffer_will_write  cfth_buffer_will_write
+#  define cftx_buffer_host_wrote  cfth_buffer_host_wrote
+#  define cftx_buffer_stat        cfth_buffer_stat
+#  define cftx_run                cfth_run
+#  define cftx_reduce             cfth_reduce
+#  define cftx_reduce_seg         cfth_reduce_seg
+#  define cftx_program_run        cfth_program_run
+#  define cftx_last_error         cfth_last_error
+#  define cftx_clear_error        cfth_clear_error
+/* Whether the GPU backend keeps device copies of a cft_alloc'd buffer,
+ * for cft_get_caps's buffers_resident, which says what THIS device does.
+ * 0 while cfth_buffer_create declines every buffer, and device.c keeps
+ * each as host memory, as the buffer seam below allows. */
+#  define CFT_HIP_BUFFERS_RESIDENT 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -334,7 +374,14 @@ int  cftx_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a,
  * its backend never sees a table, because device.c gathers the blocks
  * dense on the client before calling it, and it compacts a masked run
  * to its kept lanes itself.
+ *
+ * prog         the loaded program the image was parsed into, set by
+ *              program.c: cft_program_load's own validated form, for a
+ *              backend that executes the parsed form (the GPU backend),
+ *              so that no backend parses the image a second time. The
+ *              XRT and remote backends ignore it.
  */
+struct cft_program;
 typedef struct cft_seq_run_io {
     const void *bank;        size_t bank_bytes;
     const void *scratch_in;  size_t scratch_in_bytes;
@@ -351,6 +398,8 @@ typedef struct cft_seq_run_io {
      * caller has: the XRT backend from each tile's block, copied to its
      * slice's first lane as the counts are (lane_cut.h), never bound */
     uint8_t *lane_flags; size_t lane_flags_bytes;
+    /* appended for the GPU backend (2026-11-11): see `prog` above */
+    const struct cft_program *prog;
 } cft_seq_run_io;
 
 /* Run a sequencer program (docs/SEQUENCER.md). A backend with several

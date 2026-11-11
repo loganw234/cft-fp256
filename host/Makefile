@@ -133,14 +133,70 @@ endif
 HIP          ?= 0
 HIP_ROOT     ?= /opt/rocm
 HIP_PLATFORM ?= amd
+# The CUDA toolkit HIP's NVIDIA layer compiles and links against.
+HIP_CUDA     ?= /usr/local/cuda
 ifeq ($(HIP_PLATFORM),nvidia)
   HIP_ARCH   ?= 89 120
   HIP_FLAGS  := -x cu -isystem $(HIP_ROOT)/include -Xptxas -v \
                 $(foreach a,$(HIP_ARCH),-gencode arch=compute_$(a),code=sm_$(a))
+  # nvcc takes the host compiler's flags through -Xcompiler. -Wpedantic
+  # is not among them: the unit is HIP, whose kernels are extensions. Nor
+  # is -Wshadow, and unused functions are not warned: in nvcc's host pass
+  # the tree's softfloat.c has a local `half` beside CUDA's global type of
+  # that name, and seq_exec.h's static seq_run_block has a caller only in
+  # device code (both measured 2026-11-11; amd's clang warns of neither,
+  # so the amd line keeps both warnings).
+  HIP_WARN   := -Xcompiler -Wall,-Wextra,-Wno-unused-function
+  HIP_PICF   := -Xcompiler -fPIC,-fvisibility=hidden
+  # The shared CUDA runtime, so that `ldd` names it in every binary
+  HIPLIBS    := -L$(HIP_CUDA)/lib64 -Wl,-rpath,$(HIP_CUDA)/lib64 \
+                -lcudart -lstdc++ -lpthread -ldl -lrt
 else
   HIP_ARCH   ?= gfx1102
   HIP_FLAGS  := -Rpass-analysis=kernel-resource-usage \
                 $(addprefix --offload-arch=,$(HIP_ARCH))
+  HIP_WARN   := -Wall -Wextra -Wshadow
+  HIP_PICF   := -fPIC -fvisibility=hidden
+  HIPLIBS    := -L$(HIP_ROOT)/lib -Wl,-rpath,$(HIP_ROOT)/lib -lamdhip64 \
+                -lstdc++
+endif
+HIP_CC = HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc
+# HIP_ARCH for backend_hip.cpp's sentences, as one token ("89_120")
+HIP_EMPTY :=
+HIP_SPACE := $(HIP_EMPTY) $(HIP_EMPTY)
+HIP_ARCHDEF = -DCFT_HIP_ARCH_TOKENS=$(subst $(HIP_SPACE),_,$(strip $(HIP_ARCH)))
+
+# The GPU backend (the GPU backend's round 1, 2026-11-11): HIP=1 builds
+# src/backend_hip.cpp into libcft, and cft_open("hip:N") opens the Nth
+# GPU the HIP runtime sees (docs/HOSTAPI.md, "The GPU backend").
+#
+#   make HIP=1 all api-test device-test hip-test hip-corpus     on ROCm
+#   make HIP=1 HIP_PLATFORM=nvidia HIP_ROOT=/opt/rocm-7.2.4 ...  on NVIDIA
+#   make HIP=1 HIP_PLANTS=1 ...                                  the plants
+#
+# It implements the XRT backend's seam (src/backend.h, which renames the
+# cftx_ functions to cfth_ under CFT_ENABLE_HIP), so CFT_ENABLE_XRT is
+# defined with CFT_ENABLE_HIP and device.c's device branches serve both;
+# a library therefore holds a card or a GPU, never both, and HIP=1 with
+# XRT=1 is refused. backend_hip.cpp is ONE device translation unit with
+# no relocatable device code: it includes the tree's bigint.c, softfloat.c
+# and seq_exec.h itself, so it is not in SRC (print-src, the WebAssembly
+# module's sources) and its rules are its own, below. Every link line
+# ends in $(XRTLIBS), so the GPU runtime's libraries ride in it.
+#
+# HIP_PLANTS=1 compiles the backend's plants in (CFT_HIP_PLANTS, chosen
+# at run time by CFT_HIP_PLANT; backend_hip.cpp lists them). Build it in
+# a directory of its own: gen/hip/backend-flags makes the object follow
+# the flags, so the two cannot share an object by accident either.
+ifeq ($(HIP),1)
+  ifeq ($(XRT),1)
+    $(error HIP=1 with XRT=1: the GPU backend implements the XRT backend's seam (src/backend.h), so one libcft holds a card (XRT=1) or a GPU (HIP=1), never both - build them in two trees)
+  endif
+  XRTDEF  := -DCFT_ENABLE_XRT -DCFT_ENABLE_HIP
+  XRTLIBS := $(HIPLIBS)
+  OBJ     += src/backend_hip.o
+  PICOBJ  += src/backend_hip.lo
+  HIP_PLANTDEF := $(if $(filter 1,$(HIP_PLANTS)),-DCFT_HIP_PLANTS,)
 endif
 .PHONY: hip-unit
 ifeq ($(HIP),1)
@@ -346,6 +402,109 @@ libcft.a: $(OBJ)
 
 $(SHLIB): $(PICOBJ)
 	$(CC) $(SHFLAGS) -o $@ $^ $(XRTLIBS)
+
+# ==== the GPU backend's own rules (HIP=1; the block at HIP above) ======
+#
+# backend_hip.cpp is compiled by hipcc, with the flags hip-unit uses and
+# the library's own CFLAGS, XRTDEF and include path. The object follows
+# gen/hip/backend-flags, which is rewritten only when the flags change,
+# so a plant build (HIP_PLANTS=1) and a default one cannot share it. The
+# compiler's resource report (registers, stack a thread) and any warning
+# are in gen/hip/backend_hip-<platform>.log; a warning is printed too.
+#
+# THE SYMBOL CHECK. The unit includes bigint.c and softfloat.c, whose
+# headers have no extern "C", so it defines their functions again as C++
+# (mangled) names beside the host objects' C ones. A DATUM is not
+# mangled, and cft_sf_formats would collide: backend_hip.cpp renames its
+# copy. hip-symcheck holds that to the objects - no symbol defined in
+# backend_hip.o (.lo) is defined in any other object of the library -
+# and libcft.a and the shared library wait for it, so every HIP=1 build
+# runs it. hip-symcheck-plant compiles the unit with the rename removed
+# (-DCFT_HIP_PLANT_COLLIDE) and requires the same check to FAIL on
+# cft_sf_formats: a check that cannot fail is not one.
+.PHONY: hip-flags-force hip-symcheck hip-symcheck-plant clean-hip
+hip-flags-force:
+HIP_LOG = gen/hip/backend_hip-$(HIP_PLATFORM)
+HIP_OTHER_OBJ   = $(filter-out src/backend_hip.o,$(OBJ))
+HIP_OTHER_PICOBJ = $(filter-out src/backend_hip.lo,$(PICOBJ))
+# $(call hip_symcheck,UNIT OBJECT,HOST OBJECTS,TAG): one shell command
+# that fails naming every symbol defined in both, and fails too if nm
+# saw neither side's sentinel (cfth_open, cft_open): an empty listing
+# must not read as "none in both".
+hip_symcheck = LC_ALL=C nm -g --defined-only $(1) | awk 'NF >= 3 { print $$3 }' | \
+	  LC_ALL=C sort -u > gen/hip/$(3)-unit.txt && \
+	LC_ALL=C nm -g --defined-only $(2) | awk 'NF >= 3 { print $$3 }' | \
+	  LC_ALL=C sort -u > gen/hip/$(3)-host.txt && \
+	grep -qx cfth_open gen/hip/$(3)-unit.txt && grep -qx cft_open gen/hip/$(3)-host.txt && \
+	LC_ALL=C comm -12 gen/hip/$(3)-unit.txt gen/hip/$(3)-host.txt > gen/hip/$(3)-both.txt && \
+	if [ -s gen/hip/$(3)-both.txt ]; then \
+	  echo "hip-symcheck: FAILED - defined in $(1) and in a host object of libcft:" \
+	       "$$(tr '\n' ' ' < gen/hip/$(3)-both.txt)"; exit 1; \
+	else \
+	  echo "hip-symcheck: $$(wc -l < gen/hip/$(3)-unit.txt) symbols defined in $(1)," \
+	       "$$(wc -l < gen/hip/$(3)-host.txt) in the $(words $(2)) host objects, none in both"; \
+	fi
+
+ifeq ($(HIP),1)
+gen/hip/backend-flags: hip-flags-force
+	@mkdir -p gen/hip
+	@echo '$(HIP_PLATFORM) $(HIP_ROOT) $(HIP_ARCH) $(CFLAGS) $(XRTDEF) $(HIP_PLANTDEF)' > $@.new
+	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
+
+src/backend_hip.o: src/backend_hip.cpp src/bigint.c src/softfloat.c gen/hip/backend-flags
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
+		$(HIP_ARCHDEF) $(HIP_PLANTDEF) -c $< -o $@ > $(HIP_LOG).log 2>&1 \
+		|| { cat $(HIP_LOG).log; exit 1; }
+	@grep -i 'warning' $(HIP_LOG).log || true
+
+src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c gen/hip/backend-flags
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
+		$(HIP_ARCHDEF) $(HIP_PLANTDEF) $(HIP_PICF) $(SHDEF) -c $< -o $@ \
+		> $(HIP_LOG)-pic.log 2>&1 || { cat $(HIP_LOG)-pic.log; exit 1; }
+	@grep -i 'warning' $(HIP_LOG)-pic.log || true
+
+gen/hip/symcheck.ok: src/backend_hip.o $(HIP_OTHER_OBJ)
+	@$(call hip_symcheck,src/backend_hip.o,$(HIP_OTHER_OBJ),sym)
+	@touch $@
+gen/hip/symcheck-pic.ok: src/backend_hip.lo $(HIP_OTHER_PICOBJ)
+	@$(call hip_symcheck,src/backend_hip.lo,$(HIP_OTHER_PICOBJ),sympic)
+	@touch $@
+libcft.a: | gen/hip/symcheck.ok
+$(SHLIB): | gen/hip/symcheck-pic.ok
+hip-symcheck: gen/hip/symcheck.ok gen/hip/symcheck-pic.ok
+
+hip-symcheck-plant: src/backend_hip.cpp gen/hip/backend-flags $(HIP_OTHER_OBJ)
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(INC) $(XRTDEF) $(HIP_ARCHDEF) \
+		-DCFT_HIP_PLANT_COLLIDE -c $< -o gen/hip/symplant.o > gen/hip/symplant.log 2>&1 \
+		|| { cat gen/hip/symplant.log; exit 1; }
+	@if ( $(call hip_symcheck,gen/hip/symplant.o,$(HIP_OTHER_OBJ),symplant) ); then \
+	  echo "hip-symcheck-plant: the check PASSED a unit whose cft_sf_formats is not renamed - it cannot fail"; \
+	  exit 1; \
+	fi; \
+	grep -qx cft_sf_formats gen/hip/symplant-both.txt || { \
+	  echo "hip-symcheck-plant: the check failed, but not on cft_sf_formats"; exit 1; }; \
+	echo "hip-symcheck-plant: RED, as it must be - the unit without the rename defines" \
+	     "$$(tr '\n' ' ' < gen/hip/symplant-both.txt)beside the host objects"
+else
+hip-symcheck hip-symcheck-plant:
+	@echo "$@: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
+endif
+
+# The backend's own tests (tests/hip_test.c, tests/hip_corpus.c): the
+# public API only, linked as api-test is. In a HIP=0 build they still
+# build and say what an artifact "hip:N" is refused with.
+hip-test$(EXE): tests/hip_test.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+hip-corpus$(EXE): tests/hip_corpus.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+# Outside the ifeq, as clean-resident is: a HIP=0 clean removes what a
+# HIP=1 build left.
+clean: clean-hip
+clean-hip:
+	rm -f src/backend_hip.o src/backend_hip.lo hip-test hip-test.exe \
+	      hip-corpus hip-corpus.exe
 
 cft-selftest$(EXE): tools/cft_selftest.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)

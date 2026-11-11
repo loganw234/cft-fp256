@@ -1930,6 +1930,10 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
              * byte a lane the caller has. */
             io.lane_flags        = A->lane_flags;
             io.lane_flags_bytes  = A->lane_flags_bytes;
+            /* And the program itself, as loaded and validated here, for
+             * a backend that runs the parsed form (backend.h): nothing
+             * parses the image a second time. XRT and remote ignore it. */
+            io.prog              = prog;
             /* Which device backend is device.c's business: the
              * dispatcher in backend.h hands the run to the XRT one or
              * the remote one (docs/REMOTE.md) and this file names
