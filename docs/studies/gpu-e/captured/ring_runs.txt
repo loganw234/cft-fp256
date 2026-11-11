@@ -1,0 +1,55 @@
+# GPU-E, captured 2026-11-11 11:38:23: ring_runs.py over /root/gpu-e/work (WSL cft-gpu on this desktop),
+# the 23 records run_ring.sh wrote 11:23:18 to 11:37:56 (each run 3 to 103 s, one at a time;
+# WSL loadavg 0.8 rising to 5.1, the desktop busy with other parcels). Trimmed: ring_runs.py's
+# output whole and nothing else; the records and the runs' wall times are in the GPU-E ledger.
+label | format | arith | epsilon | N | E | steps/orbit (two halves) | passes/attempt | max | rejected | cap hits | s
+A_fp128_e12 | fp128 | rebound | 1e-12 | 2 | 1 | 97.5 / 96.3 | 5.660 | 8 | 0 | 0 | 15.0
+A_fp128_e12_fma | fp128 | fma | 1e-12 | 2 | 1 | 97.5 / 96.3 | 5.645 | 8 | 0 | 0 | 7.9
+A_fp128_e16 | fp128 | rebound | 1e-16 | 2 | 1 | 360.4 / 358.9 | 4.035 | 8 | 0 | 0 | 14.9
+A_fp128_e9 | fp128 | rebound | 1e-09 | 2 | 1 | 36.5 / 35.9 | 8.010 | 9 | 0 | 0 | 24.9
+A_fp256_e12 | fp256 | rebound | 1e-12 | 2 | 1 | 97.5 / 96.3 | 15.015 | 17 | 0 | 0 | 65.5
+A_fp256_e16 | fp256 | rebound | 1e-16 | 2 | 1 | 360.4 / 358.9 | 11.035 | 15 | 0 | 0 | 49.7
+A_fp256_e16_fma | fp256 | fma | 1e-16 | 2 | 1 | 360.4 / 358.9 | 11.035 | 15 | 0 | 0 | 19.9
+A_fp256_e20 | fp256 | rebound | 1e-20 | 2 | 1 | 1322.9 / 1337.8 | 8.080 | 14 | 0 | 0 | 34.0
+A_fp256_e24 | fp256 | rebound | 1e-24 | 2 | 1 | 4986.9 / 4986.9 | 7.075 | 14 | 1 | 0 | 30.2
+A_fp256_e9 | fp256 | rebound | 1e-09 | 2 | 1 | 36.5 / 35.9 | 19.980 | 21 | 0 | 0 | 102.9
+A_fp64_e9 | fp64 | rebound | 1e-09 | 2 | 1 | 36.5 / 35.9 | 3.025 | 5 | 0 | 0 | 9.1
+B_fp128_e12_100 | fp128 | rebound | 1e-12 | 2 | 1 | 97.5 | 5.730 | 8 | 0 | 0 | 8.3
+B_fp128_e12_200 | fp128 | rebound | 1e-12 | 2 | 1 | 96.9 | 5.660 | 8 | 0 | 0 | 16.2
+B_fp256_e16f_100 | fp256 | fma | 1e-16 | 2 | 1 | 360.4 | 11.070 | 15 | 0 | 0 | 7.0
+B_fp256_e16f_200 | fp256 | fma | 1e-16 | 2 | 1 | 359.7 | 11.035 | 15 | 0 | 0 | 21.0
+B_fp64_e9_100 | fp64 | rebound | 1e-09 | 2 | 1 | 36.5 | 3.040 | 5 | 0 | 0 | 3.2
+B_fp64_e9_200 | fp64 | rebound | 1e-09 | 2 | 1 | 36.2 | 3.025 | 5 | 0 | 0 | 7.1
+C_ens8_fp128_e12 | fp128 | rebound | 1e-12 | 2 | 8 | per member below | 5.592 | 8 | 0 | 0 | 96.8
+C_ens8_fp64_e9 | fp64 | rebound | 1e-09 | 2 | 8 | per member below | 3.014 | 5 | 0 | 0 | 44.7
+D_ring8_fp128_e12 | fp128 | rebound | 1e-12 | 9 | 1 | 96.3 (r=1.0) | 5.700 | 8 | 0 | 0 | 81.7
+D_ring8_fp64_e9 | fp64 | rebound | 1e-09 | 9 | 1 | 35.9 (r=1.0) | 3.035 | 5 | 0 | 0 | 33.9
+E_ring16_fp64_e9 | fp64 | rebound | 1e-09 | 17 | 1 | 35.9 (r=1.0) | 3.025 | 5 | 0 | 0 | 79.9
+E_ring32_fp64_e9 | fp64 | rebound | 1e-09 | 33 | 1 | 35.9 (r=1.0) | 3.090 | 5 | 0 | 0 | 102.6
+
+C_ens8_fp128_e12: members (r_k = 1 + 0.1 k), pc_lane_efficiency=0.93
+member | r | steps/own orbit | passes/attempt | max | rejected | orbits in the run
+0 | 1.0 | 96.3 | 5.660 | 8 | 0 | 2.06
+1 | 1.1 | 96.3 | 5.570 | 8 | 0 | 2.06
+2 | 1.2 | 96.3 | 5.580 | 8 | 0 | 2.06
+3 | 1.3 | 96.3 | 5.565 | 8 | 0 | 2.06
+4 | 1.4 | 96.3 | 5.590 | 8 | 0 | 2.06
+5 | 1.5 | 96.3 | 5.620 | 7 | 0 | 2.06
+6 | 1.6 | 96.3 | 5.615 | 8 | 0 | 2.06
+7 | 1.7 | 96.3 | 5.535 | 7 | 0 | 2.06
+
+C_ens8_fp64_e9: members (r_k = 1 + 0.1 k), pc_lane_efficiency=0.986
+member | r | steps/own orbit | passes/attempt | max | rejected | orbits in the run
+0 | 1.0 | 35.9 | 3.025 | 5 | 0 | 5.52
+1 | 1.1 | 35.9 | 3.010 | 4 | 0 | 5.52
+2 | 1.2 | 35.9 | 3.010 | 4 | 0 | 5.51
+3 | 1.3 | 35.9 | 3.005 | 4 | 0 | 5.51
+4 | 1.4 | 35.9 | 3.025 | 4 | 0 | 5.51
+5 | 1.5 | 35.9 | 3.005 | 4 | 0 | 5.51
+6 | 1.6 | 35.9 | 3.020 | 4 | 0 | 5.51
+7 | 1.7 | 35.9 | 3.010 | 4 | 0 | 5.50
+
+div/sqrt identity (d = the 200-step run minus the 100-step run):
+fp64 rebound: d_passes=301 d_attempts=100 predicted d_divsqrt=32099 measured=32099 -> IDENTICAL
+fp128 rebound: d_passes=559 d_attempts=100 predicted d_divsqrt=57641 measured=57641 -> IDENTICAL
+fp256 fma: d_passes=1100 d_attempts=100 predicted d_divsqrt=17300 measured=17300 -> IDENTICAL
