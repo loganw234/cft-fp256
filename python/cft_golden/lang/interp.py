@@ -44,18 +44,22 @@ class Run:
 
 
 def _transcend(fmt, fn, rnd):
-    """The golden function of one of the nine: transcend.py's, by the name
-    the node carries, under the program's attribute - the correctly
-    rounded result and its exact flags (M1's build, item 3, and M2's)."""
+    """The golden function of one of the thirteen (graph.TRANSCEND):
+    transcend.py's, by the name the node carries, under the program's
+    attribute - the correctly rounded result and its exact flags (M1's
+    build, item 3, M2's and M4's). atan2's takes its two operands, y first
+    as the node holds them, and every other one's takes one."""
+    if fn == "atan2":
+        return lambda a, b: transcend.compute(fmt, fn, a, b, rnd)
     return lambda a: transcend.compute(fmt, fn, a, 0, rnd)
 
 
 def _ops(fmt, rnd):
-    """The golden function for each node operation. The fifteen that round
+    """The golden function for each node operation. The nineteen that round
     take the program's attribute - division and the square root among
     them, sf.div and sf.sqrt, correctly rounded with their exact flags
-    (L4), and the math library's nine, transcend.py's (M1's build, item 3,
-    and M2's) - and the rest are called as softfloat.compute calls them,
+    (L4), and the math library's thirteen, transcend.py's (M1's build,
+    item 3, M2's and M4's) - and the rest are called as softfloat.compute calls them,
     and ignore it."""
     return {
         "fma": lambda a, b, c: sf.fma(fmt, a, b, c, rnd),
@@ -80,7 +84,7 @@ def _ops(fmt, rnd):
 
 
 def transcendentals(graph):
-    """The nine (graph.TRANSCEND) a graph's sections hold, in their order:
+    """The thirteen (graph.TRANSCEND) a graph's sections hold, in their order:
     what makes a run of it need mpmath."""
     held = set()
     for name in SECTIONS:
@@ -91,7 +95,7 @@ def transcendentals(graph):
 
 
 def need_mpmath(graph):
-    """Nothing for a graph without the nine; for one with them, nothing where
+    """Nothing for a graph without the thirteen; for one with them, nothing where
     mpmath imports, and otherwise transcend.ZivEscalation naming it - the
     golden model's own failure for a transcendental it cannot decide here,
     which the certificate auditor maps to `definition-unavailable`. Raised
@@ -329,7 +333,7 @@ def run(graph, states, steps, lane_params=None, params=None,
                 cbits[k] = _round_run(graph, f"{C.h_form(factor)}",
                                       factor * hv)
 
-    # a graph holding one of the nine needs mpmath for its golden functions,
+    # a graph holding one of the thirteen needs mpmath for its golden functions,
     # named here, after the inputs' refusals and before any lane runs
     need_mpmath(graph)
 

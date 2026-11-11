@@ -1420,9 +1420,12 @@ def test_intention_out_of_random_systems():
     # operation but the math library's six, which have random systems of
     # their own (test_m1_intention_out_of_random_systems), so that these
     # draws are what they were before M1's build, item 3 - and sin, cos and
-    # tan (M2's build), whose systems are test_lang_trig.py's
+    # tan (M2's build), whose systems are test_lang_trig.py's, and atan,
+    # asin, acos and atan2 (M4's build), whose systems are
+    # test_lang_invtrig.py's
     assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
-    assert ops == set(lang.OPS) - set(SIX) - {"sin", "cos", "tan"}
+    assert ops == set(lang.OPS) - set(SIX) - {"sin", "cos", "tan", "atan",
+                                              "asin", "acos", "atan2"}
     assert fmts == set(FORMATS) and rnds == set(C.RND_BY_NAME)
     assert arrays and lanes and lets
 
@@ -2347,7 +2350,7 @@ def test_m1_the_six_are_nodes():
     operand, named as transcend.py names the function, listed after sqrt;
     each is a built-in - reserved, and held to one argument - and every
     other name of the reserved list is still `transcendental` at run time
-    and `irrational-constant` of a constant, for M2 to M4."""
+    and `irrational-constant` of a constant, for the rounds after M4."""
     from cft_golden import transcend
     assert list(lang.OPS)[:12] == ["fma", "add", "sub", "mul", "div", "sqrt",
                                    *SIX]
@@ -2365,11 +2368,13 @@ def test_m1_the_six_are_nodes():
         assert info.value.name == "reserved-name"
         assert "a built-in" in info.value.sentence
     rest = set(lang_check.TRANSCENDENTAL)
-    # sin, cos and tan left the list in M2's build (2026-11-02): they are
-    # nodes now (test_lang_trig.py), and the 26 others still refused
+    # sin, cos and tan left the list in M2's build (2026-11-02) and atan,
+    # asin, acos and atan2 in M4's: they are nodes now (test_lang_trig.py,
+    # test_lang_invtrig.py), and the 22 others still refused
     three = {"sin", "cos", "tan"}
-    assert rest | set(SIX) | three == RESERVED_BEFORE
-    assert not rest & (set(SIX) | three) and len(rest) == 26
+    four = {"atan", "asin", "acos", "atan2"}
+    assert rest | set(SIX) | three | four == RESERVED_BEFORE
+    assert not rest & (set(SIX) | three | four) and len(rest) == 22
     for name in sorted(rest):
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = {name}(x)", state="x"))
@@ -2821,20 +2826,22 @@ def test_m1_mpmath_is_needed_only_by_a_run_of_the_six(tmp_path):
     assert lines[4] == "exact_eval ImportError"
 
 
-def test_m2_the_language_is_at_1_2():
-    """The six (M1's build) and sin, cos and tan (M2's build) are minor
-    steps (CONFORMANCE.md, "The language's version"): lang/version.py is
-    1.2, and cft.h's macros, which cft-segrun and cft-audit compile in, are
-    the same. (This was test_m1_the_language_is_at_1_1, at 1.1 and cft.h's
-    1, until M2's build, 2026-11-02.)"""
+def test_m4_the_language_is_at_1_3():
+    """The six (M1's build), sin, cos and tan (M2's build) and atan, asin,
+    acos and atan2 (M4's build) are minor steps (CONFORMANCE.md, "The
+    language's version"): lang/version.py is 1.3, and cft.h's macros, which
+    cft-segrun and cft-audit compile in, are the same. (This was
+    test_m2_the_language_is_at_1_2, at 1.2 and cft.h's 2, until M4's build;
+    before it test_m1_the_language_is_at_1_1, at 1.1 and cft.h's 1, until
+    M2's build, 2026-11-02.)"""
     from cft_golden import cert2
     from cft_golden.lang import version
-    assert version.VERSION == (1, 2)
-    assert cert2.version_text(version.VERSION) == "1.2"
+    assert version.VERSION == (1, 3)
+    assert cert2.version_text(version.VERSION) == "1.3"
     text = (REPO / "host" / "include" / "cft.h").read_text(encoding="utf-8")
     got = dict(re.findall(r"^#define (CFT_LANGUAGE_(?:MAJOR|MINOR))\s+(\d+)",
                           text, re.M))
-    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "2"}
+    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "3"}
 
 
 # ---- the documents -------------------------------------------------------------

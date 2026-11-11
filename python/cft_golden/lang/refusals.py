@@ -105,18 +105,21 @@ CATALOGUE = {
     # the compiler refused them `runtime-routine` until parcel C4 carried
     # them as inlined routines, and that name went too. exp, expm1, exp2,
     # log, log1p and log2 are operations since M1's build, item 3,
-    # 2026-10-15, and sin, cos and tan since M2's build, 2026-11-02:
-    # `transcendental` refuses the rest of the reserved list)
+    # 2026-10-15, sin, cos and tan since M2's build, 2026-11-02, and
+    # atan, asin, acos and atan2 since M4's build: `transcendental`
+    # refuses the rest of the reserved list)
     "transcendental": "a transcendental function the language does not "
                       "have (pow, sinh and the rest of the reserved "
                       "list), at run time",
     "irrational-constant": "a square root of a constant that is no "
                            "rational's square (2, or a negative one); exp, "
-                           "expm1, exp2, log, log1p, log2, sin, cos or tan "
-                           "of a constant whose value is irrational or not "
-                           "real (exp(1), log(2), log(-1), sin(1)); or any "
-                           "other transcendental of a constant, which the "
-                           "language does not have yet",
+                           "expm1, exp2, log, log1p, log2, sin, cos, tan, "
+                           "atan, asin, acos or atan2 of constants whose "
+                           "value is irrational or not real (exp(1), "
+                           "log(2), log(-1), sin(1), atan(1), asin(2), "
+                           "atan2(1, 1)); or any other transcendental of a "
+                           "constant, which the language does not have "
+                           "yet",
     "power": "^ or **",
     "not-equal": "!=",
     "chained-comparison": "a comparison of a comparison, unparenthesised",

@@ -41,7 +41,8 @@ they were before tangents existed):
 A node is [op, [ref], label or null]; an op is one of OPS below - div
 and sqrt, the run-time division and square root (L4, 2026-10-02), the
 math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
-item 3, 2026-10-15), and its sin, cos and tan (M2's build, 2026-11-02),
+item 3, 2026-10-15), its sin, cos and tan (M2's build, 2026-11-02) and its
+atan, asin, acos and atan2 (M4's build, atan2 of two operands, y first),
 among them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
 (a const) or nN (a node of the same section, always an earlier one). In
 a tangent section nN is a LABELLED node of the section it differentiates
@@ -71,24 +72,30 @@ from .refusals import Refusal
 
 VERSION = 1
 
-# The math library's six (M1's build, item 3) and its sin, cos and tan (M2's
-# build, 2026-11-02): each a node of one operand, named as transcend.py names
-# the function, its golden function transcend.compute(fmt, name, a, 0, rnd)
-# under the program's attribute. The order is the one the nodes are counted
-# in (OPS, below): sin, cos and tan directly after log2 and before neg, which
-# the canonical form's "; operations:" line shows and cftc's ir.ARITY mirrors.
+# The math library's six (M1's build, item 3), its sin, cos and tan (M2's
+# build, 2026-11-02) and its atan, asin, acos and atan2 (M4's build): each a
+# node named as transcend.py names the function, its golden function
+# transcend.compute(fmt, name, a, b, rnd) under the program's attribute, b the
+# second operand where the node has two (atan2's, y first) and 0 where it has
+# one. The order is the one the nodes are counted in (OPS, below): sin, cos
+# and tan directly after log2, then atan, asin, acos and atan2, before neg,
+# which the canonical form's "; operations:" line shows and cftc's ir.ARITY
+# mirrors.
 TRANSCEND = ("exp", "expm1", "exp2", "log", "log1p", "log2",
-             "sin", "cos", "tan")
+             "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
+
+# The operands of a TRANSCEND node: atan2's two, every other one's one.
+TRANSCEND_ARITY = {fn: 2 if fn == "atan2" else 1 for fn in TRANSCEND}
 
 # The operations a node may be, in the order counts are written, with
 # each one's operand count. The names are softfloat.OP_NAMES' spellings
 # and the operand order is the golden function's (asm.py's OP_FIELDS) -
 # but for div and sqrt, which no tile instruction is: their names are the
-# golden functions' own, sf.div and sf.sqrt (L4); and the nine, whose names
-# are transcend.py's. Count lines write only the operations a section
+# golden functions' own, sf.div and sf.sqrt (L4); and the thirteen of
+# TRANSCEND, whose names are transcend.py's. Count lines write only the operations a section
 # has, so a graph without these writes what it wrote before them.
 OPS = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
-       **{fn: 1 for fn in TRANSCEND},
+       **TRANSCEND_ARITY,
        "neg": 1, "abs": 1,
        "copysign": 2, "min": 2, "max": 2, "minnum": 2, "maxnum": 2,
        "cmplt": 2, "cmple": 2, "cmpeq": 2, "select": 3}
@@ -113,6 +120,10 @@ ROOT_BITS = 256
 # sin, cos and tan of any other rational are mpmath's at TRANS_BITS of the
 # argument rounded to nearest at TRANS_BITS - for an argument of 2^k, a
 # reduction by pi to about k + TRANS_BITS bits, which mpmath does itself.
+# atan, asin and acos of any rational but 0 (acos: but 1), and atan2 of two
+# but a zero y with a nonnegative x, are mpmath's at TRANS_BITS of the
+# arguments, each rounded to nearest at TRANS_BITS first (M4's build); asin
+# and acos are Undefined outside [-1, 1].
 TRANS_BITS = 1024
 _TRANS = []
 
@@ -140,19 +151,26 @@ def exact_root(value):
     return Fraction(isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
 
 
-def _mp(fn, value):
-    """exp, exp2, log, log2, sin, cos or tan of a rational, by mpmath at
-    TRANS_BITS, as the exact rational the result is (its _mpf_ tuple,
-    read)."""
+def _mp(fn, value, value2=None):
+    """exp, exp2, log, log2, sin, cos, tan, atan, asin or acos of a rational,
+    or atan2 of two (value is y, value2 is x), by mpmath at TRANS_BITS, as
+    the exact rational the result is (its _mpf_ tuple, read)."""
     if not _TRANS:
-        import mpmath            # only a graph holding one of the nine needs it
+        import mpmath            # only a graph holding one of the thirteen needs it
         ctx = mpmath.MPContext()
         ctx.prec = TRANS_BITS
         _TRANS.append((mpmath.libmp, ctx))
     lib, ctx = _TRANS[0]
     x = ctx.make_mpf(lib.from_rational(value.numerator, value.denominator,
                                        TRANS_BITS, lib.round_nearest))
-    if fn == "exp":
+    if fn == "atan2":
+        x2 = ctx.make_mpf(lib.from_rational(
+            value2.numerator, value2.denominator, TRANS_BITS,
+            lib.round_nearest))
+        y = ctx.atan2(x, x2)
+    elif fn in ("atan", "asin", "acos"):
+        y = getattr(ctx, fn)(x)
+    elif fn == "exp":
         y = ctx.exp(x)
     elif fn == "exp2":
         y = ctx.power(2, x)
@@ -171,12 +189,30 @@ def _mp(fn, value):
     return -v if sign else v
 
 
-def exact_transcendental(op, value):
+def exact_transcendental(op, value, value2=None):
     """The transcendental exact_eval takes (TRANS_BITS, above): exact where
     the value is rational, otherwise mpmath's at TRANS_BITS - a fixed
     function of its exact argument. Undefined at a logarithm's pole or
-    below its domain, and for a value beyond 2^+-1048576."""
+    below its domain, for asin and acos outside [-1, 1], and for a value
+    beyond 2^+-1048576. atan2 takes both operands, y as `value` and x as
+    `value2`; every other one takes `value` alone."""
     v = K_.exact(value)
+    if op == "atan2":
+        w = K_.exact(value2)
+        # rational only where y is 0 and x is not negative (Lindemann: a
+        # nonzero rational's arctangent is irrational, and the angle of
+        # (x, 0) with x < 0 is pi); atan2(0, 0) is the language's 0, as its
+        # fold
+        if v == 0 and w >= 0:
+            return Fraction(0)
+        return _mp(op, v, w)
+    if op in ("atan", "asin", "acos"):
+        if op != "atan" and abs(v) > 1:
+            raise Undefined(f"{op}({K_.brief(v)}), outside [-1, 1]")
+        # rational only at 0 (atan, asin) and 1 (acos), Hermite-Lindemann
+        if (v == 0 and op != "acos") or (v == 1 and op == "acos"):
+            return Fraction(0)
+        return _mp(op, v)
     if op in ("sin", "cos", "tan"):
         # rational only at zero (Hermite-Lindemann: a nonzero rational's sin,
         # cos or tan is transcendental), where it is 0, 1 and 0 exactly
@@ -717,13 +753,14 @@ class StepGraph:
         root is exact_root's: the exact root where its argument is a
         rational's square, and otherwise a fixed function of its exact
         argument - the root rounded down to 2^-ROOT_BITS - so that two
-        evaluations of the same root agree exactly (L4). The nine
+        evaluations of the same root agree exactly (L4). The thirteen
         transcendentals are exact_transcendental's, alike: exact where the
         value is rational, otherwise mpmath's at TRANS_BITS, a fixed
-        function of the exact argument (M1's build, item 3, and M2's), so a
-        graph holding one needs mpmath here. A division by zero, a negative
-        root's argument, a logarithm at or below its pole and a value
-        beyond 2^+-1048576 raise Undefined. `params` and
+        function of the exact argument (M1's build, item 3, M2's and M4's),
+        so a graph holding one needs mpmath here. A division by zero, a
+        negative root's argument, a logarithm at or below its pole, asin or
+        acos of a value outside [-1, 1] and a value beyond 2^+-1048576
+        raise Undefined. `params` and
         `lanes` default to the declared defaults. A tangent section
         (tangent_field, tangent_step) takes `tangent`, one tangent
         vector's values, and evaluates the section it differentiates
@@ -815,7 +852,7 @@ def _exact(op, a):
     if op == "sqrt":
         return exact_root(a[0])
     if op in TRANSCEND:
-        return exact_transcendental(op, a[0])
+        return exact_transcendental(op, *a)
     if op == "neg":
         return -a[0]
     if op == "abs":

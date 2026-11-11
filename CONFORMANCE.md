@@ -484,7 +484,7 @@ a source states it on its `language` line.
   the golden certificates' 24 sourced cases were made again at `language
   1.1`, only their `language` and `hash` lines and their manifest digests
   moving.
-- **It is 1.2 since 2026-11-02** (M2's build): sin, cos and tan, each an
+- **It was 1.2 from 2026-11-02** (M2's build): sin, cos and tan, each an
   operation with transcend.py's golden function, their folds at 0
   (sin(0) and tan(0) are 0 and cos(0) is 1), and their tangent rules -
   functions the language refused before only for not having them, so a
@@ -493,6 +493,15 @@ a source states it on its `language` line.
   certificates' 24 sourced cases were made again at `language 1.2`, only
   their `language` and `hash` lines and their manifest digests moving (72
   lines: 24 of each).
+- **It is 1.3 since 2026-11-11** (M4's build): atan, asin, acos and
+  atan2, each an operation with transcend.py's golden function, atan2 the
+  language's first of two operands, their folds at 0 (atan(0), asin(0),
+  acos(1) and atan2(0, c) for a constant c >= 0 are 0), and their tangent
+  rules - functions the language refused before only for not having them,
+  so a minor step again (Logan's answer 12 to the M4 study, 2026-10-23).
+  `cft.h`'s `CFT_LANGUAGE_MINOR` stepped with it, and the golden
+  certificates' 24 sourced cases were made again at `language 1.3`, only
+  their `language` and `hash` lines and their manifest digests moving.
 - **Its rule is the profile's.** A major step whenever an accepted source
   is refused, or computes another thing: a new keyword an old source used
   as a name, a refusal added, a node's golden function changed. A minor

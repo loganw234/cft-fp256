@@ -56,10 +56,17 @@ taken the same way: exact at 0 - sin(0) = tan(0) = 0 and cos(0) = 1, the
 only rational values - and otherwise mpmath's at 1,024 bits of the argument
 rounded to nearest at 1,024 bits.
 
-Only the nine need mpmath, here as in the language: have_mpmath() says,
+atan, asin, acos and atan2 (M4's build) print as arctan(a), arcsin(a),
+arccos(a) and atan2(a, b), y first, and are taken the same way: exact at 0
+for arctan and arcsin, at 1 for arccos, and for atan2 at a zero y with an x
+that is not negative - its zero - and otherwise mpmath's at 1,024 bits of
+the arguments, each rounded to nearest at 1,024 bits; arcsin and arccos
+outside [-1, 1] raise an ArithmeticError.
+
+Only the thirteen need mpmath, here as in the language: have_mpmath() says,
 without importing it, whether this host has it, so that the tests that
-run or evaluate the nine skip by name on a host without it while the rest -
-the checker, the renderers and cftc's refusal of the nine among them - run.
+run or evaluate the thirteen skip by name on a host without it while the rest -
+the checker, the renderers and cftc's refusal of the thirteen among them - run.
 """
 
 import importlib.util
@@ -98,10 +105,11 @@ def root(q):
     return Fraction(isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
 
 
-def _mpvalue(fn, q):
-    """mpmath's exp, 2^x, ln, log2, sin, cos or tan of a rational at
-    TRANS_BITS, the argument rounded to nearest at TRANS_BITS first, as an
-    exact rational."""
+def _mpvalue(fn, q, q2=None):
+    """mpmath's exp, 2^x, ln, log2, sin, cos, tan, atan, asin or acos of a
+    rational, or atan2 of two (y is q, x is q2), at TRANS_BITS, each
+    argument rounded to nearest at TRANS_BITS first, as an exact
+    rational."""
     if not _MP:
         import mpmath
         ctx = mpmath.MPContext()
@@ -110,9 +118,15 @@ def _mpvalue(fn, q):
     lib, ctx = _MP[0]
     x = ctx.make_mpf(lib.from_rational(q.numerator, q.denominator,
                                        TRANS_BITS, lib.round_nearest))
-    y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v), "ln": ctx.log,
-         "log2": lambda v: ctx.log(v) / ctx.ln2, "sin": ctx.sin,
-         "cos": ctx.cos, "tan": ctx.tan}[fn](x)
+    if fn == "atan2":
+        x2 = ctx.make_mpf(lib.from_rational(q2.numerator, q2.denominator,
+                                            TRANS_BITS, lib.round_nearest))
+        y = ctx.atan2(x, x2)
+    else:
+        y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v),
+             "ln": ctx.log, "log2": lambda v: ctx.log(v) / ctx.ln2,
+             "sin": ctx.sin, "cos": ctx.cos, "tan": ctx.tan,
+             "atan": ctx.atan, "asin": ctx.asin, "acos": ctx.acos}[fn](x)
     sign, man, exp, bc = y._mpf_
     man = int(man)
     if man == 0 or abs(exp + bc) > LIMIT:
@@ -121,11 +135,26 @@ def _mpvalue(fn, q):
     return -v if sign else v
 
 
-def transcendental(name, q):
-    """One of the nine as the exact checks take it (the module docstring),
-    by the mathematical form's name for it: exp, expm1, 2^ (exp2), ln,
-    log1p, log₂, sin, cos or tan - or the language's, log and log2."""
+def transcendental(name, q, q2=None):
+    """One of the thirteen as the exact checks take it (the module
+    docstring), by the mathematical form's name for it: exp, expm1, 2^
+    (exp2), ln, log1p, log₂, sin, cos, tan, arctan, arcsin, arccos or
+    atan2 (q is y, q2 is x) - or the language's, log, log2, atan, asin and
+    acos."""
     q = Fraction(q)
+    if name == "atan2":
+        q2 = Fraction(q2)
+        if q == 0 and q2 >= 0:
+            return Fraction(0)
+        return _mpvalue("atan2", q, q2)
+    if name in ("arctan", "atan", "arcsin", "asin", "arccos", "acos"):
+        fn = {"arctan": "atan", "arcsin": "asin", "arccos": "acos"}.get(
+            name, name)
+        if fn != "atan" and abs(q) > 1:
+            raise ArithmeticError(f"{name}({q}): outside [-1, 1]")
+        if q == (1 if fn == "acos" else 0):
+            return Fraction(0)
+        return _mpvalue(fn, q)
     if name in ("sin", "cos", "tan"):
         if q == 0:
             return Fraction(1 if name == "cos" else 0)
@@ -159,7 +188,7 @@ def transcendental(name, q):
 
 
 _TRANSCENDENTAL = ("exp", "expm1", "ln", "log1p", "log₂", "sin", "cos",
-                   "tan")
+                   "tan", "arctan", "arcsin", "arccos")
 
 
 class MathFormError(ValueError):
@@ -562,6 +591,10 @@ class MathForm:
                 if len(vals) != 1:
                     raise MathFormError(f"{name} of {len(vals)} values")
                 return transcendental(name, vals[0])
+            if name == "atan2":
+                if len(vals) != 2:
+                    raise MathFormError(f"{name} of {len(vals)} values")
+                return transcendental(name, vals[0], vals[1])
             if name in ("min", "minNum"):
                 return min(vals)
             if name in ("max", "maxNum"):

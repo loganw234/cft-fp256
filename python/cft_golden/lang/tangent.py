@@ -30,6 +30,10 @@ Each operation's tangent is a rule written in the language
   sin(a)          cos(a) * da                   M2's build, 2026-11-02;
   cos(a)          (-sin(a)) * da                the routine of the first
   tan(a)          fma(r, r, 1) * da             factor a node of its own
+  atan(a)         da / fma(a, a, 1)             M4's build, 2026-11-11:
+  asin(a)         da / sqrt(fma(-a, a, 1))      one division a vector, no
+  acos(a)         da / (-sqrt(fma(-a, a, 1)))   routine node
+  atan2(a, b)     fma(b, da, -(a * db)) / fma(b, b, a * a)
   abs(a)          copysign(1, a) * da
   copysign(a, b)  copysign(1, b) * (copysign(1, a) * da)
   min, max, minnum, maxnum (a, b) with result r
@@ -118,6 +122,28 @@ attribute: measured at fp32, fp64, fp128 and fp256). tan's reads r twice,
 written again each time it has no name, as log's three reads are. None has
 a point where it is not differentiable: at +-inf cos(a) is a NaN,
 as the primal is, and no representable argument is a pole of tan.
+
+atan, asin, acos and atan2 (M4's build, 2026-11-11; docs/studies/
+M4-invtrig.md, section 7, which Logan approved as recommended on
+2026-10-23, answer 10) spend ONE DIVISION a vector on da (and db), after
+primal-only denominators the compiler shares across vectors: fma(a, a, 1);
+sqrt(fma(-a, a, 1)) and, for acos, its exact negation; fma(b, b, a * a). No
+rule writes a routine node. The negations are exact and sit inside the
+denominator: acos's is `da / (-sqrt(...))`, not `-(da / sqrt(...))`, which
+rounds the quotient before negating and differs under rdn and rup. atan2(a,
+b) is the angle of the point (b, a), its tangent (b da - a db) / (b b +
+a a): both tangents nonzero, `fma(b, da, -(a * db)) / fma(b, b, a * a)`,
+the product rounding once and the fma once; db identically zero, `b * da /
+fma(b, b, a * a)`; da identically zero, `(-(a * db)) / fma(b, b, a * a)`,
+the negation exact and outside the product. Where the rule is not the
+derivative: at a = +-1 asin's and acos's root is of an exact zero (+0, and -0
+under rdn: IEEE 754 6.3's exact zero sum), so the tangent is an infinity
+with divideByZero, da / +-0 (asin: +inf for da > 0, -inf under rdn; acos:
+-inf for da > 0, +inf under rdn); past +-1 they are the invalid NaN, tangent
+too; atan2 at the origin has a zero numerator over a zero denominator and
+the tangent is the invalid NaN, in each of the three cases; atan at +-inf
+is da / inf, a zero. Each is asserted at the four formats and five
+attributes by python/tests/test_lang_invtrig.py's specials test.
 
 The walk is iterative, from the outputs, and makes the tangent of a node
 only when some output's tangent reads it, so a comparison's operands, a
@@ -351,6 +377,39 @@ class Derivation:
             else:
                 k = N("fma", R(node), R(node), self.one)
             return N("mul", k, t[0])
+        if op in ("atan", "asin", "acos"):
+            # one division a vector, after a primal-only denominator the
+            # compiler shares across vectors: atan: da / fma(a, a, 1);
+            # asin: da / sqrt(fma(-a, a, 1)); acos: da / -sqrt(fma(-a, a,
+            # 1)). The negations are exact and inside the denominator, so
+            # that acos's is not -(da / sqrt(...)), which rounds the
+            # quotient before negating (the module docstring)
+            if t[0] is None:
+                return None
+            if op == "atan":
+                den = N("fma", R(a[0]), R(a[0]), self.one)
+            else:
+                den = N("sqrt", N("fma", N("neg", R(a[0])), R(a[0]),
+                                  self.one))
+                if op == "acos":
+                    den = N("neg", den)
+            return N("div", t[0], den)
+        if op == "atan2":
+            # atan2(a, b) = the angle of the point (b, a): (b da - a db) /
+            # (b b + a a). The numerator is one fma when both tangents are
+            # not zero, b da + (-(a db)), and one product when one is; the
+            # denominator is primal-only, fma(b, b, a * a), shared across
+            # vectors; one division a vector
+            da, db = t
+            if da is None and db is None:
+                return None
+            den = N("fma", R(a[1]), R(a[1]), N("mul", R(a[0]), R(a[0])))
+            if db is None:
+                return N("div", N("mul", R(a[1]), da), den)
+            minus = N("neg", N("mul", R(a[0]), db))
+            if da is None:
+                return N("div", minus, den)
+            return N("div", N("fma", R(a[1]), da, minus), den)
         if op == "abs":
             if t[0] is None:
                 return None

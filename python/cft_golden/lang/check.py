@@ -52,20 +52,29 @@ from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
 # sin(0) = tan(0) = 0 and cos(0) = 1 - and of any other they are
 # `irrational-constant`; no constant is a pole of tan (pi/2 is irrational),
 # so none is `constant-division-by-zero`; and of a constant that changes
-# with h's size they are `h-nonlinear`, as every function of one is.
-MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan")
+# with h's size they are `h-nonlinear`, as every function of one is. atan,
+# asin, acos and atan2 joined them in M4's build, by Logan's answer 8 to the
+# M4 study's questions (docs/studies/M4-invtrig.md, section 6): of constants
+# they fold where the value is 0 - atan(0), asin(0), acos(1) and atan2(0, c)
+# for a constant c >= 0, c = 0 included - and are `irrational-constant`
+# elsewhere, asin and acos outside [-1, 1] as "not a real number"; none is
+# `constant-division-by-zero`. atan2 takes two arguments, y first, the one
+# of the math library's thirteen that does.
+MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan",
+        "atan", "asin", "acos", "atan2")
 BUILTINS = {"fma": 3, "abs": 1, "copysign": 2, "min": 2, "max": 2,
             "minnum": 2, "maxnum": 2, "select": 3, "sqrt": 1,
-            **{fn: 1 for fn in MATH}}
+            **{fn: 2 if fn == "atan2" else 1 for fn in MATH}}
 
 # Refused by name in v1 (`transcendental`, `irrational-constant`), and so
 # reserved: a value cannot be named after one. The six built-ins above
-# left this list in M1's build, item 3, and sin, cos and tan in M2's;
-# the later rounds take the rest (M3's pow family, M4's inverse functions).
+# left this list in M1's build, item 3, sin, cos and tan in M2's, and atan,
+# asin, acos and atan2 in M4's; the later rounds take the rest (M3's pow
+# family).
 TRANSCENDENTAL = frozenset({
     "exp10", "log10",
     "pow", "pown", "powr", "rootn", "hypot", "sinpi",
-    "cospi", "tanpi", "asin", "acos", "atan", "atan2", "asinpi", "acospi",
+    "cospi", "tanpi", "asinpi", "acospi",
     "atanpi", "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh",
     "atanh", "cbrt", "rsqrt",
 })
@@ -173,17 +182,66 @@ _REWRITE = ("and a constant is an exact rational: write its value as a "
             "decimal or a/b, or take it at run time, of a param")
 
 
-def _fold_math(op, c, line):
-    """One of the nine of the constant c, folded exactly where its value is
+def _fold_inverse(op, c, c2, line):
+    """atan, asin or acos of the constant c, or atan2 of c and c2 (y and x),
+    folded where the value is 0 - atan(0) = asin(0) = acos(1) = 0, and
+    atan2(0, c2) = 0 for c2 >= 0, atan2(0, 0) included, a constant 0 being
+    +0 - and refused by name elsewhere (Logan's answer 8 to the M4 study's
+    questions): `irrational-constant`, saying why; for asin and acos of a
+    constant outside [-1, 1], saying the value is not a real number. None
+    is `constant-division-by-zero`: none has a pole at a rational."""
+    shown = C.brief(c)
+    if op == "atan2":
+        if c == 0 and c2 >= 0:
+            return Fraction(0)
+        raise Refusal("irrational-constant",
+                      f"atan2({shown}, {C.brief(c2)}) is irrational: it is "
+                      f"the angle t of the point (x, y) = ({C.brief(c2)}, "
+                      f"{shown}), nonzero here, and were t algebraic, e^(it)"
+                      f" = (x + iy)/sqrt(x^2 + y^2) would be algebraic, and "
+                      f"e^(it) is transcendental for an algebraic nonzero t "
+                      f"(Hermite-Lindemann), {_REWRITE}", line)
+    if op == "atan":
+        if c == 0:
+            return Fraction(0)
+        word = "arctangent"
+        how = ("were it an algebraic nonzero t, e^(2it) = (1 + ic)/(1 - ic) "
+               "would be algebraic, c the argument")
+    else:
+        word = "arcsine" if op == "asin" else "arccosine"
+        if abs(c) > 1:
+            raise Refusal("irrational-constant", f"{op}({shown}) is not a "
+                          f"real number: the {word} of a constant outside "
+                          f"[-1, 1] has no value, as sqrt(-4) has none, and "
+                          f"a constant is an exact rational (at run time it "
+                          f"is a NaN, with invalid)", line)
+        if c == (1 if op == "acos" else 0):
+            return Fraction(0)
+        how = ("were it an algebraic nonzero t, e^(it) = cos t + i sin t "
+               "would be algebraic, one of the two being the argument c and "
+               "the other the square root of 1 - c^2")
+    zero = "1" if op == "acos" else "0"
+    raise Refusal("irrational-constant", f"{op}({shown}) is irrational: the "
+                  f"{word} of a rational other than {zero} is transcendental"
+                  f" (Hermite-Lindemann: {how}, and e^(it) is "
+                  f"transcendental), {_REWRITE}", line)
+
+
+def _fold_math(op, c, line, c2=None):
+    """One of the thirteen of the constant c (atan2 of c and c2, y and x),
+    folded exactly where its value is
     rational - exp(0) = 1, expm1(0) = 0, exp2(n) = 2^n for an integer n,
-    log(1) = 0, log1p(0) = 0, log2(2^k) = k, sin(0) = 0, cos(0) = 1 and
-    tan(0) = 0 - and refused by name elsewhere, the sentence saying why
+    log(1) = 0, log1p(0) = 0, log2(2^k) = k, sin(0) = 0, cos(0) = 1,
+    tan(0) = 0, and the zeros of atan, asin, acos and atan2 (_fold_inverse)
+    - and refused by name elsewhere, the sentence saying why
     (Logan's answer to M1's question 8, 2026-10-12, and his answer 8 to the
     M2 study's questions, 2026-10-14): `constant-division-by-zero` at a
     logarithm's pole, as 754 calls log(0) divideByZero, and
     `irrational-constant` for a value no rational carries, irrational or not
-    real. sin, cos and tan have no pole at a rational, so they have no
-    `constant-division-by-zero` at all."""
+    real. sin, cos, tan and the four inverse functions have no pole at a
+    rational, so they have no `constant-division-by-zero` at all."""
+    if op in ("atan", "asin", "acos", "atan2"):
+        return _fold_inverse(op, c, c2, line)
     shown = C.brief(c)
     if op in ("sin", "cos", "tan"):
         if c == 0:
@@ -1106,7 +1164,8 @@ class Checker:
             return v
         if name in TRANSCENDENTAL:
             # the names no round has built yet; the six left this list in
-            # M1's build, item 3, and sin, cos and tan in M2's
+            # M1's build, item 3, sin, cos and tan in M2's, and atan, asin,
+            # acos and atan2 in M4's
             vals = [self.eval(a, ctx) for a in e.args]
             if vals and all(isinstance(v, K) for v in vals):
                 raise Refusal(
@@ -1122,8 +1181,8 @@ class Checker:
                           f"function", e.line)
         raise Refusal("unknown-function", f"{name} is not a built-in: fma, "
                       f"abs, copysign, min, max, minnum, maxnum, select, "
-                      f"sqrt, exp, expm1, exp2, log, log1p, log2, sin, cos "
-                      f"and tan are", e.line)
+                      f"sqrt, exp, expm1, exp2, log, log1p, log2, sin, cos, "
+                      f"tan, atan, asin, acos and atan2 are", e.line)
 
     def name_value(self, name, index, ctx, line):
         if index is None and name in ctx.env:
@@ -1574,7 +1633,8 @@ class Checker:
                 # else (M1's question 8, and the M2 study's answer 8): a node
                 # would round twice, and spend a routine on a value fixed
                 # when compiled
-                r = K(_fold_math(op, v[0], line))
+                r = K(_fold_math(op, v[0], line,
+                                 v[1] if op == "atan2" else None))
             else:
                 raise AssertionError(op)
         if not C.in_range(r.coef):

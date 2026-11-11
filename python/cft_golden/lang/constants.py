@@ -109,7 +109,7 @@ def ln2_bits(fmt, rnd):
     (transcend.log of 2)", no new name). It IS transcend.log of 2 - the
     gate holds the two equal at every format and attribute - and is
     computed here by integers alone, so that checking a source never needs
-    mpmath (only lang.run of a graph holding one of the nine does):
+    mpmath (only lang.run of a graph holding one of the thirteen does):
     ln 2 = sum over k >= 1 of 1/(k 2^k), each of the first K terms
     truncated to a multiple of 2^-N, so that 2^N ln 2 lies in
     [S, S + K + 1] (each term loses less than 1, the tail past K = N less
