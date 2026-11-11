@@ -6,6 +6,7 @@
  *
  *     hip-corpus ARTIFACT CORPUS OUT        ARTIFACT: sw, or hip:N
  *     hip-corpus ARTIFACT CORPUS OUT --sample K:SEED   (below, before main)
+ *     hip-corpus ARTIFACT CORPUS OUT --resident        (below, before main)
  *
  * It reads the two corpus layouts and runs them; it computes nothing
  * itself. What it writes is GPU-A's output layout, so the sha256 of OUT
@@ -33,8 +34,10 @@
  * its deposits, counts, lane bytes when asked and scratch-out when
  * declared: seq_ref.c's layout (docs/studies/gpu-a/seq_ref.c:1 to :40).
  *
- * Exit 0 when every case ran and both passes agreed; 1 when a case was
- * refused or a pass disagreed; 2 when it could not start.
+ * Exit 0 when every case ran, both passes agreed and, for an elementwise
+ * corpus, every result and flag equals the corpus's expected value; 1
+ * when a case was refused, a pass disagreed or a result or a flag
+ * differed from the corpus's expected; 2 when it could not start.
  */
 
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -94,6 +97,77 @@ static void *xmalloc(size_t n)
         exit(2);
     }
     return p;
+}
+
+/* --resident: every operand and output in a buffer from cft_alloc, filled
+ * and published before its call and read back after it, so a device that
+ * keeps buffers runs its resident path - which must give the same bytes,
+ * and so the same sha256, as the staged one. The buffers' counters
+ * (cft_buffer_get_info) are summed and printed, so a run that staged
+ * everything says so. */
+static int resident;
+static cft_buffer *rb_list[16];
+static int rb_n;
+static unsigned long long rb_made, rb_res, rb_staged;
+
+static uint8_t *ralloc(cft_device *dev, size_t bytes, const void *src, int fill)
+{
+    cft_buffer *b = NULL;
+    uint8_t *p;
+    cft_status st = cft_alloc(dev, bytes ? bytes : 1, &b);
+    if (st != CFT_OK || rb_n == (int)(sizeof rb_list / sizeof rb_list[0])) {
+        fprintf(stderr, "hip-corpus: cft_alloc of %lu bytes: %s - %s\n",
+                (unsigned long)bytes, cft_strerror(st), cft_last_error());
+        exit(2);
+    }
+    p = (uint8_t *)cft_buffer_data(b);
+    if (src)
+        memcpy(p, src, bytes);
+    else
+        memset(p, fill, bytes ? bytes : 1);
+    rb_list[rb_n++] = b;
+    rb_made++;
+    return p;
+}
+
+static cft_buffer *rfind(const void *p)
+{
+    int i;
+    for (i = 0; i < rb_n; i++)
+        if (cft_buffer_data(rb_list[i]) == p)
+            return rb_list[i];
+    return NULL;
+}
+
+/* publish (to) or read back (from) the buffer whose data is p */
+static void rsync(const void *p, int to)
+{
+    cft_buffer *b = rfind(p);
+    cft_status st;
+    if (!b)
+        return;
+    st = to ? cft_buffer_to_device(b) : cft_buffer_from_device(b);
+    if (st != CFT_OK) {
+        fprintf(stderr, "hip-corpus: cft_buffer_%s_device: %s - %s\n", to ? "to" : "from",
+                cft_strerror(st), cft_last_error());
+        exit(2);
+    }
+}
+
+static void rfree_all(void)
+{
+    int i;
+    for (i = 0; i < rb_n; i++) {
+        cft_buffer_info bi;
+        memset(&bi, 0, sizeof bi);
+        bi.struct_size = sizeof bi;
+        if (cft_buffer_get_info(rb_list[i], &bi) == CFT_OK) {
+            rb_res += bi.resident_binds;
+            rb_staged += bi.staged_binds;
+        }
+        cft_buffer_free(rb_list[i]);
+    }
+    rb_n = 0;
 }
 
 /* ---- the elementwise corpus ------------------------------------------- */
@@ -157,33 +231,64 @@ static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         ref_f = want_f;
     }
 
-    /* pass 1: a case a call */
+    /* pass 1: a case a call - resident, at interior windows of one buffer
+     * an operand, the outputs read back once after the last case */
     t0 = now_s();
-    for (i = 0; i < n; i++) {
-        uint32_t f = 0;
-        cft_status st;
-        if (sel && !sel[i])
-            continue;
-        st = cft_run(dev, CFT_FMA, (cft_format)fmt, (cft_round)rnd[i], a + i * esz,
-                     b + i * esz, c + i * esz, d + i * esz, 1, &f, NULL);
-        if (st != CFT_OK) {
-            printf("pass 1: case %lu: %s - %s\n", (unsigned long)i, cft_strerror(st),
-                   cft_last_error());
-            free(d);
-            free(sel);
-            return 1;
+    {
+        const uint8_t *pa = a, *pb = b, *pc = c;
+        uint8_t *pd = d;
+        if (resident) {
+            pa = ralloc(dev, n * esz, a, 0);
+            pb = ralloc(dev, n * esz, b, 0);
+            pc = ralloc(dev, n * esz, c, 0);
+            pd = ralloc(dev, n * esz, NULL, 0);
+            rsync(pa, 1);
+            rsync(pb, 1);
+            rsync(pc, 1);
+            rsync(pd, 1);
         }
-        fl[i] = (uint8_t)f;
-        bad_d += memcmp(d + i * esz, want_d + i * esz, esz) != 0;
-        bad_f += fl[i] != want_f[i];
+        for (i = 0; i < n; i++) {
+            uint32_t f = 0;
+            cft_status st;
+            if (sel && !sel[i])
+                continue;
+            st = cft_run(dev, CFT_FMA, (cft_format)fmt, (cft_round)rnd[i], pa + i * esz,
+                         pb + i * esz, pc + i * esz, pd + i * esz, 1, &f, NULL);
+            if (st != CFT_OK) {
+                printf("pass 1: case %lu: %s - %s\n", (unsigned long)i, cft_strerror(st),
+                       cft_last_error());
+                free(d);
+                free(sel);
+                return 1;
+            }
+            fl[i] = (uint8_t)f;
+        }
+        if (resident) {
+            rsync(pd, 0);
+            memcpy(d, pd, n * esz);
+            rfree_all();
+        }
+        for (i = 0; i < n; i++) {
+            if (sel && !sel[i])
+                continue;
+            bad_d += memcmp(d + i * esz, want_d + i * esz, esz) != 0;
+            bad_f += fl[i] != want_f[i];
+        }
     }
     t1 = now_s();
 
     /* pass 2: one call an attribute */
-    ga = (uint8_t *)xmalloc(n * esz);
-    gb = (uint8_t *)xmalloc(n * esz);
-    gc = (uint8_t *)xmalloc(n * esz);
-    gd = (uint8_t *)xmalloc(n * esz);
+    if (resident) {
+        ga = ralloc(dev, n * esz, NULL, 0);
+        gb = ralloc(dev, n * esz, NULL, 0);
+        gc = ralloc(dev, n * esz, NULL, 0);
+        gd = ralloc(dev, n * esz, NULL, 0);
+    } else {
+        ga = (uint8_t *)xmalloc(n * esz);
+        gb = (uint8_t *)xmalloc(n * esz);
+        gc = (uint8_t *)xmalloc(n * esz);
+        gd = (uint8_t *)xmalloc(n * esz);
+    }
     for (k = 0; k < 5; k++) {
         size_t m = 0;
         uint32_t want_or = 0, got = 0;
@@ -199,8 +304,15 @@ static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         }
         if (!m)
             continue;
+        if (resident) {             /* the gathered operands, published */
+            rsync(ga, 1);
+            rsync(gb, 1);
+            rsync(gc, 1);
+        }
         st = cft_run(dev, CFT_FMA, (cft_format)fmt, (cft_round)k, ga, gb, gc, gd, m,
                      &got, NULL);
+        if (resident && st == CFT_OK)
+            rsync(gd, 0);
         if (st != CFT_OK) {
             printf("pass 2: attribute %s, %lu cases: %s - %s\n",
                    RND[k], (unsigned long)m, cft_strerror(st),
@@ -245,12 +357,18 @@ static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
                "and %lu flags differ\n", cft_format_name((cft_format)fmt), (unsigned long)n,
                t1 - t0, t2 - t1, p2_bad ? "DISAGREED with pass 1" : "agreed with pass 1",
                (unsigned long)bad_d, (unsigned long)bad_f);
-        rc = rc || p2_bad;
+        /* the expected values fail a full run too, as they do a sampled one
+         * (until 2026-11-11 a full run counted them and exited 0) */
+        rc = rc || p2_bad || bad_d || bad_f;
     }
-    free(ga);
-    free(gb);
-    free(gc);
-    free(gd);
+    if (resident) {
+        rfree_all();
+    } else {
+        free(ga);
+        free(gb);
+        free(gc);
+        free(gd);
+    }
     free(d);
     free(sel);
     return rc ? 1 : 0;
@@ -374,18 +492,24 @@ static int run_progs(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         memset(&I, 0, sizeof I);
         I.struct_size = sizeof I;
         cft_program_get_info(prog, &I);
-        dep = (uint8_t *)xmalloc((size_t)k.n * I.max_deposits * k.esz);
-        counts = (uint32_t *)xmalloc((size_t)k.n * 4);
-        memset(dep, (int)(k.fill & 0xFF), (size_t)k.n * I.max_deposits * k.esz);
-        for (j = 0; j < k.n; j++)
-            counts[j] = k.fill_count;
-        if (k.present & 8) {
-            lf = (uint8_t *)xmalloc(k.n);
-            memset(lf, (int)((k.fill >> 8) & 0xFF), k.n);
-        }
-        if (k.nso) {
-            so = (uint8_t *)xmalloc((size_t)k.n * k.nso * k.esz);
-            memset(so, (int)(k.fill & 0xFF), (size_t)k.n * k.nso * k.esz);
+        {
+            const size_t db = (size_t)k.n * I.max_deposits * k.esz;
+            const size_t sob = (size_t)k.n * k.nso * k.esz;
+            dep = resident ? ralloc(dev, db, NULL, (int)(k.fill & 0xFF))
+                           : (uint8_t *)xmalloc(db);
+            counts = resident ? (uint32_t *)(void *)ralloc(dev, (size_t)k.n * 4, NULL, 0)
+                              : (uint32_t *)xmalloc((size_t)k.n * 4);
+            memset(dep, (int)(k.fill & 0xFF), db);
+            for (j = 0; j < k.n; j++)
+                counts[j] = k.fill_count;
+            if (k.present & 8) {
+                lf = resident ? ralloc(dev, k.n, NULL, 0) : (uint8_t *)xmalloc(k.n);
+                memset(lf, (int)((k.fill >> 8) & 0xFF), k.n);
+            }
+            if (k.nso) {
+                so = resident ? ralloc(dev, sob, NULL, 0) : (uint8_t *)xmalloc(sob);
+                memset(so, (int)(k.fill & 0xFF), sob);
+            }
         }
         memset(&A, 0, sizeof A);
         A.struct_size = sizeof A;
@@ -397,6 +521,17 @@ static int run_progs(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         A.bank_bytes = k.bank_bytes;
         A.scratch_in = k.sin;
         A.scratch_in_bytes = k.sin ? (size_t)k.n * k.nsi * k.esz : 0;
+        if (resident) {             /* the inputs in buffers too, and all published */
+            A.a = ralloc(dev, (size_t)k.n * k.esz, k.a, 0);
+            if (k.b)
+                A.b = ralloc(dev, (size_t)k.n * k.esz, k.b, 0);
+            if (k.c)
+                A.c = ralloc(dev, (size_t)k.n * k.esz, k.c, 0);
+            if (k.sin)
+                A.scratch_in = ralloc(dev, (size_t)k.n * k.nsi * k.esz, k.sin, 0);
+            for (j = 0; j < (size_t)rb_n; j++)
+                rsync(cft_buffer_data(rb_list[j]), 1);
+        }
         A.scratch_out = so;
         A.scratch_out_bytes = so ? (size_t)k.n * k.nso * k.esz : 0;
         A.deposits = I.max_deposits ? dep : NULL;
@@ -410,6 +545,9 @@ static int run_progs(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         st = cft_program_run_ex(prog, &A);
         if (st != CFT_OK)
             printf("run failed: %s: %s - %s\n", k.name, cft_strerror(st), cft_last_error());
+        if (resident && st == CFT_OK)
+            for (j = 0; j < (size_t)rb_n; j++)
+                rsync(cft_buffer_data(rb_list[j]), 0);
         w32(&o, I.n_insns);
         w32(&o, I.n_consts);
         w32(&o, I.max_deposits);
@@ -428,10 +566,14 @@ static int run_progs(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         if (so)
             wbytes(&o, so, (size_t)k.n * k.nso * k.esz);
         nlanes += k.n;
-        free(dep);
-        free(counts);
-        free(lf);
-        free(so);
+        if (resident) {
+            rfree_all();
+        } else {
+            free(dep);
+            free(counts);
+            free(lf);
+            free(so);
+        }
         cft_program_free(prog);
     }
     fwrite(o.p ? o.p : (uint8_t *)"", 1, o.len, out);
@@ -451,18 +593,27 @@ int main(int argc, char **argv)
     cft_status st;
     int rc, i;
 
-    if (argc == 6 && !strcmp(argv[4], "--sample")) {
-        char *e = NULL;
-        sample_k = strtoull(argv[5], &e, 10);
-        if (e && *e == ':')
-            sample_seed = strtoull(e + 1, &e, 10);
-        if (!sample_k || !sample_seed || !e || *e) {
-            fprintf(stderr, "hip-corpus: --sample K:SEED, two decimal numbers above "
-                    "zero\n");
-            return 2;
+    for (i = 4; i < argc; i++) {
+        if (!strcmp(argv[i], "--sample") && i + 1 < argc && !sample_k) {
+            char *e = NULL;
+            sample_k = strtoull(argv[++i], &e, 10);
+            if (e && *e == ':')
+                sample_seed = strtoull(e + 1, &e, 10);
+            if (!sample_k || !sample_seed || !e || *e) {
+                fprintf(stderr, "hip-corpus: --sample K:SEED, two decimal numbers above "
+                        "zero\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--resident") && !resident) {
+            resident = 1;
+        } else {
+            argc = 0;               /* the usage line below */
+            break;
         }
-    } else if (argc != 4) {
-        fprintf(stderr, "usage: %s sw|hip:N CORPUS OUT [--sample K:SEED]\n", argv[0]);
+    }
+    if (argc < 4) {
+        fprintf(stderr, "usage: %s sw|hip:N CORPUS OUT [--sample K:SEED] [--resident]\n",
+                argv[0]);
         return 2;
     }
     printf("libcft build %s\n", cft_build_id());
@@ -489,8 +640,11 @@ int main(int argc, char **argv)
         rc = 2;
     }
     fclose(out);
+    if (resident)
+        printf("resident: %llu buffers from cft_alloc, %llu resident and %llu staged "
+               "bindings (cft_buffer_get_info)\n", rb_made, rb_res, rb_staged);
     if (rc != 2 && !sample_k) {
-        printf("%s on %s: sha256 ", argv[2], argv[1]);
+        printf("%s on %s%s: sha256 ", argv[2], argv[1], resident ? " --resident" : "");
         for (i = 0; i < 32; i++)
             printf("%02x", digest[i]);
         printf("\n");

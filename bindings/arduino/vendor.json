@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "2d3ea7d981b841f3f325ac64f11c07a719991ee647f64ab30ec42ddf3c40a63e"
+      "sha256": "8cd0fb4d3e7a0d4743f67e7f23ddb876ca4727b8ba3478a2f2c29beeeed60b0f"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -86,7 +86,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "c3a6ca32ce6951c0b02c85546f56f8bc08638fe5bd2933e4a7276d2851b56e81"
+      "sha256": "93477c20033338a7548c7138ec85bc1941b5887ac01fcd4f49383bc3b5d924a8"
     },
     {
       "source": "host/src/divfull_images.h",

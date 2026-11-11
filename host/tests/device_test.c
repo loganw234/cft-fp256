@@ -8867,8 +8867,10 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     size_t i;
     int k, fn, dir, which, runs = 0, agreed = 0, progs = 1, progs_so = 1,
         progs_bank = 1, progs_si = 1;
-    /* a card that keeps B resident refuses a publish over unread results */
-    const int card_refuses = xrt && hc->buffers_resident;
+    /* a device that keeps B resident - a card, or a GPU since its round 1's
+     * Part 2 - refuses a publish over unread results (cft.h's rule for a
+     * device backend; the software and remote backends keep none) */
+    const int card_refuses = hc->buffers_resident;
     /* an index table on a device: the gather V9's sequences run */
     const int indexed = (hc->seq_features & CFT_SEQ_FEAT_INDEXED) != 0;
     static const int declined[] = {SV_RWR, SV_DEP_OUT, SV_SO_OUT,

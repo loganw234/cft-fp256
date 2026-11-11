@@ -5,8 +5,8 @@
  *
  *     hip-test hip:N [-l LEGS] [-f FORMAT] [-s small|large|all]
  *
- * LEGS is a comma list of open, reduce, seg, compose, alias, two and
- * plants (default: all of them); -f keeps one format; -s chooses the
+ * LEGS is a comma list of open, reduce, seg, compose, alias, two, buffers
+ * and plants (default: all of them); -f keeps one format; -s chooses the
  * reduction sizes (default all). The legs:
  *
  *   open      cft_open's grammar for "hip:N" (each malformed spelling
@@ -39,9 +39,21 @@
  *   two       two handles on one device, used in turn and closed in
  *             turn; two DEVICES where the runtime shows two (NOT RUN,
  *             named, where it shows one).
- *   plants    (a HIP_PLANTS=1 build) CFT_HIP_PLANT, CFT_HIP_CHUNK and
- *             CFT_HIP_INFO malformed and refused by name; fail-launch's
- *             poisoned handle. In a default build: NOT RUN, named.
+ *   buffers   resident buffers (cft_alloc), each scenario held to the
+ *             software handle running the same calls on plain memory: a
+ *             publish takes effect, and a repeat binds resident; a publish
+ *             over unread results refused, nothing changed; d == a in
+ *             place; an output shifted over its own input (staged, the
+ *             snapshot rule); a masked program into a resident window,
+ *             before and after an unmasked one; a host write (a
+ *             reduction's result) between runs, with a moved, unaligned
+ *             window after it; reductions over resident windows. With
+ *             plants: a failed upload (CFT_HIP_UPLOAD=fail-fill) and its
+ *             retry, and a failed run's outputs LOST (fail-launch).
+ *   plants    (a HIP_PLANTS=1 build) CFT_HIP_PLANT, CFT_HIP_CHUNK,
+ *             CFT_HIP_PAGE and CFT_HIP_INFO malformed and refused by name;
+ *             fail-launch's poisoned handle. In a default build: NOT RUN,
+ *             named.
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
@@ -265,8 +277,8 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
           (unsigned)c.max_deposits, (unsigned)c.max_insns, (unsigned)c.max_consts,
           (unsigned)c.max_scratch, (unsigned)s.max_deposits, (unsigned)s.max_insns,
           (unsigned)s.max_consts, (unsigned)s.max_scratch);
-    CHECK(c.buffers_resident == 0, "buffers_resident %d before the GPU keeps "
-          "device copies", c.buffers_resident);
+    CHECK(c.buffers_resident == 1, "buffers_resident %d: the GPU keeps device "
+          "copies of a cft_alloc'd buffer", c.buffers_resident);
     /* the seven opcode groups, by one opcode each, at every format */
     for (f = 0; f < 4; f++) {
         static const cft_op g[7] = {CFT_FMA, CFT_ABS, CFT_MIN, CFT_CMPLT, CFT_IADD,
@@ -303,6 +315,19 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
     if (h)
         cft_close(h);
     printf("    cft_open_ex(%s, scratch_depth 2048): %s - %s\n", artifact,
+           cft_strerror(st), cft_last_error());
+    /* 256 is the depth a GPU has, and is refused too: the depth is a
+     * software handle's to choose, and the sentence says so */
+    h = NULL;
+    oa.scratch_depth = 256;
+    st = cft_open_ex(&oa, &h);
+    CHECK(st == CFT_ERR_UNSUPPORTED && h == NULL && strstr(cft_last_error(), "names a GPU") &&
+          strstr(cft_last_error(), "256 included"),
+          "cft_open_ex at 256 scratch slots: %s, \"%s\"", cft_strerror(st),
+          cft_last_error());
+    if (h)
+        cft_close(h);
+    printf("    cft_open_ex(%s, scratch_depth 256): %s - %s\n", artifact,
            cft_strerror(st), cft_last_error());
     printf("  open: %d failed\n", failures - before);
 }
@@ -589,6 +614,428 @@ static void leg_two(const char *artifact, cft_device *sw)
     printf("  two: %d failed\n", failures - before);
 }
 
+/* ---- resident buffers ------------------------------------------------------ */
+
+struct rb {
+    cft_buffer *b;
+    unsigned char *p;
+};
+
+static int rb_alloc(cft_device *dev, struct rb *r, size_t bytes)
+{
+    r->b = NULL;
+    r->p = NULL;
+    if (cft_alloc(dev, bytes, &r->b) != CFT_OK)
+        return 0;
+    r->p = (unsigned char *)cft_buffer_data(r->b);
+    return r->p != NULL;
+}
+
+static void rb_free(struct rb *r)
+{
+    cft_buffer_free(r->b);
+    r->b = NULL;
+    r->p = NULL;
+}
+
+static cft_buffer_info rb_info(const struct rb *r)
+{
+    cft_buffer_info bi;
+    memset(&bi, 0, sizeof bi);
+    bi.struct_size = sizeof bi;
+    (void)cft_buffer_get_info(r->b, &bi);
+    return bi;
+}
+
+/* the mirror filled from `src`, then published */
+static int rb_put(struct rb *r, const unsigned char *src, size_t bytes)
+{
+    memcpy(r->p, src, bytes);
+    return cft_buffer_to_device(r->b) == CFT_OK;
+}
+
+/* "deposit fma(a, b, c); halt" at fp64: leg_plants' three instructions */
+static void fma_image(unsigned char img[56])
+{
+    static const uint32_t hdr[8] = {0x50544643u, 1, 3, 0, 1, 1, 0, 0};
+    const uint64_t w[3] = {0u | (3u << 8) | (0u << 12) | (1u << 16) | (2u << 20),
+                           3u | (3u << 12) | (1ull << 31), 1ull << 31};
+    int j, k;
+    for (j = 0; j < 8; j++)
+        for (k = 0; k < 4; k++)
+            img[4 * j + k] = (unsigned char)(hdr[j] >> (8 * k));
+    for (j = 0; j < 3; j++)
+        for (k = 0; k < 8; k++)
+            img[32 + 8 * j + k] = (unsigned char)(w[j] >> (8 * k));
+}
+
+static void leg_buffers(const char *artifact, cft_device *hw, cft_device *sw)
+{
+    enum { N = 200 };                   /* fp64: 1,600 bytes, pages at 256 */
+    const size_t E = 8, NB = N * 8;
+    static unsigned char x[N * 32], y[N * 32], z[N * 32], want[3 * N * 32],
+        got[3 * N * 32], tmp[N * 32];
+    struct rb A, B, D;
+    cft_buffer_info i1, i2;
+    uint32_t fl = 0, fs = 0;
+    cft_status st;
+    int f, plant_build;
+    const int before = failures;
+
+    printf("buffers\n");
+    A.b = B.b = D.b = NULL;
+    fill(x, N, CFT_FP64, K_RANDOM);
+    fill(y, N, CFT_FP64, K_RANDOM);
+    fill(z, N, CFT_FP64, K_RANDOM);
+
+    /* 1. a publish takes effect, and a repeat binds resident; at fp64 and
+     *    fp256 (a page is eight fp256 elements) */
+    for (f = 1; f <= 3; f += 2) {
+        const size_t esz = cft_format_size((cft_format)f), bytes = N * esz;
+        unsigned char *x2 = tmp;
+        fill(x, N, f, K_RANDOM);
+        fill(x2, N, f, K_RANDOM);
+        CHECK(rb_alloc(hw, &A, bytes) && rb_alloc(hw, &D, bytes), "cft_alloc: %s",
+              cft_last_error());
+        if (!A.b || !D.b)
+            goto out;
+        CHECK(rb_put(&A, x, bytes), "publishing a");
+        CHECK(cft_run(hw, CFT_ABS, (cft_format)f, CFT_RNE, A.p, NULL, NULL, D.p, N, &fl,
+                      NULL) == CFT_OK && cft_buffer_from_device(D.b) == CFT_OK,
+              "the first run: %s", cft_last_error());
+        CHECK(cft_run(sw, CFT_ABS, (cft_format)f, CFT_RNE, x, NULL, NULL, want, N, &fs,
+                      NULL) == CFT_OK, "software");
+        CHECK(same(D.p, want, bytes) && fl == fs, "%s: a resident run differs from the "
+              "software handle's", cft_format_name((cft_format)f));
+        i1 = rb_info(&A);
+        CHECK(cft_run(hw, CFT_ABS, (cft_format)f, CFT_RNE, A.p, NULL, NULL, D.p, N, &fl,
+                      NULL) == CFT_OK && cft_buffer_from_device(D.b) == CFT_OK,
+              "the repeat: %s", cft_last_error());
+        i2 = rb_info(&A);
+        CHECK(i1.resident == 1 && i2.resident_binds == i1.resident_binds + 1 &&
+              i2.staged_binds == i1.staged_binds,
+              "%s: the repeat with nothing published was not resident (resident %d, "
+              "binds %llu/%llu then %llu/%llu, \"%s\")", cft_format_name((cft_format)f),
+              i1.resident, (unsigned long long)i1.resident_binds,
+              (unsigned long long)i1.staged_binds, (unsigned long long)i2.resident_binds,
+              (unsigned long long)i2.staged_binds, i2.staged_why);
+        CHECK(rb_put(&A, x2, bytes), "republishing a");
+        CHECK(cft_run(hw, CFT_ABS, (cft_format)f, CFT_RNE, A.p, NULL, NULL, D.p, N, &fl,
+                      NULL) == CFT_OK && cft_buffer_from_device(D.b) == CFT_OK,
+              "the run after the publish: %s", cft_last_error());
+        CHECK(cft_run(sw, CFT_ABS, (cft_format)f, CFT_RNE, x2, NULL, NULL, want, N, &fs,
+                      NULL) == CFT_OK, "software");
+        CHECK(same(D.p, want, bytes), "%s: cft_buffer_to_device did not take effect - "
+              "the run used the bytes published before", cft_format_name((cft_format)f));
+        i1 = rb_info(&A);
+        CHECK(i1.staged_binds == i2.staged_binds + 1, "%s: the run after a publish "
+              "uploaded nothing (\"%s\")", cft_format_name((cft_format)f), i1.staged_why);
+        printf("  %s: a publish took effect; a repeat bound resident (binds %llu resident, "
+               "%llu staged: \"%s\")\n", cft_format_name((cft_format)f),
+               (unsigned long long)i1.resident_binds, (unsigned long long)i1.staged_binds,
+               i1.staged_why);
+        rb_free(&A);
+        rb_free(&D);
+    }
+    fill(x, N, CFT_FP64, K_RANDOM);
+
+    /* 2. a publish over unread results: refused, nothing changed */
+    CHECK(rb_alloc(hw, &A, NB) && rb_alloc(hw, &D, NB), "cft_alloc: %s", cft_last_error());
+    if (!A.b || !D.b)
+        goto out;
+    CHECK(rb_put(&A, x, NB), "publishing a");
+    CHECK(cft_run(hw, CFT_ABS, CFT_FP64, CFT_RNE, A.p, NULL, NULL, D.p, N, &fl, NULL) ==
+          CFT_OK, "a run into d: %s", cft_last_error());
+    i1 = rb_info(&D);
+    st = cft_buffer_to_device(D.b);
+    {
+        char said[600];
+        snprintf(said, sizeof said, "%s", cft_last_error());
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT && strstr(said, "never read back") &&
+              i1.device_authority == 1 && rb_info(&D).device_authority == 1,
+              "a publish over unread results: %s, \"%s\", authority %d", cft_strerror(st),
+              said, i1.device_authority);
+        printf("  a publish over unread results: %s - %s\n", cft_strerror(st), said);
+    }
+    CHECK(cft_buffer_from_device(D.b) == CFT_OK && cft_buffer_to_device(D.b) == CFT_OK &&
+          rb_info(&D).device_authority == 0, "read back, then published: %s",
+          cft_last_error());
+    CHECK(cft_run(sw, CFT_ABS, CFT_FP64, CFT_RNE, x, NULL, NULL, want, N, &fs, NULL) ==
+          CFT_OK && same(D.p, want, NB), "the results kept through the refusal");
+
+    /* 3. d == a, in place, stays resident */
+    CHECK(cft_run(hw, CFT_FMA, CFT_FP64, CFT_RNE, A.p, y, z, A.p, N, &fl, NULL) == CFT_OK &&
+          cft_buffer_from_device(A.b) == CFT_OK, "in place: %s", cft_last_error());
+    CHECK(cft_run(sw, CFT_FMA, CFT_FP64, CFT_RNE, x, y, z, want, N, &fs, NULL) == CFT_OK,
+          "software");
+    i1 = rb_info(&A);
+    CHECK(same(A.p, want, NB) && fl == fs && !strstr(i1.staged_why, "overlaps"),
+          "d == a in place: %s, \"%s\"", same(A.p, want, NB) ? "bits right" : "BITS WRONG",
+          i1.staged_why);
+    printf("  d == a in place: %s; a's last binding: %llu resident, %llu staged\n",
+           same(A.p, want, NB) ? "the software handle's bits" : "WRONG",
+           (unsigned long long)i1.resident_binds, (unsigned long long)i1.staged_binds);
+    rb_free(&A);
+    rb_free(&D);
+
+    /* 4. an output shifted one element over its own input: the input is
+     *    staged and every element reads the published value (the snapshot
+     *    rule, as a staged run reads it); the software loop's sequential
+     *    order is its own (leg alias says the same of a scalar) */
+    CHECK(rb_alloc(hw, &A, NB + E), "cft_alloc: %s", cft_last_error());
+    if (!A.b)
+        goto out;
+    memcpy(want, x, E);
+    CHECK(cft_run(sw, CFT_ABS, CFT_FP64, CFT_RNE, x, NULL, NULL, want + E, N, &fs, NULL) ==
+          CFT_OK, "software");
+    for (f = 0; f < 2; f++) {
+        memcpy(A.p, x, NB);
+        CHECK(cft_buffer_to_device(A.b) == CFT_OK, "publishing: %s", cft_last_error());
+        CHECK(cft_run(hw, CFT_ABS, CFT_FP64, CFT_RNE, A.p, NULL, NULL, A.p + E, N, &fl,
+                      NULL) == CFT_OK && cft_buffer_from_device(A.b) == CFT_OK,
+              "the shifted run: %s", cft_last_error());
+        i1 = rb_info(&A);
+        CHECK(same(A.p, want, NB + E) && strstr(i1.staged_why, "overlaps an output"),
+              "an output shifted over its input (try %d): %s, \"%s\"", f + 1,
+              same(A.p, want, NB + E) ? "the snapshot rule held" : "NOT the snapshot rule",
+              i1.staged_why);
+    }
+    printf("  an output shifted over its input: the snapshot rule, twice; \"%s\"\n",
+           i1.staged_why);
+    rb_free(&A);
+
+    /* 5. a masked program into a resident deposit window, before and after
+     *    an unmasked one (verifier-V4's shape) */
+    {
+        unsigned char img[56], mask[(N + 7) / 8];
+        cft_program *ph = NULL, *ps = NULL;
+        cft_run_args R;
+        int k, ok = 1;
+        size_t i;
+        fma_image(img);
+        for (i = 0; i < sizeof mask; i++)
+            mask[i] = (unsigned char)(0x5Bu ^ (unsigned)(i * 37u));
+        CHECK(rb_alloc(hw, &D, NB) && cft_program_load(hw, img, sizeof img, &ph) == CFT_OK &&
+              cft_program_load(sw, img, sizeof img, &ps) == CFT_OK, "the program: %s",
+              cft_last_error());
+        for (k = 0; k < 3 && ph && ps && D.b; k++) {
+            /* k 0: masked over a sentinel; 1: unmasked; 2: masked over a new one */
+            const int masked = k != 1;
+            memset(D.p, k ? 0x3C : 0x5A, NB);
+            memset(want, k ? 0x3C : 0x5A, NB);
+            ok &= cft_buffer_to_device(D.b) == CFT_OK;
+            memset(&R, 0, sizeof R);
+            R.struct_size = sizeof R;
+            R.a = x;
+            R.b = y;
+            R.c = z;
+            R.n = N;
+            R.lane_mask = masked ? mask : NULL;
+            R.lane_mask_bytes = masked ? sizeof mask : 0;
+            R.deposits = want;
+            ok &= cft_program_run_ex(ps, &R) == CFT_OK;
+            R.deposits = D.p;
+            ok &= cft_program_run_ex(ph, &R) == CFT_OK;
+            ok &= cft_buffer_from_device(D.b) == CFT_OK;
+            CHECK(ok && same(D.p, want, NB), "a %s program into a resident window (step "
+                  "%d): %s", masked ? "masked" : "unmasked", k + 1,
+                  ok ? "lanes differ from the software handle's" : cft_last_error());
+        }
+        printf("  a masked program into a resident window, before and after an unmasked "
+               "one: %s\n", ok ? "the software handle's bytes, masked lanes kept" : "FAILED");
+        cft_program_free(ph);
+        cft_program_free(ps);
+        rb_free(&D);
+    }
+
+    /* 6. a host write between runs (a reduction's result, which device.c
+     *    writes on the host), then a moved, unaligned window, then the
+     *    read-back: every byte the software sequence's */
+    {
+        unsigned char *w = want;
+        const size_t lenD = 3 * NB;
+        CHECK(rb_alloc(hw, &D, lenD), "cft_alloc: %s", cft_last_error());
+        if (!D.b)
+            goto out;
+        memset(D.p, 0x77, lenD);
+        memset(w, 0x77, lenD);
+        CHECK(cft_buffer_to_device(D.b) == CFT_OK, "publishing");
+        /* the run into [0, N), its results left on the device */
+        CHECK(cft_run(hw, CFT_ABS, CFT_FP64, CFT_RNE, x, NULL, NULL, D.p, N, &fl, NULL) ==
+              CFT_OK, "the run: %s", cft_last_error());
+        CHECK(cft_run(sw, CFT_ABS, CFT_FP64, CFT_RNE, x, NULL, NULL, w, N, &fs, NULL) ==
+              CFT_OK, "software");
+        /* the host write: a sum into element 5, inside the run's window */
+        CHECK(cft_reduce(hw, CFT_SUM, CFT_FP64, CFT_RNE, y, NULL, D.p + 5 * E, N, &fl,
+                         NULL) == CFT_OK, "the reduction into the buffer: %s",
+              cft_last_error());
+        CHECK(cft_reduce(sw, CFT_SUM, CFT_FP64, CFT_RNE, y, NULL, w + 5 * E, N, &fs,
+                         NULL) == CFT_OK, "software");
+        /* a moved window: 150 elements from element 103 (unaligned), over
+         * the run's tail and past it */
+        CHECK(cft_run(hw, CFT_NEG, CFT_FP64, CFT_RNE, z, NULL, NULL, D.p + 103 * E, 150, &fl,
+                      NULL) == CFT_OK, "the moved window: %s", cft_last_error());
+        CHECK(cft_run(sw, CFT_NEG, CFT_FP64, CFT_RNE, z, NULL, NULL, w + 103 * E, 150, &fs,
+                      NULL) == CFT_OK, "software");
+        /* and the host write again, beside the moved window's start */
+        CHECK(cft_reduce(hw, CFT_SUM, CFT_FP64, CFT_RNE, x, NULL, D.p + 102 * E, 7, &fl,
+                         NULL) == CFT_OK, "the second reduction: %s", cft_last_error());
+        CHECK(cft_reduce(sw, CFT_SUM, CFT_FP64, CFT_RNE, x, NULL, w + 102 * E, 7, &fs,
+                         NULL) == CFT_OK, "software");
+        CHECK(cft_buffer_from_device(D.b) == CFT_OK, "the read-back: %s", cft_last_error());
+        memcpy(got, D.p, lenD);
+        {
+            size_t i = 0;
+            while (i < lenD && got[i] == w[i])
+                i++;
+            CHECK(i == lenD, "host writes between runs and a moved window: byte %lu "
+                  "(element %lu) differs from the software sequence's",
+                  (unsigned long)i, (unsigned long)(i / E));
+            printf("  a host write between runs, a moved unaligned window, another host "
+                   "write, the read-back: %s\n",
+                   i == lenD ? "every byte the software sequence's" : "DIFFERS");
+        }
+        rb_free(&D);
+    }
+
+    /* 7. reductions over resident windows, whole and interior */
+    {
+        size_t q;
+        static const size_t lo[3] = {0, 3, 17};
+        CHECK(rb_alloc(hw, &A, NB) && rb_alloc(hw, &B, NB), "cft_alloc: %s", cft_last_error());
+        if (!A.b || !B.b)
+            goto out;
+        CHECK(rb_put(&A, x, NB) && rb_put(&B, y, NB), "publishing");
+        for (q = 0; q < 3; q++) {
+            unsigned char rh[N * 8], rs_[N * 8];
+            const size_t m = N - lo[q] - (q ? 8 : 0);
+            CHECK(cft_reduce(hw, CFT_SUM, CFT_FP64, CFT_RNE, A.p + lo[q] * E, NULL, rh, m,
+                             &fl, NULL) == CFT_OK &&
+                  cft_reduce(sw, CFT_SUM, CFT_FP64, CFT_RNE, x + lo[q] * E, NULL, rs_, m,
+                             &fs, NULL) == CFT_OK && same(rh, rs_, E) && fl == fs,
+                  "a resident sum from element %lu: %s", (unsigned long)lo[q],
+                  cft_last_error());
+            CHECK(cft_reduce(hw, CFT_DOT, CFT_FP64, CFT_RNE, A.p + lo[q] * E, B.p + lo[q] * E,
+                             rh, m, &fl, NULL) == CFT_OK &&
+                  cft_reduce(sw, CFT_DOT, CFT_FP64, CFT_RNE, x + lo[q] * E, y + lo[q] * E,
+                             rs_, m, &fs, NULL) == CFT_OK && same(rh, rs_, E) && fl == fs,
+                  "a resident dot from element %lu: %s", (unsigned long)lo[q],
+                  cft_last_error());
+            CHECK(cft_reduce_seg(hw, CFT_MAXALL, CFT_FP64, CFT_RNE, A.p + lo[q] * E, NULL, rh,
+                                 m - m % 8, 8, &fl, NULL) == CFT_OK &&
+                  cft_reduce_seg(sw, CFT_MAXALL, CFT_FP64, CFT_RNE, x + lo[q] * E, NULL, rs_,
+                                 m - m % 8, 8, &fs, NULL) == CFT_OK &&
+                  same(rh, rs_, (m / 8) * E) && fl == fs,
+                  "a resident segmented maximum from element %lu: %s",
+                  (unsigned long)lo[q], cft_last_error());
+        }
+        i1 = rb_info(&A);
+        CHECK(i1.resident_binds > 0, "the reductions never bound a resident (\"%s\")",
+              i1.staged_why);
+        printf("  reductions over resident windows (sum, dot, segmented maximum, from "
+               "elements 0, 3 and 17): a's binds %llu resident, %llu staged\n",
+               (unsigned long long)i1.resident_binds, (unsigned long long)i1.staged_binds);
+        rb_free(&A);
+        rb_free(&B);
+    }
+
+    /* 8. with plants: a failed upload and its retry; a failed run's outputs */
+    {
+        cft_device *h = NULL;
+        put_env("CFT_HIP_PLANT", "bogus");
+        st = cft_open(artifact, 0, &h);
+        put_env("CFT_HIP_PLANT", NULL);
+        plant_build = st != CFT_OK;
+        if (h)
+            cft_close(h);
+    }
+    if (!plant_build) {
+        nrun("  a failed upload's retry, a failed run's outputs LOST",
+             "this libcft is a default build, which has neither CFT_HIP_UPLOAD nor "
+             "CFT_HIP_PLANT=fail-launch; build with HIP_PLANTS=1");
+    } else {
+        int planted, untouched, retry;
+        size_t i;
+        /* the failed upload: a stale page's copy fails, the run is refused
+         * with the output untouched, and the retry uploads the new bytes */
+        CHECK(rb_alloc(hw, &A, NB), "cft_alloc: %s", cft_last_error());
+        if (!A.b)
+            goto out;
+        CHECK(rb_put(&A, x, NB), "publishing x");
+        CHECK(cft_run(hw, CFT_ADD, CFT_FP64, CFT_RNE, A.p, NULL, z, got, N, &fl, NULL) ==
+              CFT_OK, "the first run: %s", cft_last_error());
+        CHECK(rb_put(&A, y, NB), "publishing y");
+        memset(got, 0x5A, NB);
+        put_env("CFT_HIP_UPLOAD", "fail-fill");
+        st = cft_run(hw, CFT_ADD, CFT_FP64, CFT_RNE, A.p, NULL, z, got, N, &fl, NULL);
+        put_env("CFT_HIP_UPLOAD", NULL);
+        planted = st != CFT_OK && strstr(cft_last_error(), "CFT_HIP_UPLOAD") != NULL;
+        for (untouched = 1, i = 0; i < NB; i++)
+            untouched &= got[i] == 0x5A;
+        CHECK(planted && untouched, "CFT_HIP_UPLOAD=fail-fill: %s, \"%s\", output %s",
+              cft_strerror(st), cft_last_error(), untouched ? "untouched" : "WRITTEN");
+        printf("  a failed upload: %s - %s\n", cft_strerror(st), cft_last_error());
+        CHECK(cft_run(hw, CFT_ADD, CFT_FP64, CFT_RNE, A.p, NULL, z, got, N, &fl, NULL) ==
+              CFT_OK, "the retry: %s", cft_last_error());
+        CHECK(cft_run(sw, CFT_ADD, CFT_FP64, CFT_RNE, y, NULL, z, want, N, &fs, NULL) ==
+              CFT_OK && cft_run(sw, CFT_ADD, CFT_FP64, CFT_RNE, x, NULL, z, tmp, N, &fs,
+                                NULL) == CFT_OK, "software");
+        retry = same(got, want, NB);
+        CHECK(retry, "the retry after a failed upload: %s", same(got, tmp, NB)
+              ? "it answered for the OLD bytes - a failed upload left its pages fresh "
+                "(KL-464's order)" : "bytes differ from the software handle's");
+        printf("  its retry: %s\n", retry ? "the software handle's bytes for the new "
+               "operand" : same(got, tmp, NB) ? "the OLD operand's bytes" : "WRONG");
+        put_env("CFT_HIP_UPLOAD", "fill");
+        st = cft_run(hw, CFT_ADD, CFT_FP64, CFT_RNE, A.p, NULL, z, got, N, &fl, NULL);
+        put_env("CFT_HIP_UPLOAD", NULL);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT && strstr(cft_last_error(), "CFT_HIP_UPLOAD"),
+              "CFT_HIP_UPLOAD=fill: %s, \"%s\" - a malformed value must be refused by name",
+              cft_strerror(st), cft_last_error());
+        rb_free(&A);
+
+        /* the failed run: its resident output LOST, refused until published */
+        {
+            cft_device *h = NULL;
+            put_env("CFT_HIP_PLANT", "fail-launch");
+            st = cft_open(artifact, 0, &h);
+            put_env("CFT_HIP_PLANT", NULL);
+            CHECK(st == CFT_OK, "open with fail-launch: %s", cft_last_error());
+            if (h && rb_alloc(h, &A, NB) && rb_alloc(h, &D, NB)) {
+                CHECK(rb_put(&A, x, NB), "publishing");
+                st = cft_run(h, CFT_ABS, CFT_FP64, CFT_RNE, A.p, NULL, NULL, D.p, N, &fl,
+                             NULL);
+                CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "fail-launch"),
+                      "the failed run: %s, \"%s\"", cft_strerror(st), cft_last_error());
+                i1 = rb_info(&D);
+                i2 = rb_info(&A);
+                CHECK(!strncmp(i1.staged_why, "LOST:", 5) && i1.device_authority == 0 &&
+                      strncmp(i2.staged_why, "LOST:", 5),
+                      "after the failed run: d's why \"%s\" authority %d, a's \"%s\"",
+                      i1.staged_why, i1.device_authority, i2.staged_why);
+                printf("  a failed run's output: %s\n", i1.staged_why);
+                st = cft_buffer_from_device(D.b);
+                CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "failed on the "
+                      "device"), "reading a LOST buffer back: %s, \"%s\"", cft_strerror(st),
+                      cft_last_error());
+                printf("  reading it back: %s - %s\n", cft_strerror(st), cft_last_error());
+                CHECK(cft_buffer_to_device(D.b) == CFT_OK &&
+                      strncmp(rb_info(&D).staged_why, "LOST:", 5) &&
+                      cft_buffer_from_device(D.b) == CFT_OK,
+                      "publishing a LOST buffer clears the loss: %s", cft_last_error());
+            }
+            rb_free(&A);
+            rb_free(&D);
+            cft_close(h);
+        }
+    }
+out:
+    rb_free(&A);
+    rb_free(&B);
+    rb_free(&D);
+    printf("  buffers: %d failed\n", failures - before);
+}
+
 /* ---- the plants (a HIP_PLANTS=1 build) ------------------------------------ */
 
 static void env_refused(const char *artifact, const char *var, const char *val)
@@ -609,9 +1056,11 @@ static void env_refused(const char *artifact, const char *var, const char *val)
 static void leg_plants(const char *artifact, cft_device *sw)
 {
     static const char *const badplant[] = {"bogus", "flip ", "FLIP", "flip,drop-flag",
-                                           "1", "stale-publish"};
+                                           "1", "stale", "fail-fill"};
     static const char *const badchunk[] = {"abc", "7", "0", "12", "64 ", "-8",
                                            "1073741832", "0x40"};
+    static const char *const badpage[] = {"0", "16", "100", "2097152", "256 ", "0x100",
+                                          "-256", "4k"};
     cft_device *h = NULL;
     cft_status st;
     size_t i;
@@ -638,6 +1087,8 @@ static void leg_plants(const char *artifact, cft_device *sw)
         env_refused(artifact, "CFT_HIP_PLANT", badplant[i]);
     for (i = 0; i < sizeof badchunk / sizeof badchunk[0]; i++)
         env_refused(artifact, "CFT_HIP_CHUNK", badchunk[i]);
+    for (i = 0; i < sizeof badpage / sizeof badpage[0]; i++)
+        env_refused(artifact, "CFT_HIP_PAGE", badpage[i]);
 
     /* fail-launch: the first launch reported failed after it ran; the call
      * fails by name and every later call is refused until the handle is
@@ -713,7 +1164,8 @@ static void leg_plants(const char *artifact, cft_device *sw)
 
 int main(int argc, char **argv)
 {
-    const char *artifact = NULL, *legs = "open,reduce,seg,compose,alias,two,plants";
+    const char *artifact = NULL,
+               *legs = "open,reduce,seg,compose,alias,two,buffers,plants";
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
     cft_status st;
@@ -743,7 +1195,7 @@ int main(int argc, char **argv)
             artifact = argv[i];
         } else {
             fprintf(stderr, "usage: %s hip:N [-l open,reduce,seg,compose,alias,two,"
-                    "plants] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
+                    "buffers,plants] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
         }
@@ -794,6 +1246,8 @@ int main(int argc, char **argv)
         leg_alias(hw, sw);
     if (strstr(legs, "two"))
         leg_two(artifact, sw);
+    if (strstr(legs, "buffers"))
+        leg_buffers(artifact, hw, sw);
     if (strstr(legs, "plants"))
         leg_plants(artifact, sw);
     cft_close(hw);

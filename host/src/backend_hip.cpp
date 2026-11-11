@@ -54,11 +54,10 @@
  * (CFT_SEQ_FEAT_INDEXED) and augmentedAddition (CFT_SEQ_FEAT_AUGADD -
  * augmented.c does not compile for an NVIDIA device as it is, so this
  * unit is CFT_NO_AUGMENTED). A program's scratch is the software
- * handle's 256 slots; cft_open_ex refuses another depth for any device
- * by name (device.c). No device image: cft_get_image_id is refused by
- * name. Resident buffers: none yet (CFT_HIP_BUFFERS_RESIDENT 0,
- * backend.h): cfth_buffer_create declines and device.c keeps the
- * buffer as host memory, so every operand is staged.
+ * handle's 256 slots, and cft_open_ex refuses any non-zero depth for a
+ * GPU by name, 256 included (device.c). No device image:
+ * cft_get_image_id is refused by name. Resident buffers: yes
+ * (CFT_HIP_BUFFERS_RESIDENT 1, backend.h; below).
  *
  * ---------------------------------------------------------------
  * Staging, chunks, and the time a launch may take
@@ -90,6 +89,36 @@
  * again" - the discipline cft.h gives the XRT and remote backends.
  *
  * ---------------------------------------------------------------
+ * Resident buffers (cft_alloc), and who owns the bytes
+ * ---------------------------------------------------------------
+ *
+ * A cft_alloc'd buffer gets ONE device allocation the size of its host
+ * mirror, made the first time a call binds it and never resized: a GPU
+ * has one memory, so where the XRT backend keeps a copy per tile and
+ * role, this keeps one, at the mirror's own offsets. Its state is kept
+ * a PAGE at a time (256 bytes, eight fp256 elements; CFT_HIP_PAGE in a
+ * plant build): STALE, the mirror is the truth and the device's bytes
+ * are not; FRESH, the two agree; DIRTY, a run wrote it and the device is
+ * the truth. A binding uploads the STALE pages its call reads - an
+ * input's whole window, an output's whole window under a lane mask (its
+ * masked lanes must stay the caller's), an unmasked output's edge pages
+ * alone (the run writes the rest) - and a run of pages is marked FRESH
+ * only once its copy has completed. A good run leaves its outputs'
+ * pages DIRTY; cft_buffer_from_device brings DIRTY pages home. The
+ * rules cft.h states for a device backend - a publish over unread
+ * results refused, a failed run's outputs LOST, a host write staling
+ * only what it touches - are the XRT backend's, page by page.
+ *
+ * One copy means two roles of one call can share bytes on the device,
+ * which per-role copies never do. So an input that overlaps an output of
+ * the same call in the same buffer is STAGED (read from the mirror,
+ * which device.c has brought home first), except cft_run's d == a, where
+ * each element is read before its own is written (cft.h); and two
+ * outputs that overlap are both staged and written into the mirror in
+ * the staged order. No lane reads what another lane writes, so no answer
+ * depends on the order lanes run in.
+ *
+ * ---------------------------------------------------------------
  * Plants (HIP_PLANTS=1 only)
  * ---------------------------------------------------------------
  *
@@ -109,10 +138,22 @@
  *                  device window the plant fills with 0xA5)
  *   fail-launch    the handle's first launch reported failed after it
  *                  ran: the call fails and the handle is poisoned
+ *   stale-publish  cft_buffer_to_device leaves the pages as they were:
+ *                  the next run binds the bytes published before
+ *   no-readback    cft_buffer_from_device marks DIRTY pages FRESH and
+ *                  copies nothing home
+ *   fresh-early    an upload's pages marked FRESH before its copy, the
+ *                  order verifier-V8 found in the XRT backend (KL-464);
+ *                  only an upload that fails (CFT_HIP_UPLOAD) shows it
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
  * chunk, n lanes a program's, so small data crosses every boundary.
+ * CFT_HIP_PAGE=<bytes> (a power of two, 32 to 1048576) sets the page.
+ * CFT_HIP_UPLOAD=fail-fill, read at each call that binds a resident
+ * buffer, fails that call's first upload after its host copy and before
+ * the device copy - an instrument, as CFT_XRT_UPLOAD is the XRT
+ * backend's.
  */
 
 /* ---- the unit: the tree's own sources, for the host and the device ---- */
@@ -189,7 +230,8 @@ struct hacc {
 enum : unsigned {
     PL_FLIP = 1u << 0, PL_RMM_AS_RNE = 1u << 1, PL_DROP_FLAG = 1u << 2,
     PL_REDUCE_CARRY = 1u << 3, PL_REDUCE_FLAGS = 1u << 4,
-    PL_SEQ_MASK = 1u << 5, PL_SEQ_DEPOSIT = 1u << 6, PL_FAIL_LAUNCH = 1u << 7
+    PL_SEQ_MASK = 1u << 5, PL_SEQ_DEPOSIT = 1u << 6, PL_FAIL_LAUNCH = 1u << 7,
+    PL_STALE_PUBLISH = 1u << 8, PL_NO_READBACK = 1u << 9, PL_FRESH_EARLY = 1u << 10
 };
 #endif
 
@@ -383,7 +425,10 @@ constexpr unsigned BLOCK = 256;                   /* threads a block */
 constexpr double LAUNCH_SLOW_MS = 250.0;          /* halve the next chunk */
 constexpr double LAUNCH_FAST_MS = 62.0;           /* double it */
 constexpr size_t PROG_CHUNK_START = 2048;         /* lanes */
+constexpr size_t PAGE_BYTES = 256;                /* a resident buffer's page */
 constexpr unsigned long long NO_FAIL = ~0ull;
+
+struct HBuf;
 
 struct Dev {
     int ordinal = 0;
@@ -400,11 +445,14 @@ struct Dev {
     hipFuncAttributes fa_run, fa_level, fa_seq;
     bool poisoned = false;
     std::string poison_why;
+    size_t page = PAGE_BYTES;     /* CFT_HIP_PAGE in a plant build */
+    bool launched = false;        /* this call has had a launch accepted */
 #ifdef CFT_HIP_PLANTS
     unsigned plant = 0;
     const char *plant_name = "none";
     size_t chunk = 0;             /* CFT_HIP_CHUNK, or 0 */
     bool fail_fired = false;
+    bool fail_fill = false;       /* CFT_HIP_UPLOAD=fail-fill, this call */
 #endif
 };
 
@@ -554,8 +602,10 @@ int check_launch(Dev &D, const char *who, const char *kernel,
                  const hipFuncAttributes &fa)
 {
     const hipError_t e = hipGetLastError();
-    if (e == hipSuccess)
+    if (e == hipSuccess) {
+        D.launched = true;        /* from here a resident output may be written */
         return CFT_OK;
+    }
     if (e == hipErrorOutOfMemory || e == hipErrorLaunchOutOfResources) {
         const unsigned long long threads =
             (unsigned long long)D.prop.multiProcessorCount *
@@ -635,10 +685,396 @@ unsigned grid_for(size_t threads)
     return (unsigned)((threads + BLOCK - 1) / BLOCK);
 }
 
+/* ==== resident buffers (the head says what they keep) ==================== */
+
+enum : uint8_t { PG_STALE = 0, PG_FRESH = 1, PG_DIRTY = 2 };
+
+/* cfth_buffer_create's object: device.c's mirror, and this backend's one
+ * device allocation of it with a state a page. */
+struct HBuf {
+    Dev *D = nullptr;
+    uint8_t *host = nullptr;      /* the mirror, device.c's for the buffer's life */
+    size_t bytes = 0;
+    uint8_t *dmem = nullptr;      /* at the first binding, never resized */
+    std::vector<uint8_t> pg;      /* a state a page, made with dmem */
+    bool lost = false;
+    std::string lost_why;
+    std::string why;              /* the last staged binding's reason */
+    uint64_t resident_binds = 0, staged_binds = 0;
+};
+
+/* The pages [*p0, *p1) that bytes [lo, hi) of B touch, clamped to it. */
+void page_span(const HBuf &B, size_t lo, size_t hi, size_t *p0, size_t *p1)
+{
+    const size_t pg = B.D->page;
+    if (hi > B.bytes)
+        hi = B.bytes;
+    if (lo > hi)
+        lo = hi;
+    *p0 = lo / pg;
+    *p1 = hi > lo ? (hi - 1) / pg + 1 : *p0;
+}
+
+size_t page_lo(const HBuf &B, size_t p) { return p * B.D->page; }
+
+size_t page_hi(const HBuf &B, size_t p)
+{
+    const size_t e = (p + 1) * B.D->page;
+    return e < B.bytes ? e : B.bytes;
+}
+
+bool any_page(const HBuf &B, size_t p0, size_t p1, uint8_t s)
+{
+    for (size_t p = p0; p < p1; p++)
+        if (B.pg[p] == s)
+            return true;
+    return false;
+}
+
+void set_pages(HBuf &B, size_t p0, size_t p1, uint8_t s) noexcept
+{
+    if (p1 > p0)
+        std::memset(B.pg.data() + p0, s, p1 - p0);
+}
+
+/* A LOST buffer's refusal, in the words its loss left. */
+int refuse_lost(const HBuf &B)
+{
+    set_err_or([&] {
+        return B.lost_why.empty()
+                   ? std::string("a failed run lost this resident buffer's contents; "
+                                 "publish them again with cft_buffer_to_device")
+                   : B.lost_why;
+    }, "buffer lost");
+    return CFT_ERR_INTERNAL;
+}
+
+/* The STALE pages of [p0, p1) to the device, a run of them at a time
+ * through the stage, each run marked FRESH only once its copy has
+ * completed: a copy that fails leaves its pages STALE, so the next
+ * binding uploads them again (the order verifier-V8 found reversed in
+ * the XRT backend, KL-464; fresh-early plants the reversal). Called
+ * before any launch of the call, so a failure is the call's, named, and
+ * does not poison the handle: nothing of the call ran. */
+int up_pages(Dev &D, HBuf &B, const char *who, size_t p0, size_t p1, size_t *moved)
+{
+    size_t p = p0;
+    while (p < p1) {
+        if (B.pg[p] != PG_STALE) {
+            p++;
+            continue;
+        }
+        size_t q = p + 1;
+        while (q < p1 && B.pg[q] == PG_STALE)
+            q++;
+        const size_t lo = page_lo(B, p), hi = page_hi(B, q - 1);
+#ifdef CFT_HIP_PLANTS
+        if (D.plant & PL_FRESH_EARLY)
+            set_pages(B, p, q, PG_FRESH);
+#endif
+        for (size_t x = lo; x < hi;) {
+            const size_t m = hi - x < D.stage ? hi - x : D.stage;
+            std::memcpy(D.host, B.host + x, m);
+#ifdef CFT_HIP_PLANTS
+            if (D.fail_fill) {
+                D.fail_fill = false;
+                set_err(fmt_str("%s: the upload of a resident buffer's pages to %s was "
+                                "failed on purpose by CFT_HIP_UPLOAD=fail-fill, after the "
+                                "host copy and before the device copy - nothing of this "
+                                "call ran, and the pages stay stale", who,
+                                D.label.c_str()));
+                return CFT_ERR_INTERNAL;
+            }
+#endif
+            hipError_t e = hipMemcpyAsync(B.dmem + x, D.host, m, hipMemcpyHostToDevice,
+                                          D.stream);
+            if (e == hipSuccess)
+                e = hipStreamSynchronize(D.stream);
+            if (e != hipSuccess) {
+                (void)hipGetLastError();
+                set_err(fmt_str("%s: uploading a resident buffer's pages to %s failed: "
+                                "%s (%s) - before any launch of this call, so nothing ran; "
+                                "the pages stay stale and the next binding uploads them "
+                                "again", who, D.label.c_str(), hipGetErrorString(e),
+                                hipGetErrorName(e)));
+                return CFT_ERR_INTERNAL;
+            }
+            x += m;
+        }
+        set_pages(B, p, q, PG_FRESH);
+        *moved += hi - lo;
+        p = q;
+    }
+    return CFT_OK;
+}
+
+/* The DIRTY pages of [p0, p1) home, a run at a time through the stage,
+ * each marked FRESH once it is in the mirror. A copy that fails leaves
+ * its pages DIRTY and poisons the handle: the device holds the only copy
+ * of those results, and a failed copy says its context may be gone. */
+int down_pages(Dev &D, HBuf &B, const char *who, size_t p0, size_t p1)
+{
+    bool copy = true;
+#ifdef CFT_HIP_PLANTS
+    copy = !(D.plant & PL_NO_READBACK);
+#endif
+    size_t p = p0;
+    while (p < p1) {
+        if (B.pg[p] != PG_DIRTY) {
+            p++;
+            continue;
+        }
+        size_t q = p + 1;
+        while (q < p1 && B.pg[q] == PG_DIRTY)
+            q++;
+        const size_t lo = page_lo(B, p), hi = page_hi(B, q - 1);
+        for (size_t x = lo; copy && x < hi;) {
+            const size_t m = hi - x < D.stage ? hi - x : D.stage;
+            hipError_t e = hipMemcpyAsync(D.host, B.dmem + x, m, hipMemcpyDeviceToHost,
+                                          D.stream);
+            if (e == hipSuccess)
+                e = hipStreamSynchronize(D.stream);
+            if (e != hipSuccess)
+                return fail_device(D, who, "reading a resident buffer back (hipMemcpyAsync)",
+                                   e);
+            std::memcpy(B.host + x, D.host, m);
+            x += m;
+        }
+        set_pages(B, p, q, PG_FRESH);
+        p = q;
+    }
+    return CFT_OK;
+}
+
+/* One operand of a call, as device.c resolved it (cft_bindings) and as
+ * bind_call then decided. */
+struct Role {
+    HBuf *B = nullptr;            /* the buffer it is a window of, or nullptr */
+    size_t off = 0, len = 0;      /* the window, bytes */
+    bool out = false;             /* the call writes it */
+    bool keep = false;            /* an output under a lane mask */
+    bool alias_ok = false;        /* an output an identical input window may
+                                   * share: each lane reads its own input
+                                   * before it writes its own output, and no
+                                   * other lane touches either */
+    bool resident = false;        /* decided: the device window dp */
+    uint8_t *dp = nullptr;
+    std::string why;              /* decided: staged, and why */
+};
+
+void role_from(Role &r, const cft_bindings *bind, int slot, size_t len, bool out,
+               bool keep, bool alias_ok)
+{
+    if (!bind || !bind->buf[slot] || !len)
+        return;
+    r.B = static_cast<HBuf *>(bind->buf[slot]);
+    r.off = bind->off[slot];
+    r.len = len;
+    r.out = out;
+    r.keep = keep;
+    r.alias_ok = alias_ok;
+}
+
+bool overlap(const Role &x, const Role &y)
+{
+    return x.B && x.B == y.B && x.off < y.off + y.len && y.off < x.off + x.len;
+}
+
+/* Every bound operand of a call, decided before anything of it runs:
+ * refused for a LOST buffer; staged where the buffer has no device
+ * memory or where two roles would share bytes on the device (the head);
+ * resident otherwise, with the STALE pages it reads uploaded. A staged
+ * output into a buffer that has device memory first brings home its
+ * DIRTY pages and stales them, as a host write does, since the mirror
+ * is what it writes. Counted as the XRT backend counts: a binding that
+ * moved bytes is staged, with the reason; one that moved none, resident. */
+int bind_call(Dev &D, const char *who, Role *R, int nr)
+{
+    int i, j;
+    D.launched = false;
+#ifdef CFT_HIP_PLANTS
+    D.fail_fill = false;
+    {
+        const char *u = std::getenv("CFT_HIP_UPLOAD");
+        if (u && *u) {
+            if (std::strcmp(u, "fail-fill")) {
+                set_err(fmt_str("CFT_HIP_UPLOAD=\"%s\": expected fail-fill (a call's "
+                                "first resident upload fails after its host copy); unset "
+                                "it for none", u));
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            D.fail_fill = true;
+        }
+    }
+#endif
+    for (i = 0; i < nr; i++) {
+        Role &r = R[i];
+        if (!r.B)
+            continue;
+        if (r.B->lost)
+            return refuse_lost(*r.B);
+        if (r.B->D != &D)
+            r.why = "the buffer belongs to another handle";
+        else if (r.off > r.B->bytes || r.len > r.B->bytes - r.off)
+            r.why = "the window runs past the end of the buffer";
+    }
+    /* the device memory, at a buffer's first binding */
+    for (i = 0; i < nr; i++) {
+        Role &r = R[i];
+        if (!r.B || !r.why.empty() || r.B->dmem)
+            continue;
+        HBuf &B = *r.B;
+        std::vector<uint8_t> pg;
+        std::string why;
+        try {
+            pg.assign((B.bytes + D.page - 1) / D.page, (uint8_t)PG_STALE);
+        } catch (const std::bad_alloc &) {
+            why = "no host memory for this buffer's page states - it is staged, as a "
+                  "plain host pointer is";
+        }
+        if (why.empty()) {
+            const hipError_t e = hipMalloc((void **)&B.dmem, B.bytes);
+            if (e == hipSuccess) {
+                B.pg.swap(pg);
+                continue;
+            }
+            B.dmem = nullptr;
+            (void)hipGetLastError();
+            why = fmt_str("no device memory for this buffer: hipMalloc of %zu bytes on "
+                          "%s: %s - it is staged, as a plain host pointer is", B.bytes,
+                          D.label.c_str(), hipGetErrorString(e));
+        }
+        for (j = 0; j < nr; j++)
+            if (R[j].B == &B && R[j].why.empty())
+                R[j].why = why;
+    }
+    /* two roles that would share bytes on the device */
+    for (i = 0; i < nr; i++)
+        for (j = i + 1; j < nr; j++) {
+            Role &x = R[i], &y = R[j];
+            if (!overlap(x, y) || (!x.out && !y.out))
+                continue;
+            if (x.out && y.out) {
+                static const char both[] =
+                    "two outputs of the same call overlap in this buffer, so both are "
+                    "staged and written into the mirror in turn, as plain host "
+                    "pointers are";
+                if (x.why.empty())
+                    x.why = both;
+                if (y.why.empty())
+                    y.why = both;
+                continue;
+            }
+            Role &in = x.out ? y : x;
+            const Role &o = x.out ? x : y;
+            if (o.alias_ok && in.off == o.off && in.len == o.len)
+                continue;
+            if (in.why.empty())
+                in.why = "an input that overlaps an output of the same call in this "
+                         "buffer is staged, so that no lane reads what another writes";
+        }
+    /* staged outputs into device memory: their pages home and stale */
+    for (i = 0; i < nr; i++) {
+        Role &r = R[i];
+        if (!r.B || !r.out || r.why.empty() || !r.B->dmem)
+            continue;
+        size_t p0, p1;
+        page_span(*r.B, r.off, r.off + r.len, &p0, &p1);
+        if (any_page(*r.B, p0, p1, PG_DIRTY)) {
+            const int st = down_pages(D, *r.B, who, p0, p1);
+            if (st != CFT_OK)
+                return st;
+        }
+        set_pages(*r.B, p0, p1, PG_STALE);
+    }
+    /* the rest resident, with what each reads uploaded; the staged ones
+     * counted last, so that a buffer's `why` names the decline rather
+     * than a fill of the same call */
+    for (i = 0; i < nr; i++) {
+        Role &r = R[i];
+        if (!r.B || !r.why.empty())
+            continue;
+        HBuf &B = *r.B;
+        size_t p0, p1, moved = 0;
+        int st = CFT_OK;
+        page_span(B, r.off, r.off + r.len, &p0, &p1);
+        if (!r.out || r.keep) {
+            st = up_pages(D, B, who, p0, p1, &moved);
+        } else {
+            /* an unmasked output: its edge pages, where the window does
+             * not cover them, so the bytes beside it stay the caller's */
+            if (r.off > page_lo(B, p0) || r.off + r.len < page_hi(B, p0))
+                st = up_pages(D, B, who, p0, p0 + 1, &moved);
+            if (st == CFT_OK && p1 - 1 > p0 && r.off + r.len < page_hi(B, p1 - 1))
+                st = up_pages(D, B, who, p1 - 1, p1, &moved);
+        }
+        if (st != CFT_OK)
+            return st;
+        r.resident = true;
+        r.dp = B.dmem + r.off;
+        if (!moved) {
+            B.resident_binds++;
+            continue;
+        }
+        B.staged_binds++;
+        B.why = !r.out ? "stale pages of this window (its first use, or published "
+                         "since) were uploaded"
+              : r.keep ? "an output under a lane mask: its stale pages were uploaded, "
+                         "so that its masked lanes stay the caller's"
+                       : "an output's stale edge pages were uploaded, so that the bytes "
+                         "beside its window stay the caller's";
+    }
+    for (i = 0; i < nr; i++)
+        if (R[i].B && !R[i].why.empty()) {
+            R[i].B->staged_binds++;
+            R[i].B->why = R[i].why;
+        }
+    return CFT_OK;
+}
+
+/* The end of a call that bound: a good run leaves its resident outputs'
+ * pages DIRTY; a failed one that may have written them leaves their
+ * buffers LOST (cft.h); a staged output into device memory leaves its
+ * pages STALE either way, since the mirror took its bytes. */
+void call_end(Dev &D, int st, const Role *R, int nr) noexcept
+{
+    const bool maybe = st != CFT_OK && (D.launched || D.poisoned);
+    for (int i = 0; i < nr; i++) {
+        const Role &r = R[i];
+        if (!r.B || !r.out || !r.B->dmem)
+            continue;
+        HBuf &B = *r.B;
+        size_t p0, p1;
+        page_span(B, r.off, r.off + r.len, &p0, &p1);
+        if (!r.resident) {
+            set_pages(B, p0, p1, PG_STALE);
+        } else if (st == CFT_OK) {
+            set_pages(B, p0, p1, PG_DIRTY);
+        } else if (maybe && !B.lost) {
+            B.lost = true;
+            try {
+                B.lost_why = fmt_str("a run that wrote this resident buffer failed on "
+                                     "the device (%s: %.200s), so what the GPU left in "
+                                     "it is not known - publish its contents again with "
+                                     "cft_buffer_to_device before reading it back or "
+                                     "running on it", cft_strerror((cft_status)st),
+                                     g_err.c_str());
+            } catch (...) {
+            }
+        }
+    }
+    D.launched = false;
+}
+
 /* ==== the elementwise run =============================================== */
 
+/* R[0..3] are a, b, c and d as bind_call decided them: a resident one is
+ * read or written at its device window, the rest staged as before. The
+ * chunk is the staged run's whatever is resident, so no launch is longer
+ * than the staged one. */
 int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
-             const void *c, void *d, size_t n, uint32_t scal, uint32_t *flags)
+             const void *c, void *d, size_t n, uint32_t scal, const Role *R,
+             uint32_t *flags)
 {
     static const char who[] = "cft_run";
     const cft_fmt_desc f = cft_sf_formats[fmt];
@@ -656,9 +1092,13 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
         if ((scal >> r) & 1u) {
             /* A SNAPSHOT for the whole run, as on a tile: a d that
              * aliases the scalar does not feed a later chunk the value
-             * an earlier one wrote. (The software loop re-reads it.) */
-            std::memcpy(snap[r], opnd[r], esz);
-            opnd[r] = snap[r];
+             * an earlier one wrote. (The software loop re-reads it.) A
+             * resident scalar is read on the device, and is resident
+             * only where d's window does not overlap it (bind_call). */
+            if (!R[r].resident) {
+                std::memcpy(snap[r], opnd[r], esz);
+                opnd[r] = snap[r];
+            }
             fixed += esz;
         } else {
             per += esz;
@@ -673,15 +1113,21 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
 #endif
     for (s = 0; s < n; s += k) {
         const size_t m = n - s < k ? n - s : k;
-        size_t off[3], o = 0, oacc, od;
+        const uint8_t *dv[3];
+        size_t o = 0, oacc, od;
         int st;
         for (r = 0; r < 3; r++) {
-            off[r] = o;
+            const bool sc = (scal >> r) & 1u;
+            dv[r] = nullptr;
             if (!opnd[r])
                 continue;
-            const size_t bytes = ((scal >> r) & 1u) ? esz : m * esz;
-            std::memcpy(D.host + o, ((scal >> r) & 1u) ? opnd[r] : opnd[r] + s * esz,
-                        bytes);
+            if (R[r].resident) {
+                dv[r] = R[r].dp + (sc ? 0 : s * esz);
+                continue;
+            }
+            const size_t bytes = sc ? esz : m * esz;
+            std::memcpy(D.host + o, sc ? opnd[r] : opnd[r] + s * esz, bytes);
+            dv[r] = D.dev + o;
             o = al(o + bytes);
         }
         oacc = o;
@@ -690,12 +1136,12 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
         if ((st = h2d(D, who, 0, oacc + sizeof(hacc))) != CFT_OK)
             return st;
         k_run<<<grid_for(m), BLOCK, 0, D.stream>>>(
-            f, op, rnd, opnd[0] ? D.dev + off[0] : nullptr,
-            opnd[1] ? D.dev + off[1] : nullptr, opnd[2] ? D.dev + off[2] : nullptr,
-            D.dev + od, m, scal, s, (hacc *)(D.dev + oacc) PLANT_ARG(D));
+            f, op, rnd, dv[0], dv[1], dv[2], R[3].resident ? R[3].dp + s * esz : D.dev + od,
+            m, scal, s, (hacc *)(D.dev + oacc) PLANT_ARG(D));
         if ((st = check_launch(D, who, "the elementwise kernel", D.fa_run)) != CFT_OK)
             return st;
-        if ((st = d2h(D, who, oacc, od - oacc + m * esz)) != CFT_OK ||
+        if ((st = d2h(D, who, oacc, R[3].resident ? sizeof(hacc)
+                                                  : od - oacc + m * esz)) != CFT_OK ||
             (st = finish(D, who)) != CFT_OK)
             return st;
         const hacc h = acc_read(D, oacc);
@@ -707,7 +1153,8 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
             return CFT_ERR_INTERNAL;
         }
         fl |= h.flags;
-        std::memcpy((uint8_t *)d + s * esz, D.host + od, m * esz);
+        if (!R[3].resident)
+            std::memcpy((uint8_t *)d + s * esz, D.host + od, m * esz);
     }
     *flags = fl;
     return CFT_OK;
@@ -736,36 +1183,44 @@ size_t reduce_cap(const Dev &D, size_t esz)
     return cap;
 }
 
-/* nseg segments of m >= 2 elements each, from host `src`, to nseg
- * results at host `dst`: levels until one element a segment is left. */
+/* nseg segments of m >= 2 elements each, from host `src` - or, when the
+ * input is resident, from its device window `dsrc`, which the first
+ * level reads in place - to nseg results at host `dst`: levels until one
+ * element a segment is left. */
 int reduce_on_device(Dev &D, const char *who, const cft_fmt_desc &f, int op, int rnd,
-                     const uint8_t *src, size_t m, size_t nseg, uint8_t *dst,
-                     uint32_t *fl)
+                     const uint8_t *src, const uint8_t *dsrc, size_t m, size_t nseg,
+                     uint8_t *dst, uint32_t *fl)
 {
-    const size_t esz = (size_t)f.width / 8;
-    const size_t x = al(sizeof(hacc)), xb = nseg * m * esz;
-    const size_t y = al(x + xb), yb = nseg * ((m + 1) / 2) * esz;
-    size_t cur = x, nxt = y, len = m;
+    const size_t esz = (size_t)f.width / 8, h1 = (m + 1) / 2;
+    /* staged: the input, then the first level's output; resident: the
+     * first level's output and the second's, which the levels after
+     * them take in turn */
+    const size_t x = al(sizeof(hacc)), xb = nseg * (dsrc ? h1 : m) * esz;
+    const size_t y = al(x + xb), yb = nseg * (dsrc ? (h1 + 1) / 2 : h1) * esz;
+    const uint8_t *in = dsrc ? dsrc : D.dev + x;
+    size_t outo = dsrc ? x : y, other = dsrc ? y : x, len = m;
     int st;
 
     if (y + yb > D.stage)
         return fail_alloc(D, who, "the reduction's stage", y + yb, hipErrorOutOfMemory);
     acc_init(D, 0);
-    std::memcpy(D.host + x, src, xb);
-    if ((st = h2d(D, who, 0, x + xb)) != CFT_OK)
+    if (!dsrc)
+        std::memcpy(D.host + x, src, xb);
+    if ((st = h2d(D, who, 0, dsrc ? sizeof(hacc) : x + xb)) != CFT_OK)
         return st;
     while (len > 1) {
         const size_t h = (len + 1) / 2;
         k_level<<<grid_for(nseg * h), BLOCK, 0, D.stream>>>(
-            f, op, rnd, D.dev + cur, D.dev + nxt, len, nseg,
-            (hacc *)D.dev PLANT_ARG(D));
+            f, op, rnd, in, D.dev + outo, len, nseg, (hacc *)D.dev PLANT_ARG(D));
         if ((st = check_launch(D, who, "the reduction's level kernel", D.fa_level)) != CFT_OK)
             return st;
-        const size_t t = cur;
-        cur = nxt;
-        nxt = t;
+        in = D.dev + outo;
+        const size_t t = outo;
+        outo = other;
+        other = t;
         len = h;
     }
+    const size_t cur = (size_t)(in - D.dev);
     if ((st = d2h(D, who, 0, sizeof(hacc))) != CFT_OK ||
         (st = d2h(D, who, cur, nseg * esz)) != CFT_OK || (st = finish(D, who)) != CFT_OK)
         return st;
@@ -783,9 +1238,12 @@ int reduce_on_device(Dev &D, const char *who, const cft_fmt_desc &f, int op, int
 
 /* A range of L elements to one, by the tree; a range past the chunk is
  * cut at lo + j * 2^p, nodes of the range's own tree, and the tree over
- * their partials has the same shape. */
+ * their partials has the same shape. `dsrc` is the range's device window
+ * when the input is resident, or nullptr; a leaf is read from the host
+ * mirror either way, which device.c has brought home before the call. */
 int reduce_range(Dev &D, const char *who, const cft_fmt_desc &f, int op, int rnd,
-                 const uint8_t *src, size_t len, uint8_t *dst, uint32_t *fl)
+                 const uint8_t *src, const uint8_t *dsrc, size_t len, uint8_t *dst,
+                 uint32_t *fl)
 {
     const size_t esz = (size_t)f.width / 8;
     if (len == 0) {                       /* softfloat.c's empty range: +0 */
@@ -800,24 +1258,28 @@ int reduce_range(Dev &D, const char *who, const cft_fmt_desc &f, int op, int rnd
     }
     const size_t cap = reduce_cap(D, esz);
     if (len <= cap)
-        return reduce_on_device(D, who, f, op, rnd, src, len, 1, dst, fl);
+        return reduce_on_device(D, who, f, op, rnd, src, dsrc, len, 1, dst, fl);
     const size_t parts = (len + cap - 1) / cap;
     std::vector<uint8_t> part(parts * esz);
     for (size_t j = 0; j < parts; j++) {
         const size_t lo = j * cap, l = len - lo < cap ? len - lo : cap;
-        const int st = reduce_range(D, who, f, op, rnd, src + lo * esz, l,
+        const int st = reduce_range(D, who, f, op, rnd, src + lo * esz,
+                                    dsrc ? dsrc + lo * esz : nullptr, l,
                                     part.data() + j * esz, fl);
         if (st != CFT_OK)
             return st;
     }
-    return reduce_range(D, who, f, op, rnd, part.data(), parts, dst, fl);
+    return reduce_range(D, who, f, op, rnd, part.data(), nullptr, parts, dst, fl);
 }
 
 /* ==== the sequencer ===================================================== */
 
+/* R[0..5] are a, b, c, the deposits, scratch-in and scratch-out as
+ * bind_call decided them; the mask, the counts, the lane bytes, the bank
+ * and the instructions are staged always. */
 int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
               const void *a, const void *b, const void *c, void *deposits,
-              uint32_t *counts, size_t n, uint32_t *flags, uint32_t *bus)
+              uint32_t *counts, size_t n, const Role *R, uint32_t *flags, uint32_t *bus)
 {
     static const char who[] = "cft_program_run_ex";
     if (!io || !io->prog) {
@@ -929,28 +1391,34 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     P.image = nullptr;
     P.image_bytes = 0;
 
+    /* which of the six are resident (bind_call): the stage carries the rest */
+    const bool ra = R[0].resident, rb = b && R[1].resident, rc = c && R[2].resident;
+    const bool rd = md && R[3].resident, rsi = nsi && R[4].resident;
+    const bool rso = nso && R[5].resident;
     uint32_t fl = 0, rep = 0;
     for (size_t first = 0; first < n;) {
         const size_t k = n - first < chunk ? n - first : chunk;
         size_t o = head;
-        const size_t o_a = o;  o = al(o + k * esz);
-        const size_t o_b = o;  if (b) o = al(o + k * esz);
-        const size_t o_c = o;  if (c) o = al(o + k * esz);
+        const size_t o_a = o;  if (!ra) o = al(o + k * esz);
+        const size_t o_b = o;  if (b && !rb) o = al(o + k * esz);
+        const size_t o_c = o;  if (c && !rc) o = al(o + k * esz);
         const size_t o_m = o;  if (mask) o = al(o + (k + 7) / 8);
-        const size_t o_si = o; if (nsi) o = al(o + k * nsi * esz);
+        const size_t o_si = o; if (nsi && !rsi) o = al(o + k * nsi * esz);
         const size_t o_acc = o; o = al(o + sizeof(hacc));
-        const size_t o_dep = o; if (md) o = al(o + k * md * esz);
+        const size_t o_dep = o; if (md && !rd) o = al(o + k * md * esz);
         const size_t o_cnt = o; if (counts) o = al(o + k * 4);
         const size_t o_lf = o;  if (lflags) o = al(o + k);
-        const size_t o_so = o;  if (nso) o = al(o + k * nso * esz);
+        const size_t o_so = o;  if (nso && !rso) o = al(o + k * nso * esz);
         const size_t end = o;
         bool up_out = mask != nullptr;
 
-        std::memcpy(D.host + o_a, (const uint8_t *)a + first * esz, k * esz);
-        if (b) std::memcpy(D.host + o_b, (const uint8_t *)b + first * esz, k * esz);
-        if (c) std::memcpy(D.host + o_c, (const uint8_t *)c + first * esz, k * esz);
+        if (!ra) std::memcpy(D.host + o_a, (const uint8_t *)a + first * esz, k * esz);
+        if (b && !rb)
+            std::memcpy(D.host + o_b, (const uint8_t *)b + first * esz, k * esz);
+        if (c && !rc)
+            std::memcpy(D.host + o_c, (const uint8_t *)c + first * esz, k * esz);
         if (mask) std::memcpy(D.host + o_m, mask + first / 8, (k + 7) / 8);
-        if (nsi)
+        if (nsi && !rsi)
             std::memcpy(D.host + o_si, (const uint8_t *)io->scratch_in + first * nsi * esz,
                         k * nsi * esz);
         acc_init(D, o_acc);
@@ -958,19 +1426,28 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
             /* OUTPUTS UNDER A MASK GO UP FIRST: the executor leaves a masked
              * lane's deposits, count, lane byte and scratch-out alone, so
              * the window it leaves must hold the caller's bytes, or the copy
-             * back would hand the caller device garbage for them. */
-            if (md) std::memcpy(D.host + o_dep, (uint8_t *)deposits + first * md * esz,
-                                k * md * esz);
+             * back would hand the caller device garbage for them. (A
+             * resident one's pages went up at its binding.) */
+            if (md && !rd)
+                std::memcpy(D.host + o_dep, (uint8_t *)deposits + first * md * esz,
+                            k * md * esz);
             if (counts) std::memcpy(D.host + o_cnt, counts + first, k * 4);
             if (lflags) std::memcpy(D.host + o_lf, lflags + first, k);
-            if (nso) std::memcpy(D.host + o_so,
-                                 (uint8_t *)io->scratch_out + first * nso * esz,
-                                 k * nso * esz);
+            if (nso && !rso)
+                std::memcpy(D.host + o_so, (uint8_t *)io->scratch_out + first * nso * esz,
+                            k * nso * esz);
         }
 #ifdef CFT_HIP_PLANTS
         if ((D.plant & PL_SEQ_DEPOSIT) && md && !mask) {
-            std::memset(D.host + o_dep, 0xA5, k * md * esz);
-            up_out = true;
+            if (rd) {
+                const hipError_t e = hipMemsetAsync(R[3].dp + first * md * esz, 0xA5,
+                                                    k * md * esz, D.stream);
+                if (e != hipSuccess)
+                    return fail_device(D, who, "the seq-deposit plant's fill", e);
+            } else {
+                std::memset(D.host + o_dep, 0xA5, k * md * esz);
+                up_out = true;
+            }
         }
 #endif
         if ((st = h2d(D, who, head, (up_out ? end : o_acc + sizeof(hacc)) - head)) != CFT_OK)
@@ -992,15 +1469,15 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         cft_run_args A;
         std::memset(&A, 0, sizeof A);
         A.struct_size = sizeof A;
-        A.a = D.dev + o_a;
-        A.b = b ? D.dev + o_b : nullptr;
-        A.c = c ? D.dev + o_c : nullptr;
+        A.a = ra ? R[0].dp + first * esz : D.dev + o_a;
+        A.b = b ? (rb ? R[1].dp + first * esz : D.dev + o_b) : nullptr;
+        A.c = c ? (rc ? R[2].dp + first * esz : D.dev + o_c) : nullptr;
         A.n = k;
-        A.scratch_in = nsi ? D.dev + o_si : nullptr;
+        A.scratch_in = nsi ? (rsi ? R[4].dp + first * nsi * esz : D.dev + o_si) : nullptr;
         A.scratch_in_bytes = k * nsi * esz;
-        A.scratch_out = nso ? D.dev + o_so : nullptr;
+        A.scratch_out = nso ? (rso ? R[5].dp + first * nso * esz : D.dev + o_so) : nullptr;
         A.scratch_out_bytes = k * nso * esz;
-        A.deposits = md ? D.dev + o_dep : nullptr;
+        A.deposits = md ? (rd ? R[3].dp + first * md * esz : D.dev + o_dep) : nullptr;
         A.counts = counts ? (uint32_t *)(D.dev + o_cnt) : nullptr;
         A.lane_mask = mask ? D.dev + o_m : nullptr;
         A.lane_mask_bytes = mask ? (k + 7) / 8 : 0;
@@ -1030,12 +1507,14 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         }
         fl |= h.flags;
         rep |= h.status;
-        if (md) std::memcpy((uint8_t *)deposits + first * md * esz, D.host + o_dep,
-                            k * md * esz);
+        if (md && !rd)
+            std::memcpy((uint8_t *)deposits + first * md * esz, D.host + o_dep,
+                        k * md * esz);
         if (counts) std::memcpy(counts + first, D.host + o_cnt, k * 4);
         if (lflags) std::memcpy(lflags + first, D.host + o_lf, k);
-        if (nso) std::memcpy((uint8_t *)io->scratch_out + first * nso * esz,
-                             D.host + o_so, k * nso * esz);
+        if (nso && !rso)
+            std::memcpy((uint8_t *)io->scratch_out + first * nso * esz, D.host + o_so,
+                        k * nso * esz);
         first += k;
         /* the next chunk's size, from this one's time (the head says why) */
 #ifdef CFT_HIP_PLANTS
@@ -1073,6 +1552,9 @@ const struct {
     {"seq-mask", PL_SEQ_MASK},
     {"seq-deposit", PL_SEQ_DEPOSIT},
     {"fail-launch", PL_FAIL_LAUNCH},
+    {"stale-publish", PL_STALE_PUBLISH},
+    {"no-readback", PL_NO_READBACK},
+    {"fresh-early", PL_FRESH_EARLY},
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not
@@ -1115,6 +1597,25 @@ int read_plants(Dev &D)
             return CFT_ERR_INVALID_ARGUMENT;
         }
         D.chunk = (size_t)x;
+    }
+    const char *pv = std::getenv("CFT_HIP_PAGE");
+    if (pv && *pv) {
+        bool ok = true;
+        unsigned long long x = 0;
+        for (const char *p = pv; *p; p++) {
+            if (*p < '0' || *p > '9' || x > (1ull << 20)) {
+                ok = false;
+                break;
+            }
+            x = x * 10 + (unsigned)(*p - '0');
+        }
+        if (!ok || x < 32 || x > (1ull << 20) || (x & (x - 1))) {
+            set_err(fmt_str("CFT_HIP_PAGE=\"%s\": expected a power of two in decimal "
+                            "from 32 to 1048576 (bytes, a resident buffer's page); unset "
+                            "it for the default %zu", pv, PAGE_BYTES));
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        D.page = (size_t)x;
     }
     return CFT_OK;
 }
@@ -1285,15 +1786,15 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          "cft hip: %s = %s (%s, %d multiprocessors, bus "
                          "%04x:%02x:%02x.0, %zu MiB), HIP platform %s, runtime %d, "
                          "driver %d; of %d visible%s%s%s%s; this libcft: HIP_ARCH %s,"
-                         " stage %zu MiB, kernels %d/%d/%d registers and "
-                         "%zu/%zu/%zu bytes local a thread (run/level/seq)%s%s\n",
+                         " stage %zu MiB, page %zu bytes, kernels %d/%d/%d registers "
+                         "and %zu/%zu/%zu bytes local a thread (run/level/seq)%s%s\n",
                          artifact, D->prop.name, arch_of(D->prop).c_str(),
                          D->prop.multiProcessorCount, (unsigned)D->prop.pciDomainID,
                          (unsigned)D->prop.pciBusID, (unsigned)D->prop.pciDeviceID,
                          (size_t)(D->prop.totalGlobalMem >> 20), platform_name(), rtv,
                          drv, count, vis ? ", CUDA_VISIBLE_DEVICES=" : "",
                          vis ? vis : "", hvis ? ", HIP_VISIBLE_DEVICES=" : "",
-                         hvis ? hvis : "", CFT_HIP_ARCH, D->stage >> 20,
+                         hvis ? hvis : "", CFT_HIP_ARCH, D->stage >> 20, D->page,
                          D->fa_run.numRegs, D->fa_level.numRegs, D->fa_seq.numRegs,
                          (size_t)D->fa_run.localSizeBytes,
                          (size_t)D->fa_level.localSizeBytes,
@@ -1370,62 +1871,206 @@ extern "C" int cfth_image_id(void *hw, cft_image_raw *out)
     });
 }
 
-/* Resident buffers: not in this build (CFT_HIP_BUFFERS_RESIDENT 0). The
- * create declines, writing no sentence (the seam's create writes none),
- * and device.c keeps the buffer as host memory; the others are then
- * unreachable, and answer as a defect if reached. */
+/* ---- resident buffers (backend.h's seam; the head says what is kept) ---- */
+
+namespace {
+
+/* A DIRTY page's bytes outside [lo, hi), home, for a host write over the
+ * rest of it - quietly: cfth_buffer_host_wrote cannot fail and must leave
+ * the call's sentence alone. False when it could not be done. */
+bool home_outside(HBuf &B, size_t p, size_t lo, size_t hi) noexcept
+{
+    Dev &D = *B.D;
+    const size_t a = page_lo(B, p), z = page_hi(B, p);
+    if (D.poisoned || hipSetDevice(D.ordinal) != hipSuccess)
+        return false;
+    hipError_t e = hipMemcpyAsync(D.host, B.dmem + a, z - a, hipMemcpyDeviceToHost,
+                                  D.stream);
+    if (e == hipSuccess)
+        e = hipStreamSynchronize(D.stream);
+    if (e != hipSuccess) {
+        try {
+            poison(D, fmt_str("a read-back beside a host write (hipMemcpyAsync) "
+                              "failed: %s (%s)", hipGetErrorString(e),
+                              hipGetErrorName(e)));
+        } catch (...) {
+            D.poisoned = true;
+        }
+        return false;
+    }
+    if (lo > a)                   /* before the write */
+        std::memcpy(B.host + a, D.host, (lo < z ? lo : z) - a);
+    if (hi < z) {                 /* after it */
+        const size_t s = hi > a ? hi : a;
+        std::memcpy(B.host + s, D.host + (s - a), z - s);
+    }
+    return true;
+}
+
+/* [off, off + len) of B, clamped to it. */
+void clamp(const HBuf &B, size_t off, size_t len, size_t *lo, size_t *hi)
+{
+    *lo = off < B.bytes ? off : B.bytes;
+    *hi = len < B.bytes - *lo ? *lo + len : B.bytes;
+}
+
+}  // namespace
+
 extern "C" int cfth_buffer_create(void *hw, void *host, size_t bytes, void **out)
 {
-    (void)hw;
-    (void)host;
-    (void)bytes;
     if (out)
         *out = nullptr;
-    return CFT_ERR_UNSUPPORTED;
+    if (!hw || !host || !bytes || !out)
+        return CFT_ERR_INVALID_ARGUMENT;
+    HBuf *B = new (std::nothrow) HBuf();
+    if (!B)
+        return CFT_ERR_OUT_OF_MEMORY;
+    B->D = static_cast<Dev *>(hw);
+    B->host = static_cast<uint8_t *>(host);
+    B->bytes = bytes;
+    *out = B;                     /* no device memory until a call binds it */
+    return CFT_OK;
 }
 
 extern "C" void cfth_buffer_destroy(void *buf)
 {
-    (void)buf;
-}
-
-static int no_buffers(const char *who)
-{
-    set_err(std::string(who) + ": the GPU backend keeps no device buffers in this "
-            "build (CFT_HIP_BUFFERS_RESIDENT is 0) and made none - a defect in "
-            "libcft, not in the call");
-    return CFT_ERR_INTERNAL;
+    /* Whatever a run wrote and nobody read back goes with it, which is
+     * what cft_buffer_free means and what cft.h says. */
+    HBuf *B = static_cast<HBuf *>(buf);
+    if (!B)
+        return;
+    if (B->dmem) {
+        (void)hipSetDevice(B->D->ordinal);
+        (void)hipFree(B->dmem);
+        (void)hipGetLastError();
+    }
+    delete B;
 }
 
 extern "C" int cfth_buffer_to_device(void *buf)
 {
-    (void)buf;
     g_err.clear();
-    return at_boundary("publishing a buffer", [] { return no_buffers("cft_buffer_to_device"); });
+    if (!buf)
+        return CFT_ERR_INVALID_ARGUMENT;
+    HBuf &B = *static_cast<HBuf *>(buf);
+    return at_boundary("publishing a resident buffer", [&]() -> int {
+        if (!B.dmem)
+            return CFT_OK;        /* no device memory: nothing to stale */
+        /* A buffer a failed run LOST: the caller is supplying its
+         * contents, so what the device holds is dropped and the loss is
+         * cleared. Nothing moves. */
+        if (B.lost) {
+            set_pages(B, 0, B.pg.size(), PG_STALE);
+            B.lost = false;
+            B.lost_why.clear();
+            return CFT_OK;
+        }
+        /* A run's results on the device and never read back: REFUSED,
+         * nothing changed (Logan's rule, 2026-09-26; backend_xrt.cpp says
+         * why neither guess is safe). */
+        if (any_page(B, 0, B.pg.size(), PG_DIRTY)) {
+            set_err("cft_buffer_to_device: a run's results in this buffer are still "
+                    "on the device and were never read back, so whether the host copy "
+                    "was written since cannot be known and publishing could keep the "
+                    "wrong bytes - read it back first (cft_buffer_from_device keeps "
+                    "the run's results), then write and publish; nothing was changed "
+                    "(docs/HOSTAPI.md)");
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+#ifdef CFT_HIP_PLANTS
+        if (B.D->plant & PL_STALE_PUBLISH)
+            return CFT_OK;        /* the plant: the pages left as they were */
+#endif
+        /* The mirror is the truth from here: every page is stale and
+         * goes up at its next binding. Nothing moves. */
+        set_pages(B, 0, B.pg.size(), PG_STALE);
+        return CFT_OK;
+    });
 }
 
 extern "C" int cfth_buffer_from_device(void *buf)
 {
-    (void)buf;
     g_err.clear();
-    return at_boundary("reading a buffer back", [] { return no_buffers("cft_buffer_from_device"); });
+    if (!buf)
+        return CFT_ERR_INVALID_ARGUMENT;
+    HBuf &B = *static_cast<HBuf *>(buf);
+    return at_boundary("reading a resident buffer back", [&]() -> int {
+        static const char who[] = "cft_buffer_from_device";
+        if (B.lost)
+            return refuse_lost(B);
+        /* nothing a run wrote: nothing moves, so a caller who reads back
+         * after every run - the right thing to do - pays for none */
+        if (!B.dmem || !any_page(B, 0, B.pg.size(), PG_DIRTY))
+            return CFT_OK;
+        const int st = enter(*B.D, who);
+        return st != CFT_OK ? st : down_pages(*B.D, B, who, 0, B.pg.size());
+    });
 }
 
 extern "C" int cfth_buffer_will_write(void *buf, size_t off, size_t len)
 {
-    (void)buf;
-    (void)off;
-    (void)len;
     g_err.clear();
-    return at_boundary("preparing a buffer for a host write",
-                       [] { return no_buffers("a host write into a buffer"); });
+    if (!buf)
+        return CFT_ERR_INVALID_ARGUMENT;
+    HBuf &B = *static_cast<HBuf *>(buf);
+    return at_boundary("preparing a resident buffer for a host write", [&]() -> int {
+        static const char who[] = "a host write into a resident buffer";
+        /* refused like a read: its bytes outside the write would still be
+         * nobody's */
+        if (B.lost)
+            return refuse_lost(B);
+        if (!B.dmem)
+            return CFT_OK;
+        size_t lo, hi, p0, p1;
+        clamp(B, off, len, &lo, &hi);
+        page_span(B, lo, hi, &p0, &p1);
+        /* A run's pages over the range come home first, WHOLE: the write
+         * may not cover all of them, and what it does not cover has to be
+         * the run's. Then the range's pages are stale. */
+        if (any_page(B, p0, p1, PG_DIRTY)) {
+            int st = enter(*B.D, who);
+            if (st == CFT_OK)
+                st = down_pages(*B.D, B, who, p0, p1);
+            if (st != CFT_OK)
+                return st;
+        }
+        set_pages(B, p0, p1, PG_STALE);
+        return CFT_OK;
+    });
 }
 
 extern "C" int cfth_buffer_host_wrote(void *buf, size_t off, size_t len)
 {
-    (void)buf;
-    (void)off;
-    (void)len;
+    /* No sentence and no failure: device.c calls this after a call's body,
+     * whose own sentence must stand. */
+    if (!buf)
+        return CFT_ERR_INVALID_ARGUMENT;
+    HBuf &B = *static_cast<HBuf *>(buf);
+    if (!B.dmem)
+        return CFT_OK;
+    size_t lo, hi, p0, p1;
+    clamp(B, off, len, &lo, &hi);
+    page_span(B, lo, hi, &p0, &p1);
+    for (size_t p = p0; p < p1; p++) {
+        /* A page a run left DIRTY under the write: inside the range it is
+         * superseded; reaching past it, the rest of the page is the run's
+         * and comes home around the write (a page is shared by neighbours,
+         * which a window-exact copy never is). If that cannot be done, the
+         * buffer is LOST - outputs that alias, or a failed device. */
+        if (B.pg[p] == PG_DIRTY && !B.lost &&
+            !(lo <= page_lo(B, p) && page_hi(B, p) <= hi) &&
+            !home_outside(B, p, lo, hi)) {
+            B.lost = true;
+            try {
+                B.lost_why = "a run's output still on the device overlapped bytes the "
+                             "library wrote on the host, and the rest of it could not "
+                             "be brought home, so this buffer's contents cannot be "
+                             "vouched for; publish them again with cft_buffer_to_device";
+            } catch (...) {
+            }
+        }
+        B.pg[p] = PG_STALE;
+    }
     return CFT_OK;
 }
 
@@ -1433,23 +2078,30 @@ extern "C" void cfth_buffer_stat(void *buf, int *resident, int *device_authority
                                  uint64_t *resident_binds, uint64_t *staged_binds,
                                  char *why, size_t why_bytes)
 {
-    (void)buf;
-    if (resident) *resident = 0;
-    if (device_authority) *device_authority = 0;
-    if (resident_binds) *resident_binds = 0;
-    if (staged_binds) *staged_binds = 0;
+    if (!buf)
+        return;
+    const HBuf &B = *static_cast<const HBuf *>(buf);
+    const bool dirty = B.dmem && any_page(B, 0, B.pg.size(), PG_DIRTY);
+    if (resident) *resident = B.dmem != nullptr;
+    /* a LOST buffer has no authority anywhere; its `why` says so, first */
+    if (device_authority) *device_authority = !B.lost && dirty;
+    if (resident_binds) *resident_binds = B.resident_binds;
+    if (staged_binds) *staged_binds = B.staged_binds;
     if (why && why_bytes) {
-        std::snprintf(why, why_bytes, "the GPU backend keeps no device buffers in "
-                      "this build: every operand is staged");
+        if (B.lost)
+            std::snprintf(why, why_bytes, "LOST: %s", B.lost_why.c_str());
+        else
+            std::snprintf(why, why_bytes, "%s", B.why.c_str());
     }
 }
+
+/* ---- the compute seams ---------------------------------------------------- */
 
 extern "C" int cfth_run(void *hw, int op, int fmt, int rnd, const void *a,
                         const void *b, const void *c, void *d, size_t n,
                         uint32_t scalar_mask, const cft_bindings *bind,
                         uint32_t *flags, uint32_t *bus)
 {
-    (void)bind;                   /* none bound: CFT_HIP_BUFFERS_RESIDENT 0 */
     g_err.clear();
     if (bus)
         *bus = 0;
@@ -1469,7 +2121,20 @@ extern "C" int cfth_run(void *hw, int op, int fmt, int rnd, const void *a,
             *flags = 0;
             return CFT_OK;
         }
-        st = run_impl(D, op, fmt, rnd, a, b, c, d, n, scalar_mask, &fl);
+        const size_t esz = (size_t)cft_sf_formats[fmt].width / 8;
+        Role R[4];
+        const void *in[3] = {a, b, c};
+        for (int r = 0; r < 3; r++)
+            role_from(R[r], bind, CFT_ROLE_A + r,
+                      in[r] ? (((scalar_mask >> r) & 1u) ? esz : n * esz) : 0, false,
+                      false, false);
+        /* d == a is cft_run's in-place rule: an element is read before
+         * its own is written, by its own thread alone */
+        role_from(R[3], bind, CFT_ROLE_D, n * esz, true, false, true);
+        if ((st = bind_call(D, "cft_run", R, 4)) != CFT_OK)
+            return st;
+        st = run_impl(D, op, fmt, rnd, a, b, c, d, n, scalar_mask, R, &fl);
+        call_end(D, st, R, 4);
         if (st == CFT_OK)
             *flags = fl;
         return st;
@@ -1481,7 +2146,6 @@ extern "C" int cfth_reduce(void *hw, int op, int fmt, int rnd, const void *a,
                            void *partials, const cft_bindings *bind, uint32_t *flags,
                            uint32_t *bus)
 {
-    (void)bind;
     g_err.clear();
     if (bus)
         *bus = 0;
@@ -1507,19 +2171,29 @@ extern "C" int cfth_reduce(void *hw, int op, int fmt, int rnd, const void *a,
         }
         const cft_fmt_desc f = cft_sf_formats[fmt];
         const size_t esz = (size_t)f.width / 8;
+        size_t top = 0;
         for (size_t r = 0; r < nranges; r++) {
             if (hi[r] < lo[r]) {
                 set_err("cft_reduce: a range whose end is before its start reached "
                         "the GPU backend - a defect in libcft, not in the call");
                 return CFT_ERR_INTERNAL;
             }
-            st = reduce_range(D, who, f, op, rnd, (const uint8_t *)a + lo[r] * esz,
-                              hi[r] - lo[r], (uint8_t *)partials + r * esz, &fl);
-            if (st != CFT_OK)
-                return st;
+            if (hi[r] > top)
+                top = hi[r];
         }
-        *flags = fl;
-        return CFT_OK;
+        /* the input's window: as far as the furthest range reads */
+        Role R[1];
+        role_from(R[0], bind, CFT_ROLE_A, top * esz, false, false, false);
+        if ((st = bind_call(D, who, R, 1)) != CFT_OK)
+            return st;
+        for (size_t r = 0; r < nranges && st == CFT_OK; r++)
+            st = reduce_range(D, who, f, op, rnd, (const uint8_t *)a + lo[r] * esz,
+                              R[0].resident ? R[0].dp + lo[r] * esz : nullptr,
+                              hi[r] - lo[r], (uint8_t *)partials + r * esz, &fl);
+        call_end(D, st, R, 1);
+        if (st == CFT_OK)
+            *flags = fl;
+        return st;
     });
 }
 
@@ -1527,7 +2201,6 @@ extern "C" int cfth_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a
                                size_t n, size_t seg, void *d, const cft_bindings *bind,
                                uint32_t *flags, uint32_t *bus)
 {
-    (void)bind;
     g_err.clear();
     if (bus)
         *bus = 0;
@@ -1556,11 +2229,17 @@ extern "C" int cfth_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a
         const uint8_t *src = (const uint8_t *)a;
         uint8_t *dst = (uint8_t *)d;
         if (seg == 1) {
-            /* every segment one leaf: verbatim, no flags */
+            /* every segment one leaf: verbatim, no flags - from the host
+             * mirror, which device.c has brought home */
             std::memmove(dst, src, n * esz);
             *flags = 0;
             return CFT_OK;
         }
+        Role R[1];
+        role_from(R[0], bind, CFT_ROLE_A, n * esz, false, false, false);
+        if ((st = bind_call(D, who, R, 1)) != CFT_OK)
+            return st;
+        const uint8_t *dsrc = R[0].resident ? R[0].dp : nullptr;
         const size_t room = D.stage - 3 * 256 - sizeof(hacc);
         const size_t per_seg = (seg + (seg + 1) / 2) * esz;
         size_t g = per_seg <= room ? room / per_seg : 0;
@@ -1573,23 +2252,22 @@ extern "C" int cfth_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a
         }
 #endif
         if (g) {
-            for (size_t s0 = 0; s0 < nres; s0 += g) {
+            for (size_t s0 = 0; s0 < nres && st == CFT_OK; s0 += g) {
                 const size_t gs = nres - s0 < g ? nres - s0 : g;
-                st = reduce_on_device(D, who, f, op, rnd, src + s0 * seg * esz, seg, gs,
+                st = reduce_on_device(D, who, f, op, rnd, src + s0 * seg * esz,
+                                      dsrc ? dsrc + s0 * seg * esz : nullptr, seg, gs,
                                       dst + s0 * esz, &fl);
-                if (st != CFT_OK)
-                    return st;
             }
         } else {
-            for (size_t s = 0; s < nres; s++) {
-                st = reduce_range(D, who, f, op, rnd, src + s * seg * esz, seg,
+            for (size_t s = 0; s < nres && st == CFT_OK; s++)
+                st = reduce_range(D, who, f, op, rnd, src + s * seg * esz,
+                                  dsrc ? dsrc + s * seg * esz : nullptr, seg,
                                   dst + s * esz, &fl);
-                if (st != CFT_OK)
-                    return st;
-            }
         }
-        *flags = fl;
-        return CFT_OK;
+        call_end(D, st, R, 1);
+        if (st == CFT_OK)
+            *flags = fl;
+        return st;
     });
 }
 
@@ -1601,7 +2279,6 @@ extern "C" int cfth_program_run(void *hw, int fmt, const void *image, size_t ima
 {
     (void)image;                  /* the parsed form runs: io->prog */
     (void)image_bytes;
-    (void)bind;
     g_err.clear();
     return at_boundary("a program run", [&]() -> int {
         Dev &D = *static_cast<Dev *>(hw);
@@ -1614,7 +2291,27 @@ extern "C" int cfth_program_run(void *hw, int fmt, const void *image, size_t ima
                     "loader refuses first - a defect in libcft, not in the call");
             return CFT_ERR_INTERNAL;
         }
-        st = prog_impl(D, fmt, io, max_deposits, a, b, c, deposits, counts, n, &fl, &rep);
+        const size_t esz = (size_t)cft_sf_formats[fmt].width / 8;
+        const size_t md = deposits ? (size_t)max_deposits : 0;
+        const size_t nsi = io && io->scratch_in ? io->n_scratch_in : 0;
+        const size_t nso = io && io->scratch_out ? io->n_scratch_out : 0;
+        const bool masked = io && io->lane_mask;
+        Role R[6];
+        role_from(R[0], bind, CFT_ROLE_A, a ? n * esz : 0, false, false, false);
+        role_from(R[1], bind, CFT_ROLE_B, b ? n * esz : 0, false, false, false);
+        role_from(R[2], bind, CFT_ROLE_C, c ? n * esz : 0, false, false, false);
+        /* the deposits are zero-filled before a lane reads its inputs, so
+         * no input may share them; scratch-out is written after a lane's
+         * last deposit, from its own slots, so an identical input window
+         * may (an integrator's state carried in place) */
+        role_from(R[3], bind, CFT_ROLE_D, n * md * esz, true, masked, false);
+        role_from(R[4], bind, CFT_ROLE_SI, n * nsi * esz, false, false, false);
+        role_from(R[5], bind, CFT_ROLE_SO, n * nso * esz, true, masked, true);
+        if ((st = bind_call(D, "cft_program_run_ex", R, 6)) != CFT_OK)
+            return st;
+        st = prog_impl(D, fmt, io, max_deposits, a, b, c, deposits, counts, n, R, &fl,
+                       &rep);
+        call_end(D, st, R, 6);
         if (st == CFT_OK) {
             if (flags) *flags = fl;
             if (bus) *bus = rep;

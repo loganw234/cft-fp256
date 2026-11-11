@@ -57,9 +57,12 @@
 #  define cftx_clear_error        cfth_clear_error
 /* Whether the GPU backend keeps device copies of a cft_alloc'd buffer,
  * for cft_get_caps's buffers_resident, which says what THIS device does.
- * 0 while cfth_buffer_create declines every buffer, and device.c keeps
- * each as host memory, as the buffer seam below allows. */
-#  define CFT_HIP_BUFFERS_RESIDENT 0
+ * 1: cfth_buffer_create makes the buffer's object, and a call that binds
+ * it gives it one device allocation, a page-at-a-time state, and the
+ * authority rule cft.h states (backend_hip.cpp's head). 0 would be a
+ * build whose create declines every buffer, which device.c then keeps
+ * as host memory, as the buffer seam below allows. */
+#  define CFT_HIP_BUFFERS_RESIDENT 1
 #endif
 
 #ifdef __cplusplus
