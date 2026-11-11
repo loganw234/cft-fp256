@@ -1,0 +1,11 @@
+== run_seq_chipstar.sh 2026-11-10 19:50:13 opencl/pocl device 0 on desktop
+run: routines-fp64.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 4eb03cc3f41f6f7e70ab819ee37aeb1faada48529b4d7da5d63ff3212a5fc3fe; 5859.7 ms; GREEN against ref-fp64.out
+run: routines-fp256.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 5970.8 ms; GREEN against ref-fp256.out
+run: fuzz-fp64.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): 200 cases, 11396 lanes, 218027 lanes x program length, 0 refused; sha256 347c9957013cbfb2bda1c0600f3acf42d702e4b8344c10d5e56ce50e91d348b3; 54.2 ms; GREEN against ref-fuzz-fp64.out
+run: fuzz-fp256.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 94.8 ms; GREEN against ref-fuzz-fp256.out
+run: systems.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 1181.7 ms; GREEN against ref-systems.out
+run: bench.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 180.2 ms; GREEN against ref-bench.out
+refused: fp64 augadd: augmentedAddition (control codes 10 and 11): augmented.c is not in the device copy (CFT_NO_AUGMENTED)
+plant s64-mask: RED, as it must be
+plant s64-konst: RED, as it must be
+== run_seq_chipstar.sh 2026-11-10 19:50:52 rc=0

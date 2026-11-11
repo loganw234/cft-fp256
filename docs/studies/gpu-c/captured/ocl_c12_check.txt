@@ -1,0 +1,14 @@
+== the device copy as it is
+-- bigint.c
+-- softfloat.c
+      4 expected expression
+      3 expected identifier or '('
+      1 program scope variable must reside in constant address space
+      1 extern variable must reside in constant address space
+      1 expected ';' at end of declaration
+      1 1 warning and 10 errors generated.
+== after the table in __constant and half renamed
+      4 initializing 'const __private char *' with an expression of type '__constant char *' changes address space of pointer
+      1 4 errors generated.
+== and the table's name field __constant
+(no lines above = no errors)

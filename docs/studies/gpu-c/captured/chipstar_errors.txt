@@ -1,0 +1,32 @@
+Every error met on the way to the first GREEN, in order, as the tools printed them (trimmed).
+cft-gpu clock 2026-11-10 19:30 to 19:45. Stock clang-22 22.1.8 from apt.llvm.org, chipStar v1.3.0.
+
+1. cmake:  Can't find clang-offload-bundler.   -> apt clang-tools-22 (9.9 MB)
+2. ninja:  clang++: error: hipspv-link command failed with exit code 17
+           RequiresVersion: Cannot fulfill SPIR-V version restriction: SPIR-V version was restricted to
+           at most 1.1 (65792) but a construct from the input requires SPIR-V version 1.2 (66048) or above
+           (the command: llvm-spirv --spirv-max-version=1.1 --spirv-ext=+all)
+   -> llvm-spirv-wrapper.sh: --spirv-max-version=1.1 becomes 1.2 (chipStar's llvm-patches/llvm/
+      0001-0004-spirv-version-and-extensions-llvm22.patch makes the driver do the same)
+3. (not an error I saw; a step taken from chipStar's recipe) chipStar's translator patch
+   llvm-patches/spirv-translator/0002-Pretend-the-SPIR-ver-needed-by-shuffles-is-1.2.patch makes sub-group
+   shuffle capabilities need SPIR-V 1.2 instead of 1.3. git apply failed on the llvm_release_220 tree (line
+   moved), so line 917 of lib/SPIRV/libSPIRV/SPIRVEntry.h was edited by sed: SPIRV_1_3 -> SPIRV_1_2.
+   MEASURED 20:03-20:06: with that line put BACK to SPIRV_1_3 (translator rebuilt), cft_fma.hip builds and
+   conf-fp256 is GREEN, sha256 da932116...: cft_fma uses no sub-group operation, so this one-line patch is
+   NOT needed for it. It stays in the recipe because chipStar's patch README (READ) gives it as the way
+   to warp-level primitives.
+4. ninja:  a CUDA sample (samples/cuda_samples quasirandomGenerator): "requires SPIR-V version 1.6"
+   -> -DCHIP_BUILD_SAMPLES=OFF (the libraries and hipcc do not need the samples)
+5. run:    hipErrorInvalidValue (CL_INVALID_KERNEL_ARGS) in launchImpl; before it, per kernel:
+           "SPIR-V Parser: Parameter type ID 29 not found in type map. This may be caused by unsupported
+            SPIR-V extensions. Skipping parameter."
+   cause:  the SPIR-V declares OpCapability UntypedPointersKHR / OpExtension SPV_KHR_untyped_pointers
+           (LLVM 22's translator, given --spirv-ext=+all)
+   -> the wrapper also turns --spirv-ext=+all into chipStar's list (-all,+SPV_INTEL_function_pointers,
+      +SPV_INTEL_subgroups,+SPV_EXT_shader_atomic_float_add,+SPV_EXT_relaxed_printf_string_address_space),
+      the same patch 0001-0004. No other change to cft_fma.hip or to the device copy.
+6. info:   cft_fma.hip:625: hipDeviceGetLimit(&stack0, hipLimitStackSize): hipErrorInvalidHandle
+           (chipStar: "Invalid Limit value", CHIPBindings.cc hipDeviceGetLimit). Unsupported; harness 'info'
+           only, 'check', 'bench' and cft_seq do not call it.
+Also seen, harmless: -Wmacro-redefined hipStreamLegacy in chipStar's own HIP headers (4 warnings per compile).

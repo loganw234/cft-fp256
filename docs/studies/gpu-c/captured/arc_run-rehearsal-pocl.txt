@@ -1,0 +1,31 @@
+== arc_run.sh 2026-11-10 19:56:40 on desktop, opencl/pocl device 0
+== plants first (each must be RED)
+PLANT flip: RED, as it must be
+    differing by attribute 0/0/0/1/0; sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9; kernel 1376.108 ms, end to end 1354.850 ms: RED
+PLANT rmm-as-rne: RED, as it must be
+    differing by attribute 0/0/0/0/51; sha256 ffe3f2eb93608966eb4c277fdf3114b0a1b29479465131e4e81d0227758a59af; kernel 9059.731 ms, end to end 8779.940 ms: RED
+PLANT drop-flag: RED, as it must be
+    differing by attribute 290/291/290/291/290; sha256 f0ca15e06fcbefb522183f534497e8e9405a35db6529f1f59217e69fe07503d4; kernel 8314.944 ms, end to end 8193.661 ms: RED
+== corpora
+check: corpus/conf-fp32.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp32, 18435 cases (rne 3687 rtz 3687 rdn 3687 rup 3687 rmm 3687); 0 results and 0 flags differ, 0 refus
+check: corpus/conf-fp64.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp64, 18440 cases (rne 3688 rtz 3688 rdn 3688 rup 3688 rmm 3688); 0 results and 0 flags differ, 0 refus
+check: corpus/conf-fp128.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp128, 18545 cases (rne 3709 rtz 3709 rdn 3709 rup 3709 rmm 3709); 0 results and 0 flags differ, 0 ref
+check: corpus/conf-fp256.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 ref
+check: corpus/stream-fp256.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp256, 1000000 cases (rne 200000 rtz 200000 rdn 200000 rup 200000 rmm 200000); 0 results and 0 flags
+== programs (GPU-A part 2; sums of the corpora and references checked first)
+plant seq-s64-mask: RED, as it must be
+plant seq-s64-konst: RED, as it must be
+== rates (fp256 FMA, 1M lanes, 10 reps; the runner's bench.bin above)
+== arc_run.sh 2026-11-10 19:57:39 rc=0  (ALL AS EXPECTED)
+check: corpus/conf-fp32.bin 18435 cases, sha256 dd3d83be8ba2477c.. 
+check: corpus/conf-fp64.bin 18440 cases, sha256 3a8a9b2cb98a5be9.. 
+check: corpus/conf-fp128.bin 18545 cases, sha256 fcc92da36e24b19c.. 
+check: corpus/conf-fp256.bin 18360 cases, sha256 da932116555557be.. 
+check: corpus/stream-fp256.bin 1000000 cases, sha256 9c7f2f6e9130003b.. 
+run: routines-fp64.bin 130 cases, sha256 4eb03cc3f41f6f7e.. ; 7738.2 ms; GREEN against ref-fp64.out
+run: routines-fp256.bin 130 cases, sha256 dd15912031cc87c4.. ; 6802.3 ms; GREEN against ref-fp256.out
+run: fuzz-fp64.bin 200 cases, sha256 347c9957013cbfb2.. ; 79.0 ms; GREEN against ref-fuzz-fp64.out
+run: fuzz-fp256.bin 200 cases, sha256 9dec942cea7b1c0e.. ; 107.7 ms; GREEN against ref-fuzz-fp256.out
+run: systems.bin 8 cases, sha256 581b9c30f1b0fadb.. ; 1236.5 ms; GREEN against ref-systems.out
+run: bench.bin 6 cases, sha256 6cba53d3cb34e5ae.. ; 170.7 ms; GREEN against ref-bench.out
+bench: corpus/stream-fp256.bin fp256, 1000000 lanes, block 128, 10 reps; kernel ms min 56.028 median 61.797 max 71.251; end to end ms min 68.891 median 80.568 max 101.093; 1.618e+07 FMA/s kernel, 1.241e+07 FMA/s end to end (medians); 61.8 ns a lane
