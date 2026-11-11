@@ -136,7 +136,8 @@ captured in gpu-c/captured/ (`run_chipstar-fp-conf.txt`, `run_seq_chipstar.txt`,
 | underflow flag dropped (build flag) | RED: 1452 flags differ | a wrong flag is seen |
 | sequencer: mask and constant plants (cft_seq) | both RED | the program runner's check sees them |
 
-Then, all GREEN, and each output file hashed again by hashlib in Python (`gen_corpus.py verify`):
+Then, all GREEN, and each output file hashed again by hashlib in Python (`gen_corpus.py verify`; its lines are
+kept for the streams only, in stream_bench_info.txt, to hold the captures short):
 
 | corpus | cases | output sha256 (first 16 hex) |
 |---|---|---|
