@@ -1,0 +1,33 @@
+; A phase follower, with its variational equations: an oscillator (c, s),
+; d/dt c = -(om * s) and d/dt s = om * c, whose angle atan2(s, c) a follower
+; phi chases, d/dt phi = k * (atan2(s, c) - phi), beside two states that
+; each hold one of the unary inverse functions, d/dt q = asin(q / 2) -
+; atan(q) and d/dt v = acos(v / 2) - v (written q * 0.5 and v * 0.5: a
+; product, so that the primal step holds no division), with one tangent
+; vector stepped beside the state by the same program. All four of the math
+; library's inverse routines are in its step - atan2 of two state
+; components, both differentiated, and atan, asin and acos each of a state
+; component - and their rules in the tangent (M4's build; the study's
+; section 7, docs/studies/M4-invtrig.md): the quotients
+; da / fma(a, a, 1), da / sqrt(fma(-a, a, 1)), da / (-sqrt(fma(-a, a, 1)))
+; and fma(b, da, -(a * db)) / fma(b, b, a * a), none of which writes a
+; routine node, so each costs a vector one run-time division. It is
+; compiled round rdn, every rounded operation toward negative infinity,
+; where acos's rule, whose negation is taken of the root before the
+; quotient rounds, is another value as well as other bytes than the
+; negation taken after, and atan2's likewise. The run keeps the oscillator
+; in the half plane c > 0 (a box of lanes, and om T far below pi), so that
+; atan2's primal, which jumps on the negative axis, does not, and q and v
+; inside [-2, 2], asin's and acos's domain.
+system phasefollower
+format fp64
+round  rdn
+state  c, s, phi, q, v
+tangent w
+param  om = 1/2, k = 1/4
+d/dt c = -(om * s)
+d/dt s = om * c
+d/dt phi = k * (atan2(s, c) - phi)
+d/dt q = asin(q * 0.5) - atan(q)
+d/dt v = acos(v * 0.5) - v
+step   rk4, h = 1/64

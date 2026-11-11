@@ -1686,7 +1686,7 @@ def test_what_math_library_refused_now_compiles(case):
     # sw and refused on one target; the others show every target
     heavy = len(ops) > 1
     c = cftc.compile_text(text, 3, source="src.cftl")
-    assert c.version == cftc.VERSION == 7
+    assert c.version == cftc.VERSION == 8
     for t in () if heavy else REV8 + ("sw:4096",):
         ct = cftc.compile_text(text, 3, target=t, source="src.cftl")
         assert (ct.image, ct.bank) == (c.image, c.bank), t

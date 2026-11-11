@@ -1,0 +1,154 @@
+; phasefollower - the canonical form, regenerated from the step graph
+; sha256 9eefb42e95c435e3e47e1eb2a2381ca09416a0f67b504610525dab1a7b8999c3
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rdn (roundTowardNegative), in binary64.
+;
+; operations: the equations 13 (3 sub, 5 mul, 1 atan, 1 asin, 1 acos, 1 atan2, 1 neg);
+;             a step 87 (30 fma, 5 add, 12 sub, 20 mul, 4 atan, 4 asin, 4 acos, 4 atan2, 4 neg);
+;             each tangent vector's equations 30 (5 fma, 3 sub, 11 mul, 4 div, 2 sqrt, 5 neg)
+;             and its step 155 (50 fma, 5 add, 12 sub, 44 mul, 16 div, 8 sqrt, 20 neg)
+;
+; constants, exact value -> binary64 under rdn:
+;   h    0.015625   0x3f90000000000000  0x1p-6                exact
+;   h/2  0.0078125  0x3f80000000000000  0x1p-7                exact
+;   h/6  1/384      0x3f65555555555555  0x1.5555555555555p-9  inexact, relative error -5.5511e-17
+;   0.5  0.5        0x3fe0000000000000  0x1p-1                exact
+;   1    1          0x3ff0000000000000  0x1p+0                exact
+;   2    2          0x4000000000000000  0x1p+1                exact
+; h-scaled, halved by a step-halving bank: h, h/2, h/6
+
+system phasefollower
+format fp64
+round  rdn
+state  c, s, phi, q, v
+tangent w
+param  om = 0.5   ; 0x3fe0000000000000  0x1p-1  exact
+param  k = 0.25   ; 0x3fd0000000000000  0x1p-2  exact
+
+d/dt c = -(om * s)
+d/dt s = om * c
+d/dt phi = k * (atan2(s, c) - phi)
+d/dt q = asin(q * 0.5) - atan(q)
+d/dt v = acos(v * 0.5) - v
+
+d/dt w.c = -(om * w.s)
+d/dt w.s = om * w.c
+d/dt w.phi = k * ((fma(c, w.s, -(s * w.c)) / fma(c, c, s * s)) - w.phi)
+d/dt w.q = (w.q * 0.5 / sqrt(fma(-(q * 0.5), q * 0.5, 1))) - (w.q / fma(q, q, 1))
+d/dt w.v = (w.v * 0.5 / (-sqrt(fma(-(v * 0.5), v * 0.5, 1)))) - w.v
+
+step rk4, h = 0.015625
+expansion
+  let k1.c = -(om * s)
+  let k1.s = om * c
+  let k1.phi = k * (atan2(s, c) - phi)
+  let k1.q = asin(q * 0.5) - atan(q)
+  let k1.v = acos(v * 0.5) - v
+  let Y2.c = fma(h/2, k1.c, c)
+  let Y2.s = fma(h/2, k1.s, s)
+  let Y2.phi = fma(h/2, k1.phi, phi)
+  let Y2.q = fma(h/2, k1.q, q)
+  let Y2.v = fma(h/2, k1.v, v)
+  let k2.c = -(om * Y2.s)
+  let k2.s = om * Y2.c
+  let k2.phi = k * (atan2(Y2.s, Y2.c) - Y2.phi)
+  let k2.q = asin(Y2.q * 0.5) - atan(Y2.q)
+  let k2.v = acos(Y2.v * 0.5) - Y2.v
+  let Y3.c = fma(h/2, k2.c, c)
+  let Y3.s = fma(h/2, k2.s, s)
+  let Y3.phi = fma(h/2, k2.phi, phi)
+  let Y3.q = fma(h/2, k2.q, q)
+  let Y3.v = fma(h/2, k2.v, v)
+  let k3.c = -(om * Y3.s)
+  let k3.s = om * Y3.c
+  let k3.phi = k * (atan2(Y3.s, Y3.c) - Y3.phi)
+  let k3.q = asin(Y3.q * 0.5) - atan(Y3.q)
+  let k3.v = acos(Y3.v * 0.5) - Y3.v
+  let Y4.c = fma(h, k3.c, c)
+  let Y4.s = fma(h, k3.s, s)
+  let Y4.phi = fma(h, k3.phi, phi)
+  let Y4.q = fma(h, k3.q, q)
+  let Y4.v = fma(h, k3.v, v)
+  let k4.c = -(om * Y4.s)
+  let k4.s = om * Y4.c
+  let k4.phi = k * (atan2(Y4.s, Y4.c) - Y4.phi)
+  let k4.q = asin(Y4.q * 0.5) - atan(Y4.q)
+  let k4.v = acos(Y4.v * 0.5) - Y4.v
+  let S2.c = fma(2, k2.c, k1.c)
+  let S2.s = fma(2, k2.s, k1.s)
+  let S2.phi = fma(2, k2.phi, k1.phi)
+  let S2.q = fma(2, k2.q, k1.q)
+  let S2.v = fma(2, k2.v, k1.v)
+  let S3.c = fma(2, k3.c, S2.c)
+  let S3.s = fma(2, k3.s, S2.s)
+  let S3.phi = fma(2, k3.phi, S2.phi)
+  let S3.q = fma(2, k3.q, S2.q)
+  let S3.v = fma(2, k3.v, S2.v)
+  let S4.c = S3.c + k4.c
+  let S4.s = S3.s + k4.s
+  let S4.phi = S3.phi + k4.phi
+  let S4.q = S3.q + k4.q
+  let S4.v = S3.v + k4.v
+  next c = fma(h/6, S4.c, c)
+  next s = fma(h/6, S4.s, s)
+  next phi = fma(h/6, S4.phi, phi)
+  next q = fma(h/6, S4.q, q)
+  next v = fma(h/6, S4.v, v)
+  let w.k1.c = -(om * w.s)
+  let w.k1.s = om * w.c
+  let w.k1.phi = k * ((fma(c, w.s, -(s * w.c)) / fma(c, c, s * s)) - w.phi)
+  let w.k1.q = (w.q * 0.5 / sqrt(fma(-(q * 0.5), q * 0.5, 1))) - (w.q / fma(q, q, 1))
+  let w.k1.v = (w.v * 0.5 / (-sqrt(fma(-(v * 0.5), v * 0.5, 1)))) - w.v
+  let w.Y2.c = fma(h/2, w.k1.c, w.c)
+  let w.Y2.s = fma(h/2, w.k1.s, w.s)
+  let w.Y2.phi = fma(h/2, w.k1.phi, w.phi)
+  let w.Y2.q = fma(h/2, w.k1.q, w.q)
+  let w.Y2.v = fma(h/2, w.k1.v, w.v)
+  let w.k2.c = -(om * w.Y2.s)
+  let w.k2.s = om * w.Y2.c
+  let w.k2.phi = k * ((fma(Y2.c, w.Y2.s, -(Y2.s * w.Y2.c)) / fma(Y2.c, Y2.c, Y2.s * Y2.s)) - w.Y2.phi)
+  let w.k2.q = (w.Y2.q * 0.5 / sqrt(fma(-(Y2.q * 0.5), Y2.q * 0.5, 1))) - (w.Y2.q / fma(Y2.q, Y2.q, 1))
+  let w.k2.v = (w.Y2.v * 0.5 / (-sqrt(fma(-(Y2.v * 0.5), Y2.v * 0.5, 1)))) - w.Y2.v
+  let w.Y3.c = fma(h/2, w.k2.c, w.c)
+  let w.Y3.s = fma(h/2, w.k2.s, w.s)
+  let w.Y3.phi = fma(h/2, w.k2.phi, w.phi)
+  let w.Y3.q = fma(h/2, w.k2.q, w.q)
+  let w.Y3.v = fma(h/2, w.k2.v, w.v)
+  let w.k3.c = -(om * w.Y3.s)
+  let w.k3.s = om * w.Y3.c
+  let w.k3.phi = k * ((fma(Y3.c, w.Y3.s, -(Y3.s * w.Y3.c)) / fma(Y3.c, Y3.c, Y3.s * Y3.s)) - w.Y3.phi)
+  let w.k3.q = (w.Y3.q * 0.5 / sqrt(fma(-(Y3.q * 0.5), Y3.q * 0.5, 1))) - (w.Y3.q / fma(Y3.q, Y3.q, 1))
+  let w.k3.v = (w.Y3.v * 0.5 / (-sqrt(fma(-(Y3.v * 0.5), Y3.v * 0.5, 1)))) - w.Y3.v
+  let w.Y4.c = fma(h, w.k3.c, w.c)
+  let w.Y4.s = fma(h, w.k3.s, w.s)
+  let w.Y4.phi = fma(h, w.k3.phi, w.phi)
+  let w.Y4.q = fma(h, w.k3.q, w.q)
+  let w.Y4.v = fma(h, w.k3.v, w.v)
+  let w.k4.c = -(om * w.Y4.s)
+  let w.k4.s = om * w.Y4.c
+  let w.k4.phi = k * ((fma(Y4.c, w.Y4.s, -(Y4.s * w.Y4.c)) / fma(Y4.c, Y4.c, Y4.s * Y4.s)) - w.Y4.phi)
+  let w.k4.q = (w.Y4.q * 0.5 / sqrt(fma(-(Y4.q * 0.5), Y4.q * 0.5, 1))) - (w.Y4.q / fma(Y4.q, Y4.q, 1))
+  let w.k4.v = (w.Y4.v * 0.5 / (-sqrt(fma(-(Y4.v * 0.5), Y4.v * 0.5, 1)))) - w.Y4.v
+  let w.S2.c = fma(2, w.k2.c, w.k1.c)
+  let w.S2.s = fma(2, w.k2.s, w.k1.s)
+  let w.S2.phi = fma(2, w.k2.phi, w.k1.phi)
+  let w.S2.q = fma(2, w.k2.q, w.k1.q)
+  let w.S2.v = fma(2, w.k2.v, w.k1.v)
+  let w.S3.c = fma(2, w.k3.c, w.S2.c)
+  let w.S3.s = fma(2, w.k3.s, w.S2.s)
+  let w.S3.phi = fma(2, w.k3.phi, w.S2.phi)
+  let w.S3.q = fma(2, w.k3.q, w.S2.q)
+  let w.S3.v = fma(2, w.k3.v, w.S2.v)
+  let w.S4.c = w.S3.c + w.k4.c
+  let w.S4.s = w.S3.s + w.k4.s
+  let w.S4.phi = w.S3.phi + w.k4.phi
+  let w.S4.q = w.S3.q + w.k4.q
+  let w.S4.v = w.S3.v + w.k4.v
+  next w.c = fma(h/6, w.S4.c, w.c)
+  next w.s = fma(h/6, w.S4.s, w.s)
+  next w.phi = fma(h/6, w.S4.phi, w.phi)
+  next w.q = fma(h/6, w.S4.q, w.q)
+  next w.v = fma(h/6, w.S4.v, w.v)
+end

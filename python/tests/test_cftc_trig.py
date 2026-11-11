@@ -619,7 +619,7 @@ def test_each_of_the_three_compiles_and_runs_as_lang_run_at_every_attribute(
     """sin(x), cos(x) and tan(x) at the format under all five attributes,
     two steps: cftc.compile_text, the image on seq.py against lang.run lane
     by lane under the marked-lane rule (held_by_lang_run). The routine is
-    one call, the image says version 7 and needs FLAG_CONTROL; under rne,
+    one call, the image says version 8 and needs FLAG_CONTROL; under rne,
     the other targets that publish it compile the same image and bank
     (revision 8's three, and sw:4096), and the four that do not refuse it
     `target-feature`, naming the bit and the routine. The marked lanes of
@@ -635,8 +635,8 @@ def test_each_of_the_three_compiles_and_runs_as_lang_run_at_every_attribute(
     for rnd in sf.RND_MODES:
         text = _one(fn, fmt_name, RND_NAMES[rnd])
         c = cftc.compile_text(text, 2, source="t.cftl")
-        assert c.version == cftc.VERSION == 7
-        assert c.manifest["compiler"] == {"name": "cftc", "version": 7}
+        assert c.version == cftc.VERSION == 8
+        assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
         assert c.manifest["routines"]["calls"] == {fn: 1}
         assert "FLAG_CONTROL" in c.features
         assert c.accepted_by == ["sw", *REV8]
@@ -1065,7 +1065,7 @@ def test_the_two_sources_are_one_system_at_two_formats():
 def test_the_committed_references_are_what_the_compiler_writes(name):
     """Eight files each, byte for byte what cftc writes for the committed
     source at 10 steps (tangent_check.py --write made them), the manifest
-    saying version 7."""
+    saying version 8."""
     c = cftc.compile_file(SYSTEMS / f"{name}.cftl", 10,
                           source=f"programs/systems/{name}.cftl")
     files = c.files()
@@ -1073,7 +1073,7 @@ def test_the_committed_references_are_what_the_compiler_writes(name):
     for fname, data in files.items():
         assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
             fname
-    assert c.manifest["compiler"] == {"name": "cftc", "version": 7}
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
     assert c.accepted_by == ["sw", *REV8]
     base, fmt = name.rsplit("-", 1)
     assert set(_calls(c)) == M2_CALLS[base.replace("-tangent", "")], \

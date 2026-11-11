@@ -54,16 +54,20 @@ lang_check.py, whose helpers this reuses), with tangents:
      run, a half-step run on the halved bank, a step-halving estimate) -
      Kepler's, whose image holds routines, among them (C4), the three
      holding the math library's six since M1's build, item 4
-     (Lotka-Volterra, the diodes, the culture), and the two holding sin,
+     (Lotka-Volterra, the diodes, the culture), the two holding sin,
      cos and tan since M2's build (the pendulum at round rne, the attitude
-     of a rigid body at round rdn); the golden reader and audit and
+     of a rigid body at round rdn), and the one holding atan, asin, acos
+     and atan2 since M4's build (the phase follower at round rdn, whose
+     lanes keep the oscillator in the half plane c > 0, so that atan2's
+     primal never meets its jump, and q and v inside [-2, 2], asin's and
+     acos's domain); the golden reader and audit and
      cft-audit accept each. A segment that marks a lane (STATUS[6]) fails
      here by name: version 1 holds the machine's guess, STATUS[6] on the
      segment; cft-segrun's version-2 writer, which this leg does not use,
      refuses a marked lane `replay-missing` without a replay image and
      `replay-undecided` with one that marks it too - so a certificate stays
      what the machine ran, and the replay of M1's build, item 5 is the
-     stages' own comparisons' (leg N below), never this leg's. The five
+     stages' own comparisons' (leg N below), never this leg's. The six
      references holding the math library's routines are skipped by name on
      a host without mpmath, which builds them
   H  determinism: two processes under two PYTHONHASHSEEDs; the committed
@@ -78,8 +82,9 @@ lang_check.py, whose helpers this reuses), with tangents:
   J  plants: three wrong derivations, red on D and on the exponent; the
      same rule rounded otherwise, green on D and red on the committed
      bytes - every committed graph holding a product of two tangent-
-     carrying operands, and only those (Lotka-Volterra's, the diodes' and
-     the pendulum's multiply a state value only by a param); three in a
+     carrying operands, and only those (Lotka-Volterra's, the diodes', the
+     pendulum's and the phase follower's multiply a state value only by a
+     param, as its atan2 and the unary three are of one); three in a
      copy of the compiler, each stopped by its internal check and, with
      that off, red on seq.py
   K  coverage: every operation the rules write, every activity pattern
@@ -219,21 +224,36 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
          # in the step and in the tangent), at round rdn, where cos's rule
          # rounded otherwise rounds to another value (its bytes move under
          # any attribute; its output rarely shows the value)
-         "pendulum-rk4-tangent": 10, "attitude-rk4-tangent": 10}
-# The references holding the math library's routines, the six and sin, cos
-# and tan: compiled only where mpmath imports, since the routines' generator
-# derives their constants through it (a leg that compiles them skips them by
-# name elsewhere), and run on lanes whose boxes keep the logarithms in their
-# domains and the angles away from tan's poles; leg G's lanes mark none, and
-# the leg fails by name a segment that marks one
+         "pendulum-rk4-tangent": 10, "attitude-rk4-tangent": 10,
+         # atan, asin, acos and atan2 and their rules (M4's build): the
+         # phase follower, atan2 of two state components and each of the
+         # unary three of one, at round rdn, where acos's and atan2's rules
+         # rounded otherwise are other bytes (and other values)
+         "phasefollower-rk4-tangent": 10}
+# The references holding the math library's routines, the six, sin, cos and
+# tan, and atan, asin, acos and atan2: compiled only where mpmath imports,
+# since the routines' generator derives their constants through it (a leg
+# that compiles them skips them by name elsewhere), and run on lanes whose
+# boxes keep the logarithms in their domains, the angles away from tan's
+# poles and the follower's oscillator off atan2's jump; leg G's lanes mark
+# none, and the leg fails by name a segment that marks one
 MATH_TREFS = ("lotkavolterra-rk4-tangent", "diode-rk4-tangent",
               "culture-rk4-tangent", "pendulum-rk4-tangent",
-              "attitude-rk4-tangent")
+              "attitude-rk4-tangent", "phasefollower-rk4-tangent")
 MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
             "diode-rk4": [(0, 4), (0, 4)],
             "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)],
             "pendulum-rk4": [(-1, 1), (-1, 1)],
-            "attitude-rk4": [(-1, 1), (-1, 1)]}
+            "attitude-rk4": [(-1, 1), (-1, 1)],
+            # the phase follower: c in [1/2, 1] and s in [-1/2, 1/2] keep
+            # the angle atan2(s, c) inside (-pi/2, pi/2), far from atan2's
+            # jump on the negative axis, and q and v keep asin(q/2) and
+            # acos(v/2) inside their domain; none of the lanes' boxes is
+            # a structured centre (the lanes mark none: leg G fails a
+            # segment that marks one)
+            "phasefollower-rk4": [(Fraction(1, 2), 1),
+                                  (-Fraction(1, 2), Fraction(1, 2)),
+                                  (-1, 1), (-1, 1), (-1, 1)]}
 # Lorenz-63's largest Lyapunov exponent at sigma 10, rho 28, beta 8/3, as
 # the round's brief gives it (the figure commonly quoted, to four places)
 LITERATURE = Fraction(9056, 10000)
@@ -1624,7 +1644,7 @@ def leg_plants(rng, segrun_path, work):
                 # tangent, so it moves exactly the committed graphs holding
                 # such a product: every one until M1's build, item 4, whose
                 # Lotka-Volterra and diode multiply a state value only by a
-                # param, as the pendulum (M2's build) does
+                # param, as the pendulum (M2's build) and the phase follower (M4's) do
                 reach = sorted(n for n in committed if products_of_two_tangents(
                     original_graphs[n]))
                 check(bad_n == 0 and reach and sorted(moved) == reach,

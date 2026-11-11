@@ -82,6 +82,25 @@ generated sources without sin, cos or tan (256 images, 41 of them
 looped, only that line moving, and 74 refusals, identical). The pack's
 21 sources were not compiled at both trees, and for them, as for any
 other source outside those sets, it is believed, not shown (2026-11-02).
+8 is the math library's atan, asin, acos and atan2 (M4's build, 2026-11-11;
+the language at 1.3): a source that names any of them - at run time, or
+folded where its operands are the constants atan(0), asin(0), acos(1) and
+atan2(0, c) for c >= 0 - which 7 refused, compiles, each run-time call an
+inlined routine, mathlib.py's fragment; atan2 is the second routine of two
+inputs, y then x, after division. For a source 7 compiled, 8 writes the
+same images, banks and text files as 7, and its manifests say version 8;
+nothing else in them moved (a manifest's routines block carries the four's
+own sentence only where its step holds one of the four). That is what
+parcel M4C measured, at both trees (the base 21b98aec's and its tip, the
+language's 1.3 merged): the 51 committed .cftl files outside the
+hard-workload pack (153 compiles on sw, u50-rev8 and u50-rev7 at 3 steps:
+122 images, only each manifest's version line moving, and 31 refusals,
+identical) and 330 compiles of 110 generated sources without the four
+(226 images, 20 of them on sw looped, only that line moving, and 104
+refusals, identical; the generated sources are tools of the parcel's
+scratch, not committed). The pack's 21 sources were not compiled at both
+trees, and for them, as for any other source outside those sets, it is
+believed, not shown (2026-11-11).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -274,7 +293,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 7               # the output version: the module docstring, outputs.py
+VERSION = 8               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
