@@ -1,0 +1,84 @@
+# Runbook: the Arc on amd-arc-box (for the lead; written 2026-11-10, nothing here was run on the box)
+
+Goal: GPU-A's cft_fma.hip and cft_seq.hip, unchanged, on an Intel Arc GPU through chipStar and Intel's
+OpenCL runtime, and the fp256 conformance hash
+`da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9`. The same script, `arc_run.sh`, passed on
+this desktop's CPU through PoCL (captured/arc_run-rehearsal-pocl.txt), so what is untested on the box is only
+Intel's runtime and the card.
+
+## 0. Which card, and the hardware question (my recommendation)
+
+- **Fit the A750, not the B580.** READ (by me, and by VGPU-C, 2026-11-10) - https://dgpu-docs.intel.com/overview/supported-hardware/i915-driver-gpus.html:
+  the A750 (56A1) on the in-kernel i915 driver, initial "Kernel 6.0", full "Ubuntu 24.04+ (6.2)"; .../xe-driver-gpus.html: the B580
+  (E20B) on the xe driver, initial "Kernel 6.11", full "Ubuntu 24.04+ (6.12)". The pages call these guidance only: vendor
+  kernels may include backported support. READ (docs/BENCHMARKS.md:67,
+  a record of 2026-09-08, not re-checked): the box ran kernel 6.8.0-139. A B580 would need a newer kernel, and
+  the U50's XRT 2.19 modules are built against the running kernel: do not change it.
+- The swap needs the box powered down. The U50's nightly runs 18:00 to 07:45: do it in the day, and check the
+  U50 afterwards (`xbutil examine`). Whether a power cycle is acceptable is Logan's call.
+- Check first, changing nothing: `uname -r`; `lspci -nn | grep -i -E "vga|display|3d"`;
+  `lsmod | grep -E "^(i915|xe)"`; `ls -l /dev/dri`; `id` (the user needs `render` or `video`);
+  `ls /etc/OpenCL/vendors`.
+
+## 1. Install list for the box
+
+**Default: nothing system-wide.** Userspace only, in the home directory, from Canonical's archive (the box is
+Ubuntu 24.04). Sizes MEASURED on the desktop with `apt-get download`, 2026-11-10:
+
+| file | version | bytes |
+|---|---|---|
+| intel-opencl-icd | 23.43.27642.40-1ubuntu3 | 2236674 |
+| libigc1 | 1.0.15468.25-2ubuntu0.1 | 10783486 |
+| libigdfcl1 | 1.0.15468.25-2ubuntu0.1 | 94434 |
+| libigdgmm12 | 22.3.17+ds1-1ubuntu1 | 145046 |
+| libze-intel-gpu1 (optional: Level Zero; chipStar's L0 backend is not built here) | 23.43.27642.40-1ubuntu3 | 2332024 |
+
+No root, no dpkg database change, no ICD in /etc, XRT untouched:
+```
+mkdir -p ~/gpuc-neo/debs ~/gpuc-neo/root ~/gpuc-neo/vendors && cd ~/gpuc-neo/debs
+apt-get download intel-opencl-icd libigc1 libigdfcl1 libigdgmm12     # needs apt lists, no root
+sha256sum *.deb                      # compare with the ledger's sums (5b95f0d6.., 5727c98f.., 1b17e072.., ede68478..)
+for d in *.deb; do dpkg -x $d ../root; done
+echo ~/gpuc-neo/root/usr/lib/x86_64-linux-gnu/intel-opencl/libigdrcl.so > ~/gpuc-neo/vendors/intel.icd
+export OCL_ICD_VENDORS=~/gpuc-neo/vendors LD_LIBRARY_PATH=~/gpuc-neo/root/usr/lib/x86_64-linux-gnu
+clinfo -l        # must list the Arc. clinfo is optional and not in the bundle: if absent, skip it (arc_run.sh runs it only if
+                 # present, `command -v clinfo`); installing it (apt install clinfo) would be a system change, so it is not part of the default path
+```
+On the desktop the extraction was run: the ICD loads and its libraries resolve; with no Intel GPU clinfo shows
+0 platforms, as it must. Not run: any of it on an Intel GPU.
+
+**Fallbacks, each a decision for Logan:**
+(a) the same packages system-wide, `sudo apt install intel-opencl-icd` (adds /etc/OpenCL/vendors/intel.icd, about
+15 MB, Canonical's archive only). (b) if IGC 1.0.15468 (December 2023) rejects the SPIR-V, a newer runtime:
+READ (github.com/intel/compute-runtime/releases, 2026-11-10) release 26.40.40196.8 of 3 Nov lists Alchemist and
+Battlemage as Production, OpenCL 3.0, Level Zero 1.18; its .deb files plus the IGC release it names, checked
+against the release's `ww40.sum`, extracted the same way (not read: the exact file list and sizes). (c) Intel's
+graphics PPA, which dgpu-docs names (its page was not readable by my tool). None touches the kernel, XRT or Python.
+
+## 2. The bundle (built on the desktop, 127 MB)
+
+In cft-gpu: `bash docs/studies/gpu-c/make_bundle.sh /root/gpu-c/arc-bundle.tar.gz /root/gpu-c/corp /root/gpu-c/progs`
+(corpora from gen_corpus.py conformance and stream, programs from gen_programs.py and build_seq.sh ref, as in the
+study's section 4). It holds cft_fma and cft_seq built by chipStar (SPIR-V inside), libCHIP.so (26 MB; needs only
+libOpenCL, libstdc++, libc), the planted builds and corpora, `arc_run.sh` and SHA256SUMS. The box needs no
+compiler, LLVM or chipStar. The lead copies it to the box's home, checks `sha256sum` against make_bundle.sh's
+printed value, then `tar xzf arc-bundle.tar.gz && cd b`.
+
+## 3. Run (daytime, the U50 idle)
+```
+CHIP_BE=opencl CHIP_DEVICE_TYPE=gpu bash arc_run.sh 0 2>&1 | tee arc-$(date +%F).txt
+```
+Prints the three plants first (flip, rmm-as-rne, drop-flag; each must say RED), then conf-fp32/64/128/256 and
+stream-fp256 with their output hashes (conf-fp256 da932116..., stream-fp256 9c7f2f6e...), the program corpora
+against GPU-A's sums, the two sequencer plants, and the fp256 FMA rate (median of 10, 1M lanes). Last line:
+`ALL AS EXPECTED` or `SOMETHING DIFFERS`. The first launch JITs the SPIR-V (7 to 9 s on PoCL). If clinfo shows
+two platforms, OCL_ICD_VENDORS is not taking effect.
+
+## 4. What a failure would mean
+- A build or launch error naming SPIR-V or a kernel argument: the runtime's IGC is too old (fallback b), not a libcft fault.
+- RED on a conformance corpus with the plants RED too: a real difference. Keep out/*.out. That is the finding.
+- All corpora GREEN but a plant GREEN: the check is blind there; stop.
+- A hang or out-of-resources at launch: per-lane private memory (about 4.5 KB) or block size 128; report the message.
+
+## 5. Remove everything
+`rm -rf ~/gpuc-neo ~/b ~/arc-bundle.tar.gz ~/.cache/chipStar`. Nothing else changed on the box (default path).

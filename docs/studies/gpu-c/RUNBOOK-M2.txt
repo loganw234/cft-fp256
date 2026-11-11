@@ -1,0 +1,34 @@
+# Runbook: the M2 Pro MacBook (for when Logan makes it available; written 2026-11-10, not run, no Mac reached)
+
+No route to the Mac's GPU is concrete yet, so this is a probe set that decides which route to build. Each step is
+read-only unless it says install. Record every output.
+
+## A. Facts, 10 minutes, one small install
+1. `sw_vers; uname -m; sysctl -n machdep.cpu.brand_string` (KosmicKrisp needs macOS 26 or later: READ, Mesa docs).
+2. `xcode-select -p; xcrun --find metal; xcrun metal --version` (BELIEVED: the Metal compiler comes with Xcode, not
+   with the command-line tools alone).
+3. OpenCL: `brew install clinfo`, then `clinfo`: device name, OpenCL version (BELIEVED 1.2), cl_khr_int64 extensions,
+   max work-group size, private memory. READ: Apple deprecated OpenCL in macOS 10.14; a forum report says it still
+   runs on macOS 26.5 (anecdotal).
+4. Vulkan, if the LunarG SDK is already there: `vulkaninfo --summary`, look at shaderInt64.
+
+## B. The device copy as Metal source, compile only (Xcode; minutes once the edit exists)
+The copy is not MSL as it stands: MSL wants an address space on every pointer parameter (thread, device,
+constant) (BELIEVED). MEASURED on the desktop: 65 function definitions, 82 lines with a pointer parameter, no
+recursion, no function pointer, no goto, no 128-bit integer. Needed: a scripted edit (call it E2, beside
+devcopy.py's E1) putting `thread` on the private pointers, a `device` variant of the load and store functions and
+`constant` on the format table. Not written. Then `xcrun metal -std=metal3.1 -c -o /dev/null shim.metal`. Expected:
+it compiles with `ulong` for uint64_t. The risk to bit exactness is only in that edit; the corpora would say.
+
+## C. chipStar on the Mac as a CPU leg (one source on the arm64 CPU, no Metal; install; 2 to 4 hours, mostly LLVM)
+READ (chipStar docs/MacOS.md): at v1.3.0 the page says "LLVM/Clang (18, 19, or 20) with patches", tested at LLVM 19.0, built from source
+from CHIP-SPV's forks (llvm-project branch `chipStar-llvm-19`; PoCL branch `macos-chipstar`), Homebrew packages, PoCL
+built with `-DENABLE_SPIR=ON`, `CHIP_DEVICE_TYPE=pocl`. (The `main` branch's page says "20, 21, or 22", with 22 in its example; use the page of the tag you check out.) Then from this repository
+`docs/studies/gpu-c/build_chipstar.sh` and `run_chipstar.sh` (the corpora and plants). Expected: the desktop's hashes
+(da932116...). It proves the one source on arm64, not Metal. The time is an ESTIMATE; nothing like it was run here.
+
+## D. The Metal GPU through Vulkan (probe only)
+READ (chipStar README): a native Vulkan backend exists, experimental, LLVM 24 or later, Vulkan 1.3, libclc for
+spirv64-unknown-vulkan. On the Mac the Vulkan driver would be KosmicKrisp (Mesa; Vulkan 1.4 conformant: READ,
+Phoronix and LunarG) or MoltenVK (deprecated by Khronos: READ, its README). Whether chipStar's Vulkan backend runs on
+either is NOT KNOWN. First step is reading, not building: chipStar's docs and issues for macOS and Vulkan.

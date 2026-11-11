@@ -1,0 +1,15 @@
+== SPIR-V chipStar made from cft_fma.hip, 2026-11-10 20:34 (same source, same flags):
+   428976 bytes: hipcc --save-temps, file cft_fma-hip-spirv64-generic.out (as the translator wrote it)
+   372272 bytes: spirv-extractor cft_fma -o k.spv (chipStar's tool, from the linked binary); same capabilities in both
+               OpCapability Addresses
+               OpCapability Linkage
+               OpCapability Kernel
+               OpCapability Int64
+               OpCapability GenericPointer
+               OpCapability Int8
+               OpMemoryModel Physical64 OpenCL
+== spirv-cross --msl (SPIRV-Cross 2021.01.15, Ubuntu spirv-cross)
+SPIRV-Cross threw an exception: Kernel capability not supported.
+== spirv-val --target-env vulkan1.3
+error: line 8: [VUID-StandaloneSpirv-None-04635] Addressing model must be Logical or PhysicalStorageBuffer64 in the Vulkan environment.
+== spirv-val --target-env opencl2.2: 0 lines of complaint

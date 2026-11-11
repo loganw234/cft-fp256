@@ -1,0 +1,11 @@
+== stream corpora, 1,000,000 cases each, chipStar on PoCL 7.2 CPU (not an Intel GPU), 2026-11-10 19:58:38
+check: /root/gpu-c/corp/stream-fp256.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp256, 1000000 cases (rne 200000 rtz 200000 rdn 200000 rup 200000 rmm 200000); 0 results and 0 flags differ, 0 refused; differing by attribute 0/0/0/0/0; sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7; kernel 91.444 ms, end to end 124.408 ms: GREEN
+verify: chip-stream-fp256.out against stream-fp256.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7
+check: /root/gpu-c/corp/stream-fp32.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp32, 1000000 cases (rne 200000 rtz 200000 rdn 200000 rup 200000 rmm 200000); 0 results and 0 flags differ, 0 refused; differing by attribute 0/0/0/0/0; sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577; kernel 43.479 ms, end to end 50.008 ms: GREEN
+verify: chip-stream-fp32.out against stream-fp32.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577
+run_checks: chip: every corpus run GREEN
+== bench (fp256 FMA)
+bench: /root/gpu-c/corp/stream-fp256.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (sm_20, bus 0000:10:40): fp256, 1000000 lanes, block 128, 10 reps; kernel ms min 51.460 median 58.766 max 85.054; end to end ms min 72.300 median 80.954 max 111.504; 1.702e+07 FMA/s kernel, 1.235e+07 FMA/s end to end (medians); 58.8 ns a lane
+== info: hipDeviceGetLimit(hipLimitStackSize) is unsupported by chipStar
+
+docs/studies/gpu-c/../gpu-a/cft_fma.hip:625: hipDeviceGetLimit(&stack0, hipLimitStackSize): hipErrorInvalidHandle
