@@ -6670,14 +6670,15 @@ def routine_catalog_checks(src: str = HERE) -> list:
         c("routine catalog: ATAN2_X is the lead's nine x in his order (1, -1, one ulp above 1, 2^40, the largest normal, the smallest normal, a subnormal, two full significands)",
           [x for x, _ in L2.ATAN2_X] == xs and len({x for x, _ in L2.ATAN2_X}) == 9)
         at = [it for it in rs if it.op.startswith("atan2-")]
-        a2d = L2.ROUTINE_DIGESTS["atan2"]
+        a2d = L2.ROUTINE_DIGESTS.get("atan2")
+        c("routine catalog: ROUTINE_DIGESTS holds atan2, whose nine items the checks below read", a2d is not None and len(at) == 9, f"digest {a2d}, {len(at)} atan2 items")
         c("routine catalog: the real table makes nine atan2 items, one an x, op atan2-f32-x<x>-d<digest>, named ...-all, in the lead's order, each in group routine",
           [it.op for it in at] == [f"atan2-f32-x{x:08x}-d{a2d}" for x in xs] and [it.name for it in at] == [f"atan2-f32-x{x:08x}-d{a2d}-all" for x in xs]
           and all(it.group == "routine" and it.exact and it.per_encoding == 5 for it in at) and rs[-9:] == at, str([it.name for it in at][:2]))
         c("routine catalog: an atan2 claim says every fp32 y for that x and what x is, and not the whole space of (y, x) pairs (Logan's answer 1), and never ', under '",
           all(f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest {a2d})" in it.claim
               and "not the whole space of (y, x) pairs" in it.claim and ", under " not in it.claim and "swept" not in it.claim
-              for it, (x, what) in zip(at, L2.ATAN2_X)), at[0].claim)
+              for it, (x, what) in zip(at, L2.ATAN2_X)) and len(at) == 9, at[0].claim if at else "no atan2 item")
         c("routine catalog: an op the tables do not hold is refused BY NAME where the item is made (OP_REACH first, then OP_FORMAT), as any item",
           raises_value(lambda: L2.Item("zz-all", "routine", "exhaustive", "zz-f32-d00000000", "all", verdict_mode="all")))
         # the stand-in's copy of the digests is its own, and equal to the library's
@@ -9666,6 +9667,9 @@ def plants(env: Env) -> None:
         ("M4CAT: atan's digest in the table is not the tool's",
          [("card_stress_lib.py", '"atan": "d22abd22", "asin"', '"atan": "d22abd23", "asin"')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),
+        ("M4CAT: atan2 is missing from the table",
+         [("card_stress_lib.py", '"acos": "2f8ca421", "atan2": "a86a60d8",', '"acos": "2f8ca421",')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS holds atan2"]),
         ("M4CAT: the table has asin and acos in another order",
          [("card_stress_lib.py", '"asin": "005fc862", "acos": "2f8ca421"', '"acos": "2f8ca421", "asin": "005fc862"')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),

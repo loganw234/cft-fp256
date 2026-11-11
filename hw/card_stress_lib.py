@@ -997,7 +997,7 @@ OP_FORMAT.update({
 #
 # ROUTINE_DIGESTS is the one table of them, in the tool's order: the digest `routine-sweep list` prints and gen_sweep_images.py's `digest` lines
 # give, held to the generator by hw/test_routine_sweep.py's `images` leg and to the real tool's `list` by the fixture hw/card_stress_fixtures/
-# rs-list.txt. The thirteen rows are the generator's `digest` lines, read at the commit that added atan, asin, acos and atan2 (parcel M4CAT):
+# rs-list.txt. The thirteen rows are the generator's `digest` lines, read from a run of gen_sweep_images.py at 53ec490b (parcel M4CAT's base) and equal at 25e398c1:
 # a routine with no digest has no item, and every routine of routine_sweep.c's RTNS now has one.
 # HOW A DIGEST MOVES: a changed fragment (the routine's sources in python/cft_golden/mathlib.py,
 # its constants or the compiler's output for it) changes the digest the generator writes; the table is then changed here, with the lead's

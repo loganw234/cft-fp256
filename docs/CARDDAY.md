@@ -2542,7 +2542,7 @@ Parcels M4F1 and M4F2 built the fp32 programs of atan, asin, acos and atan2 and 
 (hw/card_stress_lib.py), read from the generator's `digest` lines at its base: atan d22abd22, asin 005fc862, acos 2f8ca421, atan2 a86a60d8, which are the digests python/tests/test_mathlib_inv_tw2.py pins.
 `sweep_items(mpfr=True)` is then **308 items** (COMPUTED by the suite: 287 + 21; 125 without `--mpfr-prefix`), the 21 routine items at places 288 to 308 in the tool's order, the first 287 and the 125
 unchanged (the same hashes). The twelve new are `atan-f32-d...-all`, `asin-...`, `acos-...` and atan2's nine `atan2-f32-x<x>-d...-all` in `ATAN2_X`'s order, each in group `routine`. The fixtures
-`rs-list.txt` (the real `routine-sweep list`: thirteen rows, none `no image`) and `rs-images-manifest.txt` (the generator's) were regenerated in WSL cft2204 from a build of this parcel's first commit.
+`rs-list.txt` (the real `routine-sweep list`: thirteen rows, none `no image`) and `rs-images-manifest.txt` (the generator's) were regenerated in WSL cft2204 from a build of 25e398c1, the last code commit before the fixtures' own commit (an earlier pair, from a build of 0b137ab2, was replaced).
 
 **atan2's marks are a range, and the tool's list holds lanes.** The tool judges "must mark" by the images' `.marks` files, a list of lanes. For atan2 the lanes that must mark are a range (every y of the
 tiny-quotient band against x = 1: 427,819,008 encodings a sign, COMPUTED by M4F2's drafter, docs/VALIDATION.md), which that list does not hold. So on the atan2 items the card marks those lanes and the tool
