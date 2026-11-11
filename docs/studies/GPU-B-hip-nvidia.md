@@ -142,14 +142,22 @@ year of releases), all 12 old files differ and 2 are new.
 
 At Logan's word of 18:18 (install CUDA 13; no patch set, no contact with AMD)
 CUDA 13.3.73, the newest the NVIDIA WSL repository offers (13.0 to 13.3 are
-there), went into cft-gpu **beside** 12.9: 11 component packages, 370 MB (nvcc,
-cudart-dev, crt, cccl, profiler-api, driver-dev and what they pull in;
-versions, sizes and index sums in `captured/cuda13-packages.txt`). apt's plan
-was read first: 11 installs, 0 removals, no `cuda`, `cuda-drivers` or `nvidia-*`
+there), went into cft-gpu **beside** 12.9: 12 component packages (nvcc,
+cudart-dev, crt, cccl, profiler-api, driver-dev and what they pull in; all 12
+are in apt's own Install line for that run). Download 94.5 MB (apt: "Need to
+get 94.5 MB"; the 12 sizes sum to 94,472,504 bytes), 384 MB of disk by apt's
+estimate ("After this operation"), 370 MB as `du` measured
+`/usr/local/cuda-13.3`; versions, sizes, index sums and those lines are in
+`captured/cuda13-packages.txt`. One package of the family, `cuda-toolkit-config-common`
+13.3.29, was already there from the 12.9 install and is not among the 12. apt's plan
+was read first: 12 installs, 0 removals, no `cuda`, `cuda-drivers` or `nvidia-*`
 (MEASURED). **One side effect, undone:** the packages joined the `cuda`
 alternatives group at a higher priority, so `/usr/local/cuda` pointed at 13.3
-for about 28 s (18:20:50 to 18:21:18) until I set it back to 12.9 by hand
-(manual mode). A run started in that window would have used 13.3; GPU-A's legs
+for at most about 14 s: apt's `history.log` gives this install Start-Date
+18:21:04 and End-Date 18:21:10, and the alternatives lines are in its output
+(they carry no time of their own), so the link cannot have moved before
+18:21:04; I set it back to 12.9 by hand (manual mode) by 18:21:18, when the
+next command printed its clock. (18:20:50 was only when my script started.) A run started in that window would have used 13.3; GPU-A's legs
 use 12.9. Every run below names `/usr/local/cuda-13.3` itself.
 
 Prefix `/opt/gpu-b13`, work directory `~/gpu-b13`, RTX 5060 Ti only, `nvidia-smi`
@@ -165,8 +173,10 @@ before each run (no compute process), about 5 s of GPU in all
 | the same with a copy of the header plus one field (`mk_shim13.py`, 5 lines of the copy differ) | rc 0 | not run | `da932116...a9` GREEN |
 
 The one error is the study header's, not HIP's: CUDA 13's `cudaDeviceProp` has
-no `clockRate` (BELIEVED cause: CUDA 13 removed the member; I did not read
-NVIDIA's notes), which HIP's `hipDeviceProp_t` has and `cft_fma.hip` prints.
+no `clockRate` (BELIEVED cause: CUDA 13 removed the member. VGPU-B reported reading NVIDIA's
+CUDA toolkit release-notes index, both halves, and found no mention of
+`cudaDeviceProp`, `clockRate`, `memoryClockRate` or `cudaDevAttrClockRate`;
+the migration guide was not read), which HIP's `hipDeviceProp_t` has and `cft_fma.hip` prints.
 The shim fills it from `cudaDeviceGetAttribute`; GPU-A's header is untouched
 and the shim is generated into the work directory, not committed as a header.
 The hipcc probe (N1 to N3) was not rerun under 13.3.

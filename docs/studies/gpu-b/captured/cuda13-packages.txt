@@ -1,4 +1,4 @@
-# CUDA 13.3 packages: version, size, SHA256 of the repository index
+# CUDA 13.3 packages (12): version, bytes, SHA256 of the repository index
 cccl-13-3 13.3.3.4.1-1 1316752 bytes 7fb49a9a684e97f48374c230b7a548cee61f62ff925d09238f038aba601dbdb2
 cuda-toolkit-13-config-common 13.3.29-1 17440 bytes 7177da13bf1d6e33ad591b7f79602665f2af3aaf1bc9306809b830c1650218a6
 cuda-toolkit-13-3-config-common 13.3.29-1 17416 bytes c71420541f81628f551cb26ab91ca4dfb2458f118d11c538ccf3dcc548e6abcf
@@ -11,3 +11,16 @@ libnvvm-13-3 13.3.73-1 49478628 bytes ec1330e0fb4d4e789609bc273f38dcbb577fd5d872
 libnvptxcompiler-13-3 13.3.73-1 10194008 bytes 1e381ce2834f15512c95729a0e49e540c899c6a08d90d6da009461430b85b48e
 cuda-nvcc-13-3 13.3.73-1 31627316 bytes b0691b6c6e700ee023aa1cbc7a72dd0afaaacbb2dc788eff0b1aa5033ef57639
 cuda-profiler-api-13-3 13.3.27-1 19564 bytes 626c5cd1c978e7151da2fa511f12a47cb15628db9e131c9a05e5a09bf44a9d41
+# sum of the 12 sizes (bytes): 94472504
+# apt's own lines (apt13-install.log):
+Need to get 94.5 MB of archives.
+After this operation, 384 MB of additional disk space will be used.
+# /usr/local/cuda-13.3 after the install (du -sh): 370M
+# apt history.log, this install:
+Start-Date: 2026-11-10  18:21:04
+End-Date: 2026-11-10  18:21:10
+# 12 names in its Install line: 12
+# the alternatives lines (apt13-install.log; no timestamp in apt's log):
+update-alternatives: using /usr/local/cuda-13.3 to provide /usr/local/cuda (cuda) in auto mode
+update-alternatives: using /usr/local/cuda-13.3 to provide /usr/local/cuda-13 (cuda-13) in auto mode
+# present before: cuda-toolkit-config-common 13.3.29-1 (from the 12.9 install, history.log 15:17:00)
