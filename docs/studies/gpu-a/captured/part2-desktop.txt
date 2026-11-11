@@ -1,0 +1,131 @@
+# part 2 on this desktop: run_seq.sh nvidia, the 5060 Ti (DEVICE=1) then the 4070 (REUSE=1 DEVICE=0), 17:57:35 to 18:00:59
+== run_seq.sh nvidia 89 120 2026-11-10 17:57:35 on this desktop
+selftest: OK, 8 plants refused by name
+devcopy: host/src/program.c blob 6e38020c58f45ea46b5ba7f1dead4fce924c3ebc -> src/seqcore.c: 28 pieces (E2), 12 E1, 1 E3, 1 E4, no other difference
+== built 2026-11-10 17:59:01
+0, NVIDIA GeForce RTX 4070, 2042 MiB, 8 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+run: routines-fp32.bin [5060 Ti]: 90 cases, 5277 lanes, 3043521 lanes x program length, 0 refused; sha256 a7ff1aef29d4130733ca3a2d9df73a0106fcbfa5dce52ad0f017f5e43911b30d; 486.7 ms; GREEN against ref-fp32.out
+run: routines-fp64.bin [5060 Ti]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 4eb03cc3f41f6f7e70ab819ee37aeb1faada48529b4d7da5d63ff3212a5fc3fe; 311.2 ms; GREEN against ref-fp64.out
+run: routines-fp128.bin [5060 Ti]: 130 cases, 8340 lanes, 2099526 lanes x program length, 0 refused; sha256 30b7a930a7a1e1b5c96bce4e464583961711008bb8440f0d6aca6aad1e0a386d; 457.7 ms; GREEN against ref-fp128.out
+run: routines-fp256.bin [5060 Ti]: 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 674.4 ms; GREEN against ref-fp256.out
+run: fuzz-fp32.bin [5060 Ti]: 200 cases, 10630 lanes, 213045 lanes x program length, 0 refused; sha256 735f6e8684c70adaa1e95cdbeb376c2674b6b0caa9bf518a07c9d53c746b3c0f; 17.7 ms; GREEN against ref-fuzz-fp32.out
+run: fuzz-fp64.bin [5060 Ti]: 200 cases, 11396 lanes, 218027 lanes x program length, 0 refused; sha256 347c9957013cbfb2bda1c0600f3acf42d702e4b8344c10d5e56ce50e91d348b3; 17.5 ms; GREEN against ref-fuzz-fp64.out
+run: fuzz-fp128.bin [5060 Ti]: 200 cases, 11224 lanes, 221887 lanes x program length, 0 refused; sha256 e8f855b46c2335eca0109d27c0c4e3f15a0fd4864010b3db9d5449f15fab1499; 23.8 ms; GREEN against ref-fuzz-fp128.out
+run: fuzz-fp256.bin [5060 Ti]: 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 24.9 ms; GREEN against ref-fuzz-fp256.out
+run: fuzz-fp256.bin [5060 Ti]: 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 38.1 ms; GREEN against ref-fuzz-fp256.out
+run: systems.bin [5060 Ti]: 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 901.5 ms; GREEN against ref-systems.out
+run: bench.bin [5060 Ti]: 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 34.1 ms; GREEN against ref-bench.out
+run: systems.bin [5060 Ti]: 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 425.5 ms; GREEN against ref-systems.out
+run: bench.bin [5060 Ti]: 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 23.0 ms; GREEN against ref-bench.out
+run: routines-fp256.bin [5060 Ti]: 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 114.1 ms; GREEN against ref-fp256.out
+refused: fp64 augadd: augmentedAddition (control codes 10 and 11): augmented.c is not in the device copy (CFT_NO_AUGMENTED)
+run: routines-fp64.bin [5060 Ti]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 e153704603768aec14396d5834d05f80d04d7dc7ac3bfe10b05249f69a47d9ce; 334.0 ms; RED: ref-fp64.out
+run: 24 of 130 cases differ from libcft's
+plant s64-mask: RED, as it must be
+run: routines-fp64.bin [5060 Ti]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 702251771b9d52056bcb80930638237409adfa8c580a1fff6b1dc1a87d95b471; 159.0 ms; RED: ref-fp64.out
+run: 130 of 130 cases differ from libcft's
+plant s64-konst: RED, as it must be
+0, NVIDIA GeForce RTX 4070, 2175 MiB, 22 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+bench: bench.bin case 0 (fp64 exp rne stand-alone typical n=4096, 183 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 78.210 ms (min 78.166, max 78.338, 5 reps): 1.341e+07 lane-programs/s, 2.453e+09 lane-instructions/s
+bench: bench.bin case 1 (fp64 sin rne stand-alone typical n=4096, 409 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 175.793 ms (min 175.601, max 175.827, 5 reps): 5.965e+06 lane-programs/s, 2.44e+09 lane-instructions/s
+bench: bench.bin case 2 (fp64 atan rne stand-alone typical n=4096, 179 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 78.944 ms (min 78.932, max 78.968, 5 reps): 1.328e+07 lane-programs/s, 2.378e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 397.124 ms (min 397.002, max 397.312, 3 reps): 2.64e+06 lane-programs/s, 5.386e+08 lane-instructions/s
+bench: bench.bin case 4 (fp256 sin rne stand-alone typical n=4096, 392 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 836.912 ms (min 835.662, max 837.571, 3 reps): 1.253e+06 lane-programs/s, 4.911e+08 lane-instructions/s
+bench: bench.bin case 5 (fp256 atan rne stand-alone typical n=4096, 206 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 395.260 ms (min 395.092, max 395.608, 3 reps): 2.653e+06 lane-programs/s, 5.465e+08 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 40.958 ms (min 40.928, max 41.081, 3 reps): 2.56e+07 lane-programs/s, 5.223e+09 lane-instructions/s
+bench: bench.bin case 4 (fp256 sin rne stand-alone typical n=4096, 392 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 82.220 ms (min 81.931, max 82.302, 3 reps): 1.275e+07 lane-programs/s, 4.999e+09 lane-instructions/s
+bench: bench.bin case 5 (fp256 atan rne stand-alone typical n=4096, 206 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 44.032 ms (min 43.946, max 44.042, 3 reps): 2.381e+07 lane-programs/s, 4.906e+09 lane-instructions/s
+bench: routines-fp64.bin case 0 (fp64 exp rne stand-alone n=129, 183 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 140.184 ms (min 140.152, max 140.355, 3 reps): 7.48e+06 lane-programs/s, 1.369e+09 lane-instructions/s
+bench: routines-fp64.bin case 60 (fp64 sin rne stand-alone n=63, 409 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 245.350 ms (min 245.317, max 245.520, 3 reps): 4.274e+06 lane-programs/s, 1.748e+09 lane-instructions/s
+bench: routines-fp64.bin case 90 (fp64 atan rne stand-alone n=129, 179 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 112.042 ms (min 111.988, max 112.110, 3 reps): 9.359e+06 lane-programs/s, 1.675e+09 lane-instructions/s
+bench: routines-fp256.bin case 0 (fp256 exp rne stand-alone n=63, 204 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 531.906 ms (min 531.662, max 531.987, 3 reps): 1.971e+06 lane-programs/s, 4.022e+08 lane-instructions/s
+bench: routines-fp256.bin case 60 (fp256 sin rne stand-alone n=65, 392 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 1028.398 ms (min 1028.037, max 1029.076, 3 reps): 1.02e+06 lane-programs/s, 3.997e+08 lane-instructions/s
+bench: routines-fp256.bin case 92 (fp256 atan rtz stand-alone n=64, 206 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 553.985 ms (min 553.878, max 554.711, 3 reps): 1.893e+06 lane-programs/s, 3.899e+08 lane-instructions/s
+bench: routines-fp256.bin case 0 (fp256 exp rne stand-alone n=63, 204 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 46.150 ms (min 46.056, max 46.254, 3 reps): 2.272e+07 lane-programs/s, 4.635e+09 lane-instructions/s
+bench: routines-fp256.bin case 60 (fp256 sin rne stand-alone n=65, 392 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 87.843 ms (min 87.601, max 87.929, 3 reps): 1.194e+07 lane-programs/s, 4.679e+09 lane-instructions/s
+bench: routines-fp256.bin case 92 (fp256 atan rtz stand-alone n=64, 206 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 47.456 ms (min 47.356, max 47.491, 3 reps): 2.21e+07 lane-programs/s, 4.552e+09 lane-instructions/s
+0, NVIDIA GeForce RTX 4070, 2263 MiB, 23 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 4096 lanes, kernel 0.532 ms (min 0.531, max 0.543, 3 reps): 7.704e+06 lane-programs/s, 1.572e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 16384 lanes, kernel 0.962 ms (min 0.931, max 0.962, 3 reps): 1.704e+07 lane-programs/s, 3.475e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 65536 lanes, kernel 2.784 ms (min 2.783, max 2.815, 3 reps): 2.354e+07 lane-programs/s, 4.802e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 262144 lanes, kernel 10.543 ms (min 10.518, max 10.596, 3 reps): 2.486e+07 lane-programs/s, 5.072e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 1048576 lanes, kernel 41.053 ms (min 40.895, max 41.065, 3 reps): 2.554e+07 lane-programs/s, 5.211e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 2097152 lanes, kernel 82.007 ms (min 81.919, max 82.112, 3 reps): 2.557e+07 lane-programs/s, 5.217e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [5060 Ti], block 128: 4194304 lanes, kernel 163.789 ms (min 163.691, max 164.007, 3 reps): 2.561e+07 lane-programs/s, 5.224e+09 lane-instructions/s
+info: NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): 36 CUs/SMs; runner kernel: 48 registers a thread, 8000 bytes local a thread; sizeof(cft_bn) 164, CFT_BN_LIMBS 40, sizeof(seq_block) 5280
+info: block 32: 24 blocks a CU/SM resident, occupancy 50.0 %
+info: block 64: 20 blocks a CU/SM resident, occupancy 83.3 %
+info: block 128: 10 blocks a CU/SM resident, occupancy 83.3 %
+info: block 256: 5 blocks a CU/SM resident, occupancy 83.3 %
+info: stack limit a thread: 1024 bytes before any launch, 8000 after one
+0, NVIDIA GeForce RTX 4070, 2197 MiB, 20 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+== run_seq.sh 2026-11-10 17:59:57: every corpus GREEN, every plant RED
+== run_seq.sh nvidia 89 120 2026-11-10 17:59:57 on this desktop
+selftest: OK, 8 plants refused by name
+devcopy: host/src/program.c blob 6e38020c58f45ea46b5ba7f1dead4fce924c3ebc -> src/seqcore.c: 28 pieces (E2), 12 E1, 1 E3, 1 E4, no other difference
+== built 2026-11-10 17:59:58
+0, NVIDIA GeForce RTX 4070, 2196 MiB, 22 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+run: routines-fp32.bin [4070]: 90 cases, 5277 lanes, 3043521 lanes x program length, 0 refused; sha256 a7ff1aef29d4130733ca3a2d9df73a0106fcbfa5dce52ad0f017f5e43911b30d; 426.5 ms; GREEN against ref-fp32.out
+run: routines-fp64.bin [4070]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 4eb03cc3f41f6f7e70ab819ee37aeb1faada48529b4d7da5d63ff3212a5fc3fe; 285.5 ms; GREEN against ref-fp64.out
+run: routines-fp128.bin [4070]: 130 cases, 8340 lanes, 2099526 lanes x program length, 0 refused; sha256 30b7a930a7a1e1b5c96bce4e464583961711008bb8440f0d6aca6aad1e0a386d; 369.7 ms; GREEN against ref-fp128.out
+run: routines-fp256.bin [4070]: 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 542.0 ms; GREEN against ref-fp256.out
+run: fuzz-fp32.bin [4070]: 200 cases, 10630 lanes, 213045 lanes x program length, 0 refused; sha256 735f6e8684c70adaa1e95cdbeb376c2674b6b0caa9bf518a07c9d53c746b3c0f; 21.6 ms; GREEN against ref-fuzz-fp32.out
+run: fuzz-fp64.bin [4070]: 200 cases, 11396 lanes, 218027 lanes x program length, 0 refused; sha256 347c9957013cbfb2bda1c0600f3acf42d702e4b8344c10d5e56ce50e91d348b3; 20.8 ms; GREEN against ref-fuzz-fp64.out
+run: fuzz-fp128.bin [4070]: 200 cases, 11224 lanes, 221887 lanes x program length, 0 refused; sha256 e8f855b46c2335eca0109d27c0c4e3f15a0fd4864010b3db9d5449f15fab1499; 31.7 ms; GREEN against ref-fuzz-fp128.out
+run: fuzz-fp256.bin [4070]: 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 39.1 ms; GREEN against ref-fuzz-fp256.out
+run: fuzz-fp256.bin [4070]: 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 32.5 ms; GREEN against ref-fuzz-fp256.out
+run: systems.bin [4070]: 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 860.0 ms; GREEN against ref-systems.out
+run: bench.bin [4070]: 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 39.9 ms; GREEN against ref-bench.out
+run: systems.bin [4070]: 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 408.2 ms; GREEN against ref-systems.out
+run: bench.bin [4070]: 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 27.8 ms; GREEN against ref-bench.out
+run: routines-fp256.bin [4070]: 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 134.4 ms; GREEN against ref-fp256.out
+refused: fp64 augadd: augmentedAddition (control codes 10 and 11): augmented.c is not in the device copy (CFT_NO_AUGMENTED)
+run: routines-fp64.bin [4070]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 e153704603768aec14396d5834d05f80d04d7dc7ac3bfe10b05249f69a47d9ce; 282.5 ms; RED: ref-fp64.out
+run: 24 of 130 cases differ from libcft's
+plant s64-mask: RED, as it must be
+run: routines-fp64.bin [4070]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 702251771b9d52056bcb80930638237409adfa8c580a1fff6b1dc1a87d95b471; 141.2 ms; RED: ref-fp64.out
+run: 130 of 130 cases differ from libcft's
+plant s64-konst: RED, as it must be
+0, NVIDIA GeForce RTX 4070, 2323 MiB, 3 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+bench: bench.bin case 0 (fp64 exp rne stand-alone typical n=4096, 183 instructions) [4070], block 128: 1048576 lanes, kernel 105.091 ms (min 104.457, max 111.345, 5 reps): 9.978e+06 lane-programs/s, 1.826e+09 lane-instructions/s
+bench: bench.bin case 1 (fp64 sin rne stand-alone typical n=4096, 409 instructions) [4070], block 128: 1048576 lanes, kernel 207.144 ms (min 198.302, max 213.557, 5 reps): 5.062e+06 lane-programs/s, 2.07e+09 lane-instructions/s
+bench: bench.bin case 2 (fp64 atan rne stand-alone typical n=4096, 179 instructions) [4070], block 128: 1048576 lanes, kernel 102.646 ms (min 101.403, max 107.870, 5 reps): 1.022e+07 lane-programs/s, 1.829e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 1048576 lanes, kernel 297.594 ms (min 278.169, max 308.256, 3 reps): 3.524e+06 lane-programs/s, 7.188e+08 lane-instructions/s
+bench: bench.bin case 4 (fp256 sin rne stand-alone typical n=4096, 392 instructions) [4070], block 128: 1048576 lanes, kernel 552.940 ms (min 543.897, max 599.935, 3 reps): 1.896e+06 lane-programs/s, 7.434e+08 lane-instructions/s
+bench: bench.bin case 5 (fp256 atan rne stand-alone typical n=4096, 206 instructions) [4070], block 128: 1048576 lanes, kernel 273.385 ms (min 272.231, max 283.017, 3 reps): 3.836e+06 lane-programs/s, 7.901e+08 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 1048576 lanes, kernel 121.257 ms (min 118.179, max 121.334, 3 reps): 8.648e+06 lane-programs/s, 1.764e+09 lane-instructions/s
+bench: bench.bin case 4 (fp256 sin rne stand-alone typical n=4096, 392 instructions) [4070], block 128: 1048576 lanes, kernel 270.564 ms (min 266.666, max 273.674, 3 reps): 3.876e+06 lane-programs/s, 1.519e+09 lane-instructions/s
+bench: bench.bin case 5 (fp256 atan rne stand-alone typical n=4096, 206 instructions) [4070], block 128: 1048576 lanes, kernel 134.091 ms (min 131.759, max 140.723, 3 reps): 7.82e+06 lane-programs/s, 1.611e+09 lane-instructions/s
+bench: routines-fp64.bin case 0 (fp64 exp rne stand-alone n=129, 183 instructions) [4070], block 128: 1048576 lanes, kernel 200.026 ms (min 198.889, max 203.507, 3 reps): 5.242e+06 lane-programs/s, 9.593e+08 lane-instructions/s
+bench: routines-fp64.bin case 60 (fp64 sin rne stand-alone n=63, 409 instructions) [4070], block 128: 1048576 lanes, kernel 303.854 ms (min 302.524, max 311.961, 3 reps): 3.451e+06 lane-programs/s, 1.411e+09 lane-instructions/s
+bench: routines-fp64.bin case 90 (fp64 atan rne stand-alone n=129, 179 instructions) [4070], block 128: 1048576 lanes, kernel 159.849 ms (min 159.511, max 162.806, 3 reps): 6.56e+06 lane-programs/s, 1.174e+09 lane-instructions/s
+bench: routines-fp256.bin case 0 (fp256 exp rne stand-alone n=63, 204 instructions) [4070], block 128: 1048576 lanes, kernel 401.006 ms (min 400.351, max 404.467, 3 reps): 2.615e+06 lane-programs/s, 5.334e+08 lane-instructions/s
+bench: routines-fp256.bin case 60 (fp256 sin rne stand-alone n=65, 392 instructions) [4070], block 128: 1048576 lanes, kernel 709.929 ms (min 693.586, max 748.513, 3 reps): 1.477e+06 lane-programs/s, 5.79e+08 lane-instructions/s
+bench: routines-fp256.bin case 92 (fp256 atan rtz stand-alone n=64, 206 instructions) [4070], block 128: 1048576 lanes, kernel 348.751 ms (min 345.532, max 360.863, 3 reps): 3.007e+06 lane-programs/s, 6.194e+08 lane-instructions/s
+bench: routines-fp256.bin case 0 (fp256 exp rne stand-alone n=63, 204 instructions) [4070], block 128: 1048576 lanes, kernel 155.537 ms (min 154.445, max 157.295, 3 reps): 6.742e+06 lane-programs/s, 1.375e+09 lane-instructions/s
+bench: routines-fp256.bin case 60 (fp256 sin rne stand-alone n=65, 392 instructions) [4070], block 128: 1048576 lanes, kernel 321.699 ms (min 321.422, max 328.860, 3 reps): 3.259e+06 lane-programs/s, 1.278e+09 lane-instructions/s
+bench: routines-fp256.bin case 92 (fp256 atan rtz stand-alone n=64, 206 instructions) [4070], block 128: 1048576 lanes, kernel 179.276 ms (min 168.240, max 185.481, 3 reps): 5.849e+06 lane-programs/s, 1.205e+09 lane-instructions/s
+0, NVIDIA GeForce RTX 4070, 2230 MiB, 4 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 4096 lanes, kernel 0.915 ms (min 0.679, max 0.995, 3 reps): 4.474e+06 lane-programs/s, 9.128e+08 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 16384 lanes, kernel 2.219 ms (min 1.947, max 2.367, 3 reps): 7.383e+06 lane-programs/s, 1.506e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 65536 lanes, kernel 9.320 ms (min 9.102, max 9.763, 3 reps): 7.031e+06 lane-programs/s, 1.434e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 262144 lanes, kernel 33.701 ms (min 32.893, max 34.398, 3 reps): 7.779e+06 lane-programs/s, 1.587e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 1048576 lanes, kernel 133.239 ms (min 132.962, max 134.798, 3 reps): 7.87e+06 lane-programs/s, 1.605e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 2097152 lanes, kernel 251.252 ms (min 249.824, max 258.917, 3 reps): 8.347e+06 lane-programs/s, 1.703e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [4070], block 128: 4194304 lanes, kernel 512.722 ms (min 495.575, max 517.722, 3 reps): 8.18e+06 lane-programs/s, 1.669e+09 lane-instructions/s
+info: NVIDIA GeForce RTX 4070 (sm_89, bus 0000:01:00.0): 46 CUs/SMs; runner kernel: 128 registers a thread, 8208 bytes local a thread; sizeof(cft_bn) 164, CFT_BN_LIMBS 40, sizeof(seq_block) 5280
+info: block 32: 16 blocks a CU/SM resident, occupancy 33.3 %
+info: block 64: 8 blocks a CU/SM resident, occupancy 33.3 %
+info: block 128: 4 blocks a CU/SM resident, occupancy 33.3 %
+info: block 256: 2 blocks a CU/SM resident, occupancy 33.3 %
+info: stack limit a thread: 1024 bytes before any launch, 8208 after one
+0, NVIDIA GeForce RTX 4070, 2176 MiB, 8 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+== run_seq.sh 2026-11-10 18:00:59: every corpus GREEN, every plant RED

@@ -22,7 +22,11 @@
 #   cd ~/gpu-a && mkdir -p tree corpus && tar xzf gpu-a-tree.tgz -C tree
 #   mv *.bin corpus/
 #   bash tree/docs/studies/gpu-a/run_mi300x.sh ~/gpu-a/corpus ~/gpu-a/work \
-#       > mi300x.log 2>&1
+#       [~/gpu-a/programs] > mi300x.log 2>&1
+# Part 2 (programs): give a third directory with gen_programs.py's corpora
+# and seq_ref's outputs for them (scp PROGRAMS/*.bin PROGRAMS/ref-*.out),
+# made on a host with the golden model and libcft; the tree's tar then also
+# needs host/src/program.c (devcopy.py --seq takes the executor from it).
 # DEVICE=n picks the HIP device (one per GPU in SPX mode, more in CPX).
 #
 # What it does, in order (ESTIMATE: under 10 minutes in all; the RX 7600
@@ -33,9 +37,14 @@
 #      corpora, plants and a 2^30-case differential stream
 #   4. the rates: bench.sh for both kernels, 1M and 16M lanes at fp256
 #   5. every lane one case (divergence), both kernels
+#   6. with PROGRAMS_DIR, part 2: run_seq.sh amd gfx942 (the runner's builds,
+#      every program corpus against libcft's output, the refusal, the two
+#      plants red, the rates of exp, sin and atan, a batch curve to 16M
+#      lanes). Built for gfx942 on the RX 7600 machine without the card;
+#      never run on one (ESTIMATE: under 5 minutes more).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-C=${1:?CORPUS_DIR}; W=${2:?WORK_DIR}
+C=${1:?CORPUS_DIR}; W=${2:?WORK_DIR}; PROGS=${3:-}
 export PATH=${ROCM_PATH:-/opt/rocm}/bin:$PATH
 DEV=${DEVICE:-0}
 mkdir -p "$W"
@@ -58,4 +67,8 @@ for k in 5 4 1 2; do
     done
 done
 echo "== run_mi300x.sh $(date '+%F %T'): run_amd.sh exit $rc"
+if [ -n "$PROGS" ]; then
+    BIG=1 DEVICE=$DEV bash "$here/run_seq.sh" amd "$PROGS" "$W/seq" gfx942 || rc=1
+    echo "== run_mi300x.sh $(date '+%F %T'): with part 2, exit $rc"
+fi
 exit $rc

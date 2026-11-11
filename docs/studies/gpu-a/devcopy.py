@@ -49,9 +49,11 @@ FILES = (
     ("host/include/cft_config.h", "include/cft_config.h"),
 )
 
-# E1's pattern: a file-scope function declarator in these files' style.
-E1 = re.compile(r"^(static\s+)?(const\s+)?(void|int|unsigned|uint32_t|size_t)"
-                r"\s+\**[A-Za-z_][A-Za-z0-9_]*\s*\(")
+# E1's pattern: a file-scope function declarator in these files' style
+# (cft_status and cft_bn are the sequencer pieces' return types; no line of
+# the five files above starts with either, so their 105 edits are unmoved).
+E1 = re.compile(r"^(static\s+)?(const\s+)?(void|int|unsigned|uint32_t|size_t|"
+                r"cft_status|cft_bn)\s+\**[A-Za-z_][A-Za-z0-9_]*\s*\(")
 E1_TEXT = b"CFT_HD "
 
 # Functions E1 must leave alone, by name, each with its reason. Empty: every
@@ -101,8 +103,136 @@ def check_one(name, orig, copy):
     return n
 
 
-def run(root, out, check_only):
+# ---- part 2: the sequencer's executor, taken from program.c (--seq) -----
+#
+#   E2  extraction: src/seqcore.c is exactly the PIECES below, each byte for
+#       byte as program.c has it, in program.c's order, one blank line
+#       between them: seq_run_block and every function, type and constant
+#       it reaches. Nothing of program.c's loader or run setup is taken.
+#   E3  `#define BLOCK_LANES      64` -> `1`: a GPU thread is a block of one
+#       lane (the study argues why the bits cannot change).
+#   E4  seq_run_block's one ALU call, `cft_sf_compute(` -> `CFT_GPUA_ALU(`:
+#       the runner defines that hook, cft_sf_compute itself unless the
+#       fp256 path is built.
+#   E1  on the pieces' function lines, as above.
+# host/include/cft.h is copied unedited (the pieces' status codes).
+SEQ = ("host/src/program.c", "src/seqcore.c")
+SEQ_COPIED = (("host/include/cft.h", "include/cft.h"),)
+SEQ_PIECES = (
+    ("line", "#define SEQ_NREG "), ("line", "#define SEQ_MAX_DEPTH "),
+    ("line", "#define BLOCK_LANES "), ("block", "enum { SEQ_HALT = 0,"),
+    ("line", "#define SEQ_RAISE_FLAGS "), ("line", "#define SEQ_RAISE_MARK "),
+    ("line", "#define SEQ_STEP_MASK "), ("line", "#define SEQ_KX_SHIFT_A "),
+    ("line", "#define SEQ_KX_SHIFT_B "), ("line", "#define SEQ_KX_SHIFT_C "),
+    ("line", "#define SEQ_KX_INDICES "), ("line", "#define SEQ_REGHI_SHIFT "),
+    ("line", "#define SEQ_KX9_SHIFT "), ("block", "struct cft_program {"),
+    ("typedef", "} seq_insn;"), ("block", "static void seq_decode("),
+    ("block", "static int seq_reg("), ("block", "static int seq_source("),
+    ("block", "static int seq_step("), ("block", "static int seq_step_discarded("),
+    ("typedef", "} seq_block;"), ("block", "static cft_bn *seq_scratch_at("),
+    ("block", "static const cft_bn *seq_src("),
+    ("block", "static uint32_t seq_matching_endrep("),
+    ("block", "static cft_status seq_exec_augmented("),
+    ("block", "static cft_status seq_post_step("),
+    ("block", "static cft_status seq_run_block("), ("block", "static void seq_load_in("),
+)
+E3_FROM, E3_TO = b"#define BLOCK_LANES      64\n", b"#define BLOCK_LANES      1\n"
+E4_FROM, E4_TO = b"if (cft_sf_compute(p->f, d.op, d.rnd,", b"if (CFT_GPUA_ALU(p->f, d.op, d.rnd,"
+
+
+def seq_pieces(orig):
+    """[(name, first line number, original lines)] for SEQ_PIECES, refusing a
+    piece that is absent, ambiguous or out of program.c's order."""
+    lines = orig.splitlines(keepends=True)
+    text = [ln.decode("ascii").rstrip("\n") for ln in lines]
+    out, last = [], -1
+    for kind, key in SEQ_PIECES:
+        if kind == "typedef":
+            hits = [i for i, t in enumerate(text) if t == key]
+        else:
+            hits = [i for i, t in enumerate(text) if t.startswith(key)]
+        if len(hits) != 1:
+            raise ValueError(f"program.c: piece {key!r} found {len(hits)} times, not once")
+        i = hits[0]
+        if kind == "line":
+            lo, hi = i, i
+        elif kind == "typedef":
+            lo = max(j for j in range(i) if text[j] == "typedef struct {")
+            hi = i
+        else:
+            lo = i
+            hi = next(j for j in range(i, len(text)) if text[j].startswith("}")
+                      or (key.startswith("enum") and text[j].endswith("};")))
+        if lo <= last:
+            raise ValueError(f"program.c: piece {key!r} is out of program.c's order")
+        last = hi
+        out.append((key, lo + 1, lines[lo:hi + 1]))
+    return out
+
+
+def seq_edit(key, ln):
+    """One line of a piece, edited: (new line, edit kind or None)."""
+    if e1_applies(ln):
+        return E1_TEXT + ln, "E1"
+    if ln == E3_FROM:
+        return E3_TO, "E3"
+    if key.startswith("static cft_status seq_run_block(") and E4_FROM in ln:
+        return ln.replace(E4_FROM, E4_TO, 1), "E4"
+    return ln, None
+
+
+def derive_seq(orig):
+    """src/seqcore.c: the pieces, edited, joined by blank lines; and the
+    count of each edit kind, which must be 12 E1, 1 E3 and 1 E4."""
+    chunks, kinds = [], {"E1": 0, "E3": 0, "E4": 0}
+    for key, _first, lines in seq_pieces(orig):
+        new = []
+        for ln in lines:
+            ln2, k = seq_edit(key, ln)
+            new.append(ln2)
+            if k:
+                kinds[k] += 1
+        chunks.append(b"".join(new))
+    if kinds != {"E1": 12, "E3": 1, "E4": 1}:
+        raise ValueError(f"program.c: the edits are {kinds}, not 12 E1, 1 E3 and 1 E4")
+    return b"\n".join(chunks), kinds
+
+
+def check_seq(orig, copy):
+    """The copy on disk must be derive_seq(program.c) byte for byte; the
+    first line that is not is named, with the piece it should belong to."""
+    want, kinds = derive_seq(orig)
+    if copy == want:
+        return kinds
+    cl, wl = copy.splitlines(keepends=True), want.splitlines(keepends=True)
+    for i, (c, w) in enumerate(zip(cl, wl), 1):
+        if c != w:
+            raise ValueError(f"{SEQ[1]}:{i}: not program.c's piece text with E1-E4: "
+                             f"{c.decode('ascii', 'replace').rstrip()!r}")
+    raise ValueError(f"{SEQ[1]}: {len(cl)} lines, the pieces make {len(wl)} "
+                     f"(a line or a piece added or removed)")
+
+
+def run(root, out, check_only, seq=False):
     total = 0
+    if seq:
+        orig = (root / SEQ[0]).read_bytes()
+        target = out / SEQ[1]
+        if not check_only:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(derive_seq(orig)[0])
+        kinds = check_seq(orig, target.read_bytes())
+        print(f"devcopy: {SEQ[0]} blob {git_blob(orig)} -> {SEQ[1]}: "
+              f"{len(SEQ_PIECES)} pieces (E2), {kinds['E1']} E1, {kinds['E3']} E3, "
+              f"{kinds['E4']} E4, no other difference")
+        for src, dst in SEQ_COPIED:
+            data = (root / src).read_bytes()
+            if not check_only:
+                (out / dst).parent.mkdir(parents=True, exist_ok=True)
+                (out / dst).write_bytes(data)
+            if (out / dst).read_bytes() != data:
+                raise ValueError(f"{dst}: not {src} byte for byte")
+            print(f"devcopy: {src} blob {git_blob(data)} -> {dst}: copied, unedited")
     for src, dst in FILES:
         orig = (root / src).read_bytes()
         target = out / dst
@@ -138,9 +268,30 @@ def selftest(root):
         except ValueError as e:
             print(f"selftest: plant '{what}' refused: {e}")
     print(f"selftest: honest copy: {check_one('src/bigint.c', orig, good)} E1 edits, accepted")
+    # part 2's pieces: the same check, planted four ways
+    porig = (root / SEQ[0]).read_bytes()
+    pgood = derive_seq(porig)[0]
+    step_piece = b"".join(next(p for p in seq_pieces(porig)
+                               if p[0].startswith("static int seq_step_discarded("))[2])
+    pplants = {
+        "an operator changed in seq_run_block": pgood.replace(b"B->counts[i]++;",
+                                                              b"B->counts[i] += 2;", 1),
+        "BLOCK_LANES not 1": pgood.replace(E3_TO, b"#define BLOCK_LANES      2\n", 1),
+        "the ALU hook missing": pgood.replace(E4_TO, E4_FROM, 1),
+        "a piece missing": pgood.replace(step_piece + b"\n", b"", 1),
+    }
+    for what, text in pplants.items():
+        assert text != pgood, f"plant '{what}' did not change the copy"
+        try:
+            check_seq(porig, text)
+            print(f"selftest: plant '{what}' PASSED the check - the check is broken")
+            bad += 1
+        except ValueError as e:
+            print(f"selftest: plant '{what}' refused: {e}")
+    print(f"selftest: honest seqcore.c: {check_seq(porig, pgood)}, accepted")
     if bad:
         sys.exit(1)
-    print(f"selftest: OK, {len(plants)} plants refused by name")
+    print(f"selftest: OK, {len(plants) + len(pplants)} plants refused by name")
 
 
 def main():
@@ -151,6 +302,8 @@ def main():
     ap.add_argument("--out", type=Path)
     ap.add_argument("--check-only", action="store_true")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--seq", action="store_true",
+                    help="also the sequencer's executor from program.c (part 2)")
     a = ap.parse_args()
     try:
         if a.selftest:
@@ -158,7 +311,7 @@ def main():
         else:
             if a.out is None:
                 ap.error("--out is required")
-            run(a.root, a.out, a.check_only)
+            run(a.root, a.out, a.check_only, a.seq)
     except ValueError as e:
         print(f"devcopy: REFUSED: {e}")
         sys.exit(1)

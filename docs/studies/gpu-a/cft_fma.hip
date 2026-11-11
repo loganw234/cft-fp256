@@ -18,7 +18,7 @@
  *   cft_fma check CORPUS OUT|- [--device N] [--block B] [--kernel generic|fixed]
  *   cft_fma bench CORPUS [--device N] [--block B] [--reps R] [--lanes N] [--case K]
  *                 [--kernel generic|fixed]
- *   cft_fma diff N SEED [--device N] [--block B]
+ *   cft_fma diff N SEED [--device N] [--block B] [--op add|sub|mul]
  *   cft_fma info [--device N]
  *
  * --kernel fixed runs the second kernel (fma256_fixed.h, binary256 only, a
@@ -116,6 +116,81 @@ gpua_f256_kernel(int64_t n, const uint8_t *a, const uint8_t *b, const uint8_t *c
     int64_t i = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n)
         f256_fma_lane(a + i * 32, b + i * 32, c + i * 32, rnd[i], d + i * 32, flags + i);
+}
+#endif
+
+/* Part 2's identities (`diff --op add|sub|mul`): the generic lane runs
+ * cft_sf_compute(op) itself; the steered lane is cft_seq.hip's fp256 path,
+ * libcft's own sf_steer (ADD = FMA(a, 1, c), SUB = FMA(a, 1, -c), MUL =
+ * FMA(a, b, +-0 with the product's sign)) into the second kernel. */
+static int alu_op = CFT_SF_FMA;
+CFT_HD static void gpua_op_lane(const cft_fmt_desc *f, int op, const uint8_t *pa,
+                                const uint8_t *pb, const uint8_t *pc, int rnd,
+                                uint8_t *pd, uint8_t *pflags)
+{
+    cft_bn ba, bb, bc, bo;
+    uint32_t fl = 0;
+    int k;
+    cft_bn_zero(&ba); cft_bn_zero(&bb); cft_bn_zero(&bc);
+    cft_bn_load(&ba, pa, 32); cft_bn_load(&bb, pb, 32); cft_bn_load(&bc, pc, 32);
+    if (cft_sf_compute(f, op, rnd, &ba, &bb, &bc, &bo, &fl)) {
+        for (k = 0; k < 32; k++) pd[k] = 0;
+        *pflags = 0x80;
+        return;
+    }
+    cft_bn_store(&bo, pd, 32);
+    *pflags = (uint8_t)fl;
+}
+CFT_HD static void gpua_steer_lane(const cft_fmt_desc *f, int op, const uint8_t *pa,
+                                   const uint8_t *pb, const uint8_t *pc, int rnd,
+                                   uint8_t *pd, uint8_t *pflags)
+{
+    cft_bn ba, bb, bc, sa, sb, sc;
+    uint8_t qa[32], qb[32], qc[32];
+    int k;
+    cft_bn_zero(&ba); cft_bn_zero(&bb); cft_bn_zero(&bc);
+    cft_bn_load(&ba, pa, 32); cft_bn_load(&bb, pb, 32); cft_bn_load(&bc, pc, 32);
+    if (sf_steer(f, op, &ba, &bb, &bc, &sa, &sb, &sc)) {
+        for (k = 0; k < 32; k++) pd[k] = 0;
+        *pflags = 0x80;
+        return;
+    }
+    cft_bn_store(&sa, qa, 32); cft_bn_store(&sb, qb, 32); cft_bn_store(&sc, qc, 32);
+    f256_fma_lane(qa, qb, qc, rnd, pd, pflags);
+}
+/* The stream for ADD and SUB: the generator aims at a*b + c (cancellation,
+ * alignment, ties), so a becomes a*b rounded to nearest (and for SUB c becomes
+ * -c), and a + c, a - (-c) meet the same alignments a*b + c did. MUL takes
+ * the generator's a and b as they are. */
+CFT_HD static void gpua_prep_case(const cft_fmt_desc *f, int op, uint8_t *pa, const uint8_t *pb,
+                                  uint8_t *pc)
+{
+    uint8_t z[32] = {0}, p[32], fl;
+    if (op != CFT_SF_ADD && op != CFT_SF_SUB)
+        return;
+    gpua_fma_lane(f, 32, pa, pb, z, CFT_SF_RNE, p, &fl);
+    memcpy(pa, p, 32);
+    if (op == CFT_SF_SUB)
+        pc[31] ^= 0x80;
+}
+#ifndef CFT_GPUA_CPU
+__global__ void __launch_bounds__(256)
+gpua_prep_kernel(cft_fmt_desc f, int op, int64_t n, uint8_t *a, const uint8_t *b, uint8_t *c)
+{
+    int64_t i = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n)
+        gpua_prep_case(&f, op, a + i * 32, b + i * 32, c + i * 32);
+}
+__global__ void __launch_bounds__(256)
+gpua_op_kernel(cft_fmt_desc f, int op, int steered, int64_t n, const uint8_t *a,
+               const uint8_t *b, const uint8_t *c, const uint8_t *rnd, uint8_t *d,
+               uint8_t *flags)
+{
+    int64_t i = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n && steered)
+        gpua_steer_lane(&f, op, a + i * 32, b + i * 32, c + i * 32, rnd[i], d + i * 32, flags + i);
+    else if (i < n)
+        gpua_op_lane(&f, op, a + i * 32, b + i * 32, c + i * 32, rnd[i], d + i * 32, flags + i);
 }
 #endif
 
@@ -587,8 +662,14 @@ static void diff_show(const cft_fmt_desc *f, uint64_t seed, int64_t i)
     uint8_t a[32], b[32], c[32], r, d1[32], d2[32], f1, f2;
     char ha[65], hb[65], hc[65], h1[65], h2[65];
     gpua_gen_case(f, seed, i, a, b, c, &r);           /* recomputed on the host */
-    gpua_fma_lane(f, 32, a, b, c, r, d1, &f1);
-    f256_fma_lane(a, b, c, r, d2, &f2);
+    gpua_prep_case(f, alu_op, a, b, c);
+    if (alu_op == CFT_SF_FMA) {
+        gpua_fma_lane(f, 32, a, b, c, r, d1, &f1);
+        f256_fma_lane(a, b, c, r, d2, &f2);
+    } else {
+        gpua_op_lane(f, alu_op, a, b, c, r, d1, &f1);
+        gpua_steer_lane(f, alu_op, a, b, c, r, d2, &f2);
+    }
     hexle(a, 32, ha); hexle(b, 32, hb); hexle(c, 32, hc); hexle(d1, 32, h1); hexle(d2, 32, h2);
     printf("  DIFF lane %lld rnd %d: a %s b %s c %s\n     generic d %s flags 0x%02x\n"
            "       fixed d %s flags 0x%02x\n", (long long)i, r, ha, hb, hc, h1, f1, h2, f2);
@@ -626,16 +707,26 @@ static int do_diff(int64_t total, uint64_t seed)
         const int64_t m = total - base < chunk ? total - base : chunk;
 #ifdef CFT_GPUA_CPU
         clk::time_point t0 = clk::now();
-        for (i = 0; i < m; i++)
+        for (i = 0; i < m; i++) {
             gpua_gen_case(&f, seed, base + i, a + i * 32, b + i * 32, c + i * 32, r + i);
+            gpua_prep_case(&f, alu_op, a + i * 32, b + i * 32, c + i * 32);
+        }
         tgen += ms_since(t0); t0 = clk::now();
         for (i = 0; i < m; i++)
-            gpua_fma_lane(&f, 32, a + i * 32, b + i * 32, c + i * 32, r[i], &o1[i * 32],
-                          &o1[chunk * 32 + i]);
+            if (alu_op == CFT_SF_FMA)
+                gpua_fma_lane(&f, 32, a + i * 32, b + i * 32, c + i * 32, r[i], &o1[i * 32],
+                              &o1[chunk * 32 + i]);
+            else
+                gpua_op_lane(&f, alu_op, a + i * 32, b + i * 32, c + i * 32, r[i],
+                             &o1[i * 32], &o1[chunk * 32 + i]);
         tg += ms_since(t0); t0 = clk::now();
         for (i = 0; i < m; i++)
-            f256_fma_lane(a + i * 32, b + i * 32, c + i * 32, r[i], &o2[i * 32],
-                          &o2[chunk * 32 + i]);
+            if (alu_op == CFT_SF_FMA)
+                f256_fma_lane(a + i * 32, b + i * 32, c + i * 32, r[i], &o2[i * 32],
+                              &o2[chunk * 32 + i]);
+            else
+                gpua_steer_lane(&f, alu_op, a + i * 32, b + i * 32, c + i * 32, r[i],
+                                &o2[i * 32], &o2[chunk * 32 + i]);
         tf += ms_since(t0);
         for (i = 0; i < m; i++)
             if (memcmp(&o1[i * 32], &o2[i * 32], 32) || o1[chunk * 32 + i] != o2[chunk * 32 + i]) {
@@ -647,10 +738,18 @@ static int do_diff(int64_t total, uint64_t seed)
         CK(hipMemset(dcount, 0, sizeof(unsigned)));
         CK(hipEventRecord(e[0], 0));
         gpua_gen_kernel<<<g, block>>>(f, seed, base, m, da, db, dc, dr);
+        if (alu_op == CFT_SF_ADD || alu_op == CFT_SF_SUB)
+            gpua_prep_kernel<<<g, block>>>(f, alu_op, m, da, db, dc);
         CK(hipEventRecord(e[1], 0));
-        gpua_fma_kernel<<<g, block>>>(f, 32, m, da, db, dc, dr, d1, f1);
+        if (alu_op == CFT_SF_FMA)
+            gpua_fma_kernel<<<g, block>>>(f, 32, m, da, db, dc, dr, d1, f1);
+        else
+            gpua_op_kernel<<<g, block>>>(f, alu_op, 0, m, da, db, dc, dr, d1, f1);
         CK(hipEventRecord(e[2], 0));
-        gpua_f256_kernel<<<g, block>>>(m, da, db, dc, dr, d2, f2);
+        if (alu_op == CFT_SF_FMA)
+            gpua_f256_kernel<<<g, block>>>(m, da, db, dc, dr, d2, f2);
+        else
+            gpua_op_kernel<<<g, block>>>(f, alu_op, 1, m, da, db, dc, dr, d2, f2);
         CK(hipEventRecord(e[3], 0));
         gpua_cmp_kernel<<<g, block>>>(m, d1, f1, d2, f2, dcount, dfirst);
         CK(hipGetLastError());
@@ -697,9 +796,12 @@ static int do_diff(int64_t total, uint64_t seed)
     }
     for (i = 0; i < bad && i < 8 && nshow < 3; i++, nshow++)
         diff_show(&f, seed, firsts[i]);
-    printf("diff: %lld cases, seed %llu, on %s: generic and fixed differ on %lld; first chunk "
+    printf("diff%s: %lld cases, seed %llu, on %s: generic and fixed differ on %lld; first chunk "
            "(%lld cases) sha256 inputs %s, generic %s, fixed %s; kernel ms: generator %.1f, "
-           "generic %.1f (%.4g FMA/s), fixed %.1f (%.4g FMA/s): %s\n", (long long)total,
+           "generic %.1f (%.4g FMA/s), fixed %.1f (%.4g FMA/s): %s\n",
+           alu_op == CFT_SF_FMA ? "" : alu_op == CFT_SF_ADD ? " --op add (steered)" :
+           alu_op == CFT_SF_SUB ? " --op sub (steered)" : " --op mul (steered)",
+           (long long)total,
            (unsigned long long)seed, device_name, (long long)bad, (long long)chunk, hx[0], hx[1],
            hx[2], tgen, tg, total / (tg * 1e-3), tf, total / (tf * 1e-3), bad ? "RED" : "GREEN");
 #ifndef CFT_GPUA_CPU
@@ -728,6 +830,13 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--reps") && i + 1 < argc) reps = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--lanes") && i + 1 < argc) lanes = atoll(argv[++i]);
         else if (!strcmp(argv[i], "--case") && i + 1 < argc) one_case = atoll(argv[++i]);
+        else if (!strcmp(argv[i], "--op") && i + 1 < argc &&
+                 (!strcmp(argv[i + 1], "add") || !strcmp(argv[i + 1], "sub") ||
+                  !strcmp(argv[i + 1], "mul"))) {
+            i++;
+            alu_op = !strcmp(argv[i], "add") ? CFT_SF_ADD : !strcmp(argv[i], "sub")
+                     ? CFT_SF_SUB : CFT_SF_MUL;
+        }
         else if (!strcmp(argv[i], "--kernel") && i + 1 < argc &&
                  (!strcmp(argv[i + 1], "fixed") || !strcmp(argv[i + 1], "generic")))
             kernel_fixed = !strcmp(argv[++i], "fixed");

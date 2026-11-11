@@ -66,11 +66,16 @@ nvidia)
             out=$(compute-sanitizer --tool memcheck --print-limit 5 "$B/nv-fastmath/cft_fma" check \
                 "$C/$f.bin" - "$@" 2>&1); src=$?
             sum=$(grep -m1 -E "ERROR SUMMARY: [0-9]+ error" <<< "$out")
-            # "========= Error: ..." is the tool's own failure (a refused device,
-            # no debugger interface), which it counts in its ERROR SUMMARY while
-            # the program runs uninstrumented: not run. A memcheck finding is not
-            # an "Error:" line, and a summary without one is the tool's verdict.
-            if [ -z "$sum" ] || grep -qE "^=+ Error:" <<< "$out"; then
+            # "========= Error: ..." with the two known sentences is the tool's
+            # own failure (no debugger interface, a refused device), which it
+            # counts in its ERROR SUMMARY while the program runs uninstrumented:
+            # not run, but only when the summary counts those lines and nothing
+            # else. A summary counting more, or any other "Error:" line, is red.
+            known="Failed to initialize WDDM debugger interface|Device not supported"
+            nerr=$(grep -oE "ERROR SUMMARY: [0-9]+" <<< "$sum" | grep -oE "[0-9]+$")
+            ntool=$(grep -E "^=+ Error:" <<< "$out" | grep -cE "$known")
+            nother=$(grep -E "^=+ Error:" <<< "$out" | grep -cvE "$known")
+            if [ -z "$sum" ] || { [ "$ntool" -gt 0 ] && [ "$nother" = 0 ] && [ "${nerr:-0}" = "$ntool" ]; }; then
                 why=$(grep -E "^=+ Error:" <<< "$out" | sed 's/^=* *Error: *//' | sort -u | tr '\n' ' ' | cut -c1-240)
                 echo "not run: compute-sanitizer on $f (${why:-no ERROR SUMMARY, exit $src})"
                 notrun="$notrun compute-sanitizer($f)"

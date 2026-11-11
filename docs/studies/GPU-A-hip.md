@@ -17,6 +17,10 @@ VGPU-A's series), hazards.sh's verdict over a sanitizer leg that did not
 run, section 7's list of immediates, and four notes (a one-sided plant, the
 two sessions' spread, the package names, the generator's coverage).
 
+**Part 2, programs on the GPU,** written the same day at Logan's word,
+follows this part's appendix: libcft's sequencer programs, one thread a
+lane, bit for bit on all three cards, and their rates.
+
 ## The answer
 
 **One HIP source works on both vendors, bit for bit.** MEASURED, results and
@@ -46,7 +50,7 @@ the display taking 8 to 19 % of that card (section 8).
 implementation of the fp256 FMA on fixed limbs in registers. It makes 0.80
 to 1.46 G a second, kernel only (MEASURED), 1.9 to 3.4 times the quad, by
 device and batch size:
-- the RX 7600's 1.38 to 1.46 G/s holds at 1.5M lanes or fewer; it is 1.00 to 1.01 at 2M and 3M lanes and 0.80 to 0.83 at 4M (VGPU-A's MEASURED series, section 8), a step whose cause is not known;
+- the RX 7600's 1.38 to 1.46 G/s holds at 1.5M lanes or fewer; it is 1.00 to 1.01 at 2M and 3M lanes and, at 4M, 0.80 (this study's 803 M/s) to 0.83 (VGPU-A's 0.82 to 0.83) (VGPU-A's MEASURED series, section 8), a step whose cause is not known;
 - the 5060 Ti makes 0.885 to 0.935 G/s at 1M to 4M lanes, and the 4070 0.94 to 1.08 across the two sessions (section 8).
 
 It is held bit for bit to:
@@ -478,7 +482,7 @@ The block size (64, 128, 256) moves no rate by more than its spread.
 
 **The roadmap's ESTIMATE** (10^9 to 10^10 on a large GPU, low confidence),
 against the measurements:
-- Its basis was about 1,000 32-bit operations an fp256 FMA. The first kernel spends about 38,000 lane-instruction slots per FMA (COMPUTED: 1.32 x 10^13 slots a second on the 5060 Ti at 2.87 GHz, over 346 M FMAs a second with every lane on one case). The second spends about 14,900.
+- Its basis was about 1,000 32-bit operations an fp256 FMA. The first kernel spends about 38,000 lane-instruction slots per FMA (COMPUTED: 1.32 x 10^13 slots a second on the 5060 Ti at 2.87 GHz, over 346 M FMAs a second with every lane on one case). The second has about 14,900 slots per FMA at that rate (COMPUTED: the card's issue rate over the measured FMA rate), the slots available, not a measure of what it spends: part 2 bounds what it needs at about 4,200 per FMA-class instruction, inside fp256 exp (P2.5).
 - The ESTIMATE was an order of magnitude high for the generic port. The specialised kernel straddles its floor on mid-range cards: 0.80 to 1.46 x 10^9 by device and batch (the answer gives which is where).
 
 **What limits the first kernel** (MEASURED; desktop and RX 7600 experiments in
@@ -492,7 +496,7 @@ the ledger):
 - Divergence costs 0 to 7 % at 1M lanes (one case a lane: 903 to 957 M/s on NVIDIA, 1.46 to 1.48 G/s on the RX 7600).
 - Its register count holds NVIDIA's occupancy at 33 % (sm_89) and 67 % (sm_120) (MEASURED).
 - On the RX 7600 at 1M lanes it moves 130 bytes an FMA at 1.38 G/s, about 180 GB/s (COMPUTED). That is close to the card's 288 GB/s (BELIEVED, its specification). Past the step it moves less (1.0 G/s is 130 GB/s, 0.82 is 107 GB/s, COMPUTED), so that bandwidth does not explain the step.
-- On NVIDIA it uses about a quarter of the memory bandwidth, so it is BELIEVED issue-bound there.
+- On NVIDIA it uses about a quarter of the memory bandwidth. Part 2's measurement contradicts the BELIEVED "issue-bound" this line gave (P2.5): what bounds the stand-alone kernel on NVIDIA is not tested. Candidates, each untested: global-memory latency, and occupancy at 64 to 110 registers.
 
 **A tuned kernel** (ESTIMATE, medium-low confidence) might gain 1.5 to 3
 times on NVIDIA:
@@ -596,4 +600,368 @@ WORK/build/nvidia/cft_fma bench CORPUS/stream-fp256.bin --block 128 --lanes 1000
 # send-back 1: the one-sided plant (section 5), then the diff it turns red
 DEFS=-DCFT_GPUA_PLANT_FIXED_RMM_AS_RNE bash docs/studies/gpu-a/build.sh nvidia WORK/plant
 WORK/plant/cft_fma diff 16777216 20261110 --device 1
+```
+
+# Part 2: programs on the GPU
+
+Written 2026-11-10, the same day, by the same author at Logan's word:
+
+> "I'd also be curious if programs could run well on the gpu kernels at speed. If possible that could be added to the study"
+
+Part 1 measured one operation. This part runs libcft's sequencer
+**programs**: one instruction stream over many lanes with a lane mask. It
+runs the math library's routines as fragments, cftc's compiled systems, and
+the golden model's own fuzz programs. The marks are part 1's. Part 2's code
+is in `studies/gpu-a/` beside part 1's.
+
+## P2.1 The answer
+
+**Yes, bit for bit, on all three cards.** A runner with one thread a lane
+executes the same program words libcft runs. Its outputs match libcft's own
+sequencer byte for byte (MEASURED) on the RTX 5060 Ti, the RTX 4070, the
+RX 7600 and the runner's CPU build:
+- results, flags, status, deposit counts, R23's lane bytes and the scratch-out block;
+- masked lanes left as the caller filled them.
+
+The corpora:
+
+| corpus | cases | lanes | what it holds |
+|---|---|---|---|
+| seq_check's routine corpus, its first round at seed 17 | 480 | 29,627 | every fragment, both shapes, five attributes; fp32, fp64, fp128 and fp256 |
+| the golden model's fuzz programs | 800 | 44,662 | every control code but augmentedAddition's two; 200 a format |
+| cftc's compiled systems | 8 | 4,608 | loops of 10 to 100 steps (up to 17,422 instructions a lane), the scratch block, R24's regions |
+| the rate programs on typical arguments | 6 | 24,576 | exp, sin and atan at fp64 and fp256 |
+
+On the routine corpus the golden model gives the same bytes too. Two plants
+go red by name on every device.
+
+**At speed, yes.** These are kernel-only rates, with the program and the
+lanes resident, at 1M lanes. Each lane runs one of 4,096 typical
+arguments (exp and atan uniform in [-20, 20], sin in [-100, 100]). The table
+gives lane-programs a second (MEASURED, P2.5).
+
+| | 5060 Ti | 4070 | RX 7600 | libcft, one core | MPFR, one core |
+|---|---|---|---|---|---|
+| exp, fp64 | 13.4 M | 9.9 to 10.5 M | 5.9 to 6.0 M | 45.5 K | 1.2 to 1.3 M |
+| exp, fp256, libcft's arithmetic | 2.64 M | 3.5 to 3.9 M | 2.11 M | 23.4 K | 0.59 to 0.60 M |
+| exp, fp256, the fixed path | 25.6 M | 8.0 to 8.6 M | 7.1 to 7.3 M | - | - |
+
+- **Against one core of libcft's sequencer:** at fp256 exp, the generic arithmetic is 90 to 165 times faster, and the fixed path 300 to 1,090 times (COMPUTED).
+- **Against one core of MPFR** (mpfr+754, MPFR 4.2.1, P2.5): at fp256 exp, the generic arithmetic is 3.5 to 6.6 times faster, and the fixed path 12 to 43 times (COMPUTED). At fp256 atan, where MPFR is slowest, the fixed path is 42 to 149 MPFR cores.
+- **The card:** no rate for programs at fp64 or fp256 is recorded (READ, P2.5). There is nothing to set these figures beside.
+
+**Two qualifications.**
+- **The fixed path differs by card.** It is 9.7 times the generic path on the 5060 Ti, 2.1 to 2.5 times on the 4070 and 3.4 times on the RX 7600. Not explained (P2.5).
+- **Rates depend on the lanes.** On the routine corpus's own lanes (specials, edges and centres, 63 to 129 distinct), the NVIDIA cards are up to 44 % slower than on typical arguments (P2.5).
+
+**What it is.** The executor is libcft's own `seq_run_block`, copied by
+script and checked at every build (P2.3). The run's setup around it, about
+150 lines, is a **second implementation of the sequencer's run semantics**,
+held bit for bit to libcft's sequencer, and not libcft's code.
+
+## P2.2 What was built
+
+| file | lines | what it is |
+|---|---|---|
+| `devcopy.py --seq` | +159 | the executor taken from program.c by script: E2 to E4, checked; four plants |
+| `cft_seq.hip` | 693 | the runner: one source for the CPU, NVIDIA and AMD, as part 1's |
+| `seq_ref.c` | 245 | the reference: libcft's `cft_program_run_ex`, `libcft.a` built from a copy of `host/` |
+| `gen_programs.py` | 345 | the corpora, by seq_check's and the golden model's own builders; the golden outputs; the census |
+| `build_seq.sh`, `run_seq.sh` | 86, 93 | the builds; the runbook body for any HIP device |
+| `mpfr_bench.c` | 145 | MPFR on one core, BENCHMARKS.md's mpfr+754 method |
+| `cft_fma.hip --op` | +121 | ADD, SUB and MUL through the fixed FMA by libcft's steering (P2.6) |
+| `run_mi300x.sh`, `hazards.sh` | +15, +10 | step 6, the runner on gfx942; the sanitizer rule refined (P2.8) |
+| `captured/` | 545 | the corpora's sums (`programs.sha256`), every run's log (`part2-*.txt`) |
+
+Nothing in `host/src` changed.
+
+**The output layout.** Both executors write, per case: the program's
+information (`cft_program_get_info` in seq_ref, the runner's own parse), the
+run's status, FLAGS and STATUS, then the deposits, counts, lane bytes and
+scratch-out. Every buffer is first filled with seq_check's pattern, so a
+write that must not happen shows.
+
+## P2.3 The executor copied, the run re-expressed
+
+**The copy (`devcopy.py --seq`).**
+- It extracts 28 pieces of `program.c`, in its order: `seq_run_block` and every function, type and constant it reaches (`seq_decode`, `seq_source`, `seq_step`, `seq_post_step`, `struct cft_program`, `seq_block`, `seq_load_in` and the rest). That is edit E2, the extraction.
+- Each piece is byte for byte as in program.c, but for three edits:
+  - E1 (`CFT_HD`) on its 12 function lines;
+  - E3, `BLOCK_LANES` 64 becomes 1;
+  - E4, seq_run_block's one ALU call goes through a hook, `CFT_GPUA_ALU`. It is `cft_sf_compute` itself unless the fp256 path is built.
+- `cft.h` is copied unedited. Part 1's copy of softfloat and bigint is unchanged: 105 E1 edits.
+- Four new plants are each refused by name: an operator changed, `BLOCK_LANES` 2, the hook missing, a piece missing (MEASURED, `devcopy.py --selftest`).
+
+**What is re-expressed.** It is the runner's alone, held to libcft by the
+comparison:
+- `gpua_parse`: the image's header, constants and instructions, and `seq_scratch_footprint`'s two fields;
+- `gpua_seq_lane`: what `seq_program_run` does around `seq_run_block` for one lane:
+  - the registers zeroed, a, b and c loaded;
+  - R17's mask setting `keep` and `active`;
+  - a kept lane's deposits zero-filled;
+  - the scratch zeroed to its reach and preloaded;
+  - the counts, lane bytes and scratch-out read back for kept lanes only;
+- the run's FLAGS and STATUS, which are an OR of the lanes' words by atomic OR on a GPU. No order can change an OR.
+
+The runner does not validate an image. Every image it ran was first loaded,
+and so validated, by libcft in seq_ref.
+
+**Refused by name**, never computed: augmentedAddition, control codes 10 and
+11 (`augmented.c` is not in the device copy); a format the build does not
+carry; an image whose header the parser does not know. **Not run:** ABI
+0.14's index tables, for which the runner has no input, and any scratch depth
+but a plain software handle's 256.
+
+## P2.4 Why a block of one lane gives a block of 64's bits
+
+This is the runner's foundation, stated from the code.
+
+**Within the block loop.** `seq_run_block` (`host/src/program.c` :1975 to
+:2248) acts on each lane through `active[i]`: an ALU instruction, DEPOSIT,
+SETACT, STL and LDL, STX and LDX with their post-steps, the augmented halves
+and RAISE all skip an inactive lane. Only four things act on the block as a
+whole: REPEAT and ENDREP test whether **any** lane is active; HALT ends the
+block; QUIET and ENDQUIET count a depth in program order, the same for every
+lane.
+
+**Across iterations.** The validator refuses ACTALL and HALT inside a loop
+(program.c :946 to :961): ACTALL could reactivate a lane, and HALT's effect
+is not per lane. SETACT only narrows. So a lane that goes inactive inside a
+loop stays inactive until the loop ends, and each iteration it sits through
+writes nothing of its own. That is SEQUENCER.md's P3, "the early exit is
+invisible" (docs/SEQUENCER.md :270 to :282).
+
+**The consequence.** A lane's active iterations are the same in a block of 1
+and a block of 64:
+- while it is active, `any` is true in both;
+- once it is inactive, nothing touches it until both blocks reach the same `ENDREP + 1`.
+
+The other effects are per lane: a deposit's address, (lane) x max_deposits +
+count, is the global lane's alone (P2); the scratch is per lane; FLAGS and
+STATUS are ORs.
+
+**Reductions.** The sequencer has none. No instruction reduces across
+lanes: `cft_reduce` is a separate call, outside `program.c`'s executor.
+
+**The test** is the byte-for-byte comparison with libcft at `BLOCK_LANES`
+64. The loops in it:
+- the systems' loops of 10 to 100 steps;
+- the fuzz corpus's 1,102 REPEATs, 860 SETACTs and 342 ACTALLs across the four formats;
+- 233 runs that report a deposit overflow, 55 a strict scratch range and 330 a mark.
+
+All are green. **A plant that breaks block independence was not made.** It
+would have to change the copied executor, which devcopy's check refuses. The
+runner-level plants are below.
+
+## P2.5 Correctness, devices and rates
+
+**Hashes.** The sha256 of each corpus's output, equal on every device run
+(MEASURED, `captured/part2-*.txt`). Every device here means: libcft
+(seq_ref), the runner's CPU build, the 5060 Ti, the 4070 and the RX 7600, the
+fixed path included where it applies.
+
+| corpus | fp32 | fp64 | fp128 | fp256 |
+|---|---|---|---|---|
+| routines | a7ff1aef... | 4eb03cc3... | 30b7a930... | dd159120... |
+| fuzz | 735f6e86... | 347c9957... | e8f855b4... | 9dec942c... |
+
+- The golden model's outputs equal the routine row (`gen_programs.py --golden`).
+- systems: 581b9c30...; bench: 6cba53d3...
+
+**The plants.** Each is red by name, with the same wrong bytes on every
+device (MEASURED: the CPU, the 5060 Ti, the 4070 and the RX 7600):
+- `CFT_GPUA_PLANT_SEQ_MASK`, the runner ignoring R17's mask: 24 of the 130 fp64 routine cases differ, hash e1537046.... They are the cases whose mask clears a lane (COMPUTED: 24 of the 34 masked cases).
+- `CFT_GPUA_PLANT_SEQ_KONST`, an operand source, a constant read from the bank's next entry: 130 of 130 differ, hash 70225177....
+- The augadd program is refused by name everywhere.
+
+**The fragments are straight-line.** `gen_programs.py --census` reads every
+fragment, both shapes and five attributes, at four formats. Their control
+codes are DEPOSIT, HALT, QUIET, ENDQUIET and RAISE only; their branching is
+the ALU's SELECT. The rate programs' lengths at fp64 and fp256:
+- exp: 183 and 204 instructions;
+- sin: 409 and 392;
+- atan: 179 and 206.
+
+At fp256, 124 of exp's 204 are FMA, ADD, SUB or MUL (rne, stand-alone).
+
+**The rates.** Method: `cft_seq bench` times the kernel by events, a warm-up
+then 5 repetitions (3 at fp256), median given, a case's lanes repeated to 1M
+(1,048,576), block 128, outputs left on the device; `seq_ref bench` runs
+libcft's `cft_program_run_ex` over 4,096 lanes on one core, best of 3 to 5;
+MPFR runs per element over the same arguments, best pass. Clocks were not
+controlled.
+
+The RX 7600 figures were taken with the card free (amd-smi: 8,120 MB free,
+no other process). Part 1's were taken beside the resident server.
+
+Lane-programs a second, typical arguments (MEASURED):
+
+| | 5060 Ti | 4070 | RX 7600 | libcft, one core | MPFR+754, one core |
+|---|---|---|---|---|---|
+| exp, fp64 | 13.4 M | 9.9 to 10.5 M | 5.9 to 6.0 M | 45.5 K (22 µs) | 1.2 to 1.3 M (777 to 820 ns) |
+| sin, fp64 | 5.97 M | 4.9 to 5.3 M | 2.67 M | 19.3 K | 0.70 to 0.81 M (1,240 to 1,429 ns) |
+| atan, fp64 | 13.3 M | 10.2 to 10.9 M | 5.75 M | 43.8 K | 0.50 to 0.52 M (1,927 to 1,989 ns) |
+| exp, fp256 | 2.64 M | 3.5 to 3.9 M | 2.11 M | 23.4 K (43 µs) | 0.59 to 0.60 M (1,661 to 1,698 ns) |
+| sin, fp256 | 1.25 M | 1.8 to 1.9 M | 0.98 M | 11.9 K | 0.45 to 0.47 M (2,146 to 2,220 ns) |
+| atan, fp256 | 2.65 M | 3.8 to 4.1 M | 2.04 M | 24.0 K | 0.16 M (6,190 to 6,224 ns) |
+| exp, fp256, fixed | 25.6 M | 8.0 to 8.6 M | 7.1 to 7.3 M | - | - |
+| sin, fp256, fixed | 12.8 M | 3.8 to 3.9 M | 3.5 M | - | - |
+| atan, fp256, fixed | 23.9 M | 7.4 to 7.8 M | 6.8 to 6.9 M | - | - |
+
+Ranges are the sessions measured: three on the desktop (17:35 to 17:41,
+17:54 to 17:55 and 17:58 to 18:01), two on the RX 7600 (17:42 and 17:58) and
+two of MPFR (17:42 and 18:03). The 5060 Ti's three agree within 1 %. The
+4070 drives the display, which used 7 to 44 % of it between the runs
+(nvidia-smi). As lane-instructions a second:
+- fp64: 1.0 to 2.5 x 10^9;
+- fp256 with libcft's arithmetic: 0.39 to 0.84 x 10^9;
+- fp256 with the fixed path: 1.4 to 5.2 x 10^9.
+
+One core of libcft runs 120 to 215 ns a lane-instruction. MPFR's FMA at 237
+bits takes 62.3 to 65.3 ns here, against BENCHMARKS.md's 71 ns (READ).
+
+**On the corpus's own lanes** (seq_check's mix of specials, edges, centres
+and random), MEASURED at 1M lanes:
+
+| | 5060 Ti | 4070 | RX 7600 |
+|---|---|---|---|
+| exp, fp64 | 7.48 M | 5.2 to 5.6 M | 4.2 M |
+| exp, fp256 | 1.97 M | 2.5 to 2.7 M | 1.40 M |
+| exp, fp256, fixed | 22.7 M | 6.2 to 7.2 M | 6.4 to 6.6 M |
+
+Divergence is one plausible cause of the difference from typical arguments.
+It was not tested.
+
+**The batch curve**, fp256 exp on the fixed path, typical arguments, in M
+lane-programs a second (MEASURED, the runbook's session, `captured/part2-desktop.txt`
+and `part2-rx7600.txt`; the earlier sessions agree within 6 % on the 5060 Ti
+and the RX 7600, and within 8 % on the 4070 but 18 % at 4K lanes):
+
+| lanes | 4K | 16K | 64K | 256K | 1M | 2M | 4M |
+|---|---|---|---|---|---|---|---|
+| 5060 Ti | 7.7 | 17.0 | 23.5 | 24.9 | 25.5 | 25.6 | 25.6 |
+| 4070 | 4.5 | 7.4 | 7.0 | 7.8 | 7.9 | 8.3 | 8.2 |
+| RX 7600 | 2.3 | 6.3 | 7.0 | 6.9 | 7.1 | 7.4 | 7.4 |
+
+- On the corpus's lanes, fp64 exp's curve (`captured/part2-rates.txt`) is flat from 256K lanes on every card.
+- The block size (64, 128, 256) moves fp256 exp by at most 7 %.
+- **The RX 7600 shows no step here** between 1.5M and 2M lanes, unlike part 1's FMA kernel (section 8). Not explained.
+
+**The fixed path's spread across cards** (MEASURED, ptxas and the HIP-Clang
+resource report):
+- 5060 Ti: the runner holds 64 registers a thread with the fixed path and 48 without; 83 % occupancy without.
+- 4070: 128 registers with or without, with spills of 108 and 184 bytes in the fixed build; 33 % occupancy.
+- RX 7600: 74 VGPRs and 8,724 B of scratch a lane; 75 % occupancy.
+
+These are facts, not an explanation. A 4070 build with `-maxrregcount=64`
+still compiled at 128 registers, so the register count's effect was not
+tested.
+
+**A correction to part 1** (approved by the lead), from the fixed path's
+rate inside exp:
+- The 5060 Ti runs 25.6 M fp256 exp lane-programs a second. That is at least 3.17 x 10^9 executions of the second kernel's code a second, through FMA, ADD, SUB and MUL.
+- That means at most about 4,200 slots per FMA-class instruction on average, in fp256 exp at these arguments (COMPUTED from the MEASURED 25.6 M lane-programs a second).
+- This bounds those 124 instructions' kinds together. ADD and MUL may run shorter paths when an operand is exactly 1 or 0, so it is not a general FMA's cost.
+- So part 1's 14,900 slots per FMA, taken on part 1's own stream (`gen_corpus.py stream` replicated), were the slots available at that rate, not what the FMA spends.
+- Part 1's BELIEVED "issue-bound" on NVIDIA is contradicted.
+- The inputs differ between the two measurements: part 1's stream against exp's 4,096 uniform arguments.
+- On the RX 7600 the comparison goes the other way: 0.9 x 10^9 FMA-class instructions a second inside exp, against part 1's 1.38 G/s at 1.5M lanes or fewer. MEASURED; not explained.
+
+**The card** (READ): one tile runs an arithmetic instruction in 0.98 ns a lane
+and a control code in about 4 ns, MEASURED there at fp32 (docs/BENCHMARKS.md
+:452 to :466, docs/SEQUENCER.md :1624 to :1632); exp-f32 at about 2.6 M cases
+a second a tile is COMPUTED there (docs/CARDDAY.md :2038 to :2040); the quad's
+resident FMA is 1,664 M at fp64 and 427 M at fp256 (docs/ROADMAP.md :6879 to
+:6882). No rate of the card for programs at fp64 or fp256 was found (those
+files, HX-wide-sweeps.md and INTEGRATION.md), so the GPU's program rates have
+no card figure to stand beside.
+
+## P2.6 ADD, SUB and MUL through the fixed FMA
+
+The runner's fp256 path takes FMA, ADD, SUB and MUL through `sf_steer`. That
+is libcft's own steering, the same identities the RTL's operand mux uses:
+- ADD = FMA(a, 1, c);
+- SUB = FMA(a, 1, -c);
+- MUL = FMA(a, b, +-0 by the product's sign).
+
+The steering feeds `f256_fma_lane`. `cft_fma diff --op add|sub|mul` holds
+each identity against `cft_sf_compute(op)` itself, results and flags, on
+part 1's counter-based hard-case stream under the five attributes. For ADD
+and SUB, a becomes fl(a x b), so the stream's cancellation and alignment
+families meet a + c as they met a x b + c.
+
+| device | cases an operation | differing |
+|---|---|---|
+| RTX 5060 Ti | 268,435,456 (2^28) | 0, 0, 0 |
+| RTX 4070 | 67,108,864 (2^26) | 0, 0, 0 |
+| RX 7600 | 67,108,864 (2^26) | 0, 0, 0 |
+| CPU | 200,000 (seed 1) | 0, 0, 0 |
+
+The first chunk hashes alike on every device: inputs 21ae7619... (add),
+86ad800f... (sub), b0764272... (mul); outputs b2b0aa08... (add and sub alike)
+and c59668cd... (mul). Part 1's FMA diff reproduces its own hashes from the
+same build. The identities are used.
+
+## P2.7 What was not run, and what a backend's sequencer would need
+
+**Not run:**
+- augmentedAddition (refused);
+- index tables;
+- other scratch depths;
+- seq_check's other corpora through the runner: scratch, indexed, masked, rev8 and flags (the fuzz corpus covers their control codes, not their directed cases);
+- the hard workloads (`programs/workloads/`);
+- the runner on an MI300X (built for gfx942 on the RX 7600 machine: 74 VGPRs and 2,276 B at fp64, 148 and 9,156 B with the fixed path, refused there by name as a foreign image);
+- fp32 and fp128 rates;
+- `-maxrregcount`'s effect (the build did not take it).
+
+**What a backend's sequencer would need.** By functions, as Logan answered.
+Each round covers every precision libcft covers (fp32 to fp256):
+1. **The executor as libcft's code.** Here it is copied by script and checked. A backend would rather have `program.c` split so that `seq_program_run`'s per-lane setup is a function both executors call. Then nothing of the run would be re-expressed, and this part's second implementation would go.
+2. **The classes refused here:** `augmented.c` copied under E1 (AUGADD, AUGERR), index tables in the lane setup, and a handle's scratch depth.
+3. **Residency:** program, bank and lanes on the device, one launch a run. A lane's registers live in its thread's local memory: 5,280 bytes at 40 limbs.
+4. **Specialised arithmetic, by function.** The fp256 FMA class first: FMA, ADD, SUB and MUL by steering, 61 to 77 % of exp's, sin's and atan's instructions at fp256. Each is held inside the gates to the generic path.
+5. **Per-card tuning:** the 4070's register allocation, untested.
+6. **The gates:** every corpus here on every device, seq_check's eight corpora through the device, and the plants as controls.
+
+**The coverage an overnight campaign would need** before it accepts a
+second implementation (Logan's answer 3; ESTIMATE of what is enough):
+- **the fixed kernel:** the conformance FMA corpus and VGPU-A's 747,560 hard cases on every build and device; `diff` and `diff --op` at 2^30 or more an operation on each device class, with the one-sided plant red; a golden-checked stream (part 1, section 9 (c)) as a referee that is not the generic kernel. The campaign: 2^40 differential cases an operation.
+- **the runner:** seq_check's eight corpora through it (directed cases for every class); 10^4 fuzz programs a format with every arm, augmentedAddition included once copied; the systems and the hard workloads; both plants red. The campaign: 10^6 fuzz programs a format against libcft.
+
+## P2.8 Records, GPU time and the RX 7600 job
+
+- **The record:** `captured/programs.sha256` (the 21 corpora and reference outputs), `captured/part2-*.txt` (every run's log, paths removed).
+- **The corpora are not committed.** `gen_programs.py` remakes them in about 80 s (MEASURED; it needs mpmath and pytest, as seq_check's routine corpus does), and the sums hold them.
+- **Desktop GPU time in part 2:** about 6 minutes in all (COMPUTED from the logs).
+- **The RX 7600 machine:**
+  - every run was in `~/gpu-a`, with amd-smi before each GPU step;
+  - the long jobs were launched detached, `ssh -n` with `nohup setsid bash SCRIPT > LOG 2>&1 < /dev/null &`;
+  - each ended by itself, and `ps` showed nothing of them left when the log was collected.
+- **hazards.sh's sanitizer rule** (VGPU-A's note on part 1, refined here): "not run" only when the tool's errors are exactly its two known sentences (no debugger interface, device not supported); a summary counting more, or another "Error:" line, is red. MEASURED on five fake outputs (not run, red, red, green, not run as intended); the captured NVIDIA section reads "not run" under both rules.
+- **One install, approved:** `libmpfr-dev` 4.2.1-1build1.1 and `libgmp-dev` 2:6.3.0+dfsg-2ubuntu6.1 (with `libgmpxx4ldbl`) from Ubuntu's noble-updates into `cft-gpu`. Each .deb's sha256 equals the signed index's (the ledger).
+
+## P2.9 Questions for Logan
+
+1. **A backend round for programs?** The 5060 Ti runs fp256 exp at 25.6 M lane-programs a second, about 1,090 times one core of libcft's sequencer and 43 MPFR cores. Is that worth a round, and is exp's family, then trig, then the inverse functions the order?
+2. **One executor, not two.** Should `program.c` be split so that its per-lane run setup is a function a GPU backend calls? That would remove this part's second implementation.
+3. **The 4070.** Its fixed path is a third of the 5060 Ti's. Is a tuning study worth it, or is the 5060 Ti class (and the MI300X) the target?
+4. **augmentedAddition next?** It is the one class this part refuses.
+5. **The MI300X.** Should `run_mi300x.sh`'s new step 6 run with part 1's steps, if they are run?
+
+## P2 appendix: commands
+
+```
+# corpora (this desktop, Windows Python 3.12 + mpmath 1.3.0 + pytest; ~80 s), then checked
+python -B docs/studies/gpu-a/gen_programs.py PROGS --formats fp32 fp64 fp128 fp256 --golden
+python -B docs/studies/gpu-a/gen_programs.py PROGS --census            # P2.5's census
+# the reference (WSL cft-gpu): libcft.a from a copy of host/, one job
+bash docs/studies/gpu-a/build_seq.sh ref WORK/ref
+WORK/ref/seq_ref run PROGS/routines-fp64.bin PROGS/ref-fp64.out   # each corpus; and: bench
+# every device: the runbook body (the desktop: DEVICE=1, then REUSE=1 DEVICE=0)
+HIP_PATH=/opt/rocm-7.2.4 DEVICE=1 bash docs/studies/gpu-a/run_seq.sh nvidia PROGS WORK 89 120
+bash docs/studies/gpu-a/run_seq.sh amd PROGS WORK gfx1102 gfx942    # the RX 7600 machine
+# MPFR, one core
+cc -O2 docs/studies/gpu-a/mpfr_bench.c -lmpfr -lgmp -o WORK/mpfr_bench && WORK/mpfr_bench PROGS/bench.bin
+# the identities
+WORK/fma-nv/cft_fma diff 268435456 20261110 --op add --device 1   # sub, mul; 2^26 elsewhere
 ```
