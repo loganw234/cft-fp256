@@ -11,7 +11,7 @@ the two renderers, and the three derivative rules. Here:
                    lang.OPS (the place is byte-relevant: the canonical
                    form's "; operations:" line counts nodes in OPS's
                    order, and cftc's ir.ARITY mirrors it); the IR form;
-                   `transcendental` still refused for the other 26
+                   `transcendental` still refused for the other 22
   the golden       a lane's result is transcend.compute's for the node's
   functions        own name under the program's attribute, bits and flags
   the folds        sin(0) and tan(0) are 0 and cos(0) is 1, of a constant

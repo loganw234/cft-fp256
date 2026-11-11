@@ -135,9 +135,25 @@ lang_check.py, whose helpers this reuses), with tangents:
      and its committed references holding them are legs G, H and J's;
      compiled images of generated sources holding them, a marked lane
      replayed, are leg N's; the three's compiled forms are leg T's. The
-     nine golden functions need mpmath, so on a host without it
+     thirteen golden functions need mpmath, so on a host without it
      this leg is skipped by name, as are legs G and H's references holding
-     the six and leg N; legs A to L never need it otherwise
+     the six and leg N; legs A to L never need it otherwise. atan, asin, acos and atan2 (M4's build) are held by the same five
+     checks and ten plants (math_four): written shapes and generated
+     systems with tangent vectors; the tangent exactly against this
+     stage's own dual numbers, with a floor of ten decided points per
+     function; leg M's own central difference, at eps = 2^-256 within
+     2^-300 where the graph holds no asin, acos or square root and at
+     eps = 2^-64 within 2^-100 where it does - asin's and acos's rules
+     hold a root the exact evaluation rounds down to 2^-256, which a
+     difference at 2^-256 would measure - run on points whose arguments
+     are at most 7/8, never left out; the primal unchanged; each rule's
+     rounding bit for bit at every format and attribute (atan2 in its
+     three cases: both tangents, db zero, da zero); the specials (asin and
+     acos at +-1, past +-1, atan at +-inf, atan2 at the origin and its
+     axes); and plants - each rule made wrong, each rounded otherwise
+     (red at the attributes where its two forms differ), atan's golden
+     function swapped for asin's, atan2's operands swapped in the
+     interpreter (red on the golden check)
   N  the math library's six compiled, with tangent vectors (M1's build,
      item 5): generated systems that call them beside division, the root
      and the other operations, all with one tangent vector or two, under
@@ -2495,6 +2511,661 @@ def math_three(count, rng):
     print(f"  (sin, cos and tan: {time.perf_counter() - t0:.1f} s)")
 
 
+FOUR = ("atan", "asin", "acos", "atan2")                # M4's build
+ONE4 = ("atan", "asin", "acos")
+# asin's and acos's rules hold a square root, which the exact evaluation
+# rounds down to 2^-256 (graph.ROOT_BITS): a central difference at 2^-256
+# within 2^-300 would measure that rounding, so they are held at 2^-64
+# within 2^-100 (leg L's pair), on points whose arguments are at most 7/8
+ROOT_EPS = Fraction(1, 1 << 64)
+ROOT_TOL = Fraction(1, 1 << 100)
+
+M4_SHAPES = {       # atan, asin, acos and atan2 under each integrator
+    "atan and atan2, a map": (
+        "system two\nformat fp64\nstate x, y, z\ntangent v\n"
+        "next x = atan(y) - atan2(z, x * x + 1)\n"
+        "next y = atan2(x, y * y + 1) + atan(z)\n"
+        "next z = atan(x * x + 1) * atan2(y, 2 + z * z)\nstep map\n"),
+    "the four, a map": (
+        "system four\nformat fp64\nstate x, y, z\ntangent v\n"
+        "next x = asin(x / (1 + abs(x))) - acos(z / (1 + abs(z)))\n"
+        "next y = atan2(y, 1 + x * x) + asin(y / (2 + abs(y)))\n"
+        "next z = acos(x / (1 + abs(x))) * atan(z)\nstep map\n"),
+    "a pendulum, rk4": (
+        "system pendulum\nformat fp64\nstate theta, omega\ntangent v\n"
+        "param g = 9.81\nparam len = 1.5\n"
+        "d/dt theta = omega\n"
+        "d/dt omega = -(g / len) * atan(theta) - "
+        "asin(omega / (1 + abs(omega))) / 4\nstep rk4, h = 1/64\n"),
+    "a let, rdn": (
+        "system rotor\nformat fp128\nround rdn\nstate phi, w\ntangent v\n"
+        "param kappa = 1/3\nlet s = acos(phi / (1 + abs(phi)))\n"
+        "d/dt phi = w + atan2(w, 1 + phi * phi) * kappa\n"
+        "d/dt w = -(kappa * s) - atan(w) / 4\nstep rk4, h = 1/64\n"),
+    "stormer-verlet": (
+        "system pot\nformat fp32\nround rup\nstate q, p\ntangent v\n"
+        "d/dt q = p + atan2(p, 2 + p * p) / 8\n"
+        "d/dt p = -atan(q) * asin(q / (1 + abs(q)))\n"
+        "step stormer-verlet, h = 1/32, q = (q), p = (p)\n"),
+    "euler, two vectors": (
+        "system e\nformat fp256\nround rmm\nstate x\ntangent v, w\n"
+        "d/dt x = acos(-x / (1 + abs(x))) + atan2(x, 1 + x * x)\n"
+        "step euler, h = 1/8\n"),
+}
+
+
+def _m4_expr_of(fns):
+    """A random expression with `fns` among atan, asin, acos and atan2,
+    each call of operands that read one of `names`; asin's and acos's
+    argument is x / (1 + |x|), inside (-1, 1) at every point."""
+    def expr(rng, names, depth):
+        if depth <= 0 or rng.random() < 0.3:
+            return rng.choice(names + ["2", "(1/3)", "0.5"])
+        k = rng.choice(["+", "-", "*", "/", "fma", "inv", "inv", "inv"])
+
+        def sub():
+            return expr(rng, names, depth - 1)
+        if k == "inv":
+            fn = rng.choice(fns)
+            r = rng.choice(names)
+            if fn == "atan2":
+                return f"atan2({sub()} * {r}, {sub()} * {rng.choice(names)})"
+            if fn == "atan":
+                return f"atan({sub()} * {r})"
+            return f"{fn}({r} / (1 + abs({r})))"
+        if k == "fma":
+            return f"fma({sub()}, {sub()}, {sub()})"
+        return f"({sub()} {k} {sub()})"
+    return expr
+
+
+_m4_expr = _m4_expr_of(FOUR)
+_m4_expr_atan = _m4_expr_of(("atan", "atan2"))
+
+
+def _inv(fn, y, x=None):
+    """atan, asin, acos or atan2(y, x) as the exact evaluations take it,
+    computed again here: exact at the folds' points, otherwise mpmath's at
+    1,024 bits of the arguments rounded to nearest at 1,024 bits; an
+    ArithmeticError for asin or acos outside [-1, 1]."""
+    import mpmath
+    y = Fraction(y)
+    if fn == "atan2":
+        x = Fraction(x)
+        if y == 0 and x >= 0:
+            return Fraction(0)
+    else:
+        if fn != "atan" and abs(y) > 1:
+            raise ArithmeticError(f"{fn}({y}) is outside [-1, 1]")
+        if y == (1 if fn == "acos" else 0):
+            return Fraction(0)
+    if not _MP:
+        ctx = mpmath.MPContext()
+        ctx.prec = TRANS_BITS
+        _MP.append((mpmath.libmp, ctx))
+    lib, ctx = _MP[0]
+
+    def rd(q):
+        return ctx.make_mpf(lib.from_rational(q.numerator, q.denominator,
+                                              TRANS_BITS, lib.round_nearest))
+    v = ctx.atan2(rd(y), rd(x)) if fn == "atan2" else \
+        getattr(ctx, fn)(rd(y))
+    sign, man, exp, _bc = v._mpf_
+    man = int(man)
+    r = Fraction(man << exp) if exp >= 0 else Fraction(man, 1 << -exp)
+    return -r if sign else r
+
+
+def _dual4(op, a, tie=0, zero=1, L=None):
+    """_dual with the four: atan's derivative 1 / (1 + x^2), asin's and
+    acos's +-1 / sqrt(1 - x^2) with the root as the exact evaluations take
+    it (_root), atan2(y, x)'s (x dy - y dx) / (x^2 + y^2); undefined (an
+    ArithmeticError) at |x| = 1 for asin and acos and at the origin for
+    atan2."""
+    if op not in FOUR:
+        return _dual(op, a, tie, zero, L)
+    v = [p[0] for p in a]
+    d = [p[1] for p in a]
+    if op == "atan":
+        return _inv("atan", v[0]), d[0] / (1 + v[0] * v[0])
+    if op in ("asin", "acos"):
+        val = _inv(op, v[0])
+        if abs(v[0]) == 1:
+            raise ArithmeticError(f"{op}'({v[0]})")
+        root = _root(1 - v[0] * v[0])
+        return val, (d[0] if op == "asin" else -d[0]) / root
+    y, x = v
+    if x == 0 and y == 0:
+        raise ArithmeticError("atan2'(0, 0)")
+    return _inv("atan2", y, x), (x * d[0] - y * d[1]) / (x * x + y * y)
+
+
+def dual_derivative4(g, section, st, tv, pa, la):
+    """dual_derivative's, by _dual4."""
+    sec = g.section(section)
+    nil = Fraction(0)
+    vals = {"s": list(zip(st, tv)), "l": [(x, nil) for x in la],
+            "p": [(x, nil) for x in pa],
+            "c": [(v, nil) for v, *_r in g.const]}
+    nodes = []
+
+    def get(r):
+        return nodes[int(r[1:])] if r[0] == "n" else vals[r[0]][int(r[1:])]
+    for op, args, _l in sec.nodes:
+        nodes.append(_dual4(op, [get(a) for a in args]))
+    return [get(o)[1] for o in sec.out]
+
+
+def _inside4(rng, n, bound):
+    return [Fraction(rng.randint(-1000 * bound + 1, 1000 * bound - 1), 1000)
+            for _ in range(n)]
+
+
+def exact_misses4(g, rng, points, bound=3):
+    """(points decided, points where the tangent section's exact value is
+    not the dual numbers' derivative), at states of magnitude below
+    `bound`; a point where the derivative is undefined decides nothing."""
+    tot = bad_n = 0
+    for primal, tangent in (("field", "tangent_field"),
+                            ("step", "tangent_step")):
+        if g.section(primal) is None:
+            continue
+        for _ in range(points):
+            st = _inside4(rng, g.n_state, bound)
+            tv = [_q(rng) for _ in range(g.n_state)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            try:
+                want = dual_derivative4(g, primal, st, tv, pa, la)
+            except ArithmeticError:
+                continue
+            tot += 1
+            try:
+                got = g.exact_eval(tangent, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                bad_n += 1
+                continue
+            bad_n += got != want
+    return tot, bad_n
+
+
+def cd_misses4(g, rng, points, eps, tol, bound):
+    """(points decided, points where a tangent component is not the
+    central difference (S(x + eps v) - S(x - eps v)) / (2 eps) of the
+    primal section within tol max(1, |t|)), at states of magnitude below
+    `bound`; a point where the exact evaluation is undefined decides
+    nothing."""
+    tot = bad_n = 0
+    for primal, tangent in (("field", "tangent_field"),
+                            ("step", "tangent_step")):
+        if g.section(primal) is None:
+            continue
+        for _ in range(points):
+            st = _inside4(rng, g.n_state, bound)
+            tv = [_q(rng) for _ in range(g.n_state)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            try:
+                up = g.exact_eval(primal, [s + eps * t for s, t in
+                                           zip(st, tv)], pa, la)
+                dn = g.exact_eval(primal, [s - eps * t for s, t in
+                                           zip(st, tv)], pa, la)
+                got = g.exact_eval(tangent, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                continue
+            tot += 1
+            bad_n += any(abs((u - d) / (2 * eps) - t) > tol * max(1, abs(t))
+                         for u, d, t in zip(up, dn, got))
+    return tot, bad_n
+
+
+def _bits4(fmt, v):
+    return K.round_once(fmt, sf.RND_RNE, Fraction(v))[0]
+
+
+def _atan2_graph(case, fmtname="fp64", rnd="rne"):
+    """atan2's three cases: both operands states; b a lane param (a's
+    tangent alone); a a lane param (b's alone)."""
+    head = f"system r\nformat {fmtname}\nround {rnd}\n"
+    body = {"both": "state a, b, y\ntangent v\nnext a = a\nnext b = b\n",
+            "db0": "state a, y\nlane param b\ntangent v\nnext a = a\n",
+            "da0": "state b, y\nlane param a\ntangent v\nnext b = b\n"}[case]
+    return lang.compile_text(head + body + "next y = atan2(a, b)\n"
+                             "step map\n").graph
+
+
+def _run4(case, g, y, x, da, db):
+    """(the primal y, the tangent of y, FLAGS, the primal's FLAGS) of one
+    lane of atan2's `case` system; for the other three, case is None and
+    x the tangent."""
+    if case is None:
+        r = lang.run(g, [[y, 0]], 1, tangents=[[[da, 0]]])
+    elif case == "both":
+        r = lang.run(g, [[y, x, 0]], 1, tangents=[[[da, db, 0]]])
+    elif case == "db0":
+        r = lang.run(g, [[y, 0]], 1, lane_params=[[x]], tangents=[[[da, 0]]])
+    else:
+        r = lang.run(g, [[x, 0]], 1, lane_params=[[y]], tangents=[[[db, 0]]])
+    return r.states[0][-1], r.tangents[0][0][-1], r.flags, r.primal_flags
+
+
+def _rule4(fn, case, fmt, code, a, b, da, db):
+    """The table's tangent on one lane in softfloat -> (bits, the last
+    operation's exact value or None). a is the first operand (y for
+    atan2), b the second."""
+    val = lambda q: K.value_of(fmt, q)                      # noqa: E731
+    one = _bits4(fmt, 1)
+    if fn == "atan2":
+        den = sf.fma(fmt, b, b, sf.mul(fmt, a, a, code)[0], code)[0]
+        if case == "both":
+            num = sf.fma(fmt, b, da, sf.neg(fmt, sf.mul(
+                fmt, a, db, code)[0])[0], code)[0]
+        elif case == "db0":
+            num = sf.mul(fmt, b, da, code)[0]
+        else:
+            num = sf.neg(fmt, sf.mul(fmt, a, db, code)[0])[0]
+    else:
+        num = da
+        if fn == "atan":
+            den = sf.fma(fmt, a, a, one, code)[0]
+        else:
+            den = sf.sqrt(fmt, sf.fma(fmt, sf.neg(fmt, a)[0], a, one,
+                                      code)[0], code)[0]
+            if fn == "acos":
+                den = sf.neg(fmt, den)[0]
+    bits = sf.div(fmt, num, den, code)[0]
+    try:
+        return bits, val(num) / val(den), val(num), val(den)
+    except (ValueError, ZeroDivisionError):
+        return bits, None, None, None
+
+
+def rounding_misses4(fn, case, fmtname, rnd, rng, lanes=6):
+    """(lanes, lanes whose tangent is not the table's rule rounded as the
+    table says, lanes whose last division's exact value is not the
+    derivative within the roundings of its operands) on y = fn(a) (atan2
+    in `case`): the derivative by a central difference at 2^-256 of the
+    1,024-bit values; a is within 7/8 for asin and acos."""
+    g = _atan2_graph(case, fmtname, rnd) if fn == "atan2" else \
+        _one(fn, fmtname, rnd)
+    fmt, code = g.fmt, K.RND_BY_NAME[rnd]
+    u = Fraction(1, 1 << (fmt.prec - 1))
+
+    def draw():
+        if fn in ("asin", "acos"):
+            return Fraction(rng.randint(-875, 875), 1000)
+        q = Fraction(rng.randint(-64000, 64000), 1000)
+        return q + 1 if fn == "atan2" and abs(q) < Fraction(1, 100) else q
+    rows = [(_bits4(fmt, draw()), _bits4(fmt, draw()),
+             _bits4(fmt, Fraction(rng.randint(-4000, 4000) or 1, 1000)),
+             _bits4(fmt, Fraction(rng.randint(-4000, 4000) or 1, 1000)))
+            for _ in range(lanes)]
+    bits_bad = value_bad = 0
+    for a, b, da, db in rows:
+        if fn == "atan2":
+            db_ = 0 if case == "db0" else db
+            da_ = 0 if case == "da0" else da
+            _y, t, _f, _pf = _run4(case, g, a, b, da_, db_)
+        else:
+            da_, db_ = da, 0
+            _y, t, _f, _pf = _run4(None, g, a, 0, da_, 0)
+        want, exact, num, den = _rule4(fn, case, fmt, code, a, b, da_, db_)
+        bits_bad += t != want
+        av, bv = K.value_of(fmt, a), K.value_of(fmt, b)
+        dav, dbv = K.value_of(fmt, da_), K.value_of(fmt, db_)
+        if fn == "atan2":
+            d = (_inv("atan2", av + HP_EPS * dav, bv + HP_EPS * dbv)
+                 - _inv("atan2", av - HP_EPS * dav, bv - HP_EPS * dbv)) \
+                / (2 * HP_EPS)
+            eps = (u * abs(av * dbv) + u * abs(num)) / (av * av + bv * bv)
+            bound = (eps + Fraction(21, 10) * u * abs(d)) * Fraction(11, 10)
+        else:
+            d = (_inv(fn, av + HP_EPS * dav) - _inv(fn, av - HP_EPS * dav)) \
+                / (2 * HP_EPS)
+            bound = (1 if fn == "atan" else 2) * u * Fraction(101, 100) \
+                * abs(d)
+        value_bad += abs(exact - d) > bound + Fraction(1, 1 << 400)
+    return len(rows), bits_bad, value_bad
+
+
+def inv_golden_misses(fn, fmtname, rnd, rng):
+    """(lanes, lanes where the interpreter's node is not transcend.compute's
+    bits and flags) for atan, asin, acos on y = fn(a) and for atan2 over
+    pairs of the specials, y first."""
+    fmt, code = FORMATS[fmtname], K.RND_BY_NAME[rnd]
+    sp = [0, fmt.sign_mask, sf.inf_bits(fmt), sf.inf_bits(fmt) ^ fmt.sign_mask,
+          sf.qnan_bits(fmt), sf.snan_bits(fmt, 1), _bits4(fmt, 1),
+          _bits4(fmt, -1)]
+    if fn == "atan2":
+        sp += [_bits4(fmt, Fraction(rng.randint(-1 << 20, 1 << 20), 997))
+               for _ in range(4)]
+        pairs = [(y, x) for y in sp for x in sp]
+        g = lang.compile_text(f"system r\nformat {fmtname}\nround {rnd}\n"
+                              "state x, y\nnext x = atan2(x, y)\nnext y = y\n"
+                              "step map\n").graph
+        run = lang.run(g, [list(p) for p in pairs], 1)
+        bad_n = sum(st != [transcend.compute(fmt, "atan2", y, x, code)[0], x]
+                    for (y, x), st in zip(pairs, run.states))
+        return len(pairs), bad_n
+    sp += [_bits4(fmt, Fraction(rng.randint(-1000, 1000), 1000))
+           for _ in range(8)]
+    g = _one(fn, fmtname, rnd)
+    run = lang.run(g, [[a, 0] for a in sp], 1,
+                   tangents=[[[0, 0]] for _ in sp])
+    bad_n = sum(st[1] != transcend.compute(fmt, fn, a, 0, code)[0]
+                for a, st in zip(sp, run.states))
+    return len(sp), bad_n
+
+
+def inv_specials_misses():
+    """At every format under every attribute, bit for bit against the
+    table's own operations (_rule4): asin and acos at +-1, +-0, past +-1,
+    +-inf and a NaN, atan likewise, atan2 at its axes, the origin and
+    the infinities; and by name, where the rule is not the derivative:
+    asin's and acos's tangent at a = +-1 is an infinity with
+    divideByZero (da / +0, da / -0 under rdn for asin, the sign flipped
+    for acos), atan2's at the origin the invalid NaN in each of its three
+    cases. -> a list of what missed."""
+    miss = []
+    for fmtname in FORMATS:
+        fmt = FORMATS[fmtname]
+        sign, inf, qnan = fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)
+        three, two = _bits4(fmt, 3), _bits4(fmt, 2)
+        pts = [_bits4(fmt, v) for v in (1, -1, 2, -2)] + [
+            0, sign, inf, inf ^ sign, qnan, sf.snan_bits(fmt, 1), 1]
+        for rnd in RNDS5:
+            code = K.RND_BY_NAME[rnd]
+            for fn in ONE4:
+                g = _one(fn, fmtname, rnd)
+                for a in pts:
+                    _y, t, f, pf = _run4(None, g, a, 0, three, 0)
+                    if t != _rule4(fn, None, fmt, code, a, 0, three, 0)[0]:
+                        miss.append(f"{fn} at {hex(a)} under {rnd} "
+                                    f"at {fmtname}")
+                if fn != "atan":
+                    for a in pts[:2]:
+                        _y, t, f, pf = _run4(None, g, a, 0, three, 0)
+                        zero = sign if rnd == "rdn" else 0
+                        flip = sign if fn == "acos" else 0
+                        if t != inf ^ zero ^ flip or not f & sf.FLAG_DIVZERO:
+                            miss.append(f"{fn} at +-1 under {rnd} at "
+                                        f"{fmtname}")
+            for case in ("both", "db0", "da0"):
+                g = _atan2_graph(case, fmtname, rnd)
+                for y, x in [(0, 0), (sign, 0), (0, sign), (sign, sign),
+                             (pts[0], 0), (0, pts[1]), (pts[0], pts[1]),
+                             (inf, pts[0]), (pts[0], inf), (inf, inf),
+                             (qnan, pts[0]), (pts[0], qnan)]:
+                    da_, db_ = (0 if case == "da0" else three,
+                                0 if case == "db0" else two)
+                    _y, t, f, pf = _run4(case, g, y, x, da_, db_)
+                    if t != _rule4("atan2", case, fmt, code, y, x, da_,
+                                   db_)[0]:
+                        miss.append(f"atan2 {case} at {hex(y)}, {hex(x)} "
+                                    f"under {rnd} at {fmtname}")
+                for y, x in ((0, 0), (sign, 0), (0, sign), (sign, sign)):
+                    da_, db_ = (0 if case == "da0" else three,
+                                0 if case == "db0" else two)
+                    _y, t, f, pf = _run4(case, g, y, x, da_, db_)
+                    if t != qnan or not f & sf.FLAG_INVALID or \
+                            pf & sf.FLAG_INVALID:
+                        miss.append(f"atan2 {case} at the origin under "
+                                    f"{rnd} at {fmtname}")
+    return miss
+
+
+class _M4Plant(lang_tangent.Derivation):
+    """The derivation with one of the four's rules changed (kind)."""
+    kind = None
+
+    def rule(self, node):
+        a, R = node.args, self.read
+
+        def N(o, *args):
+            return Node(o, args, node.line)
+        k = self.kind
+        t = [self.of(x) for x in a]
+        if node.op in ONE4 and t[0] is not None:
+            da = t[0]
+            if node.op == "atan":
+                den = N("fma", R(a[0]), R(a[0]), self.one)
+                if k == "atan's rule: da * fma(a, a, 1)":
+                    return N("mul", da, den)
+                if k == "atan's rule rounded otherwise":
+                    return N("mul", N("div", self.one, den), da)
+            else:
+                inner = N("fma", N("neg", R(a[0])), R(a[0]), self.one)
+                if node.op == "asin":
+                    if k == "asin's rule without its root":
+                        return N("div", da, inner)
+                    if k == "asin's rule rounded otherwise":
+                        prod = N("mul", N("sub", self.one, R(a[0])),
+                                 N("add", self.one, R(a[0])))
+                        return N("div", da, N("sqrt", prod))
+                else:
+                    if k == "acos's rule without its minus":
+                        return N("div", da, N("sqrt", inner))
+                    if k == "acos's rule rounded otherwise":
+                        return N("neg", N("div", da, N("sqrt", inner)))
+        if node.op == "atan2" and t[0] is not None and t[1] is not None:
+            den = N("fma", R(a[1]), R(a[1]), N("mul", R(a[0]), R(a[0])))
+            if k == "atan2's rule: a da - b db":
+                return N("div", N("fma", R(a[0]), t[0], N("neg", N(
+                    "mul", R(a[1]), t[1]))), den)
+            if k == "atan2's rule rounded otherwise":
+                return N("div", N("fma", R(a[1]), t[0], N(
+                    "mul", N("neg", R(a[0])), t[1])), den)
+        return super().rule(node)
+
+
+def math_four(count, rng):
+    """Leg M's checks for atan, asin, acos and atan2 (M4's build), after
+    the three's: the same five, then ten plants. The exact dual numbers are
+    leg D's discipline, made on these systems; the central difference in
+    high precision is this leg's own, at 2^-256 within 2^-300 where the
+    graph holds no square root (atan, atan2) and at 2^-64 within 2^-100
+    where it does (asin, acos: the rule's root is rounded down to 2^-256 by
+    the exact evaluation, so a difference at 2^-256 would measure that
+    rounding)."""
+    t0 = time.perf_counter()
+    texts = m1_texts(count, "tangent math four", M4_SHAPES, _m4_expr)
+    texts += m1_texts(count // 2, "tangent math four atan", {},
+                      _m4_expr_atan)
+    graphs = m1_graphs(texts)
+    tot = bad_n = 0
+    hi = rt = 0
+    hi_bad = rt_bad = 0
+    decided = dict.fromkeys(FOUR, 0)
+    cd_decided = dict.fromkeys(FOUR, 0)
+    changed = []
+    for g, text, what in graphs:
+        held = set(FOUR) & set(g.op_counts("step"))
+        a, b = exact_misses4(g, rng, 3)
+        tot, bad_n = tot + a, bad_n + b
+        for fn in held:
+            decided[fn] += a
+        if {"asin", "acos", "sqrt"} & set(g.op_counts("step")):
+            a, b = cd_misses4(g, rng, 3, ROOT_EPS, ROOT_TOL, 2)
+            rt, rt_bad = rt + a, rt_bad + b
+        else:
+            a, b = cd_misses4(g, rng, 3, HP_EPS, HP_TOL, 3)
+            hi, hi_bad = hi + a, hi_bad + b
+        for fn in held:
+            cd_decided[fn] += a
+        states = LC.lanes_for(g.fmt, g.n_state, rng, 3)
+        states += LC.special_lanes(g.fmt, g.n_state, states[0], rng)
+        if not primal_unchanged(g, without_tangent(text), states, 2):
+            changed.append(what)
+    ops = set()
+    for g, _t, _w in graphs:
+        ops |= set(g.op_counts("step"))
+    check(bad_n == 0 and set(FOUR) <= ops and
+          all(v >= 10 for v in decided.values()),
+          f"{len(graphs)} systems holding atan, asin, acos and atan2, {tot} "
+          f"points: the tangent sections evaluated exactly equal this "
+          f"stage's own derivative (leg D's check, made on the four); "
+          f"points decided per function (the floor is 10): "
+          f"{', '.join(f'{k} {decided[k]}' for k in FOUR)}",
+          f"{bad_n} differ, decided {decided}")
+    check(hi_bad == 0 and hi >= 20, f"{hi} points: every tangent component "
+          f"within 2^-300 of the central difference at eps = 2^-256 of "
+          f"1,024-bit values, on the graphs holding no asin, acos or "
+          f"square root - leg M's own check", f"{hi_bad} differ, {hi} "
+          f"decided")
+    check(rt_bad == 0 and rt >= 40, f"{rt} points: every tangent component "
+          f"within 2^-100 of the central difference at eps = 2^-64, states "
+          f"of magnitude below 2 (arguments of asin and acos at most 2/3), "
+          f"on the graphs holding asin, acos or a square root", f"{rt_bad} "
+          f"differ, {rt} decided")
+    # asin and acos as y = f(a), a within 7/8: their central difference,
+    # run on its own points, never left out
+    one_tot = one_bad = 0
+    for fn in ("asin", "acos"):
+        for fmtname in FORMATS:
+            g = _one(fn, fmtname, "rne")
+            for _ in range(8):
+                a = Fraction(rng.randint(-875, 875), 1000)
+                tv = _q(rng)
+                up = g.exact_eval("step", [a + ROOT_EPS * tv, Fraction(0)])
+                dn = g.exact_eval("step", [a - ROOT_EPS * tv, Fraction(0)])
+                got = g.exact_eval("tangent_step", [a, Fraction(0)],
+                                   tangent=[tv, Fraction(0)])
+                one_tot += 1
+                one_bad += any(abs((u - d) / (2 * ROOT_EPS) - t) >
+                               ROOT_TOL * max(1, abs(t))
+                               for u, d, t in zip(up, dn, got))
+    check(one_bad == 0 and one_tot == 2 * 4 * 8,
+          f"{one_tot} points of y = asin(a) and y = acos(a), |a| at most "
+          f"7/8, four formats: the tangent within 2^-100 of the central "
+          f"difference at eps = 2^-64 - run, none skipped", f"{one_bad} "
+          f"differ of {one_tot}")
+    check(all(v >= 10 for k, v in cd_decided.items()), "points decided by "
+          f"the central difference per function (the floor is 10): "
+          f"{', '.join(f'{k} {cd_decided[k]}' for k in FOUR)}",
+          f"{cd_decided}")
+    check(not changed, "the primal unchanged in each: its states and flags "
+          "without the tangent, on lanes that overflow, hold a signalling "
+          "NaN and hold subnormals", f"changed: {changed[:4]}")
+    lanes = bits = value = glanes = gbad = 0
+    cells = []
+    for fn in FOUR:
+        for case in (("both", "db0", "da0") if fn == "atan2" else (None,)):
+            for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+                for rnd in RNDS5:
+                    n, b, v = rounding_misses4(fn, case, fmtname, rnd, rng)
+                    lanes, bits, value = lanes + n, bits + b, value + v
+                    cells.append((fn, case, fmtname, rnd))
+        for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+            for rnd in RNDS5:
+                n, b = inv_golden_misses(fn, fmtname, rnd, rng)
+                glanes, gbad = glanes + n, gbad + b
+    check(bits == 0 and value == 0 and gbad == 0 and
+          len(cells) == 6 * 4 * 5 and lanes == 6 * len(cells),
+          f"{lanes} lanes of y = f(a) over {len(cells)} cells (atan, asin, "
+          f"acos and atan2's three cases, every format and attribute): each "
+          f"tangent the table's last division rounded once on the "
+          f"denominator and numerator the table rounds first, and that "
+          f"division's exact value the derivative within their roundings; "
+          f"and {glanes} lanes in which the node's own result is the "
+          f"golden function's, bit for bit (atan2 over pairs of the "
+          f"specials, y first)", f"{bits} in bits, {value} in value, "
+          f"{gbad} golden")
+    miss = inv_specials_misses()
+    check(not miss, "the specials, bit for bit at every format under every "
+          "attribute: asin and acos at +-1 an infinity with divideByZero, "
+          "past +-1 the NaN, atan at +-inf a zero, atan2 at the origin the "
+          "invalid NaN in each case", "; ".join(miss[:6]))
+    plant_texts = m1_texts(4, "tangent math plants four", M4_SHAPES,
+                           _m4_expr)
+    original = lang_check_mod.Derivation
+    from cft_golden.lang import interp as lang_interp
+    orig_t = lang_interp._transcend
+    plants = ("atan's rule: da * fma(a, a, 1)", "asin's rule without its root",
+              "acos's rule without its minus", "atan2's rule: a da - b db",
+              "atan's rule rounded otherwise", "asin's rule rounded otherwise",
+              "acos's rule rounded otherwise",
+              "atan2's rule rounded otherwise",
+              "atan's golden function swapped for asin's",
+              "atan2's operands swapped in the interpreter")
+    try:
+        for kind in plants:
+            lang_check_mod.Derivation = original
+            lang_interp._transcend = orig_t
+            golden = "golden" in kind or "swapped" in kind
+            if kind.startswith("atan's golden"):
+                lang_interp._transcend = (
+                    lambda fmt, fn, rnd: orig_t(fmt, "asin" if fn == "atan"
+                                                else fn, rnd))
+            elif golden:
+                def swapped(fmt, fn, rnd):
+                    f = orig_t(fmt, fn, rnd)
+                    return (lambda a, b: f(b, a)) if fn == "atan2" else f
+                lang_interp._transcend = swapped
+            else:
+                class P(_M4Plant):
+                    pass
+                P.kind = kind
+                lang_check_mod.Derivation = P
+            fn = kind.split("'")[0]
+            case = "both" if fn == "atan2" else None
+            graph_of = (lambda f: _atan2_graph("both", f)) if fn == "atan2" \
+                else (lambda f: _one(fn, f))
+            ex = hp = exd = 0
+            for fmtname in ("fp32", "fp64", "fp256"):
+                g = graph_of(fmtname)
+                # asin's and acos's points inside (-1, 1), where they decide
+                a, b = exact_misses4(g, rng, 3, 1 if fn in ("asin", "acos")
+                                     else 3)
+                exd, ex = exd + a, ex + b
+                if fn in ("asin", "acos"):
+                    hp += cd_misses4(g, rng, 3, ROOT_EPS, ROOT_TOL, 2)[1]
+                else:
+                    hp += cd_misses4(g, rng, 3, HP_EPS, HP_TOL, 3)[1]
+            per = dict.fromkeys(RNDS5, 0)
+            for fmtname in ("fp32", "fp64", "fp256"):
+                for rnd in RNDS5:
+                    per[rnd] += rounding_misses4(fn, case, fmtname, rnd, rng,
+                                                 24)[1]
+            gold = sum(inv_golden_misses(fn, "fp64", rnd, rng)[1]
+                       for rnd in RNDS5)
+            said = (f"plant {kind!r}: the exact check {ex}, the central "
+                    f"difference {hp}, the rounding in bits at finite lanes "
+                    f"under rne, rtz, rdn, rup, rmm "
+                    f"{', '.join(str(per[r]) for r in RNDS5)}, the golden "
+                    f"check {gold}")
+            if not golden:
+                check(exd >= 6, f"plant {kind!r}: the exact check decided "
+                      f"{exd} points (the floor is 6), so a check that "
+                      f"decides none is red", f"{exd}")
+            if golden:
+                check(ex == 0 and hp == 0 and gold > 0, said + " - red on "
+                      "the golden check; green on both exact checks, which "
+                      "never run the interpreter's table")
+            elif "rounded otherwise" in kind:
+                if fn in ("atan", "asin"):
+                    check(ex == 0 and hp == 0 and
+                          all(v > 0 for v in per.values()), said + " - "
+                          "exact in rationals: green on both exact checks, "
+                          "red on the rounding under every attribute")
+                else:
+                    check(ex == 0 and hp == 0 and
+                          per["rne"] == per["rtz"] == per["rmm"] == 0 and
+                          per["rdn"] > 0 and per["rup"] > 0, said + " - "
+                          "exact in rationals: green on both exact checks; "
+                          "red on the rounding at finite lanes under rdn "
+                          "and rup only, where the two forms differ, green "
+                          "under rne, rtz and rmm (atan2: the case with "
+                          "both tangents)")
+            else:
+                check(ex > 0 and hp > 0 and all(v > 0 for v in per.values()),
+                      said + " - red on the exact check, the difference "
+                      "and the rounding, under every attribute")
+    finally:
+        lang_check_mod.Derivation = original
+        lang_interp._transcend = orig_t
+    print(f"  (atan, asin, acos and atan2: {time.perf_counter() - t0:.1f} s)")
+
+
 def leg_math(count, rng):
     section(f"M. the math library's rules, golden - the six (M1's build, "
             f"item 3) and sin, cos and tan (M2's build): "
@@ -2614,6 +3285,7 @@ def leg_math(count, rng):
         lang_interp._transcend = orig_t
     print(f"  (the six: {time.perf_counter() - t0:.1f} s)")
     math_three(count, rng)
+    math_four(count, rng)
 
 
 # ---- N: the math library's six, compiled with tangent vectors (item 5) -----

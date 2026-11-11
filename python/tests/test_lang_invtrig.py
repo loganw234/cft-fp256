@@ -1375,8 +1375,11 @@ def test_each_rule_rounds_as_the_table_says(fmtname):
     a) - and on a numerator likewise. And the exact values of those last
     operations are the derivative, by a central difference in high
     precision for atan, asin and acos, within the roundings of the
-    denominator. So a rule rounded otherwise (the next tests) is red here
-    wherever its two forms differ."""
+    denominator. The lanes are 6 a cell (atan, asin, acos; atan2 in each of
+    its three cases), drawn from this test's seeded generator; a rule
+    rounded otherwise (the next tests) is red here on the lanes of those 6
+    on which its two forms differ, which test_the_plants runs with 30 a
+    cell."""
     rng = random.Random(f"m4 rounds {fmtname}")
     for fn in ONE:
         for rnd in RNDS:
@@ -1819,10 +1822,13 @@ def test_the_plants(kind, monkeypatch):
     monkeypatch.setattr(lang_check, "Derivation", P)
     name = kind.split("'")[0]
     rng = random.Random(f"m4 plant {kind}")
-    exact = cd = 0
+    exact = cd = decided = 0
     for fmtname in ("fp32", "fp64", "fp256"):
         g = _plant_graph(kind, fmtname)
-        exact += exact_misses(g, rng, points=3)[1]
+        # asin's and acos's points inside (-1, 1), where they decide
+        a, b = exact_misses(g, rng, points=3,
+                            bound=1 if name in ("asin", "acos") else 3)
+        decided, exact = decided + a, exact + b
         if name in ("asin", "acos"):
             cd += cd_misses(g, rng, 3, EPS_ROOT, TOL_ROOT, 2)[1]
         else:
@@ -1838,6 +1844,7 @@ def test_the_plants(kind, monkeypatch):
                     name, fmtname, rnd, rng, 30)[1]
     expr = "atan2(a, b)" if name == "atan2" else f"{name}(a)"
     active = "ab" if name == "atan2" else "a"
+    assert decided >= 6, decided      # a plant checked at no point is not red
     line = TT._tangent_line(compile_(TT._rule_system(expr, active)))
     right = dict(RULES4)[expr][active]
     assert line != right, line
@@ -2009,3 +2016,155 @@ def test_transcendental_still_raised_for_one_of_the_four_is_red(monkeypatch):
     with pytest.raises(lang.Refusal) as info:
         compile_(_sys1("next x = asin(x)", state="x"))
     assert (info.value.name, info.value.line) == ("transcendental", 5)
+
+
+# ---- the specials this document states ---------------------------------------
+
+# For each function and argument (or pair, y first), the set of (flags, kind of
+# result) over fp32, fp64, fp128 and fp256 and the five attributes: what
+# docs/LANGUAGE.md's bullet for the four states, held here.
+SPECIALS_MEASURED = {
+    ('acos', '+0'): [('inexact', 'num')],
+    ('acos', '+inf'): [('invalid', 'nan')],
+    ('acos', '-0'): [('inexact', 'num')],
+    ('acos', '-1'): [('inexact', 'num')],
+    ('acos', '-2'): [('invalid', 'nan')],
+    ('acos', '-inf'): [('invalid', 'nan')],
+    ('acos', '1'): [('none', 'zero')],
+    ('acos', '1/2'): [('inexact', 'num')],
+    ('acos', '2'): [('invalid', 'nan')],
+    ('acos', 'greatest normal'): [('invalid', 'nan')],
+    ('acos', 'greatest subnormal'): [('inexact', 'num')],
+    ('acos', 'least normal'): [('inexact', 'num')],
+    ('acos', 'least subnormal'): [('inexact', 'num')],
+    ('acos', 'qNaN'): [('none', 'nan')],
+    ('acos', 'sNaN'): [('invalid', 'nan')],
+    ('asin', '+0'): [('none', 'zero')],
+    ('asin', '+inf'): [('invalid', 'nan')],
+    ('asin', '-0'): [('none', 'zero')],
+    ('asin', '-1'): [('inexact', 'num')],
+    ('asin', '-2'): [('invalid', 'nan')],
+    ('asin', '-inf'): [('invalid', 'nan')],
+    ('asin', '1'): [('inexact', 'num')],
+    ('asin', '1/2'): [('inexact', 'num')],
+    ('asin', '2'): [('invalid', 'nan')],
+    ('asin', 'greatest normal'): [('invalid', 'nan')],
+    ('asin', 'greatest subnormal'): [('underflow|inexact', 'num')],
+    ('asin', 'least normal'): [('inexact', 'num')],
+    ('asin', 'least subnormal'): [('underflow|inexact', 'num')],
+    ('asin', 'qNaN'): [('none', 'nan')],
+    ('asin', 'sNaN'): [('invalid', 'nan')],
+    ('atan', '+0'): [('none', 'zero')],
+    ('atan', '+inf'): [('inexact', 'num')],
+    ('atan', '-0'): [('none', 'zero')],
+    ('atan', '-1'): [('inexact', 'num')],
+    ('atan', '-2'): [('inexact', 'num')],
+    ('atan', '-inf'): [('inexact', 'num')],
+    ('atan', '1'): [('inexact', 'num')],
+    ('atan', '1/2'): [('inexact', 'num')],
+    ('atan', '2'): [('inexact', 'num')],
+    ('atan', 'greatest normal'): [('inexact', 'num')],
+    ('atan', 'greatest subnormal'): [('underflow|inexact', 'num')],
+    ('atan', 'least normal'): [('inexact', 'num'), ('underflow|inexact', 'num')],
+    ('atan', 'least subnormal'): [('underflow|inexact', 'num'), ('underflow|inexact', 'zero')],
+    ('atan', 'qNaN'): [('none', 'nan')],
+    ('atan', 'sNaN'): [('invalid', 'nan')],
+    ('atan2', '(+0, +0)'): [('none', 'zero')],
+    ('atan2', '(+0, -0)'): [('inexact', 'num')],
+    ('atan2', '(+0, -1)'): [('inexact', 'num')],
+    ('atan2', '(+0, 1)'): [('none', 'zero')],
+    ('atan2', '(+inf, +inf)'): [('inexact', 'num')],
+    ('atan2', '(+inf, -inf)'): [('inexact', 'num')],
+    ('atan2', '(+inf, 1)'): [('inexact', 'num')],
+    ('atan2', '(-0, +0)'): [('none', 'zero')],
+    ('atan2', '(-0, -0)'): [('inexact', 'num')],
+    ('atan2', '(-0, -1)'): [('inexact', 'num')],
+    ('atan2', '(-0, 1)'): [('none', 'zero')],
+    ('atan2', '(-1, +0)'): [('inexact', 'num')],
+    ('atan2', '(-inf, -inf)'): [('inexact', 'num')],
+    ('atan2', '(-inf, 1)'): [('inexact', 'num')],
+    ('atan2', '(1, +0)'): [('inexact', 'num')],
+    ('atan2', '(1, +inf)'): [('none', 'zero')],
+    ('atan2', '(1, -0)'): [('inexact', 'num')],
+    ('atan2', '(1, -1)'): [('inexact', 'num')],
+    ('atan2', '(1, -inf)'): [('inexact', 'num')],
+    ('atan2', '(1, 1)'): [('inexact', 'num')],
+    ('atan2', '(1, qNaN)'): [('none', 'nan')],
+    ('atan2', '(1, sNaN)'): [('invalid', 'nan')],
+    ('atan2', '(greatest normal, greatest normal)'): [('inexact', 'num')],
+    ('atan2', '(greatest normal, least subnormal)'): [('inexact', 'num')],
+    ('atan2', '(least normal, greatest normal)'): [('underflow|inexact', 'num'), ('underflow|inexact', 'zero')],
+    ('atan2', '(least subnormal, 1)'): [('underflow|inexact', 'num'), ('underflow|inexact', 'zero')],
+    ('atan2', '(least subnormal, greatest normal)'): [('underflow|inexact', 'num'), ('underflow|inexact', 'zero')],
+    ('atan2', '(qNaN, 1)'): [('none', 'nan')],
+    ('atan2', '(sNaN, 1)'): [('invalid', 'nan')],
+}
+
+
+RN5 = ("rne", "rtz", "rdn", "rup", "rmm")
+
+
+def _flag_names(f): return "|".join(n for n,v in (("invalid",sf.FLAG_INVALID),("divideByZero",sf.FLAG_DIVZERO),("overflow",sf.FLAG_OVERFLOW),("underflow",sf.FLAG_UNDERFLOW),("inexact",sf.FLAG_INEXACT)) if f&v) or "none"
+def _kind(fmt, bits):
+    s=fmt.sign_mask
+    return "nan" if sf.is_nan(fmt,bits) else "inf" if bits&~s==sf.inf_bits(fmt) else "zero" if bits&~s==0 else "num"
+def _unary_args(fmt):
+    b=lambda v: C.round_once(fmt, sf.RND_RNE, F(v))[0]; s=fmt.sign_mask
+    return {"+0":0,"-0":s,"least subnormal":sf.min_subnormal_bits(fmt),"greatest subnormal":sf.max_subnormal_bits(fmt),"least normal":sf.min_normal_bits(fmt),"1":b(1),"-1":b(-1),"1/2":b(F(1,2)),"2":b(2),"-2":b(-2),"greatest normal":sf.max_normal_bits(fmt),"+inf":sf.inf_bits(fmt),"-inf":sf.inf_bits(fmt)|s,"qNaN":sf.qnan_bits(fmt),"sNaN":sf.snan_bits(fmt,1)}
+def _pair_args(fmt):
+    b=lambda v: C.round_once(fmt, sf.RND_RNE, F(v))[0]; s=fmt.sign_mask; inf=sf.inf_bits(fmt)
+    one=b(1); mone=b(-1); gn=sf.max_normal_bits(fmt)
+    return {"(+0, +0)":(0,0),"(-0, +0)":(s,0),"(+0, -0)":(0,s),"(-0, -0)":(s,s),"(+0, 1)":(0,one),"(-0, 1)":(s,one),"(+0, -1)":(0,mone),"(-0, -1)":(s,mone),
+     "(1, +0)":(one,0),"(1, -0)":(one,s),"(-1, +0)":(mone,0),"(1, 1)":(one,one),"(1, -1)":(one,mone),"(1, +inf)":(one,inf),"(1, -inf)":(one,inf|s),"(+inf, 1)":(inf,one),"(-inf, 1)":(inf|s,one),"(+inf, +inf)":(inf,inf),"(+inf, -inf)":(inf,inf|s),"(-inf, -inf)":(inf|s,inf|s),
+     "(qNaN, 1)":(sf.qnan_bits(fmt),one),"(1, qNaN)":(one,sf.qnan_bits(fmt)),"(sNaN, 1)":(sf.snan_bits(fmt,1),one),"(1, sNaN)":(one,sf.snan_bits(fmt,1)),
+     "(least subnormal, 1)":(sf.min_subnormal_bits(fmt),one),"(least subnormal, greatest normal)":(sf.min_subnormal_bits(fmt),gn),"(least normal, greatest normal)":(sf.min_normal_bits(fmt),gn),"(greatest normal, least subnormal)":(gn,sf.min_subnormal_bits(fmt)),"(greatest normal, greatest normal)":(gn,gn)}
+
+
+@needs_mpmath
+def test_the_specials_the_document_states():
+    """The golden functions over the arguments the document's bullet names,
+    at the four formats under the five attributes: the set of (flags, kind
+    of result) of each is the table's. (The set is not every argument.)"""
+    out = {}
+    for fm in FORMATS:
+        fmt = FORMATS[fm]
+        for fn in ONE:
+            for nm, a in _unary_args(fmt).items():
+                for r in RN5:
+                    bits, f = transcend.compute(fmt, fn, a, 0,
+                                                C.RND_BY_NAME[r])
+                    out.setdefault((fn, nm), set()).add(
+                        (_flag_names(f), _kind(fmt, bits)))
+        for nm, (y, x) in _pair_args(fmt).items():
+            for r in RN5:
+                bits, f = transcend.compute(fmt, "atan2", y, x,
+                                            C.RND_BY_NAME[r])
+                out.setdefault(("atan2", nm), set()).add(
+                    (_flag_names(f), _kind(fmt, bits)))
+    assert {k: sorted(v) for k, v in out.items()} == SPECIALS_MEASURED
+    # no overflow and no divideByZero anywhere in it
+    seen = {name for v in out.values() for flags, _k in v
+            for name in flags.split("|")}
+    assert seen == {"none", "invalid", "underflow", "inexact"}
+
+
+def test_the_documents_rule_table_holds_the_four():
+    text = DOC.read_text(encoding="utf-8")
+    rules = text.split("### The rules", 1)[1].split("\n### ", 1)[0]
+    rows = {}
+    for line in rules.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 4 and cells[0].startswith("`"):
+            rows[cells[0]] = cells[1]
+    for op, tangent in DOC_RULES4.items():
+        assert rows.get(op) == tangent, op
+    assert rows.get("`atan2(a, b)`") == \
+        "`fma(b, da, -(a * db)) / fma(b, b, a * a)`"
+    ops = text.split("| written | node | golden function", 1)[1]
+    for fn in FOUR:
+        assert f"| `{fn}(" in ops, fn
+
+
+def test_the_table_of_changed_behaviours_has_91_sources():
+    """The count the document gives for the table of sources."""
+    assert len(M4_REFUSALS) == 91
