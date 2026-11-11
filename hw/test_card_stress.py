@@ -6678,6 +6678,7 @@ def routine_catalog_checks(src: str = HERE) -> list:
         c("routine catalog: an op the tables do not hold is refused BY NAME where the item is made (OP_REACH first, then OP_FORMAT), as any item",
           raises_value(lambda: L2.Item("zz-all", "routine", "exhaustive", "zz-f32-d00000000", "all", verdict_mode="all")))
         # the stand-in's copy of the digests is its own, and equal to the library's
+        import importlib.util
         sp = importlib.util.spec_from_file_location("rs_standin_copy", os.path.join(src, "card_stress_standin.py"))
         sm = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(sm)
