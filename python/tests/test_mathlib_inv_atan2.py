@@ -150,8 +150,8 @@ def test_plants_that_do_not_reach_atan2_are_refused_by_name():
             ml.build(FN, FP64, RNE, plant=plant)
     with pytest.raises(ValueError, match="no_such_plant"):
         ml.build(FN, FP64, RNE, plant="no_such_plant")
-    with pytest.raises(ValueError, match="parcel M4F2's"):
-        ml.build(FN, FP32, RNE)
+    with pytest.raises(ValueError, match="a fault of the double word's"):
+        ml.build(FN, FP32, RNE, plant="two_sum_all")
 
 
 def test_every_plant_changes_the_build():
@@ -776,7 +776,7 @@ def test_the_role_checks_use_the_ieee_fields_and_fail_on_a_wrong_word(
 
 def test_the_corner_is_a_committed_set_in_the_region():
     assert {k: len(v) for k, v in I.CORNER.items()} == {
-        "fp64": 101, "fp128": 40, "fp256": 40}
+        "fp64": 101, "fp128": 40, "fp256": 40, "fp32": 100}
     for fmt in FORMATS:
         lanes = I.CORNER[fmt.name]
         assert len(set(lanes)) == len(lanes)
@@ -1026,5 +1026,5 @@ def test_the_inv_commands_take_atan2_and_inv_corner_refuses_an_existing_out(
     with pytest.raises(SystemExit, match="the corner is atan2's"):
         R.main(["inv-corner", "--fn", "atan"])
     R.OUT = None
-    with pytest.raises(SystemExit, match="parcel M4F2's"):
-        R.main(["inv-corner", "--formats", "fp32"])
+    with pytest.raises(SystemExit, match="fp64, fp128, fp256 or fp32"):
+        R.main(["inv-corner", "--formats", "fp16"])

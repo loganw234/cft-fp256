@@ -68,7 +68,7 @@ from cft_golden import transcend, vectors  # noqa: E402
 
 import mathlib_harness as H  # noqa: E402
 
-FORMATS = ml.INV_FORMATS                 # fp64, fp128, fp256
+FORMATS = (FP64, FP128, FP256)           # the double word's; fp32 is the triple word's own section at the end (parcels M4F1, M4F2)
 BY_NAME = {f.name: f for f in FORMATS}
 FUNCS = tuple(ml._INV_BUILDERS)          # atan, and what M4G2 and M4G3 build
 RND_MODES = sf.RND_MODES                 # rne, rtz, rdn, rup, rmm
@@ -2372,7 +2372,8 @@ def check_corner(f, lanes=None, b=None, evaluator=None, seq_evaluator=None,
     attribute: every lane in the region (corner_region); every unmarked lane
     equal to transcend.py in bits and flag word; under rne, every unmarked
     lane with y not zero and flag word exactly inexact within its bound
-    (|V - f| / Bv under 1, mpmath at 4p + 200 bits) and with Bv not zero (a Bv
+    (|V - f| / Bv under 1, V the sum of Vh, Vl and, at fp32, V2, mpmath at
+    4p + 200 bits) and with Bv not zero (a Bv
     that underflowed certified the lane with no margin: the study's 3.6, item
     10); and the same lanes on seq.py (routines.run(f, ys, xs)) equal to
     evaluate(). `b` is the Build of the same fragment, for V and Bv (the
@@ -2409,13 +2410,14 @@ def check_corner(f, lanes=None, b=None, evaluator=None, seq_evaluator=None,
             if rnd != RNE or fw != sf.FLAG_INEXACT \
                     or not x[0] & ~fmt.sign_mask:
                 continue
-            _r, _fl, pr = b.run(x, ("Vh", "Vl", "Bv"))
+            vnames = ("Vh", "Vl", "V2") if "V2" in b.probes else ("Vh", "Vl")
+            _r, _fl, pr = b.run(x, vnames + ("Bv",))
             Bv = abs(value(fmt, pr["Bv"]))
             if Bv == 0:
                 tally["bv0"] += 1
                 first.setdefault("bv0", x)
                 continue
-            V = value(fmt, pr["Vh"]) + value(fmt, pr["Vl"])
+            V = sum(value(fmt, pr[k]) for k in vnames)
             err = abs(_mp(V) - true_value("atan2", fmt, x))
             r = -math.inf if err == 0 else float(
                 mpmath.log(err / _mp(Bv), 2))
@@ -2991,4 +2993,690 @@ def red_checks_tw(plant, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
     add("constants", check_constants_tw(
         builder=lambda name, f_, r_: tw_build_of(r_, plant),
         attrs=(RNE,), names=(TW_FN,))[0])
+    return red
+
+
+# ---- fp32: asin, acos and atan2 (parcel M4F2) ----
+#
+# The three functions on the triple word (cft_golden/mathlib.py's section of
+# that name, docs/studies/M4-invtrig.md 2.8), under the same checks as atan's
+# above (parcel M4F1), each taking the function: tw2_build_of(fn, ...). FP32 is
+# not in FORMATS (the double word's three), so the tables of the sections
+# above hold nothing of it; the keys they need are assigned here, at the end:
+# MARKING_ROWS, RANGE_EDGE, RANGE_ROWS, CORNER, SEQ_RANGE, SHAPE_TW and the
+# atan2 pool's marks. INV_POOL_MARKS has no fp32 row (M4G4's check maps it
+# through BY_NAME, which has none, and its pin is 265): atan2's marked pool
+# lanes are POOL_MARKS_TW, passed to check_pools as `marks`.
+#
+# Eight checks for asin and acos, ten for atan2 (range and corner):
+#
+#   pools  seq  bound  census  specials  shape  core  constants  [range  corner]
+#
+# What the evidence is and is not. fp32's triple word has no budget in this
+# build (Logan's answer 3), so that the bound holds on every argument is not
+# shown here: it is the samples on the box (20,000 lanes a region) and the
+# card's exhaustive sweeps (asin and acos over all 2^32 x, atan2 over every y
+# for nine fixed x). What these show: 0 wrong unmarked over the pools, the
+# specials, the census, the range rows, the corner set and the sampled
+# regions; the largest |V - f| / Bv of each region is a sampled lower bound;
+# and every plant red in a named check. A marked lane's guess is not promised:
+# the replay decides it (Logan's answer 5), and the checks count it.
+
+TW_FNS = ("asin", "acos", "atan2")
+CHECKS_TW2 = ("pools", "seq", "bound", "census", "specials", "shape", "core",
+              "constants")
+CHECKS_TW_ATAN2 = ("pools", "seq", "bound", "range", "census", "specials",
+                   "shape", "core", "constants", "corner")
+
+
+def checks_tw2(fn):
+    return CHECKS_TW_ATAN2 if fn == "atan2" else CHECKS_TW2
+
+
+@functools.lru_cache(maxsize=None)
+def tw2_build_of(fn, rnd, plant=None, shift=0):
+    """ml.build(fn, FP32, rnd, plant=plant, bound_shift=shift), once."""
+    return ml.build(fn, FP32, rnd, plant=plant, bound_shift=shift)
+
+
+@functools.lru_cache(maxsize=None)
+def tw2_fragment_of(fn, rnd, plant=None, shift=0):
+    """The build's scheduled fragment."""
+    return tw2_build_of(fn, rnd, plant, shift).fragment()
+
+
+# ---- atan2's tables at fp32: the range, its edge, the corner ---------------------
+
+# The rows that MARK: the eight of the tiny-quotient range (MEASURED on the
+# fragment under the five attributes: all eight mark, every other row of
+# _all_rows_atan2 is unmarked and equal to transcend.py). The ninth of fp64's
+# (the grid-point family) is not at fp32.
+MARKING_ROWS["fp32"] = _RANGE_LABELS
+
+# The last y that marks in atan2(y, 1), under every attribute (found by
+# bisection on the fragment, MEASURED): RECIP_SEED(1) = 1 - 2^-10 = 1023/1024,
+# so t~ = y (1 - 2^-10) and the mark is t~ < 2^(emin+2p+2) = 2^-76: the edge is
+# 1.000977 of that power of two, 0x19802007, and 0x19802008 is the first that
+# does not mark. check_range_tw holds it to the seed in exact rationals.
+RANGE_EDGE["fp32"] = 0x19802007
+
+
+def _range_below_tw():
+    """Lanes between 2^-100 and 2^-76 that must mark: inside the triple word's
+    range and outside the double word's (2^(emin+p+2) = 2^-100), so the plant
+    range_low leaves them unmarked."""
+    one = sf.one_bits(FP32)
+    return [("y 2^-77, x 1 (inside the edge)", (_V(FP32, 0, 1, -77), one)),
+            ("y 2^-80, x 1", (_V(FP32, 0, 1, -80), one)),
+            ("y -3 2^-85, x 1", (_V(FP32, 1, 3, -85), one)),
+            ("y 2^-90, x 1", (_V(FP32, 0, 1, -90), one)),
+            ("y 2^-70, x 2^10 (t = 2^-80)",
+             (_V(FP32, 0, 1, -70), _V(FP32, 0, 1, 10))),
+            ("y 2^-98, x 1 (two binades above the double word's edge)",
+             (_V(FP32, 0, 1, -98), one))]
+
+
+RANGE_ROWS["fp32"] = _range_rows(FP32) + _range_below_tw()
+SEQ_RANGE[("atan2", "fp32")] = [lane for _l, lane in RANGE_ROWS["fp32"]]
+
+# The seed tests of atan2 on the other side of the edge: the first y past it is
+# a row of the specials (via _rows_atan2 and RANGE_EDGE["fp32"]).
+
+# CORNER["fp32"]: the corner lanes (the study's 3.6, item 9), drawn once from the
+# sampler's region `tinyn`: 100 lanes at seed 17, the study's plants.py size
+# (sample("atan2", FP32, "tinyn", 100, 17)). MEASURED, rne: 36 of the 100
+# lanes mark, 0 unmarked differ from transcend.atan2, 0 have a Bv that
+# underflowed, none is past the bound (the largest unmarked 2^-7.5 of Bv);
+# the plant prescale_d is past the bound on 7 unmarked lanes (to 2^34.3 Bv) and
+# range_low leaves 15 lanes unmarked with Bv underflowed to 0. A committed
+# list is taken from the sampler, not the definition: corner_region holds each
+# lane to the region in exact rationals.
+CORNER["fp32"] = [
+    (0x8a416c83, 0x305e84c0),
+    (0x09a705ae, 0x3058869e),
+    (0x8068135d, 0x16ee7aa7),
+    (0xa4334a07, 0x2bd4145a),
+    (0x01d03f75, 0x38188d57),
+    (0x000cf3e4, 0x00f50ddf),
+    (0x00000024, 0x43e62bf7),
+    (0x2384dfe1, 0x508213a8),
+    (0x00000003, 0x129ee06e),
+    (0x0009c9b8, 0x8000000a),
+    (0x2ce05984, 0x8165f24c),
+    (0x8ff40e25, 0x1686a6b0),
+    (0x1083826a, 0x3cd823c3),
+    (0x8553e026, 0x27d90178),
+    (0x0e64c3c0, 0x2b468a0b),
+    (0x9eb90663, 0x3b6f6fcc),
+    (0x34d59b44, 0x1d17a3a5),
+    (0x0628be23, 0x1c1b3380),
+    (0x9e7c717c, 0x3f2da306),
+    (0x8f24eb49, 0x303f7608),
+    (0x00019867, 0x09fe6c6a),
+    (0xa936ae82, 0x0c90b75f),
+    (0x831c7a8f, 0xa930d7b2),
+    (0x09b70428, 0x38651d55),
+    (0x8167c69e, 0x270b9a81),
+    (0x93f7672b, 0x41d9537c),
+    (0x80000234, 0x2058fdc6),
+    (0x091013cb, 0x21f9064d),
+    (0x8b44a23b, 0x389e6dd9),
+    (0x0dc70068, 0x33775c5d),
+    (0x1be8cd4d, 0x24ed2d19),
+    (0x04ad9c6a, 0x2ddd399a),
+    (0x80001f61, 0x15e91f1b),
+    (0x0c04d704, 0x343f25e9),
+    (0x8a3cdb9d, 0x9fd28af7),
+    (0x00001744, 0x00a0b96b),
+    (0x00000007, 0x246ffedc),
+    (0x836c836f, 0xadeab46c),
+    (0x9c185cc1, 0x31bb48cc),
+    (0x8000011a, 0x1fd0f903),
+    (0x912ed872, 0x16f5d0a0),
+    (0x99926665, 0x1e80ae80),
+    (0x00000062, 0x140544b3),
+    (0x99173c80, 0x428deba4),
+    (0x1d9104af, 0x2ea6571f),
+    (0x108a8763, 0x3a5ca5b5),
+    (0x8f7407fe, 0x20fdf77e),
+    (0x0000004b, 0x80019466),
+    (0x99c1f65c, 0x4bdeb8e6),
+    (0x24256eed, 0x307b0b89),
+    (0xa14dfe2e, 0xae617be6),
+    (0xb13ea22b, 0x9957a205),
+    (0x8c32ab01, 0x165e1d1f),
+    (0x1b1226b9, 0x3df97121),
+    (0x80126f85, 0x0f436f31),
+    (0x8233ab06, 0x0495ea85),
+    (0x05fa2736, 0x335665fc),
+    (0x237107e2, 0x4b21deff),
+    (0x0614cab3, 0x8000006a),
+    (0x0afe1867, 0xa90eb600),
+    (0x8d9cf234, 0x12f2763d),
+    (0x1c621105, 0x4f4aa0b7),
+    (0x47effa6a, 0xa1b03fe1),
+    (0x8ab4ba67, 0x000002c1),
+    (0xcd4ce24b, 0x22ec5dba),
+    (0x80007d0f, 0x282fe8b3),
+    (0x800007e6, 0x44ef8319),
+    (0x00000024, 0x06fc505b),
+    (0x80000082, 0x00001211),
+    (0x1f2b82cd, 0x38597929),
+    (0x926fa7a0, 0x89c07196),
+    (0x0df80638, 0x33e31497),
+    (0x1e5fa595, 0x455d197b),
+    (0x94d15f8e, 0x0000001a),
+    (0x83366f29, 0x04472785),
+    (0x1e2814ba, 0x35e20e65),
+    (0x003a7b8d, 0x0cba196f),
+    (0xa16fe406, 0x49ff0447),
+    (0x039da7c1, 0x80000122),
+    (0x80000001, 0x25e95d58),
+    (0x0000d137, 0x2b8da400),
+    (0x24ba3788, 0x4db3fcac),
+    (0x8000007f, 0x835999f1),
+    (0x0c3a864d, 0x92a8d57a),
+    (0x800cf29a, 0x07019a5c),
+    (0x800069c7, 0x086a0919),
+    (0x8661e8ed, 0x00035ce8),
+    (0x061a3e8d, 0x2edc7601),
+    (0x1d7efc55, 0x162ce294),
+    (0x0614901b, 0x2b119737),
+    (0x1fad29db, 0x48000896),
+    (0x14bfd5ec, 0x4528d8f6),
+    (0x8000658e, 0x2884b352),
+    (0x841d72b5, 0x2f90c338),
+    (0x0aa27c30, 0x0e07cd42),
+    (0x17024ddf, 0x47ad7ae1),
+    (0x8321f50b, 0x2fcd7e53),
+    (0x09751142, 0x32058abe),
+    (0x9ea4d1a2, 0xc6659a21),
+    (0x12bf3487, 0x396e3099),
+]
+
+# The pool's marked lanes of atan2 at fp32, taken from the FRAGMENT (the same
+# 31 under all five attributes, MEASURED: the pool of 527 pairs through it),
+# all in the tiny-quotient range; check_pool_marks_tw holds them to the range
+# in exact rationals with the band at 2^(emin+2p+2). A marked guess is not
+# promised: the replay decides it.
+POOL_MARKS_TW = {lane: "the tiny-quotient range" for lane in (
+    (0x3f800000, 0x7f7fffff),
+    (0xbf800000, 0x7f7fffff),
+    (0x40000000, 0x7f7fffff),
+    (0xc0000000, 0x7f7fffff),
+    (0x40400000, 0x7f7fffff),
+    (0xc0400000, 0x7f7fffff),
+    (0x00000001, 0x3f800000),
+    (0x00000001, 0x40000000),
+    (0x00000001, 0x40400000),
+    (0x00000001, 0x7f7fffff),
+    (0x80000001, 0x3f800000),
+    (0x80000001, 0x40000000),
+    (0x80000001, 0x40400000),
+    (0x80000001, 0x7f7fffff),
+    (0x00000001, 0x40800000),
+    (0x0f800000, 0x3f800000),
+    (0x0f800000, 0x40000000),
+    (0x8f800000, 0x3f800000),
+    (0x0f800000, 0x40400000),
+    (0x0a2a0151, 0x3f052ec3),
+    (0xa353660a, 0x4e63ee74),
+    (0x093d6ba3, 0x59c9eea2),
+    (0x82e70cc8, 0x5ebc5603),
+    (0xcdd9dd7f, 0x78f5276c),
+    (0x950d0de8, 0x46b4988b),
+    (0x316a5dbd, 0x7e8347c0),
+    (0x9b7194a6, 0x418414ee),
+    (0xcea180a0, 0x74cc2ec5),
+    (0x22e32737, 0x5fc598af),
+    (0x188cc3e6, 0x5188da00),
+    (0x9fae1df9, 0x5aa7d901),
+)}
+
+
+def _tqr_tw(fmt):
+    """2^(emin+2p+2): the triple word's range edge in t~ = n_h RECIP_SEED(d_h)
+    (2^-76 at fp32; _tqr's is the double word's 2^(emin+p+2))."""
+    return Fraction(2) ** (fmt.emin + 2 * fmt.prec + 2)
+
+
+def _tq_band_tw(fmt):
+    """(lo, hi): as _tq_band, about the triple word's edge."""
+    edge = _tqr_tw(fmt)
+    return edge * (1 - ml.INV_EPS_T), edge / (1 - ml.INV_EPS_T)
+
+
+# ---- the shape, at fp32 ---------------------------------------------------------
+
+# (instructions, bank words, values live) of asin, acos and atan2 under every
+# attribute: the model's (twrun-costs.fp32-tw.out.txt: 637, 633 and 518
+# instructions, 62, 61 and 70 words) and the depth-first order's 25, 25 and 31
+# values live scheduled (the design's order keeps 26, 26 and 33)
+SHAPE_TW.update({("asin", "fp32"): [(637, 62, 25)] * 5,
+                 ("acos", "fp32"): [(633, 61, 25)] * 5,
+                 ("atan2", "fp32"): [(518, 70, 31)] * 5})
+
+# the model's instructions by phase (the same file)
+_PHASES_TW2 = {
+    "asin": {"front": 10, "sqrt": 97, "index": 7, "num": 40, "den": 42,
+             "quotient": 53, "z": 29, "tail": 2, "head2": 26, "head3": 158,
+             "atan_s": 40, "table": 24, "recon": 64, "final": 27,
+             "classify": 4, "special": 14},
+    "acos": {"front": 10, "sqrt": 97, "index": 7, "num": 40, "den": 42,
+             "quotient": 53, "z": 29, "tail": 2, "head2": 26, "head3": 158,
+             "atan_s": 40, "table": 24, "recon": 66, "final": 27,
+             "classify": 3, "special": 9},
+    "atan2": {"front": 19, "index": 7, "num": 6, "den": 12, "quotient": 52,
+              "z": 29, "tail": 2, "head2": 26, "head3": 158, "atan_s": 40,
+              "table": 24, "recon": 82, "final": 27, "special": 34},
+}
+
+
+def model_phases_tw2(fn, fmt_name):
+    """The model's instructions by phase for asin, acos or atan2 at fp32."""
+    if fn not in _PHASES_TW2 or fmt_name != "fp32":
+        raise ValueError(f"no phases of {fn} at {fmt_name} pinned")
+    return dict(_PHASES_TW2[fn])
+
+
+def tables_tw2(**kw):
+    """The shape check's Tables for fp32's asin, acos and atan2 (no edit of
+    SHAPE or MODEL_PHASES); `kw` doctors one of them, as Tables does."""
+    return Tables(**dict({"shape": SHAPE_TW, "phases": model_phases_tw2}, **kw))
+
+
+def check_shape_tw2(fn, plant=None, tables=None, fragments=None):
+    """[finding]: shape. The harness's check_shape on fn at fp32, all five
+    attributes: the pinned (instructions, words, live), the phases, the flag
+    words (the study's, asin {0x0, 0x1, 0x10, 0x18, 0x90}, acos and atan2
+    {0x0, 0x1, 0x10, 0x90}), MIN and MAX (the index's MIN; asin's and acos's
+    root's MAX), check_reorder, INV_LIVE_CAP's fp32 row the measured maximum
+    and a cap one under failing by name."""
+    builds = {(fn, rnd): tw2_build_of(fn, rnd, plant) for rnd in RND_MODES}
+    return check_shape(FP32, builds, tables or tables_tw2(), fragments)
+
+
+# ---- the pools --------------------------------------------------------------------
+
+def check_pools_tw2(fn, rnd, plant=None):
+    """[finding], Tally: pools. The harness's check_pools on fn's pool at fp32
+    (333 lanes, atan2's 527 pairs) under rnd: asin and acos mark nothing and
+    have no fp32 row of INV_POOL_MARKS; atan2's marks are POOL_MARKS_TW."""
+    marks = POOL_MARKS_TW if fn == "atan2" else None
+    return check_pools(tw2_fragment_of(fn, rnd, plant), marks=marks)
+
+
+def check_pool_marks_tw(lanes=None, listed=None):
+    """[finding], band: pools. atan2's committed marks (POOL_MARKS_TW) against
+    an independent predicate in exact rationals, as check_pool_marks does
+    with the band at the triple word's edge 2^(emin+2p+2)."""
+    fmt = FP32
+    lanes = pool("atan2", fmt) if lanes is None else lanes
+    listed = list(POOL_MARKS_TW) if listed is None else listed
+    lo, hi = _tq_band_tw(fmt)
+    out, band = [], []
+    where = "pools: atan2 fp32"
+    bad = [x for x in listed
+           if (t := _tq_shape(fmt, x)) is None or t >= hi]
+    if bad:
+        out.append(f"{where}: {len(bad)} of the {len(listed)} committed range "
+                   f"marks are not of the range's shape or are past the band "
+                   f"in exact rationals, first {_hexes(bad)}")
+    have = set(listed)
+    missing = []
+    for x in lanes:
+        t = _tq_shape(fmt, x)
+        if t is None:
+            continue
+        if t < lo and x not in have:
+            missing.append(x)
+        elif lo <= t < hi:
+            band.append(x)
+    if missing:
+        out.append(f"{where}: {len(missing)} pool lanes are inside the range "
+                   f"in exact rationals and not on the committed list, first "
+                   f"{_hexes(missing)}")
+    return out, band
+
+
+# ---- seq: the lanes and the inflated bound ---------------------------------------
+
+# The bound inflated by 2^shift so that lanes mark on the main path (G' = 40 -
+# shift = 6), for asin and acos. Re-derived for each function (not atan's
+# by assumption): a main-path lane marks when V lies within Bv of a rounding
+# boundary, with probability about 2 Bv / ulp(V); Bv = 2^-30 |V| and
+# ulp(V) = 2^-23 |V| / m for V = m 2^e, m in [1, 2), so the rate is about 2^-6 m,
+# 0.02 on average (ESTIMATE, the same for the three, since Bv is |V| 2^-(p+G')).
+# The count on each function's lanes is MEASURED (the test). atan2 needs none:
+# its range lanes (SEQ_RANGE) mark without inflating the bound.
+TW2_SEQ_SHIFT = {"asin": 34, "acos": 34}
+
+
+def check_seq_tw2(fn, rnd, plant=None, shift=0, xs=None, extra=(200, 100),
+                  **kw):
+    """[finding], lanes: seq. The harness's check_seq on fn at fp32 under rnd;
+    with `shift` (TW2_SEQ_SHIFT's: the bound inflated to G' = 6) the lanes that
+    mark are many enough to run STATUS[6] and the byte's mark on the main
+    path, and a run that marks no lane is a finding of its own. atan2's
+    committed range lanes (SEQ_RANGE) are among its lanes and marked in the
+    byte. fp32 has no structured lane (STRUCT has no fp32 key). `extra`
+    (random, edge): the lanes of those regions (seeds 21 and 22) added to the
+    seq slice for the inflated bound."""
+    f = tw2_fragment_of(fn, rnd, plant, shift)
+    if shift and xs is None:
+        xs = list(seq_slice(fn, FP32))
+        for region, n, seed in (("random", extra[0], 21),
+                                ("edge", extra[1], 22)):
+            xs += sample(fn, FP32, region, n, seed)
+        xs = list(dict.fromkeys(xs))
+    out, lanes = check_seq(f, xs=xs, **kw)
+    if shift:
+        n = sum(1 for x in lanes if ml.evaluate(f, x)[1] & MARK)
+        if not n:
+            out = out + [f"seq: {fn} fp32 {sf.RND_NAMES[rnd]}: the bound "
+                         f"inflated by 2^{shift} marks none of the "
+                         f"{len(lanes)} lanes: the mark is not exercised"]
+    return out, lanes
+
+
+# ---- the bound: the regions, and the committed lanes of 3.6 item 5 --------------
+
+# The committed lanes of the study's 3.6, item 5, for the faults the sampled
+# regions do not turn red (or only on few lanes), found by running the planted
+# fragment (rem0_fma, root_fma) over 1,000 to 6,000 lanes of the regions and
+# keeping those past the bound under rne (MEASURED, with the plant's own Build
+# and bound_log2). THESE LISTS ARE TAKEN FROM THE PLANTED FRAGMENT, so they
+# hold the fragment and not the definition: each lane is held to an
+# independent predicate, recomputed in exact rationals from the CLEAN build's
+# probes (rem0_inexact_tw: N0 - q0 D0 not representable in one word;
+# root_inexact_tw: u0 - w0^2 not representable in one word), and inside the
+# bound on the clean build. Encodings with their signs, as found.
+REM0_LANES_TW = {
+    "asin": (0xbb9071b0, 0x3b14b15d, 0xbc1c0ec2, 0xbba06a72, 0xba407ca4,
+             0x3acec9e3, 0xbd4fcd92, 0x3c59450a),
+    "acos": (0x3f7ffbad, 0x3f7ffaf1, 0x3f7ff9d7, 0x3d3f818e, 0xbcdc101b,
+             0x3c59889d, 0xbf7ff813, 0xbbfcaf2b),
+    "atan2": ((0x386a8b55, 0xb7948c81), (0xe06fe0cd, 0x5e743f38),
+              (0x237b28d7, 0x21553044), (0xce814978, 0xd07daf7d),
+              (0x60537f07, 0xe371146b), (0x55fc0fff, 0xd97f0191)),
+}
+ROOT_LANES_TW = {
+    "asin": (0x3f27e8e9, 0xbf2331a2, 0xbf1511ef, 0x3f12ddd1, 0xbf0a4dbd,
+             0x3efd9dc9),
+    "acos": (0x3f7fff2a, 0x3f4d336f, 0x3f7b8266, 0x3f6a09a0, 0x3f7fff9e,
+             0x3f600000),
+}
+
+
+def rem0_inexact_tw(fn, x, rnd=RNE):
+    """Whether N0 - q0 D0 of the lane x is NOT representable in one word, from
+    the CLEAN build's probes N0, q0 and D0 and exact rationals."""
+    b = tw2_build_of(fn, rnd)
+    _r, _f, pr = b.run(x, ("N0", "q0", "D0"))
+    n0, q0, d0 = (value(FP32, pr[k]) for k in ("N0", "q0", "D0"))
+    r = n0 - q0 * d0
+    return ml._dec(FP32, ml._enc(FP32, r)) != r
+
+
+def root_inexact_tw(fn, x, rnd=RNE):
+    """Whether u0 - w0^2 of the lane x is NOT representable in one word (asin
+    and acos), from the CLEAN build's probes u0 and wq (w0 before its
+    renormalisation) and exact rationals: the residual the plant root_fma
+    computes by one FMA is then rounded."""
+    b = tw2_build_of(fn, rnd)
+    _r, _f, pr = b.run(x, ("u0", "wq"))
+    u0, w0 = value(FP32, pr["u0"]), value(FP32, pr["wq"])
+    r = u0 - w0 * w0
+    return ml._dec(FP32, ml._enc(FP32, r)) != r
+
+
+def committed_tw2(fn):
+    """{label: [lane]}: the committed lanes of fn's bound check."""
+    out = {"rem0": list(REM0_LANES_TW[fn])}
+    if fn in ROOT_LANES_TW:
+        out["root"] = list(ROOT_LANES_TW[fn])
+    return out
+
+
+def check_bound_tw2(fn, plant=None, n=48, seed=11, extra=None):
+    """[finding], {region: (worst, main-path lanes, lanes)}: bound. fn's
+    regions (REGIONS_BY_FN: edge, big, small, random and the diagonal), n
+    points each under rne, each lane under 1 Bv with V = V0 + V1 + V2
+    (bound_log2) and equal to transcend.py where unmarked; and the committed
+    lanes of 3.6 item 5 as regions of their own ("rem0", "root"), which the
+    clean build holds. `extra` {label: lanes} replaces them. The worst of each
+    region is the largest found, a sampled lower bound."""
+    b = tw2_build_of(fn, RNE, plant)
+    regions = dict(placed_points(fn, FP32, n, seed))
+    regions.update(committed_tw2(fn) if extra is None else extra)
+    out, worst = [], {}
+    for label, xs in regions.items():
+        found, w = check_bound(b, xs, label)
+        out += found
+        worst[label] = w
+    return out, worst
+
+
+# ---- the range (atan2) ----------------------------------------------------------------
+
+def check_range_tw(f, rows=None, edge=None, evaluator=None):
+    """[finding], tally: range. The harness's check_range with the band and the
+    edge at the triple word's 2^(emin+2p+2) = 2^-76: each committed range lane
+    (RANGE_ROWS["fp32"], or `rows`) marked by the fragment, its guess COUNTED
+    and not compared (the replay decides it), and in the range in exact
+    rationals (under the band's top). The edge (RANGE_EDGE["fp32"], or `edge`)
+    is held to RECIP_SEED(1) = softfloat's seed of 1 in exact rationals: y_last
+    times the seed rounds below 2^-76 and (y_last + 1) times it does not, and
+    atan2(y_last + 1, 1) is not marked. tally: lanes, marked, guess_right."""
+    fmt, rnd = f.fmt, f.rnd
+    ev = evaluator or ml.evaluate
+    rows = RANGE_ROWS[fmt.name] if rows is None else rows
+    where = f"range: atan2 {fmt.name} {sf.RND_NAMES[rnd]}"
+    out = []
+    tally = {"lanes": 0, "marked": 0, "guess_right": 0}
+    unmarked, outside = [], []
+    lo, hi = _tq_band_tw(fmt)
+    for label, lane in rows:
+        tally["lanes"] += 1
+        bits, fw = ev(f, lane)
+        if fw & MARK:
+            tally["marked"] += 1
+            if (bits, fw & 0x1F) == golden(fmt, rnd, lane, "atan2"):
+                tally["guess_right"] += 1
+        else:
+            unmarked.append(lane)
+        t = _tq_shape(fmt, lane)
+        if t is None or t >= hi:
+            outside.append(lane)
+    if unmarked:
+        out.append(f"{where}: {len(unmarked)} of the {len(rows)} committed "
+                   f"range lanes are not marked, first {_hexes(unmarked)}")
+    if outside:
+        out.append(f"{where}: {len(outside)} committed range lanes are not in "
+                   f"the range in exact rationals, first {_hexes(outside)}")
+    one = sf.one_bits(fmt)
+    last = RANGE_EDGE[fmt.name] if edge is None else edge
+    seed = value(fmt, sf.recip_seed(fmt, one)[0])
+    limit = _tqr_tw(fmt) * (1 - Fraction(1, 2 ** (fmt.prec + 1)))
+    if not value(fmt, last) * seed < limit:
+        out.append(f"{where}: the edge lane {_hexes([last])} times the seed of "
+                   f"1 is not under 2^(emin+2p+2) in exact rationals")
+    if value(fmt, last + 1) * seed < limit:
+        out.append(f"{where}: the lane past the edge {_hexes([last + 1])} "
+                   f"times the seed of 1 is still under 2^(emin+2p+2)")
+    if ev(f, (last + 1, one))[1] & MARK:
+        out.append(f"{where}: the lane past the edge ({_hexes([last + 1])}, 1)"
+                   f" is marked")
+    return out, tally
+
+
+# ---- the census: M4G4's lane makers at fp32 --------------------------------------
+
+def census_lanes_tw(fn):
+    """{family: [lane]}: M4G4's lane makers (mathlib_inv_family.census_lanes)
+    at fp32: asin's tiny family and the lanes next to 1; acos's windows about
+    pi/2 (positive x) and the lanes next to 1; atan2's tiny family against
+    x = 1, 3 and 5 2^7, the windows about pi, the ratio family and the
+    diagonals. Each window is 2 J + 1 = 129 consecutive arguments about the
+    centre of each of the two nearest boundaries of each kind."""
+    import mathlib_inv_family as F
+    return F.census_lanes(FP32, fn)
+
+
+def census_min_d_tw(fn, lanes=None):
+    """{family: (nearest, directed)}: the least distance d over the family's
+    lanes, from |f| to the nearest rounding boundary of the result in units of
+    2^-(p+G) |f| at G = 40 (M4G4's distance: mpmath at 4p + 200 bits), under a
+    nearest and a directed attribute. fp32 has no budget B (the thresholds
+    need one), so the lane is judged by d alone: the in-lane bound is one
+    unit, so a lane farther than that from every boundary cannot mark."""
+    import mathlib_inv_family as F
+    lanes = census_lanes_tw(fn) if lanes is None else lanes
+    return {fam: (min(F.distance(FP32, RNE, fn, x) for x in xs),
+                  min(F.distance(FP32, RTZ, fn, x) for x in xs))
+            for fam, xs in lanes.items()}
+
+
+def check_census_tw2(fn, rnds=RND_MODES, plant=None, lanes=None,
+                     evaluator=None, step=1):
+    """[finding], tally: census. The census lanes of fn at fp32 (census_lanes_tw,
+    or `lanes` {family: [lane]}, every `step`-th of each family) through the
+    fragment under each of rnds: every lane UNMARKED (zero is the claim: the
+    families have no centre at G = 40, as atan's and M2F2's) and equal to
+    transcend.py in bits and flag word. `evaluator` stands for ml.evaluate. tally:
+    lanes (a lane once for each attribute), marked, wrong, min_d (the least
+    d of census_min_d_tw over the lanes used, nearest and directed)."""
+    lanes = census_lanes_tw(fn) if lanes is None else lanes
+    lanes = {fam: xs[::step] for fam, xs in lanes.items()}
+    tally = {"lanes": 0, "marked": 0, "wrong": 0,
+             "min_d": census_min_d_tw(fn, lanes)}
+    out = []
+    for rnd in rnds:
+        f = tw2_fragment_of(fn, rnd, plant)
+        where = f"census: {fn} fp32 {sf.RND_NAMES[rnd]}"
+        for fam, xs in lanes.items():
+            marked, wrong = [], []
+            for x in xs:
+                bits, fw = (evaluator or ml.evaluate)(f, x)
+                tally["lanes"] += 1
+                if fw & MARK:
+                    marked.append(x)
+                elif (bits, fw) != golden(FP32, rnd, x, fn):
+                    wrong.append(x)
+            tally["marked"] += len(marked)
+            tally["wrong"] += len(wrong)
+            if marked:
+                out.append(f"{where}: {fam}: {len(marked)} of {len(xs)} "
+                           f"lanes are marked (zero is the claim), first "
+                           f"{_hexes(marked)}")
+            if wrong:
+                out.append(f"{where}: {fam}: {len(wrong)} of {len(xs)} "
+                           f"unmarked lanes differ from transcend.{fn}, first "
+                           f"{_hexes(wrong)}")
+    return out, tally
+
+
+# ---- the core and the constants -----------------------------------------------------
+
+def check_core_tw2(plant=None, triple=True, **kw):
+    """[finding], tally: core. M4F1's check_core_tw on _build_inv_core_tw's
+    branch asin and acos reach (triple=True: three-word operands) or the one
+    atan2 reaches (single words)."""
+    return check_core_tw(plant, triple, **kw)
+
+
+def check_constants_tw2(fn, plant=None, **kw):
+    """[finding], lines: constants. mathlib._check_inv_tw_constants() in
+    process for fn (fp32), under rne unless `attrs` is given, on the
+    planted fragment where there is a plant."""
+    kw.setdefault("attrs", (RNE,))
+    return check_constants_tw(
+        builder=lambda name, f_, r_: tw2_build_of(name, r_, plant),
+        names=(fn,), **kw)
+
+
+# ---- the plants: every check on every plant --------------------------------------------
+
+def placed_tw2(f):
+    """Whether the scheduled fragment can be placed in the sequencer's 32
+    registers (routines.program): atan2's holds 31 values live, and a planted
+    fault that keeps 33 live (z2_dropped, mark_silenced) leaves a fragment no
+    program can be made of, so that the checks that run it on seq.py have
+    nothing to run ("no register for the harness")."""
+    try:
+        routines.program(f)
+    except AssertionError as e:
+        if "no register for the harness" not in str(e):
+            raise
+        return False
+    return True
+
+
+def red_checks_tw2(fn, plant, pool_rnds=(RNE, RTZ), seq_rnds=(RNE, RTZ),
+                   census_rnds=(RTZ,), bound_n=36, census_step=12,
+                   corner_rnds=(RNE,), not_run=None):
+    """{check: [findings]} for the checks that are RED on `plant` (None: the
+    control) in fn at fp32, checks_tw2(fn)'s: pools under pool_rnds (atan2's
+    also the marks' own leg, check_pool_marks_tw), seq under seq_rnds and, for
+    asin and acos, once on the build with the bound inflated (TW2_SEQ_SHIFT,
+    rne), bound over the fn's regions (bound_n points each) and the committed
+    lanes under rne, census under census_rnds (every census_step-th lane of
+    each family), specials and shape under all five attributes, core on the
+    branches the plant reaches, constants (rne) and for atan2 range (all five
+    attributes) and corner (under corner_rnds). A check that does not run for a
+    plant is neither red nor green: the core is refused by name ("does not
+    apply") for a plant the core holds no fault of, on both branches, and
+    seq is not run for a plant whose scheduled fragment cannot be placed in the
+    registers (placed_tw2: atan2's z2_dropped and mark_silenced keep 33 values
+    live; their shape is red by the cap, and corner runs without its seq leg);
+    `not_run`, a dict if given, is filled with {check: reason}."""
+    red = {}
+
+    def add(name, found):
+        if found:
+            red.setdefault(name, []).extend(found)
+    for rnd in pool_rnds:
+        add("pools", check_pools_tw2(fn, rnd, plant)[0])
+    if fn == "atan2":
+        add("pools", check_pool_marks_tw()[0])
+    placed = placed_tw2(tw2_fragment_of(fn, RNE, plant))
+    if placed:
+        for rnd in seq_rnds:
+            add("seq", check_seq_tw2(fn, rnd, plant)[0])
+        if fn in TW2_SEQ_SHIFT:
+            add("seq", check_seq_tw2(fn, RNE, plant, TW2_SEQ_SHIFT[fn],
+                                     extra=(60, 30))[0])
+    elif not_run is not None:
+        live = tw2_fragment_of(fn, RNE, plant).live_max()
+        not_run["seq"] = (f"seq: not run (the scheduled fragment keeps {live} "
+                          f"values live and cannot be placed in the "
+                          f"sequencer's registers)")
+    add("bound", check_bound_tw2(fn, plant, bound_n)[0])
+    add("census", check_census_tw2(fn, census_rnds, plant,
+                                   step=census_step)[0])
+    for rnd in RND_MODES:
+        f = tw2_fragment_of(fn, rnd, plant)
+        add("specials", check_specials(f)[0])
+        if fn == "atan2":
+            add("range", check_range_tw(f)[0])
+    add("shape", check_shape_tw2(fn, plant))
+    ran = False
+    for triple in ((True,) if fn != "atan2" else (False, True)):
+        try:
+            tw_core_of(plant, triple)
+        except ValueError as e:
+            if "does not apply" not in str(e):
+                raise
+            why = str(e)
+        else:
+            ran = True
+            add("core", check_core_tw2(plant, triple)[0])
+    if not ran and not_run is not None:
+        not_run["core"] = ("core: not run (the core holds no such fault): "
+                           f"{why}")
+    add("constants", check_constants_tw2(fn, plant)[0])
+    if fn == "atan2":
+        for rnd in corner_rnds:
+            b = tw2_build_of(fn, rnd, plant)
+            add("corner", check_corner(b.fragment(), b=b, seq=placed)[0])
     return red

@@ -166,9 +166,10 @@ sample is a function of --seed, so a run can be repeated.
   inv-pools  atan, asin, acos and atan2 (parcel M4G1 builds atan, M4G3
            atan2; the others join as they are built: --fn defaults to every
            function python/tests/mathlib_inv_harness.py has a pool for; at
-           --formats fp32, the triple word, only atan is built, parcel M4F1's:
-           a function the triple word lacks is refused by name, parcel M4F2's;
-           fp32 is never a default): the
+           --formats fp32, the triple word, all four are built, parcels M4F1
+           (atan) and M4F2 (the others): a function the triple word lacks is
+           refused by name; fp32 is never a default; atan2's marks at fp32 are
+           the harness's POOL_MARKS_TW): the
            pool (atan's unary: the stage's trig_pool, the vector sets' and
            test_transcend's brute pool, 333, 285 and 285 arguments at fp64,
            fp128 and fp256; atan2's PAIRS (y, x): the stage's atan2_pairs, the
@@ -193,15 +194,16 @@ sample is a function of --seed, so a run can be repeated.
            size (atan, the defaults: 3,000 points a region at fp64, 1,000 at
            fp128 and fp256, rne; one process, unniced, the desktop shared and
            its load not measured): 93 s, peak memory 51 MB, RESULT: ok;
-           --quick is 12 points a region. At --formats fp32 (atan's triple
-           word, parcel M4F1's; 20,000 points a region by default, the
+           --quick is 12 points a region. At --formats fp32 (the triple word,
+           parcels M4F1 and M4F2; 20,000 points a region by default, the
            study's sample on the box) V is the sum of three words. atan2's
            full-size time is in the entry of docs/VALIDATION.md. No code
            changes for asin or acos
   inv-corner  atan2 (parcel M4G3; the study's corner.py): the region `tinyn`,
            send-back 1's corner, a tiny or subnormal |y| against a larger |x|
            that no pool reaches, --n sampled pairs (2,000 at fp64, 500 at fp128,
-           300 at fp256 by default, seed --seed 101) of each format under
+           300 at fp256 and, with --formats fp32, the triple word, parcel
+           M4F2's, 1,000 by default, seed --seed 101) of each format under
            --attrs (all five by default): every unmarked lane equal to
            transcend.py in bits and flag word, and under rne every unmarked lane
            with y not zero and flag word exactly inexact within its bound
@@ -1138,7 +1140,8 @@ def _inv_fns(arg):
 def _inv_formats(arg, default, fns=()):
     """The formats asked for. fp32 is the triple word (parcels M4F1: atan, and
     M4F2: the others): it is accepted where every function in `fns` is built
-    there, and refused by name where one is not."""
+    there, and refused by name where one is not (none is not built since
+    parcel M4F2)."""
     I = _inv_harness()
     names = arg.split(",") if arg else default
     for n in names:
@@ -1147,11 +1150,12 @@ def _inv_formats(arg, default, fns=()):
             if lacking or not fns:
                 raise SystemExit(
                     f"--formats 'fp32': {', '.join(lacking or ('this',))} "
-                    f"is not built at fp32: fp32 is the triple word, parcel "
-                    f"M4F2's ({', '.join(ml._INV_TW_BUILDERS)} is built)")
+                    f"is not built at fp32: fp32 is the triple word "
+                    f"({', '.join(ml._INV_TW_BUILDERS)} is built)")
         elif n not in I.BY_NAME:
             raise SystemExit(f"--formats {n!r}: fp64, fp128, fp256 or fp32 "
-                             f"(fp32 is atan's triple word, parcel M4F1's)")
+                             f"(fp32 is the triple word, parcels M4F1 and "
+                             f"M4F2)")
     return [I.FP32 if n == "fp32" else I.BY_NAME[n] for n in names]
 
 
@@ -1172,7 +1176,8 @@ def cmd_inv_pools(a):
             xs = list(I.pool(fn, fmt))[::step]
             for rnd in rnds:
                 f = ml.fragment(fn, fmt, rnd)
-                out, t = I.check_pools(f, xs)
+                marks = I.POOL_MARKS_TW if (fn, fmt.name) == ("atan2", "fp32")                     else None
+                out, t = I.check_pools(f, xs, marks=marks)
                 note(out)
                 line = (f"inv-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
                         f"{t.n} lanes, {len(t.marked)} marked (guess right "
@@ -1196,7 +1201,7 @@ def cmd_inv_corner(a):
     if a.fn and a.fn != "atan2":
         raise SystemExit(f"--fn {a.fn!r}: the corner is atan2's (the only "
                          f"function with two operands built)")
-    sizes = {"fp64": 2000, "fp128": 500, "fp256": 300}
+    sizes = {"fp64": 2000, "fp128": 500, "fp256": 300, "fp32": 1000}
     fmts = _inv_formats(a.formats, ["fp128"] if a.quick else
                         [f.name for f in I.FORMATS], ("atan2",))
     rnds = attrs_of(a.attrs) if a.attrs else (
@@ -1674,8 +1679,8 @@ def main(argv=None):
     p = sub.add_parser("inv-pools")
     p.add_argument("--fn", help="atan,atan2 (the functions built, by default)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default), or "
-                                     "fp32 (atan's triple word, parcel "
-                                     "M4F1's: not a default)")
+                                     "fp32 (the triple word, parcels M4F1 "
+                                     "and M4F2: not a default)")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--seq", action="store_true")
     p.add_argument("--step", type=int, default=0,
@@ -1688,8 +1693,8 @@ def main(argv=None):
     p = sub.add_parser("inv-bound")
     p.add_argument("--fn", help="atan,atan2 (the functions built, by default)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default), or "
-                                     "fp32 (atan's triple word, parcel "
-                                     "M4F1's: not a default)")
+                                     "fp32 (the triple word, parcels M4F1 "
+                                     "and M4F2: not a default)")
     p.add_argument("--attrs", help="rne (by default)")
     p.add_argument("--n", type=int, default=0,
                    help="points a region (default 3,000 at fp64, 1,000 at "
@@ -1704,11 +1709,13 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_inv_bound)
     p = sub.add_parser("inv-corner")
     p.add_argument("--fn", help="atan2 (the only one, the default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default), or "
+                                     "fp32 (the triple word, parcel M4F2: "
+                                     "not a default)")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--n", type=int, default=0,
                    help="lanes (default 2,000 at fp64, 500 at fp128, 300 at "
-                        "fp256)")
+                        "fp256, 1,000 at fp32)")
     p.add_argument("--seed", type=int, default=101,
                    help="the sampler's seed (the study's corner runs)")
     p.add_argument("--seq", action="store_true",

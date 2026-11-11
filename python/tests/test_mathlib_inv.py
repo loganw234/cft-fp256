@@ -141,7 +141,7 @@ def test_inv_names_is_beside_the_six_and_the_trig_names():
     assert ml.NAMES == ("exp", "exp2", "expm1", "log", "log2", "log1p")
     assert ml.TRIG_NAMES == ("sin", "cos", "tan")
     assert not set(ml.INV_NAMES) & set(ml.NAMES + ml.TRIG_NAMES)
-    assert ml.INV_FORMATS == (FP64, FP128, FP256)
+    assert ml.INV_FORMATS == (FP64, FP128, FP256, FP32)
     # atan first, then what wave 2 builds, in INV_NAMES' order (M4G2's asin
     # and acos, M4G3's atan2): each parcel's own file pins its own names
     assert FUNCS == tuple(n for n in ml.INV_NAMES if n in ml._INV_BUILDERS)
@@ -185,14 +185,10 @@ def test_an_inverse_fragment_is_held_to_its_own_row_and_to_no_fallback(
 
 
 def test_the_refusals_are_by_name():
-    # fp32 is the triple word (parcels M4F1 and M4F2): a name of INV_NAMES
-    # not built at fp32 yet is refused by name, saying whose it is
-    assert "atan" in ml._INV_TW_BUILDERS
-    for name in (n for n in ml.INV_NAMES if n not in ml._INV_TW_BUILDERS):
-        for call in (ml.build, ml.fragment):
-            with pytest.raises(ValueError, match="parcel M4F2's") as e:
-                call(name, FP32, RNE)
-            assert f"{name} at fp32 is not built" in str(e.value)
+    # fp32 is the triple word (parcels M4F1 and M4F2): every name of
+    # INV_NAMES is built there, in INV_NAMES' order; an unbuilt name's
+    # refusal at fp32 is held in test_mathlib_inv_tw2.py
+    assert tuple(ml._INV_TW_BUILDERS) == ml.INV_NAMES
     # a name of INV_NAMES not built is refused by name, saying whose it is:
     # each in turn taken out of the builders and the fragment cache, so the
     # refusal is held whatever wave 2 has built
@@ -1289,8 +1285,8 @@ def test_the_inv_commands_run_at_small_sizes_and_refuse_an_existing_out(
         R.main(["inv-bound", "--quick", "--out", str(out2)])
     R.OUT = None
     R.FINDINGS.clear()
-    with pytest.raises(SystemExit, match="parcel M4F2's"):
-        R.main(["inv-pools", "--formats", "fp32", "--fn", "asin"])
+    with pytest.raises(SystemExit, match="fp64, fp128, fp256 or fp32"):
+        R.main(["inv-pools", "--formats", "fp16", "--fn", "asin"])
     with pytest.raises(SystemExit, match="--fn 'atanh'"):
         R.main(["inv-bound", "--fn", "atanh"])
     # --seq runs the compiled shape over the same lanes

@@ -12,7 +12,7 @@ quick enough for the golden stage; the larger runs are
   pools  seq  bound  census  specials  shape  core  constants
 
 and for every check a planted fault shown red in it, the control green in all
-(mathlib._INV_TW_PLANTS: ten, private), every leg of every check shown failing
+(mathlib._INV_TW_PLANTS: atan's ten (parcel M4F2 adds the others' after them), private), every leg of every check shown failing
 alone on a doctored input (seq's leg for the committed lanes that must mark has
 no lane to run at fp32: it has no structured lane that marks, and says so), the
 routing and the refusals, and the port's pins.
@@ -103,12 +103,12 @@ def _doctor(results, i, bits=0, orwith=0, andnot=0):
 # =====================================================================
 
 def test_the_builders_and_the_plants_are_private_and_the_double_words_are_as_they_were():
-    assert tuple(ml._INV_TW_BUILDERS) == ("atan",)
-    assert tuple(ml._INV_TW_PLANTS) == TW_PLANTS
+    assert tuple(ml._INV_TW_BUILDERS)[:1] == ("atan",)
+    assert tuple(ml._INV_TW_PLANTS)[:len(TW_PLANTS)] == TW_PLANTS
     assert all(isinstance(t, str) and len(t) > 20
                for t in ml._INV_TW_PLANTS.values())
     # no public name: the interface the double word pinned is whole
-    assert ml.INV_FORMATS == (FP64, FP128, FP256)
+    assert ml.INV_FORMATS == (FP64, FP128, FP256, FP32)
     assert ml.INV_NAMES == ("atan", "asin", "acos", "atan2")
     assert tuple(ml._INV_BUILDERS) == ("atan", "asin", "acos", "atan2")
     assert not any(n.startswith("_") for n in ml.__all__)
@@ -118,7 +118,8 @@ def test_the_builders_and_the_plants_are_private_and_the_double_words_are_as_the
         assert name not in ml.__all__ and hasattr(ml, name)
     # and no key of INV_PLANTS is the triple word's alone
     only_tw = {"q2_dropped", "z2_dropped", "head3_two", "rem0_fma",
-               "bound_wide"}
+               "bound_wide", "w2_dropped", "root_fma", "num_two_words",
+               "range_low"}
     assert not only_tw & set(ml.INV_PLANTS)
     assert set(ml._INV_TW_PLANTS) - only_tw <= set(ml.INV_PLANTS)
     # the study's variant is not a plant: it is measured in the model, not built
@@ -230,12 +231,7 @@ def test_the_fragment_and_its_build_agree_on_30_random_lanes_and_atan_of_1():
 # =====================================================================
 
 def test_the_refusals_are_by_name():
-    for name in ("asin", "acos", "atan2"):
-        for call in (ml.build, ml.fragment):
-            with pytest.raises(ValueError, match="parcel M4F2's") as e:
-                call(name, FP32, RNE)
-            msg = str(e.value)
-            assert f"{name} at fp32 is not built" in msg and "triple word" in msg
+    # asin, acos and atan2 are built at fp32 since parcel M4F2
     # a plant of the double word's alone, at fp32; one of the triple word's
     # alone, at fp64 and the others
     for plant in sorted(set(ml.INV_PLANTS) - set(ml._INV_TW_PLANTS)):
@@ -553,7 +549,7 @@ def test_shape():
 def test_constants_in_process_and_as_a_program():
     findings, lines = I.check_constants_tw()
     assert findings == []
-    assert len(lines) == 3
+    assert len(lines) == 6
     assert lines[0].startswith("atan(7/8) + atan(1/15) = pi/4")
     assert lines[1].startswith("RECIP_SEED at fp32")
     assert "atan fp32 (triple word): G = 40, plan (K3, K2, D) = (3, 3, 8): " \
@@ -566,9 +562,9 @@ def test_constants_in_process_and_as_a_program():
     r = run("--check", "--only", "inv-tw")
     assert r.returncode == 0, r.stdout + r.stderr
     got = r.stdout.splitlines()
-    assert got[:3] == lines
-    assert got[3] == ("mathlib --check (inv, triple word): 1 routines, 1 "
-                      "format, 0 differences") and len(got) == 4
+    assert got[:6] == lines
+    assert got[6] == ("mathlib --check (inv, triple word): 4 routines, 1 "
+                      "format, 0 differences") and len(got) == 7
     # the list names inv-tw, and a name outside it is refused
     r = run("--check", "--only", "nonesuch")
     assert r.returncode != 0 and "inv-tw" in r.stderr
@@ -590,7 +586,7 @@ def test_check_prints_inv_tw_lines_only_under_only_and_exits_1_on_a_difference(
     assert ml.main(["--check", "--only", "inv-tw"]) == 1
     shown = capsys.readouterr().out.splitlines()
     assert shown == ["a tw line", "DIFFERENCE: tw x differs",
-                     "mathlib --check (inv, triple word): 1 routines, 1 "
+                     "mathlib --check (inv, triple word): 4 routines, 1 "
                      "format, 1 differences"]
     # clean: the default run prints nothing of it
     monkeypatch.setattr(ml, "_check_inv_tw_constants",
@@ -807,7 +803,8 @@ def test_a_check_that_did_not_run_is_not_listed_green():
 
 def test_every_plant_is_in_the_table_and_every_row_lists_every_check():
     named = [row[0] for row in PLANTED]
-    assert tuple(named) == TW_PLANTS and set(named) == set(ml._INV_TW_PLANTS)
+    # atan's ten; the others' twelve are test_mathlib_inv_tw2.py's
+    assert tuple(named) == TW_PLANTS and set(named) <= set(ml._INV_TW_PLANTS)
     assert len(CHECKS) == 8
     for row in PLANTED:
         _check_row(row)
@@ -1177,13 +1174,7 @@ def test_the_inv_commands_take_fp32_for_atan_and_refuse_the_others_by_name(
     assert "inv-bound atan fp32 rne edge seed 121: 12 lanes" in shown
     assert "a sampled lower bound" in shown and "RESULT: ok" in shown
     R.FINDINGS.clear()
-    for argv in (["inv-pools", "--formats", "fp32", "--fn", "asin"],
-                 ["inv-pools", "--formats", "fp32"],
-                 ["inv-bound", "--formats", "fp32", "--fn", "atan2"],
-                 ["inv-corner", "--formats", "fp32"]):
-        with pytest.raises(SystemExit, match="parcel M4F2's"):
-            R.main(argv)
-    with pytest.raises(SystemExit, match="fp32 is atan's triple word"):
+    with pytest.raises(SystemExit, match="fp32 is the triple word"):
         R.main(["inv-pools", "--formats", "fp16", "--fn", "atan"])
     # fp32 is never a default: the sizes are the double word's three, and the
     # box's sample is fp32's own
@@ -1201,8 +1192,8 @@ def test_the_sweep_generator_builds_atan_at_fp32(tmp_path):
     `digest atan` line equal to the manifest's own rule over the five atan
     images and banks (the first 32 bits of the sha256 of rne to rmm, image
     then bank); the nine `digest` lines of the other routines equal to
-    hw/card_stress_lib.py's ROUTINE_DIGESTS row for row, atan being the one
-    name the table lacks; asin, acos and atan2 skipped by name. And the
+    hw/card_stress_lib.py's ROUTINE_DIGESTS row for row, the four inverse
+    routines being names the table lacks, and none skipped. And the
     program of each atan fragment has 477 instructions and 60 words
     (MEASURED: the compiled shape adds QUIET, ENDQUIET, RAISE, the deposit and
     HALT to the body's 472)."""
@@ -1235,11 +1226,11 @@ def test_the_sweep_generator_builds_atan_at_fp32(tmp_path):
         spec.loader.exec_module(lib)
     finally:
         sys.modules.pop("card_stress_lib", None)
-    others = {d[1]: d[2] for d in digests if d[1] != "atan"}
-    assert len(others) == 9 and others == dict(lib.ROUTINE_DIGESTS)
-    assert "atan" not in lib.ROUTINE_DIGESTS
-    for n in ("asin", "acos", "atan2"):
-        assert f"skipped {n} not built at fp32" in manifest
+    nine = {d[1]: d[2] for d in digests if d[1] in lib.ROUTINE_DIGESTS}
+    assert len(nine) == 9 and nine == dict(lib.ROUTINE_DIGESTS)
+    assert not any(n in lib.ROUTINE_DIGESTS
+                   for n in ("atan", "asin", "acos", "atan2"))
+    assert not any(ln.startswith("skipped ") for ln in manifest)
     assert sum(1 for ln in manifest if ln.startswith("image atan ")) == 5
     for rnd in RND:
         prog, bank = H.r24_program(I.tw_fragment_of(rnd))

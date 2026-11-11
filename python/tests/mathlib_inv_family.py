@@ -102,6 +102,7 @@ import mpmath
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from cft_golden import FP64, FP128, FP256  # noqa: E402
 from cft_golden import mathlib as ml  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 
@@ -138,7 +139,7 @@ def thresholds(fmt, fn):
     return round(1 - B, 6), round(1 + B, 6)
 RND_NAMES = sf.RND_NAMES
 FUNCTIONS = ml.INV_NAMES
-FORMATS = ml.INV_FORMATS
+FORMATS = (FP64, FP128, FP256)
 NEAREST = (sf.RND_RNE, sf.RND_RMM)
 CBITS = 6                       # the listed c: odd, below 2^CBITS
 K_BOUNDARIES = 3                # boundaries of each kind below each constant
