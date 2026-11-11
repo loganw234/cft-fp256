@@ -29,7 +29,9 @@ ready by `xbutil examine`, and the kernel is unchanged; i915 drives the A750 wit
   - conf-fp32 to conf-fp256 GREEN (fp256 `da932116...`) and stream-fp256 GREEN (`9c7f2f6e...`, 1M lanes);
   - the program runner's six corpora GREEN against libcft's references, 0 refused, and its two plants RED;
   - fp256 FMA at 5.41e7 a second, kernel median of 10 at 1M lanes, block 128 (2.69e7 end to end);
-  - the first launch of each binary JIT-compiles its SPIR-V, about 29 to 32 s.
+  - the two planted binaries' first launches took 28.9 s and 32.4 s end to end (kernels 4.7 and 8.0 ms), BELIEVED
+    to be chipStar compiling their SPIR-V; the unplanted binary's first check took 26 ms end to end, its module
+    BELIEVED already in chipStar's cache directory from a diagnostic run before it.
   No i915 hang or reset was logged, and the U50 was present and ready afterwards.
 
 ## 1. The answer first
