@@ -1,0 +1,35 @@
+# GPU-D, the RX 7600 (gfx1102) through ROCm 10.1's OpenCL, 2026-11-11 (MEASURED): ocl_run.sh's
+# summary lines and the comparison's lines, verbatim, cut at 400 characters; home paths as ~.
+== ocl_run.sh 2026-11-11 06:08:23, harness flags: (none), OCL_ICD_VENDORS=~/gpu-d/vendors, stack limit 65536 KB
+bundle sums: OK
+PLANT flip: RED, as it must be; output sha256 da932116555557be... as GPU-A's
+PLANT rmm-as-rne: RED, as it must be; output sha256 ffe3f2eb93608966... as GPU-A's
+PLANT drop-flag: RED, as it must be; output sha256 f0ca15e06fcbefb5... as GPU-A's
+check: corpus/conf-fp32.bin fp32 18435 cases, sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae, kernel 0.760 ms, end to end 6.731 ms: GREEN
+verify: conf-fp32.out against conf-fp32.bin: 18435 cases, 0 results and 0 flags differ; hashlib sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae
+check: corpus/conf-fp64.bin fp64 18440 cases, sha256 3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f, kernel 1.159 ms, end to end 7.313 ms: GREEN
+verify: conf-fp64.out against conf-fp64.bin: 18440 cases, 0 results and 0 flags differ; hashlib sha256 3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f
+check: corpus/conf-fp128.bin fp128 18545 cases, sha256 fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25, kernel 1.821 ms, end to end 7.483 ms: GREEN
+verify: conf-fp128.out against conf-fp128.bin: 18545 cases, 0 results and 0 flags differ; hashlib sha256 fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25
+check: corpus/conf-fp256.bin fp256 18360 cases, sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9, kernel 2.688 ms, end to end 8.631 ms: GREEN
+verify: conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+check: corpus/stream-fp32.bin fp32 1000000 cases, sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577, kernel 3.978 ms, end to end 16.946 ms: GREEN
+verify: stream-fp32.out against stream-fp32.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577
+check: corpus/stream-fp256.bin fp256 1000000 cases, sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7, kernel 12.740 ms, end to end 57.742 ms: GREEN
+verify: stream-fp256.out against stream-fp256.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7
+bench: corpus/stream-fp256.bin: fp256, 1000000 lanes, work-group 256, 10 reps; kernel ms min 12.053 median 12.159 max 12.273; end to end ms min 32.581 median 32.704 max 32.853; 8.225e+07 FMA/s kernel, 3.058e+07 FMA/s end to end (medians); 12.2 ns a lane; kernel by the host clock ms min 12.734 median 12.941 max 13.135, 7.728e+07 FMA/s
+== ocl_run.sh 2026-11-11 06:08:31 rc=0  (ALL AS EXPECTED)
+== same session, the same card (06:09): GPU-A's HIP build, then this harness, fp256 1M lanes
+== build.sh amd 2026-11-11 06:09:08 DEFS='' XFLAGS='' ROOT=~/gpu-d/hip
+== built ~/gpu-d/hip/build/cft_fma 2026-11-11 06:09:16
+HIP version: 7.16.26385-0000000
+conf-fp256 sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9: GREEN
+HIP: fp256, 1000000 lanes, block 128, 10 reps; kernel ms min 11.938 median 12.050 max 12.108; end to end ms min 30.769 median 30.886 max 31.399; 8.298e+07 FMA/s kernel, 3.238e+07 FMA/s end to end (medians); 12.1 ns a lane
+HIP: fp256, 1000000 lanes, block 256, 10 reps; kernel ms min 11.871 median 12.034 max 12.125; end to end ms min 30.673 median 30.930 max 30.983; 8.31e+07 FMA/s kernel, 3.233e+07 FMA/s end to end (medians); 12.0 ns a lane
+OpenCL: fp256, 1000000 lanes, work-group 128, 10 reps; kernel ms min 11.981 median 12.074 max 12.095; end to end ms min 32.524 median 32.644 max 32.758; 8.282e+07 FMA/s kernel, 3.063e+07 FMA/s end to end (medians); 12.1 ns a lane; kernel by the host clock ms min 12.792 median 12.856 max 12.908, 7.779e+07 FMA/s
+OpenCL: fp256, 1000000 lanes, work-group 256, 10 reps; kernel ms min 12.048 median 12.144 max 12.169; end to end ms min 32.083 median 32.489 max 32.593; 8.235e+07 FMA/s kernel, 3.078e+07 FMA/s end to end (medians); 12.1 ns a lane; kernel by the host clock ms min 12.496 median 12.808 max 12.855, 7.807e+07 FMA/s
+-- OpenCL with -cl-strict-aliasing (the lead s discriminating test)
+program: run/b/cft_fma.cl, 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d; build options "-cl-std=CL1.2 -cl-strict-aliasing"
+check: conf-fp256; 0 results and 0 flags differ, 0 refused, sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9: GREEN
+== its build log (06:09, the same options through info; the line was printed twice)
+warning: OpenCL C version 1.2 does not support the option '-cl-strict-aliasing' [-Wdeprecated]

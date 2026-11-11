@@ -1,0 +1,35 @@
+# Runbook: GPU-D's OpenCL bundle on the Arc in amd-arc-box (for the lead; written 2026-11-11; nothing
+# here was run on the box). The same bundle, byte for byte, passed on PoCL (the rehearsal) and on the
+# RX 7600 through ROCm's OpenCL (captured/pocl-rehearsal.txt, captured/rx7600.txt).
+
+0. Before it: GPU-C's RUNBOOK-ARC.txt section 0 (the card: the A750) and section 1 (Intel's runtime from
+   Canonical's archive extracted in ~/gpuc-neo, no root, no ICD in /etc). This route needs libigdfcl1,
+   which that list holds: it is NEO's OpenCL C front end, and this harness hands the runtime OpenCL C
+   source, not SPIR-V (BELIEVED: NEO compiles source through it; not run on the box). libigc1 is needed
+   as for chipStar. The box's ocl-icd-libopencl1 (2.3.2) is the loader the binary links against.
+
+1. Copy and check (the bundle is in cft-gpu at /root/gpu-d/ocl-bundle.tar.gz):
+     sha256sum ocl-bundle.tar.gz   # 1da16f887be1f5a49d1eef900cb51410b37fa6dbe95d0ad1d30a7fe0a17b3536
+     mkdir ~/gpud-ocl && tar xzf ocl-bundle.tar.gz -C ~/gpud-ocl          # 132,403,803 bytes
+   It holds bin/cft_fma_ocl (built in cft-gpu, Ubuntu 24.04: needs libOpenCL.so.1 and libc only),
+   cft_fma.cl (sha256 02efcc15...), the corpora, ocl_run.sh, gen_corpus.py and SHA256SUMS.
+
+2. Run (daytime, the U50 idle; about 30 s on the RX 7600):
+     export OCL_ICD_VENDORS=~/gpuc-neo/vendors LD_LIBRARY_PATH=~/gpuc-neo/root/usr/lib/x86_64-linux-gnu
+     bash ~/gpud-ocl/b/ocl_run.sh 2>&1 | tee ~/gpud-arc-$(date +%F).txt
+   It checks the bundle's sums, then: the three plants (each must be RED at GPU-A's planted hash),
+   conf-fp32/64/128/256 and stream-fp32/fp256 (each GREEN at its expected hash, then gen_corpus.py
+   verify), and the fp256 rate. Every harness run prints the platform, the device, the text's sha256,
+   the build options, clBuildProgram's time and log, and the work-group size. Last line: ALL AS
+   EXPECTED or SOMETHING DIFFERS. If the Arc is not platform 0 device 0, add --platform N --device N.
+
+3. What a failure means:
+   - "build: FAILED" with a log: the log is the finding. The text is OpenCL C 1.2; NEO takes up to 3.0.
+   - Corpora RED by refusals (flags 0x80, d = 0), as Apple's GPU at default options: run again with
+     `bash ~/gpud-ocl/b/ocl_run.sh --opts -cl-opt-disable` and keep both logs.
+   - A corpus RED with values that are not refusals: a real difference. Keep out/*.out.
+   - Corpora GREEN but a plant not RED: the check is blind; stop.
+   - A launch error (CL_OUT_OF_RESOURCES): the lane's private memory, about 4.8 KB (the RX 7600's
+     compiler reports 4,796 B); try --wg 64.
+
+4. Remove: rm -rf ~/gpud-ocl ~/ocl-bundle.tar.gz ~/gpud-arc-*.txt (and ~/gpuc-neo by GPU-C's section 5).

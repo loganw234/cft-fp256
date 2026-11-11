@@ -1,0 +1,42 @@
+# GPU-D, cft-gpu, 2026-11-11 (MEASURED). First, one check at three stack limits (06:13; cut at 200
+# characters, the scratch script's directory dropped from its path). Then the final bundle unpacked
+# fresh and run on PoCL 7.2 at 4 compute units (06:06 to 06:07): ocl_run.sh's summary lines,
+# verbatim, cut at 400 characters; the log's other lines omitted.
+-- stack limit 8192 KB: check conf-fp32 at the kernel's own work-group size
+wsl_stack.sh: line 11:   342 Segmentation fault      timeout 100 bin/cft_fma_ocl check corpus/conf-fp32.bin - > "$G/stack.txt" 2>&1
+rc=139
+-- stack limit 262144 KB: check conf-fp32 at the kernel's own work-group size
+check: corpus/conf-fp32.bin on cpu-alderlake-12th Gen Intel(
+rc=0
+-- stack limit 65536 KB: check conf-fp32 at the kernel's own work-group size
+check: corpus/conf-fp32.bin on cpu-alderlake-12th Gen Intel(
+rc=0
+(05:55, the same check at 256 MB in an earlier script, its whole last line:)
+check: corpus/conf-fp32.bin on cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (Portable Computing Language, OpenCL 3.0 PoCL HSTR: cpu-x86_64-pc-linux-gnu-alderlake, driver 7.2): fp32, 18435 cases (rne 3687 rtz 3687 rdn 3687 rup 3687 rmm 3687); 0 results and 0 flags differ, 0 refused; differing by attribute 0/0/0/0/0; sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae; kern
+== wsl_leg_pocl.sh 2026-11-11 06:06:58 in cft-gpu;  06:06:58 up 0 min,  0 user,  load average: 0.00, 0.00, 0.00
+1da16f887be1f5a49d1eef900cb51410b37fa6dbe95d0ad1d30a7fe0a17b3536  /root/gpu-d/ocl-bundle.tar.gz
+-rw-r--r-- 1 root root 132403803 Nov 11 06:07 /root/gpu-d/ocl-bundle.tar.gz
+== ocl_run.sh 2026-11-11 06:07:06, harness flags: (none), OCL_ICD_VENDORS=/etc/opt/gpu-c/pocl/OpenCL/vendors, stack limit 65536 KB
+bundle sums: OK
+== plants first (each must be RED)
+PLANT flip: RED, as it must be; output sha256 da932116555557be... as GPU-A's
+PLANT rmm-as-rne: RED, as it must be; output sha256 ffe3f2eb93608966... as GPU-A's
+PLANT drop-flag: RED, as it must be; output sha256 f0ca15e06fcbefb5... as GPU-A's
+== corpora (each must be GREEN at its expected sha256)
+check: corpus/conf-fp32.bin fp32 18435 cases, sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae, kernel 6.788 ms, end to end 7.529 ms: GREEN
+verify: conf-fp32.out against conf-fp32.bin: 18435 cases, 0 results and 0 flags differ; hashlib sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae
+check: corpus/conf-fp64.bin fp64 18440 cases, sha256 3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f, kernel 8.520 ms, end to end 9.336 ms: GREEN
+verify: conf-fp64.out against conf-fp64.bin: 18440 cases, 0 results and 0 flags differ; hashlib sha256 3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f
+check: corpus/conf-fp128.bin fp128 18545 cases, sha256 fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25, kernel 7.611 ms, end to end 8.688 ms: GREEN
+verify: conf-fp128.out against conf-fp128.bin: 18545 cases, 0 results and 0 flags differ; hashlib sha256 fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25
+check: corpus/conf-fp256.bin fp256 18360 cases, sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9, kernel 8.636 ms, end to end 10.238 ms: GREEN
+verify: conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+check: corpus/stream-fp32.bin fp32 1000000 cases, sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577, kernel 184.161 ms, end to end 1210.956 ms: GREEN
+verify: stream-fp32.out against stream-fp32.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577
+check: corpus/stream-fp256.bin fp256 1000000 cases, sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7, kernel 288.871 ms, end to end 330.600 ms: GREEN
+verify: stream-fp256.out against stream-fp256.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7
+== rate (fp256 FMA, 1,000,000 lanes, median of 10)
+bench: corpus/stream-fp256.bin: fp256, 1000000 lanes, work-group 4096, 10 reps; kernel ms min 284.025 median 334.111 max 402.542; end to end ms min 316.250 median 369.742 max 436.485; 2.993e+06 FMA/s kernel, 2.705e+06 FMA/s end to end (medians); 334.1 ns a lane; kernel by the host clock ms min 284.257 median 334.364 max 402.777, 2.991e+06 FMA/s
+== ocl_run.sh 2026-11-11 06:07:22 rc=0  (ALL AS EXPECTED)
+rc=0
+== wsl_leg_pocl.sh end 2026-11-11 06:07:22;  06:07:22 up 0 min,  1 user,  load average: 0.51, 0.13, 0.04
