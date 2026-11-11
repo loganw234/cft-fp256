@@ -59,38 +59,38 @@ typedef struct {
     uint32_t v[CFT_BN_LIMBS];       /* little-endian */
 } cft_bn;
 
-void     cft_bn_zero(cft_bn *r);
-void     cft_bn_copy(cft_bn *r, const cft_bn *a);
-int      cft_bn_is_zero(const cft_bn *a);
-void     cft_bn_set_u32(cft_bn *r, uint32_t x);
+CFT_HD void     cft_bn_zero(cft_bn *r);
+CFT_HD void     cft_bn_copy(cft_bn *r, const cft_bn *a);
+CFT_HD int      cft_bn_is_zero(const cft_bn *a);
+CFT_HD void     cft_bn_set_u32(cft_bn *r, uint32_t x);
 
-int      cft_bn_bitlen(const cft_bn *a);
-int      cft_bn_bit(const cft_bn *a, int i);
-void     cft_bn_setbit(cft_bn *r, int i);
-void     cft_bn_clearbit(cft_bn *r, int i);
-uint32_t cft_bn_extract(const cft_bn *a, int lo, int nbits); /* nbits <= 32 */
-void     cft_bn_mask(cft_bn *r, int nbits);                  /* keep low bits */
+CFT_HD int      cft_bn_bitlen(const cft_bn *a);
+CFT_HD int      cft_bn_bit(const cft_bn *a, int i);
+CFT_HD void     cft_bn_setbit(cft_bn *r, int i);
+CFT_HD void     cft_bn_clearbit(cft_bn *r, int i);
+CFT_HD uint32_t cft_bn_extract(const cft_bn *a, int lo, int nbits); /* nbits <= 32 */
+CFT_HD void     cft_bn_mask(cft_bn *r, int nbits);                  /* keep low bits */
 
-int      cft_bn_cmp(const cft_bn *a, const cft_bn *b);
-int      cft_bn_low_nonzero(const cft_bn *a, int k);   /* any of bits [0,k) */
+CFT_HD int      cft_bn_cmp(const cft_bn *a, const cft_bn *b);
+CFT_HD int      cft_bn_low_nonzero(const cft_bn *a, int k);   /* any of bits [0,k) */
 
-int      cft_bn_shl(cft_bn *r, const cft_bn *a, int k);
-void     cft_bn_shr(cft_bn *r, const cft_bn *a, int k);
-int      cft_bn_add(cft_bn *r, const cft_bn *a, const cft_bn *b);
-void     cft_bn_sub(cft_bn *r, const cft_bn *a, const cft_bn *b); /* a >= b */
-int      cft_bn_mul(cft_bn *r, const cft_bn *a, const cft_bn *b);
-int      cft_bn_inc(cft_bn *r);
-void     cft_bn_dec(cft_bn *r);                        /* r > 0 */
+CFT_HD int      cft_bn_shl(cft_bn *r, const cft_bn *a, int k);
+CFT_HD void     cft_bn_shr(cft_bn *r, const cft_bn *a, int k);
+CFT_HD int      cft_bn_add(cft_bn *r, const cft_bn *a, const cft_bn *b);
+CFT_HD void     cft_bn_sub(cft_bn *r, const cft_bn *a, const cft_bn *b); /* a >= b */
+CFT_HD int      cft_bn_mul(cft_bn *r, const cft_bn *a, const cft_bn *b);
+CFT_HD int      cft_bn_inc(cft_bn *r);
+CFT_HD void     cft_bn_dec(cft_bn *r);                        /* r > 0 */
 
-void     cft_bn_and(cft_bn *r, const cft_bn *a, const cft_bn *b);
-void     cft_bn_or(cft_bn *r, const cft_bn *a, const cft_bn *b);
-void     cft_bn_xor(cft_bn *r, const cft_bn *a, const cft_bn *b);
+CFT_HD void     cft_bn_and(cft_bn *r, const cft_bn *a, const cft_bn *b);
+CFT_HD void     cft_bn_or(cft_bn *r, const cft_bn *a, const cft_bn *b);
+CFT_HD void     cft_bn_xor(cft_bn *r, const cft_bn *a, const cft_bn *b);
 
 /* Interchange encodings are dense little-endian byte strings, which is
  * what the buffers a caller hands cft_run() contain and what the tile
  * reads off the bus. Load and store are the only places this file
  * knows about bytes. */
-void     cft_bn_load(cft_bn *r, const uint8_t *le, int nbytes);
-void     cft_bn_store(const cft_bn *a, uint8_t *le, int nbytes);
+CFT_HD void     cft_bn_load(cft_bn *r, const uint8_t *le, int nbytes);
+CFT_HD void     cft_bn_store(const cft_bn *a, uint8_t *le, int nbytes);
 
 #endif /* CFT_BIGINT_H */

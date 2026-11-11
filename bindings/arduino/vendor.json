@@ -26,7 +26,7 @@
     {
       "source": "host/include/cft_config.h",
       "dest": "src/cft/include/cft_config.h",
-      "sha256": "8b7aa54042b895622de0e7dfdbee248b2b484da5daccb6b2ff2959782c469869"
+      "sha256": "848fdb24ff043677d495d9cd52a766e17a55d7f3edce5615f8863ee4900150b9"
     },
     {
       "source": "host/include/cft_seq_flags.h",
@@ -51,12 +51,12 @@
     {
       "source": "host/src/bigint.c",
       "dest": "src/cft/src/bigint.c",
-      "sha256": "176ccea3dfc97b223cfef1b13fbc7b6175440bfb32393594f1218492f049874a"
+      "sha256": "996be05ee46ee4fdde21bdf412229e4ec93084ce7b4f1e787a1dc8e983b3d05c"
     },
     {
       "source": "host/src/bigint.h",
       "dest": "src/cft/src/bigint.h",
-      "sha256": "de8d620232da676da1df7ecc55d340a2266ee9a0de79d3062857431ad0d4f391"
+      "sha256": "18bead2f2cd74637ec5703508b3b0dea148eb2c80286d260e8aac9760178f47b"
     },
     {
       "source": "host/src/build_id.c",
@@ -136,7 +136,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "887b7bcbcbb50d8f0a4d8977268f0aae83d7d545f97c90fbac338b8d03fab01c"
+      "sha256": "f0379687f0fb3625cdfa567c5cfbc8ea13a3c2f15ef9b4cdda9fa2656d5d71d0"
     },
     {
       "source": "host/src/reduce.c",
@@ -147,6 +147,11 @@
       "source": "host/src/remote.h",
       "dest": "src/cft/src/remote.h",
       "sha256": "5f364d5cfc5147e431e94fd518084a594272838b94ff3e4679dcf946f87eb75a"
+    },
+    {
+      "source": "host/src/seq_exec.h",
+      "dest": "src/cft/src/seq_exec.h",
+      "sha256": "bae00d10cff57392a12c76dcec2471c5792663c0fc06d7cfe315fe9877878785"
     },
     {
       "source": "host/src/sha256.c",
@@ -166,12 +171,12 @@
     {
       "source": "host/src/softfloat.c",
       "dest": "src/cft/src/softfloat.c",
-      "sha256": "390e538f68eebe8f029858bbbf3724d4763ce2cf4d54d8fbdfc00f379b7766e3"
+      "sha256": "140d9594f797ff5d83c450019b59c681da07958d2bdd0db7ec4cf574818dc256"
     },
     {
       "source": "host/src/softfloat.h",
       "dest": "src/cft/src/softfloat.h",
-      "sha256": "cea81227dc0a3c35e3aa92abf5df8f6c8666860b0db5bdf68f640281b1d83da2"
+      "sha256": "e40a979857e0e47b4fdec7aa9f4feba55ddf325f0d8521d58bf9be38cb1d8672"
     },
     {
       "source": "host/src/tile_select.h",

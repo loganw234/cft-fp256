@@ -111,6 +111,53 @@ ifeq ($(XRT),1)
   PICOBJ  += src/backend_xrt.lo
 endif
 
+# The GPU's compile check (the GPU backend's round 1, 2026-11-11). Off by
+# default, as the device backend above is, and for the same reason: with
+# HIP=0 the target refuses by name, and no other rule reads these names.
+#
+#   make HIP=1 hip-unit                          ROCm's hipcc, HIP_ROOT /opt/rocm
+#   make HIP=1 HIP_PLATFORM=nvidia HIP_ROOT=/opt/rocm-7.2.4 hip-unit
+#                                                HIP 7.2.4's NVIDIA layer
+#
+# One translation unit for the device, as the backend's kernels will be:
+# tools/hip_unit.py writes gen/hip/cft_hip_unit.hip, which includes the
+# tree's own bigint.c, softfloat.c and seq_exec.h (CFT_HD, cft_config.h),
+# and hipcc compiles it for HIP_ARCH - compute capabilities on nvidia
+# (default 89 120, the RTX 4070 and the RTX 5060 Ti), gfx targets on amd
+# (default gfx1102, the RX 7600). Compiled, not linked or launched; the
+# compiler's resource report is gen/hip/resource-<platform>.log. On
+# nvidia the line says -x cu, -isystem and -gencode itself: HIP 7.2.4's
+# hipcc hands --offload-arch to nvcc, which refuses it, nvcc does not
+# know the .hip suffix, and under -x cu hipcc drops its own -isystem
+# (docs/studies/GPU-A-hip.md, section 3).
+HIP          ?= 0
+HIP_ROOT     ?= /opt/rocm
+HIP_PLATFORM ?= amd
+ifeq ($(HIP_PLATFORM),nvidia)
+  HIP_ARCH   ?= 89 120
+  HIP_FLAGS  := -x cu -isystem $(HIP_ROOT)/include -Xptxas -v \
+                $(foreach a,$(HIP_ARCH),-gencode arch=compute_$(a),code=sm_$(a))
+else
+  HIP_ARCH   ?= gfx1102
+  HIP_FLAGS  := -Rpass-analysis=kernel-resource-usage \
+                $(addprefix --offload-arch=,$(HIP_ARCH))
+endif
+.PHONY: hip-unit
+ifeq ($(HIP),1)
+hip-unit:
+	@case "$(HIP_PLATFORM)" in nvidia|amd) ;; *) \
+		echo "hip-unit: HIP_PLATFORM is nvidia or amd, not '$(HIP_PLATFORM)'"; exit 1 ;; esac
+	@[ -x "$(HIP_ROOT)/bin/hipcc" ] || { echo "hip-unit: no $(HIP_ROOT)/bin/hipcc - set HIP_ROOT"; exit 1; }
+	$(PYTHON) tools/hip_unit.py unit gen/hip
+	HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc $(HIP_FLAGS) \
+		-O2 -std=c++17 -c gen/hip/cft_hip_unit.hip -o gen/hip/cft_hip_unit-$(HIP_PLATFORM).o \
+		> gen/hip/resource-$(HIP_PLATFORM).log 2>&1 || { cat gen/hip/resource-$(HIP_PLATFORM).log; exit 1; }
+	@echo "hip-unit: bigint.c, softfloat.c and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
+else
+hip-unit:
+	@echo "hip-unit: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
+endif
+
 ifeq ($(OS),Windows_NT)
   SHLIB   := cft.dll
   SHFLAGS := -shared -Wl,--out-implib,libcft.dll.a

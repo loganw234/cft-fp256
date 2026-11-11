@@ -154,12 +154,12 @@ extern const cft_fmt_desc cft_sf_formats[4];
 
 /* Is `op` one of the assigned opcodes? Unassigned ones still compute -
  * see above - but cft_supports() answers with this. */
-int cft_sf_op_assigned(int op);
+CFT_HD int cft_sf_op_assigned(int op);
 
 /* Is `op` a reduction? Reductions are assigned, so op_assigned() says
  * yes, but they cannot be evaluated elementwise and cft_run() refuses
  * them on that basis. */
-int cft_sf_is_reduction(int op);
+CFT_HD int cft_sf_is_reduction(int op);
 
 /* The reduction tree over elements [lo, hi) of a (and b, for dot).
  *
@@ -176,7 +176,7 @@ int cft_sf_is_reduction(int op);
  * size a host can express.
  *
  * Returns 0, or 1 on an internal invariant failure. */
-int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
+CFT_HD int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
                   const void *a, const void *b, size_t esz,
                   size_t lo, size_t hi,
                   cft_bn *out, uint32_t *flags);
@@ -212,17 +212,17 @@ int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
  * and both fold to the same answer; this one just uses fewer tiles
  * than it could. tests/reduce_parts_test.c checks the property, and
  * tests/reduce_check.py checks this function against the model. */
-size_t cft_sf_canonical_ranges(size_t n, size_t parts,
+CFT_HD size_t cft_sf_canonical_ranges(size_t n, size_t parts,
                                size_t *lo_out, size_t *hi_out, size_t cap);
 
 /* Which of a, b, c the opcode reads, as bits 1, 2, 4. The steering
  * makes ADD ignore b and MUL ignore c, so a caller may legitimately
  * pass NULL for those; anything an opcode does read must be there. */
-unsigned cft_sf_op_operands(int op);
+CFT_HD unsigned cft_sf_op_operands(int op);
 
 /* One element. Returns 0, or 1 on an internal invariant failure -
  * never on a caller error, which the API layer rejects first. */
-int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
+CFT_HD int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
                    const cft_bn *a, const cft_bn *b, const cft_bn *c,
                    cft_bn *out, uint32_t *flags);
 
@@ -239,19 +239,19 @@ int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
  * under `rnd`, delivering inexact/underflow/overflow exactly as the
  * model's round_pack does. See the static sf_round_pack above its
  * definition for the m/sticky preconditions. */
-int cft_sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
+CFT_HD int cft_sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
                       int e, int sticky, int rnd,
                       cft_bn *out, uint32_t *flags);
 
-void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out);
-void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out);
-void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out);
+CFT_HD void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out);
+CFT_HD void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out);
+CFT_HD void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out);
 
 /* 754-2019 9.5's augmentedAddition for one lane: r into *vr, e into *ve,
  * its flags OR-ed into *acc. 0, or 1 on a broken invariant. Defined in
  * augmented.c, and so absent from a -DCFT_NO_AUGMENTED build - where
  * program.c neither calls it nor publishes the feature that needs it. */
-int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
                      const cft_bn *xb, cft_bn *vr, cft_bn *ve,
                      uint32_t *acc);
 
@@ -284,7 +284,7 @@ int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
  * --------------------------------------------------------------- */
 struct cft_device;              /* cft.h's opaque handle; device.c owns it */
 
-void cft_flags_emit(struct cft_device *dev, uint32_t acc,
+CFT_HD void cft_flags_emit(struct cft_device *dev, uint32_t acc,
                     uint32_t *flags_out);
 
 /* Resident buffers and the entry points computed ON THE HOST.
@@ -312,12 +312,12 @@ void cft_flags_emit(struct cft_device *dev, uint32_t acc,
  * copy the write then leaves stale - so a composition that runs passes
  * over the caller's arrays between its host writes calls it again
  * before each write. Idempotent. */
-int cft_host_in(struct cft_device *dev, const void *p, size_t bytes);
-int cft_host_out(struct cft_device *dev, void *p, size_t bytes);
+CFT_HD int cft_host_in(struct cft_device *dev, const void *p, size_t bytes);
+CFT_HD int cft_host_out(struct cft_device *dev, void *p, size_t bytes);
 
 /* The common shape in one call: a, b and c READ, `bytes` each, then d
  * WRITTEN, `dbytes` - any of the four may be NULL. */
-int cft_host_io(struct cft_device *dev, const void *a, const void *b,
+CFT_HD int cft_host_io(struct cft_device *dev, const void *a, const void *b,
                 const void *c, size_t bytes, void *d, size_t dbytes);
 
 /* The composition discipline's half of the same seam.
@@ -345,6 +345,6 @@ int cft_host_io(struct cft_device *dev, const void *a, const void *b,
  *     (void)cft_flags_mute(dev, prev);
  *
  * Returns the previous state. NULL dev is 0 and does nothing. */
-int cft_flags_mute(struct cft_device *dev, int on);
+CFT_HD int cft_flags_mute(struct cft_device *dev, int on);
 
 #endif /* CFT_SOFTFLOAT_H */

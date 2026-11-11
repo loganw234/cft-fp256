@@ -496,4 +496,34 @@ CFT_BN_LIMBS=64 (see cft_config.h)"
  * docs/EMBEDDED.md measures both on the parts this is built for.
  * --------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------
+ * CFT_HD - the same functions, compiled for a GPU as well
+ *
+ * Not a profile: nothing here changes what a build contains or what
+ * it computes. HIP and CUDA compile a function for the device only
+ * when it carries __device__, and a function the host calls as well
+ * carries __host__ __device__. So bigint.h and bigint.c, softfloat.h
+ * and softfloat.c, and the sequencer's executor in seq_exec.h put
+ * CFT_HD before every function at file scope - declarations too,
+ * because a redeclaration in another execution space is an error in
+ * nvcc and an overload in clang - and a GPU compiles the text the host
+ * compiles. It is study GPU-A's edit E1 (docs/studies/GPU-A-hip.md,
+ * section 2), made in the tree in place of a copy edited at every
+ * build.
+ *
+ * __host__ __device__ when a device compiler builds the file: HIP's
+ * compilers define __HIPCC__, nvcc defines __CUDACC__, and
+ * CFT_DEVICE_BUILD says so for any other. Otherwise empty, so a host
+ * compiler sees the text it saw before this macro existed. A file
+ * that defines CFT_HD before it includes this one keeps its own
+ * definition, as GPU-A's harnesses do.
+ * --------------------------------------------------------------- */
+#ifndef CFT_HD
+#  if defined(__HIPCC__) || defined(__CUDACC__) || defined(CFT_DEVICE_BUILD)
+#    define CFT_HD __host__ __device__
+#  else
+#    define CFT_HD
+#  endif
+#endif
+
 #endif /* CFT_CONFIG_H */
