@@ -47,7 +47,19 @@ The steps:
        refused one way and is refused another now - sin(h), which was
        `irrational-constant` at 1.1 and is `h-nonlinear` at 1.2 - changes no
        accepted source.
+  1.3  2026-11-11, M4's build: atan, asin, acos and atan2, each an operation
+       with transcend.py's golden function (atan2 the language's first of
+       two operands, y first), their folds (atan(0), asin(0), acos(1) and
+       atan2(0, c) for a constant c >= 0 are 0, of constants exactly so
+       only), and their tangent rules. Functions the language refused
+       before only because it did not have them, as at 1.1 and 1.2 (Logan's
+       answer 12 to the M4 study, 2026-10-23: "the language to 1.3"): every
+       source accepted at 1.2 is accepted at 1.3 and computes the same, and
+       a source refused at 1.2 is refused still, or, using one of the four,
+       accepted. A source that was refused one way and is refused another
+       now - atan(h), which was `irrational-constant` at 1.2 and is
+       `h-nonlinear` at 1.3 - changes no accepted source.
 """
 
-# (major, minor): spelt "1", or "1.2" once a minor step is taken
-VERSION = (1, 2)
+# (major, minor): spelt "1", or "1.3" once a minor step is taken
+VERSION = (1, 3)

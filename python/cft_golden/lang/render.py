@@ -16,12 +16,14 @@
                     division as a/b and a square root as √(a), the math
                     library's six as exp(a), expm1(a), 2^(a), ln(a),
                     log1p(a) and log₂(a), its sin, cos and tan (M2's
-                    build) as sin(a), cos(a) and tan(a), each constant as
+                    build) as sin(a), cos(a) and tan(a), its atan, asin,
+                    acos and atan2 (M4's build) as arctan(a), arcsin(a),
+                    arccos(a) and atan2(a, b), each constant as
                     its exact value, the step as the template's own scheme.
                     Evaluated exactly at random rational points it gives
                     what the step graph gives evaluated exactly
                     (python/tests/lang_mathform.py) - each square root
-                    and each of the nine a fixed function of its exact
+                    and each of the thirteen a fixed function of its exact
                     argument on both sides (graph.exact_root,
                     graph.exact_transcendental).
 
@@ -535,14 +537,19 @@ def m_sqrt(a):
 # log1p(x) (C99's, transcend.py's; IEEE 754-2019 calls the second logp1):
 # e^x − 1 and ln(1 + x) would print two operations where the program
 # performs one, rounded once. sin, cos and tan (M2's build) are conventional
-# notation already, sin(x), cos(x) and tan(x), in radians.
+# notation already, sin(x), cos(x) and tan(x), in radians. atan, asin and
+# acos (M4's build) are conventional notation too, ISO 80000-2's arctan(x),
+# arcsin(x) and arccos(x), in radians; atan2(y, x) has none, and is written
+# by the name numerical libraries give it, y first as they do.
 _MATH_CALL = {"exp": "exp({})", "expm1": "expm1({})", "exp2": "2^({})",
               "log": "ln({})", "log1p": "log1p({})", "log2": "log₂({})",
-              "sin": "sin({})", "cos": "cos({})", "tan": "tan({})"}
+              "sin": "sin({})", "cos": "cos({})", "tan": "tan({})",
+              "atan": "arctan({})", "asin": "arcsin({})",
+              "acos": "arccos({})", "atan2": "atan2({}, {})"}
 
 
-def m_math(op, a):
-    return M(_MATH_CALL[op].format(a.text), 3)
+def m_math(op, *a):
+    return M(_MATH_CALL[op].format(*[x.text for x in a]), 3)
 
 
 def m_neg(a):
@@ -661,7 +668,7 @@ class _Math:
         if op == "sqrt":
             return m_sqrt(a[0])
         if op in _MATH_CALL:
-            return m_math(op, a[0])
+            return m_math(op, *a)
         if op in ("copysign", "min", "max", "minnum", "maxnum"):
             name = {"minnum": "minNum", "maxnum": "maxNum"}.get(op, op)
             return M(f"{name}({a[0].text}, {a[1].text})", 3)
