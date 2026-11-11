@@ -1375,8 +1375,11 @@ def test_each_rule_rounds_as_the_table_says(fmtname):
     a) - and on a numerator likewise. And the exact values of those last
     operations are the derivative, by a central difference in high
     precision for atan, asin and acos, within the roundings of the
-    denominator. So a rule rounded otherwise (the next tests) is red here
-    wherever its two forms differ."""
+    denominator. The lanes are 6 a cell (atan, asin, acos; atan2 in each of
+    its three cases), drawn from this test's seeded generator; a rule
+    rounded otherwise (the next tests) is red here on the lanes of those 6
+    on which its two forms differ, which test_the_plants runs with 30 a
+    cell."""
     rng = random.Random(f"m4 rounds {fmtname}")
     for fn in ONE:
         for rnd in RNDS:
