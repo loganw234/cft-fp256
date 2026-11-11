@@ -508,25 +508,41 @@ def _param_bits(graph, params, source):
 
 
 def _call_loops(g, pb, src, low0, prog0):
-    """-> (lowered, program, looped batches): the step's batches looped,
-    the largest first, until it fits CALL_LOOP_ABOVE or none is left
-    (callloop.py), lowered again with the loop's step word and, once the
-    allocation is chosen, its record bases (callloop.finish). A batch is
-    known by its operation and depth, which the fold - the one thing the
+    """-> (lowered, program, looped batches, declined): the step's batches
+    looped, the largest first, until it fits CALL_LOOP_ABOVE or none is
+    left (callloop.py), lowered again with the loop's step word and, once
+    the allocation is chosen, its record bases (callloop.finish). A batch
+    is known by its operation and depth, which the fold - the one thing the
     words' room can change - leaves alone. A step with no batch of two
-    calls or more has nothing a loop shortens, and stays inlined."""
+    calls or more has nothing a loop shortens, and stays inlined.
+
+    A batch whose loop body needs more registers than the allocator has
+    (callloop.declined: atan2 at fp32) is DECLINED when the loop reaches
+    it: it stays inlined, where the allocator spills, the loop goes on to
+    the next batch, and the manifest names it (`declined` is its entries).
+    One the loop never reached, because the batches before it were enough,
+    is no entry: the step is the one it was."""
     sizes = {b.key(): b for b in callloop.batches(low0)}
     keys = [b.key() for b in callloop.by_size(low0)]
     if not keys:
-        return low0, prog0, []
+        return low0, prog0, [], []
     low = lower(g, pb, source=src, loop_words=callloop.WORDS)
-    for k in range(1, len(keys) + 1):
-        looped = callloop.select(low, keys[:k], sizes)
+    by = {b.key(): b for b in callloop.batches(low)}
+    taken, declined, looped = [], [], []
+    for key in keys:
+        d = callloop.declined(low, by[key])
+        if d is not None:
+            declined.append(d)
+            continue
+        taken.append(key)
+        looped = callloop.select(low, taken, sizes)
         prog = best_program(low, looped=looped)
         if len(prog.body) + 1 <= callloop.CALL_LOOP_ABOVE:
             break
+    if not taken:
+        return low0, prog0, [], declined
     callloop.finish(low, prog, src)
-    return low, prog, looped
+    return low, prog, looped, declined
 
 
 # The math library's thirteen (the six, M1's build, item 4, 2026-10-15; sin,
@@ -610,9 +626,9 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     low = lower(g, pb, source=src)
     half = halve(low, src) if low.h_slots else None
     prog = best_program(low)
-    c.looped = []
+    c.looped, c.declined = [], []
     if low.routines and len(prog.body) + 1 > callloop.CALL_LOOP_ABOVE:
-        low, prog, c.looped = _call_loops(g, pb, src, low, prog)
+        low, prog, c.looped, c.declined = _call_loops(g, pb, src, low, prog)
         half = halve(low, src) if low.h_slots else None
     c.lowered, c.program = low, prog
     # a step's instructions as it runs them: its call loops' bodies once a

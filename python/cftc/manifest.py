@@ -318,6 +318,11 @@ def build(c):
                           for li in loops],
                 "executed_per_step": prog.executed(),
             }
+        if getattr(c, "declined", None):
+            # a batch the call loop reached and declined, its body needing
+            # more registers than the allocator has (callloop.declined):
+            # only then, so that no other manifest gains the key
+            m["routines"]["call_loop_declined"] = list(c.declined)
     cost = {
         "assumes": "revision 7, a single-pass tile (docs/SEQUENCER.md "
                    "R12-R19); measured on revision 7's quad on the U50, "

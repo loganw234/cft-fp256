@@ -144,6 +144,46 @@ def by_size(low):
                                  ORDER[b.op]))
 
 
+def fixed_inputs(low, batch):
+    """The inputs every call of `batch` takes from one bank slot, as the
+    allocator decides it (regalloc's loop_, which this repeats on the
+    lowered calls' operands before any allocation): {input name: operand}.
+    An operand that is a node, a state or a lane value is a record's; a
+    division's 1 or a constant divisor is one slot for all. A batch with
+    every input so fixed has none fixed (its records are then the
+    inputs)."""
+    names = R.INPUTS[batch.op]
+    fixed = {}
+    for i, name in enumerate(names):
+        refs = {low.nodes[c].args[i] for c in batch.calls}
+        ref = next(iter(refs))
+        if len(refs) == 1 and ref[0] not in "sln":
+            fixed[name] = ref
+    return {} if len(fixed) == len(names) else fixed
+
+
+def room():
+    """The registers a loop body can have: the allocator's, REGS
+    (regalloc.py), 29 of them. The body's registers are all held at once
+    and protected while the loop is placed, and a body has no spills, so a
+    plan past this raised InternalError at the allocator's victim()."""
+    from .regalloc import REGS
+    return len(REGS)
+
+
+def declined(low, batch):
+    """None where `batch` can be looped, else the entry the manifest gives
+    a batch the loop declined: its plan needs more registers than the
+    allocator has (plan()'s n, against room()). The batch stays inlined,
+    where the allocator spills."""
+    g = low.graph
+    need = plan(batch.op, g.fmt, g.rnd, tuple(fixed_inputs(low, batch)))[1]
+    if need <= room():
+        return None
+    return {"op": batch.op, "depth": batch.depth, "calls": len(batch.calls),
+            "registers": need, "room": room()}
+
+
 def select(low, keys, sizes):
     """The batches of `low` named by `keys`, in that order, each the size
     `sizes` gave it - which the words were made for."""
