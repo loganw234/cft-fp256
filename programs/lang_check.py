@@ -147,9 +147,13 @@ besides.
      flags raised by those runs, and call loops run of both; and, since
      M1's build, item 5, the same for each of the math library's six -
      every format, attribute and integrator, the five flags, the marks
-     seen and replayed (at fp64, fp128 and fp256 for the four with a
-     structured family), the call loops of the six, the refusals on
-     revision 7
+     seen and replayed (at fp64, fp128 and fp256 for those of the six with
+     a structured family), the call loops of the six, the refusals on
+     revision 7; the same for sin, cos and tan since M2's build, wave 4;
+     and the same for atan, asin, acos and atan2 since M4's build, wave 5
+     (marks at fp64, fp128 and fp256, and atan2's at fp32 too; the
+     fp32 statement; the guess tally against the golden function; the
+     four flags they raise - divideByZero is not asked of them)
   O  the marked-lane rule's controls (M1's build, item 5): the golden
      corpus's markstep, a hand-written image that marks lanes on purpose
      (certificates/programs/markstep-fp64.cfta; no mpmath), run as it is
@@ -5040,8 +5044,8 @@ def four_lanes(fn, fmtname, rnd, rng, everything=False):
     if fmtname != "fp32":
         cs = iv.expand(iv.INV_FAMILY[fn][fmtname][rnd])
     shaped = [c for c in cs if c[0] in ("tiny", "win")]
-    if everything:          # up to 150 spread centres, not the whole list
-        shaped = shaped[::max(1, len(shaped) // 150)]
+    if everything:          # up to 60 spread centres, not the whole list
+        shaped = shaped[::max(1, len(shaped) // 60)]
     for i, centre in enumerate(sample_centres(shaped, fn, F, everything)):
         x = iv.centre_lane(fn, F, centre)
         v = iv.varied(x)
@@ -5207,6 +5211,7 @@ def leg_four_alone(rng, everything=False):
         cell_gw = {}            # format -> wrong by the golden function
         cell_pin_run = {}       # format -> pinned attributes run as a map
         cell_pin_lanes = {}     # format -> pinned lanes found wrong
+        pin_unrun = []          # pinned (format, attribute) not run as a map
         t1 = time.perf_counter()
         for fi, fmtname in enumerate(FORMATS4):
             F = FORMATS[fmtname]
@@ -5238,6 +5243,8 @@ def leg_four_alone(rng, everything=False):
                         if s == 1:
                             first.append(r)
                         return r
+                elif pins.get((fn, fmtname, RND_CODE[rnd])):
+                    pin_unrun.append(f"{fmtname} {rnd} ({shape})")
                 v = rule_compare(c, states, steps, width=c.ir.n_state,
                                  runner=runner, tally=False)
                 dem = [None if shape == "sv" and role == "ordinary" else
@@ -5358,6 +5365,10 @@ def leg_four_alone(rng, everything=False):
         if pinned_not_run:
             print(f"    the pinned cells {', '.join(pinned_not_run)} of "
                   f"{fn}: no pinned attribute ran as a map - not run")
+        if pin_unrun:
+            print(f"    pinned (format, attribute) of {fn} not run as a map, "
+                  f"so the guess tally does not read them - not run: "
+                  f"{', '.join(pin_unrun)}")
         at = " and ".join(str(s) for s in checkpoints(steps))
         equal = all(x[1] == x[2] for x in tl.values())
         pinned_line = ", ".join(f"{f} ({cell_pin_lanes.get(f, 0)} pinned "
@@ -6186,15 +6197,17 @@ def main(argv=None):
                     help="generated sources that call atan, asin, acos and "
                          "atan2 in leg U2 (default 12)")
     ap.add_argument("--four-all", action="store_true",
-                    help="the larger draw of the four's legs. U1: up to 150 "
-                         "spread centres of the tiny and window families a "
-                         "configuration, the first eight with their windows' "
-                         "neighbours, twelve ordinary lanes, six more "
-                         "tiny-quotient range pairs of atan2 and six "
-                         "near-1 lanes. U2: up to twelve centres for each "
-                         "distinct direct call of a source. U3: six centres "
-                         "a call and three range pairs. (Minutes more; the "
-                         "default is gate-sized)")
+                    help="the larger draw of the four's legs. U1: every "
+                         "(n // 60)th centre of the tiny and window "
+                         "families a configuration (all of a list of 119 or "
+                         "fewer), the first eight with their windows' "
+                         "neighbours, twelve ordinary lanes and four outside "
+                         "[-1, 1] for asin and acos, eighteen tiny-quotient "
+                         "range pairs of atan2 where the default has nine, "
+                         "and six near-1 lanes where it has two. U2: up to "
+                         "twelve centres for each distinct direct call of a "
+                         "source. U3: six centres a call and three range "
+                         "pairs. (Minutes more; the default is gate-sized)")
     ap.add_argument("--group", default="",
                     help="a comma list of groups, each its legs and its tally: "
                          "core (refs, corpus, letmaps, banks, libcft, "

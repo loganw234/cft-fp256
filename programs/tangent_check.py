@@ -199,13 +199,15 @@ lang_check.py, whose helpers this reuses), with tangents:
      atan2's tiny-quotient range pairs, at every format, in the primal,
      every lane the theory demands marked asserted marked in the sources
      whose calls are known. No lane is marked by the tangent's routine
-     alone: the four's tangent rules write no routine node but div and
-     sqrt, which never mark, and a call of the four in a tangent section
-     is a copy of a primal call - a reading of the rules, checked on the
-     images (U0e: the tangent section of each written and generated
-     system's image holds no routine but the four, div and sqrt, and each
-     call of the four there repeats a primal call's operation and operand
-     structure). Controls with a tangent vector: atan(3 2^-26) under rne at
+     alone: the four's tangent rules write no routine node of their own
+     but the div and sqrt they name, which never mark, and the calls of
+     the four that a tangent section holds in the compiled image (a rule
+     that reads a primal call a second time is given the call written
+     again) are copies of primal calls - checked on the images U0e reads
+     (the written shapes and the systems leg M draws: the tangent section
+     of each holds no routine but the four, div and sqrt, and each call of
+     the four there repeats a primal call's operation and operand
+     structure), not on every image. Controls with a tangent vector: atan(3 2^-26) under rne at
      fp64 (marked); an atan2 pair in the tiny-quotient range at fp64 and
      at fp32 (marked); a flip in an unmarked lane's tangent, red, and the
      same flip in a marked lane's tangent, replayed and counted, not red
@@ -3778,15 +3780,21 @@ def leg_three(count, rng, everything=False):
 #
 # NO LANE IS MARKED BY THE TANGENT'S ROUTINE ALONE, as leg T's third control
 # shows for cos. That is a reading of the rules, not a measurement of every
-# lane: the four's rules write no routine node but div and sqrt (the
-# interpreter's tangent rules, and leg M's `math_four`), and div and sqrt
-# never mark. The reading is checked on the images, not on lanes: control U0e
-# reads the routine nodes of the tangent section of each written shape's
-# image, and of the generated systems leg M draws, and requires every
-# routine there to be the four, div or sqrt, and every call of the four a
-# copy of a primal call (the tangent section derives again a primal
-# subexpression it needs, so that some images call the four more often than
-# their primal-only forms; a copy marks exactly as the call it copies).
+# lane: no rule of the four writes a routine node of its own beyond the div
+# and sqrt it names (the interpreter's tangent rules, and leg M's
+# `math_four`), and div and sqrt never mark. That is a statement about the
+# rules; the compiled images are another matter, because the step graph
+# gives an unlabelled node one use, so a rule that reads a primal call a
+# second time (a product or a quotient of a call by another value does) is
+# given the call written again: `next x = atan(y) * x` with a tangent vector
+# holds one atan in its primal step and a second in its tangent step. The
+# reading is therefore checked on the images, not on lanes: control U0e reads
+# the routine nodes of the tangent section of each written shape's image, and
+# of the generated systems leg M draws, and requires every routine there to
+# be the four, div or sqrt, and every call of the four a copy of a primal
+# call - the same operation on the same operand structure, so that it marks
+# exactly as the call it copies. That is shown of those images (the count is
+# in U0e's line), not of every image the compiler can write.
 
 def four_controls():
     """U0a to U0f, the rule's controls with a tangent vector for the four
