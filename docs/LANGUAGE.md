@@ -517,15 +517,20 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
     values, `atan2(0, c)` for a constant c >= 0 - and compiles as the
     constant it is, with no mpmath.
   - **A marked lane** (the structured families; M1's question 4). A
-    compiled routine of the six, and since M2's build of sin, cos and tan,
-    decides its last bit in the lane, and
+    compiled routine of the six, since M2's build of sin, cos and tan,
+    and since M4's build of atan, asin, acos and atan2, decides its last
+    bit in the lane, and
     where its in-lane test cannot decide it - where the true value lies
     within the routine's error bound of a rounding boundary - it marks
     the lane (bit 7 of its raised word; R24 and R23's lane byte, and
     STATUS[6]). The three also mark, at fp128 and fp256, every lane at or
     past 2^1024 whatever the test says, and there the guess is wrong in
     some lanes (the study, docs/studies/M2-trig.md; the stages' T legs
-    hold such lanes). The language's definition is unchanged by a mark: a
+    hold such lanes). atan2 also marks, at every format fp32 included,
+    every lane in its tiny-quotient range (|y / x| under a bound the
+    format sets, y not zero, x positive) whatever the test says
+    (docs/studies/M4-invtrig.md; the stages' U legs hold such lanes). The
+    language's definition is unchanged by a mark: a
     marked lane is replayed by the definition, `lang.run`, and the
     image's guess is compared only as a guess. Next to an exact case -
     exp near 0, log near 1, the arguments x = c 2^-e and 1 + c ulp the
@@ -586,7 +591,12 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
       the definition raises overflow too; everywhere else in T1 to T3 they
       are equal,
       so the `lang-routines` legs of the three hold this half only through those
-      two lanes;
+      two lanes. In the legs of atan, asin, acos and atan2 (U1 to U3) the
+      guess's [4:0] differ from the definition's in some lanes of atan2 and
+      in none of the other three, as drawn (counted in the legs' own lines:
+      `guesses wrong in value ..., in flags ...`; the tally of I2 prints
+      the totals), so those legs hold this half through atan2's lanes
+      only, and `tangent`'s leg U does not count them;
     - *the values half is a count:* a marked lane's differing values add to
       the stage's counts of wrong guesses and to nothing else, and a guess
       is never required. For sin, cos and tan one check reads that count:
@@ -604,6 +614,23 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
       and asserts that count nonzero at fp128 and fp256 and its controls
       with a tangent vector, among them a lane that only the tangent's
       cos(a) marks, whose mark excuses the lane's primal state too.
+      For atan, asin, acos and atan2 the same check is the `lang-routines`
+      stage's leg U1 on the map configurations (`next x = f(x)`, and for
+      atan2 `next y = atan2(y, x)` with x carried): the rule's count of
+      wrong guesses equals the count against `routines.GOLDEN` of each
+      marked lane's own argument, at every format, and is asserted
+      nonzero at exactly the (function, format) cells where the harness
+      pins a wrong guess (`python/tests/mathlib_inv_harness.py`,
+      `STRUCT_GUESS_WRONG`) and a pinned attribute ran as a map, each
+      pinned lane being wrong by that count. At every other cell - asin
+      everywhere, atan at fp128 and fp256, atan2 at fp256, every function
+      at fp32 - no committed lane has a wrong guess, the leg prints that
+      the values half has nothing to count there, and no nonzero count is
+      asserted. The `tangent` stage's leg U counts wrong guesses in tangents
+      and states what it measured in its controls (the study's atan(3 2^-26)
+      under rne at fp64, an atan2 range pair at fp64 and at fp32, a lane of
+      the harness's pin), and shows that a flip in a marked lane's tangent
+      is replayed, not red.
 - **sin, cos and tan** (M2's build, 2026-11-02; the language at 1.2) are
   three more of the math library's, each one correctly rounded operation
   of a radian argument, under the program's attribute, with exactly the
@@ -3193,6 +3220,15 @@ beside those: the `lang-routines` stage's T1 (each alone, with the
 families' centres, the minimisers' neighbours and the lanes past the
 range, and the guess tally above), T2 (generated sources) and T3 (the call
 loop), and the `tangent` stage's leg T, with one tangent vector and two;
+since M4's build, wave 5, atan, asin, acos and atan2 have legs of their
+own the same way: the `lang-routines` stage's U1 (each alone, with the
+inverse family's centres, atan2's tiny-quotient range pairs at every
+format, the harness's committed lanes and the guess tally), U2 (generated
+sources) and U3 (the call loop), and the `tangent` stage's leg U. fp32 has
+no inverse family and its theory has no threshold, so of the four only
+atan2's range lanes are demanded marked at fp32, and the legs say so. A
+looped batch of two atan2 calls at fp32 stops cftc with an internal error
+(exit 70), which U3 does not exercise (its fp32 source calls atan2 once);
 each is skipped by name without mpmath. The routines themselves are held to softfloat by
 python/tests/test_routines.py and the `lang-routines` stage's leg K2,
 and their inlining and their loops by `python/tests/test_cftc.py`.

@@ -192,16 +192,44 @@ besides.
      beside three of the six (exp, log1p and expm1), division, the root and
      the other operations, as N2; (T3) the call loop over batches of the three, the constant
      lowered, as N3
+  U  atan, asin, acos and atan2, compiled and run (M4's build, wave 5;
+     needs mpmath, else skipped by name), each leg with its own generator
+     so that none of the six's or the three's lanes or lines moves: (U1)
+     each alone, at every format and attribute, each integrator among the
+     twenty (atan2 as `next y = atan2(y, x)` with x carried, and under
+     Stormer-Verlet four components whose positions are the call's operands
+     only where the momenta are zero), on ordinary, large, special,
+     gate-edge and structured arguments - the committed centres of
+     python/tests/mathlib_inv_family.py at fp64, fp128 and fp256, their
+     neighbours, the ratio and zero claims, the harness's committed
+     structured lanes (mathlib_inv_harness.STRUCT) - and atan2's
+     tiny-quotient range pairs at every format. Every lane classify() calls
+     "mark" is marked, and in the map, map-with-h and Euler configurations
+     (one call at the first step) every lane it calls "clear" is not. fp32
+     has no family and classify() raises there, so of the four only atan2's
+     range lanes are demanded at fp32 (atan2_status), and the other three
+     have no demanded lane there. On the map configurations the rule's
+     count of wrong guesses at the first checkpoint equals the count against
+     routines.GOLDEN (transcend.py) of each marked lane's own argument; it
+     is asserted nonzero exactly at the (function, format) cells where the
+     harness pins a wrong guess (STRUCT_GUESS_WRONG), and elsewhere the
+     leg prints that the values half has nothing to count; each refused
+     `target-feature` on revision 7's four targets; (U2) generated sources
+     that call them beside exp, log1p, sin, division, the root and the other
+     operations, as N2 (asin and acos through `* 0.5`, a structured
+     argument c put in the component as 2c); (U3) the call loop over
+     batches of the four, the constant lowered, as N3
 
 The legs come in two groups, each with its tally (GROUPS, below): core,
 legs A to H and J with I its tally, which is the `lang` stage, in the
-quick budget; and routines, legs K, K2, L, O, N and T with I2 its tally,
+quick budget; and routines, legs K, K2, L, O, N, T and U with I2 its tally,
 the `lang-routines` stage, in the gate budget (verify/run.sh). `--group`
 runs a group; with no selection both run. `--six N` is the number of
 generated sources in leg N2, and `--six-all` the larger draw of N1 and N2
 (every centre of each family, both neighbours, twelve ordinary lanes, every
 edge), minutes more than the gate-sized default; `--three N` and
-`--three-all` are T2's number and the larger draw of T1 to T3. A tally runs when every leg
+`--three-all` are T2's number and the larger draw of T1 to T3; `--four N`
+and `--four-all` are U2's number and the larger draw of U1 to U3. A tally runs when every leg
 of its group ran; where `--only` ran part of a group, its tally is a
 SKIP line.
 
@@ -4854,6 +4882,957 @@ def leg_three(count, rng_for, everything=False):
     leg_three_loops(rng_for("three loops"), everything)
 
 
+# ---- U: atan, asin, acos and atan2 (M4's build, wave 5) -----------------------
+#
+# The four inverse routines (python/cft_golden/mathlib.py, compiled by cftc 8)
+# run here under the same marked-lane rule as the six in N1 to N3 and the
+# three in T1 to T3, each leg with its own generator, so that no lane, count
+# or check line of the six's or the three's moves. What is not the three's:
+#   - the structured families are python/tests/mathlib_inv_family.py's, not
+#     the trig module's: INV_FAMILY holds compact entries (tiny, win, ratio,
+#     zero) at fp64, fp128 and fp256 ONLY, and classify() takes
+#     (format, attribute code, function, lane);
+#   - atan2 has two operands: its lane is a pair (y, x), and `INPUTS` names y
+#     first (a = y, b = x);
+#   - asin and acos decide nothing outside [-1, 1]: there the result is
+#     invalid, the lane "gated", never demanded marked;
+#   - fp32 has no family and classify() raises there (THRESHOLD_B has no fp32
+#     key), so of the four only atan2 has a demanded lane at fp32 - the
+#     tiny-quotient range, decided by atan2_status. The other three have NO
+#     demanded lane at fp32, and the legs say so rather than demand nothing
+#     silently;
+#   - atan2's tiny-quotient range is marked whatever the test says, so the
+#     demand of it is classify's own ("mark") with no separate range test;
+#   - the replay's values half has real wrong guesses to count where
+#     python/tests/mathlib_inv_harness.py pins them (STRUCT_GUESS_WRONG), and
+#     U1 asserts a nonzero count exactly at those (function, format) cells.
+
+FOUR = ("atan", "asin", "acos", "atan2")
+# the functions U2's calls are drawn from: the four beside two of the six
+# (exp and log1p) and one of sin, cos and tan (sin), at the (k + count)
+# places g_four indexes, so that every source of 12 meets each
+FOUR_MIX = ("atan", "asin", "acos", "atan2", "exp", "asin", "atan2", "sin",
+            "acos", "atan", "log1p", "atan2")
+_INV = []
+
+
+def inv():
+    """(mathlib_inv_family, mathlib_inv_harness): the four's committed
+    centres and theory, and the committed structured lanes with the pin on
+    their wrong guesses."""
+    if not _INV:
+        sys.path.insert(0, str(ROOT / "python" / "tests"))
+        try:
+            import mathlib_inv_family
+            import mathlib_inv_harness
+        finally:
+            sys.path.remove(str(ROOT / "python" / "tests"))
+        _INV.append((mathlib_inv_family, mathlib_inv_harness))
+    return _INV[0]
+
+
+def four_demand(fn, F, rnd, lane):
+    """What the theory demands of the lane (a bit pattern, or for atan2 a pair
+    (y, x)): "mark" (classify says so; at fp32 only atan2's tiny-quotient
+    range, by atan2_status, since classify raises there), "clear" (classify
+    says the lane must not be marked and is right unmarked; fp64 and up) or
+    None (gated, either, and every lane at fp32 but atan2's range ones)."""
+    iv, _ih = inv()
+    if F.name == "fp32":
+        return "mark" if fn == "atan2" and \
+            iv.atan2_status(F, lane) == "mark" else None
+    c = iv.classify(F, RND_CODE[rnd], fn, lane)
+    return c if c in ("mark", "clear") else None
+
+
+def four_range_pairs(F, everything=False):
+    """[(lane, label)]: atan2 pairs about the tiny-quotient range's edge
+    (mathlib_inv_harness._tq_band), at every format, fp32 included: y/x of
+    c 2^-e, with c in 1, 3 and 5 and x in 1, 3 and 5 2^7 (the census's), e
+    from where the range's bottom is passed (lane under it: marked), through
+    the edge (the band: either), to a few past it above (main path)."""
+    iv, ih = inv()
+    lo, _hi = ih._tq_band(F)
+    e0 = lo.denominator.bit_length() - lo.numerator.bit_length() + 2
+    out = []
+    for e in ((e0 + 1, e0 - 6, e0 + 40) if not everything else
+              (e0 + 1, e0 - 6, e0 + 40, e0 - 1, e0 + 3, e0 + 12)):
+        for c, x in ((1, 1), (3, 3), (5, 5 << 7)):
+            out.append((iv.tiny_lane("atan2", F, c, e, x), f"{c} 2^-{e}/{x}"))
+    return out
+
+
+def four_lanes(fn, fmtname, rnd, rng, everything=False):
+    """[(lane, role)]: the lanes one of the four is run on at one format and
+    attribute - a lane is a bit pattern, for atan2 a pair (y, x). Ordinary
+    ones and large ones (for asin and acos mostly inside (-1, 1), and a few
+    outside, which are gated and must come out invalid), the specials (for
+    atan2 as y and as x against 1, and the pairs of zeros and infinities),
+    each function's gate edge and one ulp either side (asin and acos at +-1
+    and one ulp inside and outside it), atan2's tiny-quotient range pairs at
+    every format, the committed centres of INV_FAMILY (fp64 and up) sampled
+    with their neighbours, the ratio and zero families' claims, and the
+    harness's committed structured lanes (STRUCT, where the pin on wrong
+    guesses is). A role beginning `structured`, `range` or `pin` is one the
+    theory may demand marked (four_demand)."""
+    iv, ih = inv()
+    F = FORMATS[fmtname]
+    code = RND_CODE[rnd]
+    sign, one = F.sign_mask, sf.one_bits(F)
+    pair = fn == "atan2"
+    lanes, seen = [], set()
+
+    def add(lane, role):
+        if lane not in seen:
+            seen.add(lane)
+            lanes.append((lane, role))
+
+    def mk(v, x=None):
+        return (v, one if x is None else x) if pair else v
+    n = 12 if everything else 3
+    if fn in ("asin", "acos"):
+        for _ in range(n):
+            add(full_value(F, rng, -1, 1), "ordinary")
+        for _ in range(4 if everything else 2):
+            add(full_value(F, rng, 1, 4), "ordinary outside")
+    elif pair:
+        for _ in range(n):
+            add((full_value(F, rng, -8, 8), full_value(F, rng, -8, 8)),
+                "ordinary")
+        for _ in range(4 if everything else 2):
+            add((full_value(F, rng, 1024, 1 << 30),
+                 full_value(F, rng, -8, 8)), "ordinary")
+    else:
+        for _ in range(n):
+            add(full_value(F, rng, -8, 8), "ordinary")
+        for _ in range(4 if everything else 2):
+            add(full_value(F, rng, 1024, 1 << 30), "ordinary")
+    specials = ((0, "+0"), (sign, "-0"), (sf.inf_bits(F), "+inf"),
+                (sf.inf_bits(F, 1), "-inf"), (sf.qnan_bits(F), "qNaN"),
+                (sf.snan_bits(F), "sNaN"), (one, "1"), (one | sign, "-1"),
+                (1, "least subnormal"), (F.man_mask, "greatest subnormal"),
+                (1 << F.man_w, "least normal"),
+                (sf.max_normal_bits(F), "greatest normal"),
+                (sf.max_normal_bits(F, 1), "-greatest normal"))
+    for b, role in specials:
+        add(mk(b), role)
+        if pair:
+            add((one, b), role + " as x")
+    if pair:
+        zi = (0, sign, sf.inf_bits(F), sf.inf_bits(F, 1))
+        for y in zi:
+            for x in zi:
+                add((y, x), "zero or infinity pair")
+    gate = ih.ml._pow2(F, ih.ml.trig_gates(F)[0 if fn == "asin" else 1])
+    for d, tag in ((0, "gate"), (-1, "gate -1 ulp"), (1, "gate +1 ulp")):
+        add(mk(ulp_away(F, gate, d)), f"edge {tag}")
+    if fn in ("asin", "acos"):
+        for d, tag in ((0, "1"), (-1, "1 - ulp"), (1, "1 + ulp")):
+            add(ulp_away(F, one, d), f"edge {tag}")
+            add(ulp_away(F, one, d) | sign, f"edge -{tag}")
+    if pair:
+        for lane, lab in four_range_pairs(F, everything):
+            add(lane, f"range {lab}")
+        add((3, 5 << 20), "pair of subnormal and normal")
+        add((one, one | sign), "(1, -1)")
+        add((one | sign, one | sign), "(-1, -1)")
+    cs = []
+    if fmtname != "fp32":
+        cs = iv.expand(iv.INV_FAMILY[fn][fmtname][rnd])
+    shaped = [c for c in cs if c[0] in ("tiny", "win")]
+    if everything:          # up to 150 spread centres, not the whole list
+        shaped = shaped[::max(1, len(shaped) // 150)]
+    for i, centre in enumerate(sample_centres(shaped, fn, F, everything)):
+        x = iv.centre_lane(fn, F, centre)
+        v = iv.varied(x)
+        for d, tag in ((0, "centre"), (1, "+1 ulp"), (-1, "-1 ulp")):
+            if d >= 0 or i < 3 or everything:
+                add(iv.with_varied(x, ulp_away(F, v, d)),
+                    f"structured {centre} {tag}")
+        if i == 0:
+            add(iv.negated(fn, F, x), f"structured {centre} negated")
+        if pair and centre[0] == "tiny" and (i == 0 or everything):
+            for xx in (3, 5 << 7):
+                add(iv.tiny_lane(fn, F, centre[1], centre[2], xx),
+                    f"structured {centre} against x = {xx}")
+        if i == 0 or (everything and i < 8):
+            for lane, lab in iv.neighbours(F, fn, centre):
+                add(lane, f"structured {centre} window {lab}")
+    for en in cs:
+        if en[0] == "ratio":
+            for dj in (0, 1, -1):
+                add(iv.ratio_lane(F, iv.ratio_k(F, en[1]), en[2] + dj),
+                    f"structured {en} {dj:+d}")
+        elif en[0] == "zero" and en[1] == "near1":
+            near = iv.census_near1(F, fn)
+            for lane in (near[:6] if everything else near[:2]) + \
+                    (near[iv.NEAR1_J:iv.NEAR1_J + 2] if fn == "acos" else []):
+                add(lane, "structured near 1")
+        elif en[0] == "zero" and en[1] == "diag":
+            diag = iv.census_diag(F, 2, 2)
+            for lane in (diag if everything else diag[::7]):
+                add(lane, "structured diagonal")
+    for lane in ih.structured_lanes(fn, F, code):
+        add(lane, "pin committed lane")
+    return lanes
+
+
+def four_text(fn, fmt, rnd, shape):
+    """The one-function source: alone_text's for the three one-operand
+    functions; for atan2 two components, y's equation the call and x carried
+    (`next y = atan2(y, x)`, `next x = x`, or its flow form with x's
+    derivative 0). Under Stormer-Verlet atan2's four components are the
+    positions (y, x) and the momenta, which drift the positions before the
+    force is called: the call reads the positions as they are only where the
+    momenta are zero."""
+    if fn != "atan2":
+        return alone_text(fn, fmt, rnd, shape)
+    head = f"system v\nformat {fmt}\nround {rnd}\n"
+    if shape == "sv":
+        return (head + "state q0, q1, m0, m1\nd/dt q0 = m0\nd/dt q1 = m1\n"
+                "d/dt m0 = atan2(q0, q1)\nd/dt m1 = 0\n"
+                "step stormer-verlet, h = 1/16, q = (q0, q1), "
+                "p = (m0, m1)\n")
+    word, step = {"map": ("next", "step map"),
+                  "maph": ("next", "step map, h = 1/8"),
+                  "rk4": ("d/dt", "step rk4, h = 1/16"),
+                  "euler": ("d/dt", "step euler, h = 1/16")}[shape]
+    rhs = "atan2(y, x) + h" if shape == "maph" else "atan2(y, x)"
+    keep = "x" if word == "next" else "0"
+    return head + f"state y, x\n{word} y = {rhs}\n{word} x = {keep}\n{step}\n"
+
+
+def four_states(fn, shape, F, lanes, rng):
+    """Each lane's state vector: the lane, and under Stormer-Verlet its
+    momenta - ordinary lanes get ordinary ones, every other zero, so that
+    the call reads its operand as the lane has it."""
+    out = []
+    for lane, role in lanes:
+        base = list(lane) if fn == "atan2" else [lane]
+        if shape == "sv":
+            base += [full_value(F, rng, -1, 1) if role == "ordinary" else 0
+                     for _ in base]
+        out.append(base)
+    return out
+
+
+def golden_guess(fn, F, rnd, lane):
+    """transcend.py's value for the lane (routines.GOLDEN, never Ref)."""
+    code = RND_CODE[rnd]
+    if fn == "atan2":
+        return R.GOLDEN[fn](F, lane[0], lane[1], code)[0]
+    return R.GOLDEN[fn](F, lane, code)[0]
+
+
+# The four's own tally (the routines group's I2, from these legs alone): the
+# TCOVER of the three with `tally[format]` = [marked, wrong by the rule, wrong
+# by the golden function] at one step of U1's one-call map images, and the
+# lanes demanded marked and demanded clear.
+FOURCOVER = {"images": 0, "flags": 0, "loops": 0, "looped_calls": 0,
+             "looped_ops": set(), "refusals": 0, "comparisons": 0,
+             "lanes": 0, "marked": 0, "wrong": 0, "wrong_flags": 0,
+             "by_op": {fn: {"formats": set(), "rounds": set(),
+                            "integrators": set(), "images": 0, "marked": 0,
+                            "wrong": 0, "wrong_flags": 0, "demanded": 0,
+                            "clear": 0, "marked_formats": set(),
+                            "demanded_at": {}, "tally": {}} for fn in FOUR}}
+
+
+def fcover(c, v, demanded=0, clear_n=0):
+    """Count one image of the four run under the rule (as tcover does)."""
+    T = FOURCOVER
+    T["images"] += 1
+    T["flags"] |= v.ref.flags
+    T["comparisons"] += 1
+    T["lanes"] += len(v.ref.lanes)
+    T["marked"] += len(v.marked)
+    T["wrong"] += len(v.wrong)
+    T["wrong_flags"] += len(v.wrong_flags)
+    ops = c.ir.op_counts()
+    present = [f for f in R.ROUTINES if ops.get(f)]
+    for fn, d in T["by_op"].items():
+        if ops.get(fn):
+            d["images"] += 1
+            d["formats"].add(c.ir.fmt_name)
+            d["rounds"].add(c.ir.rnd_name)
+            d["integrators"].add(c.ir.integrator[0])
+            if present == [fn]:
+                # one function alone: its marks are its own
+                d["marked"] += len(v.marked)
+                d["wrong"] += len(v.wrong)
+                d["wrong_flags"] += len(v.wrong_flags)
+                d["demanded"] += demanded
+                d["clear"] += clear_n
+                d["demanded_at"][c.ir.fmt_name] = \
+                    d["demanded_at"].get(c.ir.fmt_name, 0) + demanded
+                if v.marked:
+                    d["marked_formats"].add(c.ir.fmt_name)
+    for b in getattr(c, "looped", ()):
+        if b.op in FOUR:
+            T["loops"] += 1
+            T["looped_calls"] += len(b.calls)
+            T["looped_ops"].add(b.op)
+
+
+# the shapes whose one call at the first step reads the lane as it is and is
+# the only call of that step: a lane the theory calls "clear" is not marked
+# there (rk4 and Stormer-Verlet call again at the stages' and the kick's
+# operands, which are not the lane's)
+ONE_CALL_SHAPES = ("map", "maph", "euler")
+
+
+def leg_four_alone(rng, everything=False):
+    section("U1. each of atan, asin, acos and atan2 alone, at every format "
+            "and attribute and each integrator: the committed centres, the "
+            "committed structured lanes and atan2's tiny-quotient range put "
+            "in the lanes on purpose, the marks replayed, and the guesses of "
+            "the one-call images counted against the definition (M4's "
+            "build, wave 5)")
+    if not have_mpmath():
+        skip("U1: atan, asin, acos and atan2 alone", "python has no mpmath "
+             "module, which their golden functions (python/cft_golden/"
+             "transcend.py) and their routines' generator (python/"
+             "cft_golden/mathlib.py) need (pip install mpmath)")
+        return
+    iv, ih = inv()
+    t0 = time.perf_counter()
+    steps = 2
+    pins = ih.STRUCT_GUESS_WRONG
+    pin_cells = {(fn, fm) for (fn, fm, _r) in pins}
+    for fn in FOUR:
+        wrong, internal, notmarked, unwanted = [], [], [], []
+        configs = lanes_n = marked = guess = gflags = demanded = 0
+        clear_n = refused = 0
+        by_fmt, shapes = {}, set()
+        cell_gw = {}            # format -> wrong by the golden function
+        cell_pin_run = {}       # format -> pinned attributes run as a map
+        cell_pin_lanes = {}     # format -> pinned lanes found wrong
+        t1 = time.perf_counter()
+        for fi, fmtname in enumerate(FORMATS4):
+            F = FORMATS[fmtname]
+            for ri, rnd in enumerate(ATTRS5):
+                shape = ALONE_SHAPES[(fi * 5 + ri) % 10]
+                shapes.add(shape)
+                text = four_text(fn, fmtname, rnd, shape)
+                what = f"{fn} {fmtname} {rnd} {shape}"
+                lanes = four_lanes(fn, fmtname, rnd, rng, everything)
+                states = four_states(fn, shape, F, lanes, rng)
+                try:
+                    c = cftc.compile_text(text, steps, source=what, stem="n")
+                except lang.Refusal as e:
+                    wrong.append(f"{what}: refused {e.name}: "
+                                 f"{e.sentence[:80]}")
+                    continue
+                except cftc.InternalError as e:
+                    internal.append(f"{what}: internal error (exit 70): "
+                                    f"{str(e)[:120]}")
+                    continue
+                first, runner = [], None
+                if shape == "map":
+                    block = c.scratch_block(states, None, None)
+
+                    def runner(s, c=c, states=states, block=block,
+                               first=first):
+                        r = run_image(image_at(c.image, s), c, states, None,
+                                      None, block=block)
+                        if s == 1:
+                            first.append(r)
+                        return r
+                v = rule_compare(c, states, steps, width=c.ir.n_state,
+                                 runner=runner, tally=False)
+                dem = [None if shape == "sv" and role == "ordinary" else
+                       four_demand(fn, F, rnd, lane) for lane, role in lanes]
+                must = [i for i, d in enumerate(dem) if d == "mark"]
+                clear = [i for i, d in enumerate(dem) if d == "clear"] \
+                    if shape in ONE_CALL_SHAPES else []
+                fcover(c, v, len(must), len(clear))
+                configs += 1
+                lanes_n += len(lanes)
+                marked += len(v.marked)
+                guess += len(v.wrong)
+                gflags += len(v.wrong_flags)
+                demanded += len(must)
+                clear_n += len(clear)
+                d = by_fmt.setdefault(fmtname, [0, 0, 0, 0])
+                d[0] += len(v.marked)
+                d[1] += len(v.wrong)
+                d[2] += len(must)
+                d[3] += len(clear)
+                if first:
+                    # the guess tally: at one step of the map the image's
+                    # state is the guess itself. The oracle is routines.GOLDEN
+                    # (transcend.py), not Ref: each marked lane's guess
+                    # against the golden function of its own argument
+                    r, m = first[0], c.ir.m
+                    mk = [k for k in range(len(lanes))
+                          if r.lane_flags[k] & LANE_MARKED]
+                    gw = [k for k in mk if r.scratch_out[k * m] !=
+                          golden_guess(fn, F, rnd, lanes[k][0])]
+                    tl = FOURCOVER["by_op"][fn]["tally"].setdefault(
+                        fmtname, [0, 0, 0])
+                    tl[0] += len(mk)
+                    tl[1] += len(v.per[1].wrong)
+                    tl[2] += len(gw)
+                    cell_gw[fmtname] = cell_gw.get(fmtname, 0) + len(gw)
+                    if v.per[1].marked != mk or v.per[1].wrong != gw:
+                        wrong.append(f"{what}: at 1 step the rule counts "
+                                     f"{len(v.per[1].wrong)} guesses wrong, "
+                                     f"the golden function {len(gw)} "
+                                     f"(lanes {v.per[1].wrong[:4]} against "
+                                     f"{gw[:4]})")
+                    listed = pins.get((fn, fmtname, RND_CODE[rnd]))
+                    if listed:
+                        cell_pin_run[fmtname] = \
+                            cell_pin_run.get(fmtname, 0) + 1
+                        at = {lanes[k][0] for k in gw}
+                        absent = [x for x in listed
+                                  if x not in {la for la, _r in lanes}]
+                        right = [x for x in listed
+                                 if x in {la for la, _r in lanes}
+                                 and x not in at]
+                        cell_pin_lanes[fmtname] = \
+                            cell_pin_lanes.get(fmtname, 0) + \
+                            len(listed) - len(right) - len(absent)
+                        if absent or right:
+                            wrong.append(
+                                f"{what}: of the {len(listed)} lanes the "
+                                f"harness pins wrong, {len(absent)} are not "
+                                f"in the leg's lanes and {len(right)} are "
+                                f"not wrong by the golden function")
+                if v.failing or not v.flags_ok:
+                    wrong.append(f"{what}: {len(v.failing)} unmarked lanes "
+                                 f"differ; {v.describe()}")
+                lost = [lanes[i][1] for i in must
+                        if i not in v.per[1].marked]
+                if lost:
+                    notmarked.append(f"{what}: demanded and not marked: "
+                                     f"{lost[:3]}")
+                bad = [lanes[i][1] for i in clear if i in v.per[1].marked]
+                if bad:
+                    unwanted.append(f"{what}: theory-clear and marked: "
+                                    f"{bad[:3]}")
+            # the revision-7 refusals, once a function: at the format its
+            # place among the four decides
+            if fmtname == FORMATS4[FOUR.index(fn) % 4]:
+                refused += check_refused_rev7(
+                    four_text(fn, fmtname, "rne", "map"), f"{fn} {fmtname}",
+                    wrong, internal, cover=FOURCOVER)
+        tl = FOURCOVER["by_op"][fn]["tally"]
+        for f in (internal + wrong + notmarked + unwanted)[:8]:
+            print(f"        {f}")
+        fmt_line = ", ".join(f"{f}: {a} marked, {b} wrong, {m} demanded, "
+                             f"{k} clear" for f, (a, b, m, k) in
+                             by_fmt.items())
+        tally_line = ", ".join(f"{f}: {x[1]} by the rule, {x[2]} by the "
+                               f"golden function of {x[0]} marked"
+                               for f, x in tl.items())
+        print(f"  {fn}: {configs} configurations, {lanes_n} lanes; marked "
+              f"{marked}, guesses wrong in value {guess}, in flags {gflags} "
+              f"({fmt_line}) [{time.perf_counter() - t1:.1f} s]")
+        print(f"    guess tally at 1 step, the map configurations: "
+              f"{tally_line}")
+        # the cells: nonzero asserted where the harness pins a wrong guess
+        # (and a pinned attribute ran as a map), the equality everywhere
+        pinned_ok, pinned_not_run, nothing = [], [], []
+        for fmtname in FORMATS4:
+            if (fn, fmtname) in pin_cells:
+                if cell_pin_run.get(fmtname):
+                    pinned_ok.append(fmtname)
+                    if not cell_gw.get(fmtname):
+                        wrong.append(f"{fn} {fmtname}: the harness pins a "
+                                     f"wrong guess here and the golden "
+                                     f"function counts none")
+                else:
+                    pinned_not_run.append(fmtname)
+            else:
+                nothing.append(fmtname)
+        if nothing:
+            print(f"    the replay's values half has nothing to count at "
+                  f"{fn} {', '.join(nothing)}: no committed lane has a "
+                  f"wrong guess (the equality is still asserted over all "
+                  f"the leg's lanes there - rule's count "
+                  f"{ {f: tl.get(f, [0, 0, 0])[1] for f in nothing} }, "
+                  f"golden function's "
+                  f"{ {f: tl.get(f, [0, 0, 0])[2] for f in nothing} } - "
+                  f"and no nonzero count is asserted)")
+        if pinned_not_run:
+            print(f"    the pinned cells {', '.join(pinned_not_run)} of "
+                  f"{fn}: no pinned attribute ran as a map - not run")
+        at = " and ".join(str(s) for s in checkpoints(steps))
+        equal = all(x[1] == x[2] for x in tl.values())
+        pinned_line = ", ".join(f"{f} ({cell_pin_lanes.get(f, 0)} pinned "
+                                f"lanes wrong, {cell_gw.get(f, 0)} wrong in "
+                                f"all)" for f in pinned_ok) or "none"
+        check(not internal and not wrong and not notmarked and
+              not unwanted and equal and configs == 20 and
+              refused == len(REV7_TARGETS),
+              f"U1. {fn}: 20 configurations (4 formats x 5 attributes, "
+              f"{', '.join(sorted(shapes))}), {lanes_n} lanes at {at} steps "
+              f"- ordinary, special, edge, range, structured and the "
+              f"harness's committed lanes ({demanded} the theory demands "
+              f"marked, every one marked; {clear_n} it calls clear, in the "
+              f"{'/'.join(ONE_CALL_SHAPES)} configurations, none marked) "
+              f"- equal the interpreter under the marked-lane rule: "
+              f"{marked} lanes marked and replayed, {guess} guesses wrong in "
+              f"their value, {gflags} in their flags; at 1 step of the map "
+              f"configurations the rule's wrong count equals the golden "
+              f"function's count ({tally_line}), nonzero where the harness "
+              f"pins a wrong guess: {pinned_line}; refused "
+              f"`target-feature`, naming FLAG_CONTROL, on revision 7's "
+              f"{len(REV7_TARGETS)} targets ({refused})",
+              f"{len(wrong) + len(internal) + len(notmarked) + len(unwanted)}"
+              f" otherwise; golden counts {cell_gw}")
+    print(f"  ({time.perf_counter() - t0:.1f} s)")
+
+
+# ---- U2: generated sources that call atan, asin, acos and atan2 --------------
+
+def g_four(rng, k, tangent=None):
+    """(text, direct, components): g_six's system with the calls drawn from
+    FOUR_MIX - the four beside exp and log1p (two of the six) and sin (one of
+    sin, cos and tan), division, the root and the other operations. An
+    argument of asin or acos is `s * 0.5`, so that a component kept in (-2, 2)
+    puts the call's argument in (-1, 1) and a structured argument c is put in
+    the component as 2c; the non-direct forms (`(t * s) * 0.5`,
+    `s / (1 + abs(s))`) keep the argument bounded without a demand.
+    atan2 is a call of two components, y first. `direct` lists (component,
+    function) pairs, for atan2 ((y, x), "atan2"), where a call reads
+    components as they are at the first step."""
+    shape = SHAPES5[k % 5]
+    fmt = FORMATS4[(k // 5 + k) % 4]
+    rnd = ATTRS5[(k + k // 5) % 5]
+    sv = shape == "sv"
+    comps = ["q0", "q1", "m0", "m1"] if sv else \
+        rng.choice([["x", "y"], ["x", "y", "z"]])
+    lines = [f"system fx{k}", f"format {fmt}", f"round {rnd}",
+             "state " + ", ".join(comps)]
+    if tangent:
+        lines.append("tangent v" + (", w" if k % 3 == 2 else ""))
+    elif tangent is None and rng.random() < 0.4:
+        lines.append("tangent v" + (", w" if rng.random() < 0.3 else ""))
+    params = [f"p{i}" for i in range(rng.randint(0, 1))]
+    if params:
+        lines.append("param " + ", ".join(f"{p} = {rng.choice(LITS[:6])}"
+                                          for p in params))
+    direct, count = [], [0]
+
+    def four_term(pool, allow_direct, force=False):
+        fn = FOUR_MIX[(k + count[0]) % len(FOUR_MIX)]
+        count[0] += 1
+        s = rng.choice(pool)
+        t = rng.choice([x for x in pool if x != s] or pool)
+        lit = rng.choice(LITS[:6])
+        form = rng.randrange(5) if allow_direct and (force or
+                                                     rng.random() < 0.8) \
+            else rng.choice((5, 6))
+        if fn == "atan2":
+            call = [f"atan2({s}, {t})", f"atan2({t} * {s}, {s})",
+                    f"atan2(abs({s}) + 1, {t})"][0 if form < 5 else
+                                                  1 + form - 5]
+        elif fn in ("asin", "acos"):
+            call = [f"{fn}({s} * 0.5)", f"{fn}(({t} * {s}) * 0.5)",
+                    f"{fn}({s} / (1 + abs({s})))"][0 if form < 5 else
+                                                  1 + form - 5]
+        else:
+            call = [f"{fn}({s})", f"{fn}({t} * {s})",
+                    f"{fn}(abs({s}) + 1)"][0 if form < 5 else 1 + form - 5]
+        expr = [call, f"{call} * {lit}", f"fma({call}, {t}, {lit})",
+                f"{call} / ({t} * {t} + 1)", f"sqrt(abs({call})) + {t}",
+                call, call][form]
+        if form < 5:
+            direct.append(((s, t), fn) if fn == "atan2" else (s, fn))
+        return expr
+    extra = list(params)
+    if not sv and rng.random() < 0.33:
+        lines.append(f"let r = {four_term(comps, True)}")
+        extra.append("r")
+    if sv:
+        reads = {"q0": ["m0", "m1"], "q1": ["m0", "m1"],
+                 "m0": ["q0", "q1"], "m1": ["q0", "q1"]}
+        word, first_eq = "d/dt", len(lines) + 1
+    else:
+        reads = {c: comps + (["h"] if shape == "maph" else [])
+                 for c in comps}
+        word, first_eq = "next" if shape.startswith("map") else "d/dt", \
+            len(lines) + 1
+    for i, c in enumerate(comps):
+        pool = [s for s in reads[c] if s != "h"]
+        allow = (c[0] == "q") if sv else True
+        if (i == 0 and not direct) or rng.random() < 0.75:
+            rhs = four_term(pool, allow, force=(i == 0 and not direct))
+        else:
+            rhs = g_expr(rng, reads[c], 2)
+        lines.append(f"{word} {c} = {rhs}")
+    used = extra + (["h"] if shape == "maph" else [])
+    if used:
+        lines[first_eq - 1] += " + " + " + ".join(used)
+    lines.append({"map": "step map", "maph": "step map, h = 1/8",
+                  "rk4": "step rk4, h = 1/8", "euler": "step euler, h = 1/8",
+                  "sv": "step stormer-verlet, h = 1/8, q = (q0, q1), "
+                        "p = (m0, m1)"}[shape])
+    return "\n".join(lines) + "\n", direct, comps
+
+
+def half_of(F, bits):
+    """The encoding of half of `bits` (a normal finite value): what a
+    component holds so that `s * 0.5` reads `bits`, exactly."""
+    return bits + (1 << F.man_w)
+
+
+def four_source_lanes(g, rng, direct, comps, k, everything=False):
+    """The lanes a generated source of the four runs on: ordinary ones (in
+    (-2, 2)), the primal's three special lanes, a zero lane, and for each
+    distinct direct call lanes (two, twelve with `everything`) with the
+    committed centres of its function - at fp64 and up - put where the call
+    reads them (for asin and acos as twice the centre, under the wrapper
+    `* 0.5`, and for atan2 as the pair (y, x) in its two components), and
+    for atan2 at every format two tiny-quotient range pairs. The demand is
+    computed from the operand the call reads. -> (lanes, roles); a role is
+    "ordinary", "special", "zero" or (kind, function, label, operand)."""
+    iv, _ih = inv()
+    fmt, n = g.fmt, g.n_state
+    lanes = lanes_for(fmt, n, rng, 3, (-2, 2))
+    lanes += special_lanes(fmt, n, lanes[0], rng)
+    lanes.append([0] * n)
+    roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+    for s, fn in sorted({d for d in direct if d[1] in FOUR}, key=lambda d: (
+            [comps.index(x) for x in d[0]] if isinstance(d[0], tuple)
+            else [comps.index(d[0])], d[1])):
+        cs = [] if fmt.name == "fp32" else \
+            iv.expand(iv.INV_FAMILY[fn][fmt.name][g.round_name])
+        picks = sample_centres([c for c in cs if c[0] in ("tiny", "win")],
+                               fn, fmt, everything)
+        ops = [("structured", iv.centre_lane(fn, fmt, picks[(k + j) %
+                                                           len(picks)]),
+                picks[(k + j) % len(picks)])
+               for j in range(min(12 if everything else 2, len(picks)))]
+        if fn == "atan2":
+            far = four_range_pairs(fmt)
+            ops += [("range", far[(3 * k + 4 * j) % len(far)][0], f"range {j}")
+                    for j in range(2)]
+        for j, (kind, operand, label) in enumerate(ops):
+            lane = list(lanes[j % 3])
+            if fn == "atan2":
+                lane[comps.index(s[0])], lane[comps.index(s[1])] = operand
+            else:
+                lane[comps.index(s)] = half_of(fmt, operand) \
+                    if fn in ("asin", "acos") else operand
+            lanes.append(lane)
+            roles.append((kind, fn, label, operand))
+    return lanes, roles
+
+
+def leg_four_generated(count, rng, everything=False):
+    section(f"U2. {count} generated sources that call atan, asin, acos and "
+            f"atan2 beside division, the root, exp, log1p and sin and the "
+            f"other operations, compiled for the software targets and run "
+            f"against the interpreter under the marked-lane rule, and "
+            f"refused `target-feature` on revision 7's (M4's build, wave 5)")
+    if not have_mpmath():
+        skip("U2: generated sources that call atan, asin, acos and atan2",
+             "python has no mpmath module (see U1)")
+        return
+    t0 = time.perf_counter()
+    tally, wrong, internal = {}, [], []
+    held = marked = guess = gtan = demanded = flags = refused = 0
+    fours, kinds, cli = set(), set(), []
+    t_compile = t_run = t_refuse = 0.0
+    for k in range(count):
+        text, direct, comps = g_four(random.Random(f"lang four {k}"), k)
+        what = f"four {k}"
+        try:
+            g = lang.compile_text(text, what).graph
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name not in SIX_ARTIFACTS:
+                wrong.append(f"{what}: the language refused {e}")
+            continue
+        used = {op for op in g.op_counts("step") if op in FOUR}
+        if not used:
+            wrong.append(f"{what}: none of the four in its step")
+        canon = lang.render_canonical(g)
+        if lang.compile_text(canon, "canonical").graph.to_bytes() != \
+                g.to_bytes():
+            wrong.append(f"{what}: its canonical form reads back as "
+                         f"another graph")
+        lang.render_math(g)
+        try:
+            t1 = time.perf_counter()
+            images, c = {}, None
+            for t in (SW_TARGETS if k < SIX_ALL_TARGETS else SW_TARGETS[:1]):
+                ct = cftc.compile_text(text, 5, target=t, source=what,
+                                       stem="n")
+                images[t] = ct.image
+                c = c or ct             # the run is sw's, at its own depth
+            t_compile += time.perf_counter() - t1
+            if len(set(images.values())) != 1:
+                wrong.append(f"{what}: the software targets' images differ")
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            wrong.append(f"{what}: refused {e.name} on the software "
+                         f"targets: {e.sentence[:100]}")
+            continue
+        except cftc.InternalError as e:
+            internal.append(f"{what}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+            continue
+        lanes, roles = four_source_lanes(g, rng, direct, comps, k,
+                                         everything)
+        tans = None
+        if g.tangent:
+            tans = [[lanes_for(g.fmt, g.n_state, rng, 1)[0]
+                     for _ in g.tangent] for _ in lanes]
+        t1 = time.perf_counter()
+        v = rule_compare(c, lanes, 5, tans=tans, width=c.ir.n_state,
+                         tally=False)
+        t_run += time.perf_counter() - t1
+        flags |= v.ref.flags
+        must = [i for i, r in enumerate(roles) if isinstance(r, tuple) and
+                four_demand(r[1], g.fmt, g.round_name, r[3]) == "mark"]
+        fcover(c, v, len(must))
+        lost = [roles[i][1:3] for i in must if i not in v.per[1].marked]
+        marked += len(v.marked)
+        guess += len(v.wrong)
+        gtan += len(v.wrong_tangents)
+        demanded += len(must)
+        fours |= used
+        kinds.add(g.integrator[0])
+        if v.failing or not v.flags_ok:
+            wrong.append(f"{what}: {len(v.failing)} unmarked lanes differ; "
+                         f"{v.describe()}")
+        elif lost:
+            wrong.append(f"{what}: demanded and not marked: {lost[:3]}")
+        else:
+            held += 1
+        t1 = time.perf_counter()
+        refused += check_refused_rev7(
+            text, what, wrong, internal, 5,
+            REV7_TARGETS if k < SIX_ALL_TARGETS else REV7_TARGETS[:1],
+            cover=FOURCOVER)
+        t_refuse += time.perf_counter() - t1
+        if not cli:
+            cli.append((k, text))
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, text in cli:
+            src = Path(tmp) / f"four{k}.cftl"
+            src.write_bytes(text.encode("ascii"))
+            out = Path(tmp) / f"sw{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                                     str(out)], capture_output=True,
+                               text=True)
+            if p.returncode != 0 or not (out / f"four{k}.cfta").is_file():
+                wrong.append(f"four {k} through the command line on sw: rc "
+                             f"{p.returncode}, {p.stderr.strip()[:120]}")
+            out = Path(tmp) / f"quad{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                     "u50-rev7-quad", "--out", str(out)],
+                               capture_output=True, text=True)
+            if p.returncode != 3 or not p.stderr.startswith(
+                    "cftc: refused target-feature: ") or out.exists():
+                wrong.append(f"four {k} through the command line on "
+                             f"u50-rev7-quad: rc {p.returncode}, "
+                             f"{p.stderr.strip()[:120]}")
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    print(f"  outcomes: {dict(sorted(tally.items()))}; the four used: "
+          f"{sorted(fours)}; integrators {sorted(kinds)}; FLAGS over the "
+          f"{held} sources held: {flags:#x}")
+    print(f"  compile {t_compile:.1f} s, run under the rule {t_run:.1f} s, "
+          f"the refusals {t_refuse:.1f} s")
+    check(not internal, f"no InternalError: {count} generated sources that "
+          f"call the four, on {len(SW_TARGETS) + len(REV7_TARGETS)} targets "
+          f"each", f"{len(internal)} stopped the compiler with an internal "
+          f"error, exit 70")
+    check(not wrong and held >= count // 2 and fours == set(FOUR),
+          f"U2. {held} sources accepted by the language read back, compiled "
+          f"for sw - the first {SIX_ALL_TARGETS} for sw:4096 and sw:32768 "
+          f"too, one image for the three software targets - and run on "
+          f"seq.py equal to the interpreter at 1, 2 and 5 steps, states, "
+          f"tangents and FLAGS, under the marked-lane rule: structured and "
+          f"range arguments in "
+          f"the components the calls read ({demanded} demanded marked, "
+          f"every one marked), {marked} lanes marked and replayed, {guess} "
+          f"guesses wrong in their values ({gtan} in their tangents too); "
+          f"atan, asin, acos and atan2 among them, under "
+          f"{', '.join(sorted(kinds))}; each refused `target-feature`, "
+          f"naming FLAG_CONTROL, by u50-rev7, the first {SIX_ALL_TARGETS} "
+          f"by all {len(REV7_TARGETS)} of revision 7's targets ({refused} "
+          f"refusals), and {len(cli)} through the command line (exit 0 on "
+          f"sw, exit 3 on u50-rev7-quad, nothing written) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise")
+
+
+# ---- U3: the call loop over a batch of the four -----------------------------
+#
+# As T3 for the three (python/cftc/callloop.py): the constant lowered, every
+# batch looped and the largest alone. The batches are listed by depth and then
+# in callloop.ORDER (batches), and the largest is the one whose calls are the
+# most instructions (calls times the fragment's size, check.held_fragment's),
+# ties to the shallower and then by ORDER (callloop.by_size) - which the leg
+# mirrors from the code, not from a document.
+
+FOUR_LOOPS = {
+    "A": ("system fourloopa\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = atan(a) + atan2(a, b) * 0.125\n"
+          "next b = atan(b) - asin(a * 0.5)\n"
+          "next c = asin(c * 0.5) + acos(d * 0.5)\n"
+          "next d = acos(c * 0.5) * (1/3) + atan2(c, d)\nstep map\n",
+          (("a", "atan"), ("b", "atan"), (("a", "b"), "atan2"),
+           (("c", "d"), "atan2"), ("a", "asin"), ("c", "asin"),
+           ("d", "acos"), ("c", "acos")),
+          [("acos", 1, 2), ("asin", 1, 2), ("atan", 1, 2), ("atan2", 1, 2)]),
+    "B": ("system fourloopb\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = atan2(atan(a), atan(b))\n"
+          "next b = atan2(atan(b), 2)\n"
+          "next c = acos(asin(c * 0.5) * 0.5)\n"
+          "next d = acos(asin(d * 0.5) * 0.5) - 0.25\nstep map\n",
+          (("a", "atan"), ("b", "atan"), ("c", "asin"), ("d", "asin")),
+          [("acos", 2, 2), ("asin", 1, 2), ("atan", 1, 2), ("atan2", 2, 2)]),
+    # A with one atan2 call: at fp32 a looped batch of two atan2 calls stops
+    # the compiler with an internal error (exit 70), so this source keeps
+    # atan2 a batch of one, which is never looped, inlined among the three
+    # looped batches
+    "C": ("system fourloopc\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = atan(a) + atan2(a, b) * 0.125\n"
+          "next b = atan(b) - asin(a * 0.5)\n"
+          "next c = asin(c * 0.5) + acos(d * 0.5)\n"
+          "next d = acos(c * 0.5) * (1/3)\nstep map\n",
+          (("a", "atan"), ("b", "atan"), (("a", "b"), "atan2"),
+           ("a", "asin"), ("c", "asin"), ("d", "acos"), ("c", "acos")),
+          [("acos", 1, 2), ("asin", 1, 2), ("atan", 1, 2)]),
+}
+# source, format, attribute: A at fp64 under rdn (the windows), A at fp256
+# under rup (the long lists of atan, asin and atan2), C at fp32 under rne
+# (atan2's range pairs, the only lanes demanded there), B at fp128 under rne
+# and B at fp256 under rdn
+FOUR_LOOP_CASES = (("A", "fp64", "rdn"), ("A", "fp256", "rup"),
+                   ("C", "fp32", "rne"), ("B", "fp128", "rne"),
+                   ("B", "fp256", "rdn"))
+
+
+def leg_four_loops(rng, everything=False):
+    from cftc import callloop
+    from cftc.check import held_fragment
+    above = callloop.CALL_LOOP_ABOVE
+    section("U3. the call loop over a batch of atan, asin, acos and atan2 "
+            "(M4's build, wave 5): the constant lowered as leg L lowers it "
+            "for Kepler, every batch looped and the largest alone, run "
+            "against the interpreter under the marked-lane rule")
+    if not have_mpmath():
+        skip("U3: the call loop over a batch of the four", "python has no "
+             "mpmath module (see U1)")
+        return
+    iv, _ih = inv()
+    t0 = time.perf_counter()
+    wrong, internal = [], []
+    marked = guess = demanded = images = 0
+    comps = ["a", "b", "c", "d"]
+    for name, fmtname, rnd in FOUR_LOOP_CASES:
+        template, places, want_all = FOUR_LOOPS[name]
+        text = template.format(fmt=fmtname, rnd=rnd)
+        F = FORMATS[fmtname]
+        size = len(cftc.compile_text(text, 5, source=f"fourloop{name}")
+                   .program.body) + 1
+        try:
+            for low_to, what in ((0, "every batch"),
+                                 (size - 1, "the largest batch alone")):
+                callloop.CALL_LOOP_ABOVE = low_to
+                tag = f"four loop {name} {fmtname} {rnd}, {what}"
+                try:
+                    c = cftc.compile_text(text, 5, source=tag, stem="n")
+                except cftc.InternalError as e:
+                    internal.append(f"{tag}: internal error (exit 70): "
+                                    f"{str(e)[:120]}")
+                    continue
+                looped = sorted((b.op, b.depth, len(b.calls))
+                                for b in c.looped)
+                if low_to == 0:
+                    ok_loops = looped == want_all
+                else:
+                    fsize = {op: len(held_fragment(op, F, RND_CODE[rnd]))
+                             for op, _d, _n in want_all}
+                    best = min(want_all, key=lambda b: (
+                        -b[2] * fsize[b[0]], b[1], callloop.ORDER[b[0]]))
+                    ok_loops = looped == [best]
+                if not ok_loops:
+                    wrong.append(f"{tag}: looped {looped}")
+                g = c.ir
+                lanes = lanes_for(g.fmt, g.n_state, rng, 3, (-2, 2))
+                lanes += special_lanes(g.fmt, g.n_state, lanes[0], rng)
+                lanes.append([0] * g.n_state)
+                roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+                for comp, fn in places:
+                    if fmtname == "fp32":
+                        cs = []
+                    else:
+                        cs = [x for x in iv.expand(
+                            iv.INV_FAMILY[fn][fmtname][rnd])
+                            if x[0] in ("tiny", "win")]
+                    ops = [iv.centre_lane(fn, F, x)
+                           for x in cs[:6 if everything else 2]]
+                    if fn == "atan2":
+                        ops += [lane for lane, _l in
+                                four_range_pairs(F)[:3 if everything else 1]]
+                    for j, operand in enumerate(ops):
+                        lane = list(lanes[j % 3])
+                        if fn == "atan2":
+                            lane[comps.index(comp[0])], \
+                                lane[comps.index(comp[1])] = operand
+                        else:
+                            lane[comps.index(comp)] = half_of(F, operand) \
+                                if fn in ("asin", "acos") else operand
+                        lanes.append(lane)
+                        roles.append((fn, comp, operand))
+                v = rule_compare(c, lanes, 5, width=c.ir.n_state,
+                                 tally=False)
+                fcover(c, v)
+                must = [(i, r[0]) for i, r in enumerate(roles)
+                        if isinstance(r, tuple) and
+                        four_demand(r[0], F, rnd, r[2]) == "mark"]
+                marked += len(v.marked)
+                guess += len(v.wrong)
+                demanded += len(must)
+                images += 1
+                lost = [m for m in must if m[0] not in v.per[1].marked]
+                if v.failing or not v.flags_ok:
+                    wrong.append(f"{tag}: {len(v.failing)} unmarked lanes "
+                                 f"differ; {v.describe()}")
+                if lost:
+                    wrong.append(f"{tag}: demanded and not marked: "
+                                 f"{lost[:3]}")
+        finally:
+            callloop.CALL_LOOP_ABOVE = above
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    cases = ", ".join(f"{n} at {f} under {r}" for n, f, r in FOUR_LOOP_CASES)
+    check(not internal and not wrong and images == 2 * len(FOUR_LOOP_CASES),
+          f"U3. a step of the four looped, the constant lowered: {images} "
+          f"images - source A (an atan, an asin, an acos and an atan2 batch "
+          f"of two calls, all at depth 1), source B (atan2 and acos "
+          f"batches at depth 2, reading the atan and asin calls) and source "
+          f"C (A with one atan2 call, so that atan2 is a batch of one and "
+          f"is never looped): {cases}; "
+          f"each with every batch looped and with the largest alone - run on "
+          f"seq.py at 1, 2 and 5 steps equal to the interpreter under the "
+          f"marked-lane rule, FLAGS included: structured and range "
+          f"arguments in the components the calls read ({demanded} "
+          f"(lane, call) pairs demanded marked, every lane marked, "
+          f"{marked} lanes marked and replayed, in the loops' iterations "
+          f"and out, {guess} guesses wrong) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong) + len(internal)} otherwise")
+
+
+def leg_four(count, rng_for, everything=False):
+    """U1 to U3, atan, asin, acos and atan2 compiled and run (each with its
+    own generator, so that one's lanes do not move another's)."""
+    leg_four_alone(rng_for("four alone"), everything)
+    leg_four_generated(count, rng_for("four generated"), everything)
+    leg_four_loops(rng_for("four loops"), everything)
+
+
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage():
@@ -4923,12 +5902,15 @@ def leg_routine_coverage():
     if have_mpmath():
         six_coverage()
         three_coverage()
+        four_coverage()
     else:
         skip("I2: the math library's six", "python has no mpmath module, "
              "which their legs (N1 to N3) need; the tally of div and sqrt "
              "above stands alone")
         skip("I2: sin, cos and tan", "python has no mpmath module, which "
              "their legs (T1 to T3) need")
+        skip("I2: atan, asin, acos and atan2", "python has no mpmath module, "
+             "which their legs (U1 to U3) need")
 
 
 def six_coverage():
@@ -4983,6 +5965,80 @@ def six_coverage():
           f"value ({MARKS['wrong_tangents']} in tangents too), "
           f"{MARKS['wrong_flags']} in flags",
           f"{SCOVER['refusals']} refusals, {MARKS['marked']} lanes marked")
+
+
+def four_coverage():
+    """The routines tally's fourth part (M4's build, wave 5), from legs U1 to
+    U3: each of atan, asin, acos and atan2 compiled and run at every format,
+    under every attribute and integrator; the five flags those runs raised;
+    the marks seen and replayed, at fp64, fp128 and fp256, where the
+    families have centres (fp32 has none, so atan2's tiny-quotient range
+    lanes are the only lanes demanded there); the guess tally against the
+    golden function; the call loops, run; and the refusals on revision 7."""
+    section("I2 (atan, asin, acos and atan2). what legs U1 to U3 covered")
+    T = FOURCOVER
+    for fn, d in T["by_op"].items():
+        tl = ", ".join(f"{f}: {x[1]} by the rule, {x[2]} by the golden "
+                       f"function" for f, x in sorted(d["tally"].items()))
+        print(f"  {fn}: {d['images']} images; formats {sorted(d['formats'])}; "
+              f"attributes {sorted(d['rounds'])}; integrators "
+              f"{sorted(d['integrators'])}; alone, {d['marked']} lanes "
+              f"marked and replayed ({d['demanded']} demanded, {d['clear']} "
+              f"demanded clear), {d['wrong']} guesses wrong in value, "
+              f"{d['wrong_flags']} in flags; marks at "
+              f"{sorted(d['marked_formats'])}; guess tally ({tl})")
+        check(d["images"] and d["formats"] == set(FORMATS4),
+              f"{fn}, a routine: compiled and run at every format",
+              f"{d['images']} images, at {sorted(d['formats'])}")
+        check(d["rounds"] == set(ATTRS5),
+              f"{fn}: under every attribute, the routine specialised at "
+              f"each", f"{sorted(d['rounds'])}")
+        check(d["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"},
+              f"{fn}: under every integrator", f"{sorted(d['integrators'])}")
+        check({"fp64", "fp128", "fp256"} <= d["marked_formats"] and
+              d["marked"] >= d["demanded"] > 0,
+              f"{fn}: marks seen and replayed at fp64, fp128 and fp256 "
+              f"- every format where it has a committed centre - "
+              f"{d['marked']} lanes, {d['demanded']} demanded by the theory",
+              f"marks at {sorted(d['marked_formats'])}: {d['marked']} lanes "
+              f"of {d['demanded']} demanded")
+        check(all(x[1] == x[2] for x in d["tally"].values()),
+              f"{fn}: the rule's count of wrong guesses equals the golden "
+              f"function's at every format ({tl})", f"tally {d['tally']}")
+    at = {fn: d["demanded_at"] for fn, d in T["by_op"].items()}
+    check("fp32" in T["by_op"]["atan2"]["marked_formats"] and
+          at["atan2"].get("fp32", 0) > 0 and
+          all(at[fn].get("fp32", 0) == 0 for fn in FOUR if fn != "atan2") and
+          all(at[fn].get(f, 0) > 0 for fn in FOUR
+              for f in ("fp64", "fp128", "fp256")),
+          f"fp32 as it is: of the four only atan2 has demanded lanes there "
+          f"({at['atan2'].get('fp32', 0)}, its tiny-quotient range, by "
+          f"atan2_status; classify has no fp32 threshold), atan, asin and "
+          f"acos none ({[at[fn].get('fp32', 0) for fn in FOUR[:3]]}), and "
+          f"every function has demanded lanes at fp64, fp128 and fp256 "
+          f"({at}); atan2 marked lanes at fp32 too",
+          f"demanded by format {at}; atan2 marks at "
+          f"{sorted(T['by_op']['atan2']['marked_formats'])}")
+    for flag, word in ((sf.FLAG_INVALID, "invalid"),
+                       (sf.FLAG_OVERFLOW, "overflow"),
+                       (sf.FLAG_UNDERFLOW, "underflow"),
+                       (sf.FLAG_INEXACT, "inexact")):
+        check(T["flags"] & flag, f"an image of the four's run raised {word}")
+    # no result of the four is an exact infinity from finite operands, so
+    # divideByZero is not asked of them (it is the three's and the six's)
+    print(f"  divideByZero: "
+          f"{'raised' if T['flags'] & sf.FLAG_DIVZERO else 'not raised'} "
+          f"by these runs (not asserted)")
+    check(T["loops"] and T["looped_ops"] == set(FOUR),
+          f"call loops of the four compiled and run: {T['loops']} loops of "
+          f"{T['looped_calls']} calls, {', '.join(sorted(T['looped_ops']))}",
+          f"{T['loops']} loops, of {sorted(T['looped_ops'])}")
+    check(T["refusals"] > 0 and T["marked"] > 0,
+          f"{T['refusals']} refusals `target-feature` on revision 7's "
+          f"targets; the rule saw {T['marked']} lanes marked and replayed in "
+          f"{T['comparisons']} comparisons of {T['lanes']} lanes, "
+          f"{T['wrong']} guesses wrong in value, {T['wrong_flags']} in flags",
+          f"{T['refusals']} refusals, {T['marked']} lanes marked")
 
 
 def three_coverage():
@@ -5059,7 +6115,7 @@ GROUPS = (("core", ("refs", "corpus", "letmaps", "banks", "libcft",
                     "determinism", "refusals", "plants", "readback"),
            "I, the core tally"),
           ("routines", ("routines", "pools", "loops", "rule", "six",
-                         "three"),
+                         "three", "four"),
            "I2, the routines' tally"))
 
 
@@ -5126,18 +6182,31 @@ def main(argv=None):
                          "centres for each distinct (component, function) pair "
                          "of a source's direct calls. T3: six centres a call's component. "
                          "(Minutes more; the default is gate-sized)")
+    ap.add_argument("--four", type=int, default=12,
+                    help="generated sources that call atan, asin, acos and "
+                         "atan2 in leg U2 (default 12)")
+    ap.add_argument("--four-all", action="store_true",
+                    help="the larger draw of the four's legs. U1: up to 150 "
+                         "spread centres of the tiny and window families a "
+                         "configuration, the first eight with their windows' "
+                         "neighbours, twelve ordinary lanes, six more "
+                         "tiny-quotient range pairs of atan2 and six "
+                         "near-1 lanes. U2: up to twelve centres for each "
+                         "distinct direct call of a source. U3: six centres "
+                         "a call and three range pairs. (Minutes more; the "
+                         "default is gate-sized)")
     ap.add_argument("--group", default="",
                     help="a comma list of groups, each its legs and its tally: "
                          "core (refs, corpus, letmaps, banks, libcft, "
                          "determinism, refusals, plants, readback; the lang "
                          "stage) and routines (routines, pools, loops, rule, "
-                         "six, three; the lang-routines stage). With neither "
+                         "six, three, four; the lang-routines stage). With neither "
                          "--group nor --only, both")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs, corpus, letmaps, banks, "
                          "libcft, determinism, refusals, plants, readback "
                          "(the core group), routines, pools, loops, rule, "
-                         "six, three (the routines group); a group's tally "
+                         "six, three, four (the routines group); a group's tally "
                          "runs "
                          "only when all its legs ran, and is a SKIP line "
                          "otherwise")
@@ -5194,7 +6263,8 @@ def main(argv=None):
                                              a.audit, work)),
             ("rule", leg_rule),
             ("six", lambda: leg_six(a.six, rng, a.six_all)),
-            ("three", lambda: leg_three(a.three, rng, a.three_all))]
+            ("three", lambda: leg_three(a.three, rng, a.three_all)),
+            ("four", lambda: leg_four(a.four, rng, a.four_all))]
     if sorted(name for name, _fn in legs) != sorted(known):
         raise AssertionError("a leg is in no group, or a group names a leg "
                              "there is not")
