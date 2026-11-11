@@ -1,0 +1,28 @@
+== gpu_run.sh 2026-11-10 16:56:06 device 1
+-- 16:56:06 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 38 %, 1917 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ tc_plain
+toolchain_check: HIP_VERSION 71626385, 1 device(s)
+device 0: NVIDIA GeForce RTX 5060 Ti, cc 12.0, arch '¾eX‰', bus 0000:05:00.0, 36 CUs/SMs, warp 32: 0 of 1048576 lanes wrong
+toolchain_check: PASS
+-- 16:56:08 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 20 %, 1987 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ tc_hipcc
+toolchain_check: HIP_VERSION 71626385, 1 device(s)
+device 0: NVIDIA GeForce RTX 5060 Ti, cc 12.0, arch '', bus 0000:05:00.0, 36 CUs/SMs, warp 32: 0 of 1048576 lanes wrong
+toolchain_check: PASS
+-- 16:56:09 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 23 %, 1996 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ cft_fma (plain) conf-fp256
+check: ~/gpu-a/corpus/conf-fp256.bin on NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 refused; differing by attribute 0/0/0/0/0; sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9; kernel 21.658 ms, end to end 23.017 ms: GREEN
+verify: plain-conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+-- 16:56:10 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 44 %, 1985 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ cft_fma (hipcc-build) conf-fp256
+check: ~/gpu-a/corpus/conf-fp256.bin on NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 refused; differing by attribute 0/0/0/0/0; sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9; kernel 10.163 ms, end to end 11.176 ms: GREEN
+verify: hipcc-build-conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+== gpu_run.sh 2026-11-10 16:56:12 rc=0

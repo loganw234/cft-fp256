@@ -1,0 +1,14 @@
+# plain nvcc build of cft_fma.hip after C1: warnings by kind
+      3 "HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM" redefined
+      3 "HIP_GET_PROC_ADDRESS_LEGACY_STREAM" redefined
+      3 "HIP_GET_PROC_ADDRESS_DEFAULT" redefined
+      1 ‘cudaError_t cudaMemcpyToArray
+      1 ‘cudaError_t cudaMemcpyFromArray
+      1 ‘cudaError_t cudaLaunchCooperativeKernelMultiDevice
+      1 ‘cudaError_t cudaFuncSetSharedMemConfig
+      1 ‘cudaError_t cudaDeviceSetSharedMemConfig
+      1 ‘cudaError_t cudaDeviceGetSharedMemConfig
+      1 ‘CUresult cuTexRefSetMaxAnisotropy
+      1 ‘CUresult cuTexRefSetFormat
+      1 ‘CUresult cuTexRefSetFlags
+# errors: 0

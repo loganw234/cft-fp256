@@ -1,0 +1,7 @@
+# git ls-remote of github.com/ROCm/<repo>: lines (heads+tags) and the newest rocm-* / therock-* tags
+hipother: 90 refs; rocm-7.2.2 rocm-7.2.3 rocm-7.2.4 
+HIP: 484 refs; rocm-7.2.2 rocm-7.2.3 rocm-7.2.4 
+clr: 221 refs; rocm-7.2.2 rocm-7.2.3 rocm-7.2.4 
+hipcc: 93 refs; rocm-5.7.1 rocm-6.0.0 rocm-6.0.2 
+rocm-systems: 5419 refs; therock-7.14.1 therock-10.0 therock-10.1 
+llvm-project: 2711 refs; therock-7.14.1 therock-10.0 therock-10.1 

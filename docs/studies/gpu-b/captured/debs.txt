@@ -1,0 +1,5 @@
+Package: hip-dev Version: 7.16.26385-7da43026e4-local Depends: libc6, file, hip-runtime-amd, rocm-llvm, hsa-rocr-dev, hipcc 
+Package: hip-doc Version: 7.16.26385-7da43026e4-local Depends: hip-dev (= 7.16.26385-7da43026e4-local) 
+Package: hip-runtime-amd Version: 7.16.26385-7da43026e4-local Depends: hsa-rocr, rocminfo, comgr, libnuma1, libstdc++6, libc6, libgcc-s1 
+Package: hip-runtime-nvidia Version: 7.16.26385-7da43026e4-local Depends: cuda (>= 7.5), hipcc-nvidia 
+Package: hipcc-nvidia Version: 1.1.1.99999-local 

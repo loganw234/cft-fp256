@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Fifty-three files, 97,137 lines. Flat in one directory they look like one
+Fifty-four files, 97,394 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **29,017 lines you consult while working** — the three under *Start here*,
@@ -8,12 +8,12 @@ undifferentiated pile; they are not, and the split is close to even:
 - **7,894 lines of tool manual**, one per shipped program;
 - **4,250 lines of operations**, read when you are about to do something to
   hardware;
-- **55,976 lines of record and argument** — the ledger, the roadmap and the
+- **56,233 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of fifty-three names feels heavier than the work actually is.
+flat listing of fifty-four names feels heavier than the work actually is.
 
 This index exists because the README linked eight of the thirty-four there
 were and nothing linked the other twenty-six. Nothing has moved: a file's
@@ -141,6 +141,7 @@ questions.
 | [studies/SCHED-A-card-scheduler.md](studies/SCHED-A-card-scheduler.md) | 976 | a design for one scheduler per machine that owns the card's time, written before any of it is built, at Logan's word of 2026-10-21 (the nightly window of 18:00 to 08:00 on whatever the sweep has not reached, staged program runs, metrics on the card and its performance, the lead's box scripts replaced, several cards later): what exists, checked (the stress driver and what it does not do, among them that its guard is not a lock; the lead's seventeen box scripts, whose guards are written nine ways and whose `pgrep` pattern misses four card users the driver names; the card, the box and the remote backend; what reads the driver's output; the part of the sweep study's coverage ledger a nightly needs, and that the nightly's resume is blind to trees in its planner), the data volumes (a night's record is 1.6 to 1.8 MB), what a preemption costs (3.5 minutes on average to a safe point, 8.7 at the 95th percentile), the requirements, the options for architecture, jobs, code, cards, coverage, the metrics store, the interface, deployment and failure, a recommended first version (a scheduler around the unchanged driver, launched by the lead, a file queue, refusals by name), a build plan in parcels with their plants, and thirteen questions for Logan; its five scripts and their captured runs are in `studies/sched-a/` |
 | [studies/HX-wide-sweeps.md](studies/HX-wide-sweeps.md) | 771 | which exhaustive-type sweeps the card can finish at fp64, fp128 and fp256, written after the nightly covered its 71 exhaustive items, at Logan's word of 2026-10-26: the cross-format ladder settled by exhaustion at toy precisions and at p = 24 on the constructed hard cases (the product and quotient need p' >= 2p, the sum 2p + 1, the root 2p + 2; it fails for the FMA at every rung; it sees nothing below the top 56 bits of a wide result over the fp32 slice), the card's rates at the wide formats measured by a probe the lead ran on amd-arc-box, the spaces (the fp32 slice, sub-slices of fp64, low-bit windows, hard cases and class items at fp128 and fp256) sized with the tree's own generators, the oracles (MPFR, the native CPU, quadmath, the golden model, exact identities and a residual check), each item's card time, a first phase of about 133 tile-hours, the parcels that would build it and nine questions for Logan; its scripts and their captured runs are in `studies/hx/`, the probe's box outputs in `studies/hx/box-out/` |
 | [studies/GPU-A-hip.md](studies/GPU-A-hip.md) | 539 | whether one HIP source runs libcft's arithmetic bit for bit on AMD and NVIDIA GPUs and what it costs, the roadmap's first step for a GPU backend, at Logan's word of 2026-11-10: host/src's softfloat and bigint compiled as device code by a scripted copy with one edit kind (105 `__host__ __device__` insertions, checked at every build), one source built for the CPU, HIP over CUDA 12.9 (HIP 7.2.4, the last release that packages the NVIDIA platform), HIP over ROCm 10.1 and plain nvcc through a 52-line header of the study's own, held to the golden model on the conformance vectors' 73,780 FMA cases and a 4,000,000-case seeded stream at every format and attribute on an RTX 4070, an RTX 5060 Ti, an RX 7600 and two CPU builds, three plants red everywhere, the compilers' hazards run as build variants, and the rates: 77 to 175 M fp256 FMAs a second for libcft's code and 0.89 to 1.38 G for a second kernel on fixed limbs, a second implementation held to the first on 2.4 x 10^9 counter-generated hard cases, against the quad's 427 M; a gfx942 build and runbook for the MI300X, what a backend would need and seven questions for Logan; its code, runbooks and captured runs are in `studies/gpu-a/` |
+| [studies/GPU-B-hip-nvidia.md](studies/GPU-B-hip-nvidia.md) | 257 | what bringing HIP's NVIDIA platform back to the official build would involve, the third leg of Logan's answer on GPU-A's NVIDIA leg, at his word of 2026-11-10: ROCm 10.1 left the NVIDIA platform in its sources (clr's CMake option, hipother's headers, hipcc's NVIDIA mode, an AMD compile-only CI on CUDA 13.2) and left it out of the release (no packages, no install page, no release note, TheRock builds `HIP_PLATFORM=amd` only, AMD's own workflow says it will not publish CUDA artifacts); HIP 7.16.26385 for NVIDIA assembled by hand from the tag `therock-10.1` in about 6 minutes with one change (13 lines for CUDA 12.9), the hipcc built from source reproducing GPU-A's hazards N1 to N3, the toolchain check and the fp256 conformance corpus on the RTX 5060 Ti with GPU-A's hash through plain nvcc and through that hipcc, the sources' own CPack making the NVIDIA .deb files, estimates for a local recipe, a fork and an upstream route, a recommendation and five questions for Logan; its scripts and captures are in `studies/gpu-b/` |
 
 ---
 
