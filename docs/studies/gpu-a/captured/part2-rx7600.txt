@@ -1,0 +1,68 @@
+# part 2 on the RX 7600 machine: run_seq.sh amd gfx1102 gfx942 (REUSE=1), 17:57:20 to 17:58:35, launched detached; then ps
+== run_seq.sh amd gfx1102 gfx942 2026-11-10 17:57:20 on nvidia-box
+selftest: OK, 8 plants refused by name
+devcopy: host/src/program.c blob 6e38020c58f45ea46b5ba7f1dead4fce924c3ebc -> src/seqcore.c: 28 pieces (E2), 12 E1, 1 E3, 1 E4, no other difference
+== built 2026-11-10 17:57:38
+  0    0  1200 MHz    0 %      56 MB     8120 MB     8176 MB   0.68 %
+    PROCESS_INFO: No running processes detected
+run: routines-fp32.bin [RX 7600]: 90 cases, 5277 lanes, 3043521 lanes x program length, 0 refused; sha256 a7ff1aef29d4130733ca3a2d9df73a0106fcbfa5dce52ad0f017f5e43911b30d; 800.7 ms; GREEN against ref-fp32.out
+run: routines-fp64.bin [RX 7600]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 4eb03cc3f41f6f7e70ab819ee37aeb1faada48529b4d7da5d63ff3212a5fc3fe; 547.6 ms; GREEN against ref-fp64.out
+run: routines-fp128.bin [RX 7600]: 130 cases, 8340 lanes, 2099526 lanes x program length, 0 refused; sha256 30b7a930a7a1e1b5c96bce4e464583961711008bb8440f0d6aca6aad1e0a386d; 793.9 ms; GREEN against ref-fp128.out
+run: routines-fp256.bin [RX 7600]: 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 1295.3 ms; GREEN against ref-fp256.out
+run: fuzz-fp32.bin [RX 7600]: 200 cases, 10630 lanes, 213045 lanes x program length, 0 refused; sha256 735f6e8684c70adaa1e95cdbeb376c2674b6b0caa9bf518a07c9d53c746b3c0f; 17.6 ms; GREEN against ref-fuzz-fp32.out
+run: fuzz-fp64.bin [RX 7600]: 200 cases, 11396 lanes, 218027 lanes x program length, 0 refused; sha256 347c9957013cbfb2bda1c0600f3acf42d702e4b8344c10d5e56ce50e91d348b3; 13.8 ms; GREEN against ref-fuzz-fp64.out
+run: fuzz-fp128.bin [RX 7600]: 200 cases, 11224 lanes, 221887 lanes x program length, 0 refused; sha256 e8f855b46c2335eca0109d27c0c4e3f15a0fd4864010b3db9d5449f15fab1499; 46.5 ms; GREEN against ref-fuzz-fp128.out
+run: fuzz-fp256.bin [RX 7600]: 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 60.4 ms; GREEN against ref-fuzz-fp256.out
+run: fuzz-fp256.bin [RX 7600]: 200 cases, 11412 lanes, 226675 lanes x program length, 0 refused; sha256 9dec942cea7b1c0e94c53dbda171e2bdcebe45f6c5f851792e0af4f8bb07b618; 47.4 ms; GREEN against ref-fuzz-fp256.out
+run: systems.bin [RX 7600]: 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 1436.4 ms; GREEN against ref-systems.out
+run: bench.bin [RX 7600]: 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 44.3 ms; GREEN against ref-bench.out
+run: systems.bin [RX 7600]: 8 cases, 4608 lanes, 1733248 lanes x program length, 0 refused; sha256 581b9c30f1b0fadbde2240cc1f8d8d66c347e908fd151aabc947c6fa3a40fd43; 637.4 ms; GREEN against ref-systems.out
+run: bench.bin [RX 7600]: 6 cases, 24576 lanes, 6443008 lanes x program length, 0 refused; sha256 6cba53d3cb34e5aea53b0ab748adf2c2f027d9174f21af17ca7e3ebf722074ad; 21.0 ms; GREEN against ref-bench.out
+run: routines-fp256.bin [RX 7600]: 130 cases, 7877 lanes, 2155242 lanes x program length, 0 refused; sha256 dd15912031cc87c4a467db9253f6b3a7a10fdb601fb278b9c6f6795e74d11831; 298.9 ms; GREEN against ref-fp256.out
+refused: fp64 augadd: augmentedAddition (control codes 10 and 11): augmented.c is not in the device copy (CFT_NO_AUGMENTED)
+run: routines-fp64.bin [RX 7600]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 e153704603768aec14396d5834d05f80d04d7dc7ac3bfe10b05249f69a47d9ce; 554.8 ms; RED: ref-fp64.out
+run: 24 of 130 cases differ from libcft's
+plant s64-mask: RED, as it must be
+run: routines-fp64.bin [RX 7600]: 130 cases, 8133 lanes, 2043392 lanes x program length, 0 refused; sha256 702251771b9d52056bcb80930638237409adfa8c580a1fff6b1dc1a87d95b471; 373.5 ms; RED: ref-fp64.out
+run: 130 of 130 cases differ from libcft's
+plant s64-konst: RED, as it must be
+  0    0  1200 MHz   82 %      56 MB     8120 MB     8176 MB   0.68 %
+    PROCESS_INFO: No running processes detected
+bench: bench.bin case 0 (fp64 exp rne stand-alone typical n=4096, 183 instructions) [RX 7600], block 128: 1048576 lanes, kernel 176.735 ms (min 174.169, max 185.695, 5 reps): 5.933e+06 lane-programs/s, 1.086e+09 lane-instructions/s
+bench: bench.bin case 1 (fp64 sin rne stand-alone typical n=4096, 409 instructions) [RX 7600], block 128: 1048576 lanes, kernel 392.378 ms (min 392.189, max 392.976, 5 reps): 2.672e+06 lane-programs/s, 1.093e+09 lane-instructions/s
+bench: bench.bin case 2 (fp64 atan rne stand-alone typical n=4096, 179 instructions) [RX 7600], block 128: 1048576 lanes, kernel 182.464 ms (min 181.820, max 185.526, 5 reps): 5.747e+06 lane-programs/s, 1.029e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 1048576 lanes, kernel 497.097 ms (min 495.616, max 497.253, 3 reps): 2.109e+06 lane-programs/s, 4.303e+08 lane-instructions/s
+bench: bench.bin case 4 (fp256 sin rne stand-alone typical n=4096, 392 instructions) [RX 7600], block 128: 1048576 lanes, kernel 1066.482 ms (min 1066.331, max 1067.645, 3 reps): 9.832e+05 lane-programs/s, 3.854e+08 lane-instructions/s
+bench: bench.bin case 5 (fp256 atan rne stand-alone typical n=4096, 206 instructions) [RX 7600], block 128: 1048576 lanes, kernel 514.348 ms (min 513.155, max 514.816, 3 reps): 2.039e+06 lane-programs/s, 4.2e+08 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 1048576 lanes, kernel 144.655 ms (min 142.569, max 147.011, 3 reps): 7.249e+06 lane-programs/s, 1.479e+09 lane-instructions/s
+bench: bench.bin case 4 (fp256 sin rne stand-alone typical n=4096, 392 instructions) [RX 7600], block 128: 1048576 lanes, kernel 298.806 ms (min 295.383, max 302.343, 3 reps): 3.509e+06 lane-programs/s, 1.376e+09 lane-instructions/s
+bench: bench.bin case 5 (fp256 atan rne stand-alone typical n=4096, 206 instructions) [RX 7600], block 128: 1048576 lanes, kernel 153.697 ms (min 150.889, max 156.027, 3 reps): 6.822e+06 lane-programs/s, 1.405e+09 lane-instructions/s
+bench: routines-fp64.bin case 0 (fp64 exp rne stand-alone n=129, 183 instructions) [RX 7600], block 128: 1048576 lanes, kernel 248.125 ms (min 246.928, max 254.711, 3 reps): 4.226e+06 lane-programs/s, 7.734e+08 lane-instructions/s
+bench: routines-fp64.bin case 60 (fp64 sin rne stand-alone n=63, 409 instructions) [RX 7600], block 128: 1048576 lanes, kernel 493.953 ms (min 492.746, max 495.183, 3 reps): 2.123e+06 lane-programs/s, 8.682e+08 lane-instructions/s
+bench: routines-fp64.bin case 90 (fp64 atan rne stand-alone n=129, 179 instructions) [RX 7600], block 128: 1048576 lanes, kernel 232.981 ms (min 232.192, max 238.714, 3 reps): 4.501e+06 lane-programs/s, 8.056e+08 lane-instructions/s
+bench: routines-fp256.bin case 0 (fp256 exp rne stand-alone n=63, 204 instructions) [RX 7600], block 128: 1048576 lanes, kernel 746.667 ms (min 746.358, max 746.686, 3 reps): 1.404e+06 lane-programs/s, 2.865e+08 lane-instructions/s
+bench: routines-fp256.bin case 60 (fp256 sin rne stand-alone n=65, 392 instructions) [RX 7600], block 128: 1048576 lanes, kernel 1331.808 ms (min 1331.597, max 1332.128, 3 reps): 7.873e+05 lane-programs/s, 3.086e+08 lane-instructions/s
+bench: routines-fp256.bin case 92 (fp256 atan rtz stand-alone n=64, 206 instructions) [RX 7600], block 128: 1048576 lanes, kernel 724.370 ms (min 724.123, max 724.633, 3 reps): 1.448e+06 lane-programs/s, 2.982e+08 lane-instructions/s
+bench: routines-fp256.bin case 0 (fp256 exp rne stand-alone n=63, 204 instructions) [RX 7600], block 128: 1048576 lanes, kernel 162.911 ms (min 159.908, max 165.366, 3 reps): 6.437e+06 lane-programs/s, 1.313e+09 lane-instructions/s
+bench: routines-fp256.bin case 60 (fp256 sin rne stand-alone n=65, 392 instructions) [RX 7600], block 128: 1048576 lanes, kernel 317.829 ms (min 313.912, max 322.864, 3 reps): 3.299e+06 lane-programs/s, 1.293e+09 lane-instructions/s
+bench: routines-fp256.bin case 92 (fp256 atan rtz stand-alone n=64, 206 instructions) [RX 7600], block 128: 1048576 lanes, kernel 164.200 ms (min 161.386, max 166.963, 3 reps): 6.386e+06 lane-programs/s, 1.316e+09 lane-instructions/s
+  0    0  1200 MHz   90 %      56 MB     8120 MB     8176 MB   0.68 %
+    PROCESS_INFO: No running processes detected
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 4096 lanes, kernel 1.815 ms (min 1.686, max 1.934, 3 reps): 2.257e+06 lane-programs/s, 4.604e+08 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 16384 lanes, kernel 2.608 ms (min 2.422, max 3.062, 3 reps): 6.282e+06 lane-programs/s, 1.282e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 65536 lanes, kernel 9.397 ms (min 9.151, max 9.641, 3 reps): 6.974e+06 lane-programs/s, 1.423e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 262144 lanes, kernel 37.869 ms (min 37.522, max 37.888, 3 reps): 6.922e+06 lane-programs/s, 1.412e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 1048576 lanes, kernel 147.246 ms (min 144.832, max 148.937, 3 reps): 7.121e+06 lane-programs/s, 1.453e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 2097152 lanes, kernel 283.702 ms (min 281.229, max 292.577, 3 reps): 7.392e+06 lane-programs/s, 1.508e+09 lane-instructions/s
+bench: bench.bin case 3 (fp256 exp rne stand-alone typical n=4096, 204 instructions) [RX 7600], block 128: 4194304 lanes, kernel 565.208 ms (min 563.869, max 565.644, 3 reps): 7.421e+06 lane-programs/s, 1.514e+09 lane-instructions/s
+info: AMD Radeon RX 7600 (gfx1102, bus 0000:03:00.0): 16 CUs/SMs; runner kernel: 74 registers a thread, 8724 bytes local a thread; sizeof(cft_bn) 164, CFT_BN_LIMBS 40, sizeof(seq_block) 5280
+info: block 32: 48 blocks a CU/SM resident, occupancy 75.0 %
+info: block 64: 24 blocks a CU/SM resident, occupancy 75.0 %
+info: block 128: 12 blocks a CU/SM resident, occupancy 75.0 %
+info: block 256: 6 blocks a CU/SM resident, occupancy 75.0 %
+info: stack limit a thread: 1024 bytes before any launch, 1024 after one
+  0    0  1200 MHz   73 %      56 MB     8120 MB     8176 MB   0.68 %
+    PROCESS_INFO: No running processes detected
+== run_seq.sh 2026-11-10 17:58:35: every corpus GREEN, every plant RED
+--- ps at collection:
+--- none above means nothing left running

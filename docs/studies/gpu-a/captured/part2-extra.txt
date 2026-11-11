@@ -1,0 +1,117 @@
+# part 2: the corpora as gen_programs.py drew them (this desktop, 17:53 to 17:54; the routines and systems identical to the 17:26 to 17:38 draws, cmp)
+fuzz-fp32.bin: 200 cases (2179 drawn with an augmented half, left out), sha256 9a5de43155aa0d6a8a1a671c04f8e9f8d505e3a78816646d93bf71189c950474; control codes: actall 71, deposit 310, endquiet 272, endrep 295, halt 200, ldl 167, ldx 269, quiet 272, raise 491, repeat 295, setact 223, stl 166, stx 229
+fuzz-fp64.bin: 200 cases (2297 drawn with an augmented half, left out), sha256 c152cb27855afe89c7f546ef0eafbb0141f32fd7aa7a70aa4ab880017f639578; control codes: actall 85, deposit 296, endquiet 244, endrep 264, halt 200, ldl 171, ldx 269, quiet 244, raise 479, repeat 264, setact 213, stl 203, stx 210
+fuzz-fp128.bin: 200 cases (2629 drawn with an augmented half, left out), sha256 8c55b6ed968de131abe962d982a832b8a1905d3eda1124df4bdbee43d5cf9ee7; control codes: actall 92, deposit 320, endquiet 240, endrep 281, halt 200, ldl 204, ldx 276, quiet 240, raise 477, repeat 281, setact 215, stl 179, stx 230
+fuzz-fp256.bin: 200 cases (2355 drawn with an augmented half, left out), sha256 d7f7d80c8a0da86ae3dd12815ea1923b16bee3e91ff1cbb4caf9a016dbb8e9f3; control codes: actall 94, deposit 318, endquiet 231, endrep 262, halt 200, ldl 187, ldx 277, quiet 231, raise 495, repeat 262, setact 209, stl 151, stx 228
+routines-fp32.bin: 90 cases, sha256 90fa09fc1c6f126d3a2b241d6f301da3106b6240c26d9cef97bfff88e50bd2cd (2 s)
+routines-fp64.bin: 130 cases, sha256 d3e48e45825e5179d6897f5bffb1a80aad7ddc2d9390528c6fb9cd6c9992c622 (2 s)
+routines-fp128.bin: 130 cases, sha256 7ad54acf1b93d15e381850230d984b269ceffb8c0d8591d3330a34e37eb192ae (3 s)
+routines-fp256.bin: 130 cases, sha256 27697e33ff53cc4abc0dcf8d0fa06e6b02e7ee36d041d6447122d31ebbdc32dc (11 s)
+systems.bin: sha256 989c2be3f55409ffaad7e1b536c66bba90340388455da418ede9ae54a844f4ff
+bench.bin: sha256 2d9f6badf51de11b181b161b897f90dd35c36a9a2677a0f724f3b5de973585cd
+refuse.bin: sha256 86e5d2b818cf25740117b8120c0794982b77fecfc0f83b29029a294507d6343b
+# the census (gen_programs.py --census), lines cut at 200 characters
+# the census (gen_programs.py --census), lines cut at 200 characters
+census fp32: control codes over every fragment, both shapes, five attributes: deposit 135, endquiet 45, halt 90, quiet 45, raise 45
+  exp: stand-alone [382, 383, 385], compiled [384, 385, 387] instructions; rne stand-alone ALU OP_SUB 138, OP_ADD 86, OP_SELECT 49, OP_FMA 30, OP_MUL 28, OP_NEG 9, OP_CMPEQ 7, OP_IAND 5, OP_ICMPLT 5,
+  exp2: stand-alone [371, 372, 374, 376], compiled [373, 374, 376, 378] instructions; rne stand-alone ALU OP_SUB 128, OP_ADD 80, OP_SELECT 51, OP_FMA 31, OP_MUL 27, OP_NEG 9, OP_CMPEQ 8, OP_IAND 6, OP
+  expm1: stand-alone [408, 409, 410, 411], compiled [410, 411, 412, 413] instructions; rne stand-alone ALU OP_SUB 157, OP_ADD 99, OP_SELECT 43, OP_FMA 31, OP_MUL 30, OP_NEG 10, OP_IAND 5, OP_ICMPLT 5,
+  log: stand-alone [382], compiled [384] instructions; rne stand-alone ALU OP_SUB 147, OP_ADD 96, OP_SELECT 42, OP_FMA 32, OP_MUL 29, OP_IAND 6, OP_NEG 6, OP_CMPEQ 5, OP_IOR 5, OP_ICMPLT 4, OP_ISHR 2,
+  log2: stand-alone [394], compiled [396] instructions; rne stand-alone ALU OP_SUB 152, OP_ADD 99, OP_SELECT 42, OP_FMA 33, OP_MUL 32, OP_IAND 6, OP_NEG 6, OP_IOR 5, OP_CMPEQ 5, OP_ICMPLT 4, OP_ISHR 2
+  log1p: stand-alone [434, 436], compiled [436, 438] instructions; rne stand-alone ALU OP_SUB 160, OP_ADD 101, OP_SELECT 51, OP_FMA 43, OP_MUL 33, OP_NEG 10, OP_ICMPLT 7, OP_IAND 6, OP_IOR 5, OP_CMPEQ
+  sin: stand-alone [942], compiled [944] instructions; rne stand-alone ALU OP_SUB 388, OP_ADD 244, OP_FMA 104, OP_SELECT 70, OP_MUL 66, OP_IXOR 14, OP_IAND 12, OP_NEG 11, OP_IOR 5, OP_CMPEQ 4, OP_ICMP
+  cos: stand-alone [939], compiled [941] instructions; rne stand-alone ALU OP_SUB 388, OP_ADD 244, OP_FMA 103, OP_SELECT 69, OP_MUL 66, OP_IXOR 14, OP_IAND 11, OP_NEG 11, OP_IOR 5, OP_CMPEQ 4, OP_IADD
+  tan: stand-alone [996], compiled [998] instructions; rne stand-alone ALU OP_SUB 407, OP_ADD 259, OP_FMA 116, OP_SELECT 73, OP_MUL 72, OP_IXOR 18, OP_NEG 11, OP_IAND 10, OP_IOR 5, OP_CMPEQ 4, OP_ICMP
+census fp64: control codes over every fragment, both shapes, five attributes: deposit 195, endquiet 65, halt 130, quiet 65, raise 65
+  exp: stand-alone [180, 181, 183], compiled [182, 183, 185] instructions; rne stand-alone ALU OP_SELECT 39, OP_SUB 37, OP_FMA 28, OP_ADD 25, OP_MUL 13, OP_IAND 5, OP_ICMPLT 5, OP_ISUB 4, OP_ISHL 4, O
+  exp2: stand-alone [178, 179, 181, 183], compiled [180, 181, 183, 185] instructions; rne stand-alone ALU OP_SELECT 41, OP_SUB 32, OP_FMA 28, OP_ADD 23, OP_MUL 13, OP_IAND 6, OP_ICMPLT 6, OP_CMPEQ 5,
+  expm1: stand-alone [179, 180, 181, 182], compiled [181, 182, 183, 184] instructions; rne stand-alone ALU OP_SUB 40, OP_SELECT 33, OP_FMA 31, OP_ADD 27, OP_MUL 14, OP_IAND 5, OP_ICMPLT 5, OP_ISUB 3,
+  log: stand-alone [189], compiled [191] instructions; rne stand-alone ALU OP_SUB 46, OP_FMA 39, OP_SELECT 32, OP_ADD 30, OP_MUL 17, OP_IAND 6, OP_ICMPLT 4, OP_CMPEQ 2, OP_IOR 2, OP_ISHR 2, OP_IADD 2,
+  log2: stand-alone [183], compiled [185] instructions; rne stand-alone ALU OP_SUB 43, OP_FMA 41, OP_SELECT 32, OP_ADD 26, OP_MUL 16, OP_IAND 6, OP_ICMPLT 4, OP_IOR 2, OP_ISHR 2, OP_IADD 2, OP_CMPEQ 2
+  log1p: stand-alone [223, 225], compiled [225, 227] instructions; rne stand-alone ALU OP_SUB 55, OP_FMA 46, OP_SELECT 39, OP_ADD 32, OP_MUL 19, OP_ICMPLT 7, OP_IAND 6, OP_IOR 2, OP_IADD 2, OP_NEG 2,
+  sin: stand-alone [409], compiled [411] instructions; rne stand-alone ALU OP_SUB 95, OP_FMA 85, OP_SELECT 74, OP_ADD 66, OP_MUL 33, OP_IAND 13, OP_IXOR 9, OP_NEG 7, OP_ICMPLT 4, OP_IADD 3, OP_ISUB 3,
+  cos: stand-alone [405], compiled [407] instructions; rne stand-alone ALU OP_SUB 95, OP_FMA 84, OP_SELECT 73, OP_ADD 66, OP_MUL 33, OP_IAND 11, OP_IXOR 9, OP_NEG 7, OP_IADD 3, OP_ISUB 3, OP_ISHL 3, O
+  tan: stand-alone [422], compiled [424] instructions; rne stand-alone ALU OP_SUB 97, OP_FMA 93, OP_SELECT 76, OP_ADD 68, OP_MUL 35, OP_IAND 11, OP_IXOR 11, OP_NEG 7, OP_ICMPLT 4, OP_IADD 3, OP_ISUB 3
+  atan: stand-alone [179], compiled [181] instructions; rne stand-alone ALU OP_FMA 40, OP_SUB 34, OP_SELECT 31, OP_ADD 27, OP_MUL 15, OP_IXOR 12, OP_IAND 7, OP_ICMPLT 5, OP_RECIP_SEED 2, OP_MIN 1, OP_
+  asin: stand-alone [224], compiled [226] instructions; rne stand-alone ALU OP_FMA 52, OP_SUB 42, OP_ADD 34, OP_SELECT 33, OP_MUL 25, OP_IXOR 17, OP_IAND 6, OP_ICMPLT 6, OP_RECIP_SEED 2, OP_MAX 1, OP_
+  acos: stand-alone [220], compiled [222] instructions; rne stand-alone ALU OP_FMA 51, OP_SUB 42, OP_ADD 34, OP_SELECT 33, OP_MUL 25, OP_IXOR 16, OP_IAND 5, OP_ICMPLT 4, OP_RECIP_SEED 2, OP_MAX 1, OP_
+  atan2: stand-alone [221], compiled [223] instructions; rne stand-alone ALU OP_SELECT 57, OP_FMA 40, OP_SUB 34, OP_ADD 27, OP_MUL 19, OP_IXOR 14, OP_ICMPLT 11, OP_IAND 8, OP_CMPEQ 4, OP_RECIP_SEED 2,
+census fp128: control codes over every fragment, both shapes, five attributes: deposit 195, endquiet 65, halt 130, quiet 65, raise 65
+  exp: stand-alone [188, 189, 191], compiled [190, 191, 193] instructions; rne stand-alone ALU OP_SELECT 39, OP_SUB 37, OP_FMA 36, OP_ADD 25, OP_MUL 13, OP_IAND 5, OP_ICMPLT 5, OP_ISUB 4, OP_ISHL 4, O
+  exp2: stand-alone [186, 187, 189, 191], compiled [188, 189, 191, 193] instructions; rne stand-alone ALU OP_SELECT 41, OP_FMA 36, OP_SUB 32, OP_ADD 23, OP_MUL 13, OP_IAND 6, OP_ICMPLT 6, OP_CMPEQ 5,
+  expm1: stand-alone [186, 187, 188, 189], compiled [188, 189, 190, 191] instructions; rne stand-alone ALU OP_SUB 40, OP_FMA 38, OP_SELECT 33, OP_ADD 27, OP_MUL 14, OP_IAND 5, OP_ICMPLT 5, OP_ISUB 3,
+  log: stand-alone [211], compiled [213] instructions; rne stand-alone ALU OP_FMA 55, OP_SUB 49, OP_SELECT 32, OP_ADD 32, OP_MUL 18, OP_IAND 6, OP_ICMPLT 4, OP_CMPEQ 2, OP_IOR 2, OP_ISHR 2, OP_IADD 2,
+  log2: stand-alone [205], compiled [207] instructions; rne stand-alone ALU OP_FMA 57, OP_SUB 46, OP_SELECT 32, OP_ADD 28, OP_MUL 17, OP_IAND 6, OP_ICMPLT 4, OP_IOR 2, OP_ISHR 2, OP_IADD 2, OP_CMPEQ 2
+  log1p: stand-alone [245, 247], compiled [247, 249] instructions; rne stand-alone ALU OP_FMA 62, OP_SUB 58, OP_SELECT 39, OP_ADD 34, OP_MUL 20, OP_ICMPLT 7, OP_IAND 6, OP_IOR 2, OP_IADD 2, OP_NEG 2,
+  sin: stand-alone [385], compiled [387] instructions; rne stand-alone ALU OP_FMA 96, OP_SUB 91, OP_ADD 62, OP_SELECT 50, OP_MUL 31, OP_IAND 12, OP_IXOR 9, OP_NEG 6, OP_ICMPLT 5, OP_IADD 3, OP_ISUB 3,
+  cos: stand-alone [381], compiled [383] instructions; rne stand-alone ALU OP_FMA 95, OP_SUB 91, OP_ADD 62, OP_SELECT 49, OP_MUL 31, OP_IAND 10, OP_IXOR 9, OP_NEG 6, OP_ICMPLT 4, OP_IADD 3, OP_ISUB 3,
+  tan: stand-alone [400], compiled [402] instructions; rne stand-alone ALU OP_FMA 106, OP_SUB 93, OP_ADD 64, OP_SELECT 52, OP_MUL 33, OP_IXOR 11, OP_IAND 10, OP_NEG 6, OP_ICMPLT 5, OP_IADD 3, OP_ISUB
+  atan: stand-alone [189], compiled [191] instructions; rne stand-alone ALU OP_FMA 50, OP_SUB 34, OP_SELECT 31, OP_ADD 27, OP_MUL 15, OP_IXOR 12, OP_IAND 7, OP_ICMPLT 5, OP_RECIP_SEED 2, OP_MIN 1, OP_
+  asin: stand-alone [238], compiled [240] instructions; rne stand-alone ALU OP_FMA 64, OP_SUB 42, OP_ADD 34, OP_SELECT 33, OP_MUL 27, OP_IXOR 17, OP_IAND 6, OP_ICMPLT 6, OP_RECIP_SEED 2, OP_MAX 1, OP_
+  acos: stand-alone [234], compiled [236] instructions; rne stand-alone ALU OP_FMA 63, OP_SUB 42, OP_ADD 34, OP_SELECT 33, OP_MUL 27, OP_IXOR 16, OP_IAND 5, OP_ICMPLT 4, OP_RECIP_SEED 2, OP_MAX 1, OP_
+  atan2: stand-alone [231], compiled [233] instructions; rne stand-alone ALU OP_SELECT 57, OP_FMA 50, OP_SUB 34, OP_ADD 27, OP_MUL 19, OP_IXOR 14, OP_ICMPLT 11, OP_IAND 8, OP_CMPEQ 4, OP_RECIP_SEED 2,
+census fp256: control codes over every fragment, both shapes, five attributes: deposit 195, endquiet 65, halt 130, quiet 65, raise 65
+  exp: stand-alone [201, 202, 204], compiled [203, 204, 206] instructions; rne stand-alone ALU OP_FMA 49, OP_SELECT 39, OP_SUB 37, OP_ADD 25, OP_MUL 13, OP_IAND 5, OP_ICMPLT 5, OP_ISUB 4, OP_ISHL 4, O
+  exp2: stand-alone [199, 200, 202, 204], compiled [201, 202, 204, 206] instructions; rne stand-alone ALU OP_FMA 49, OP_SELECT 41, OP_SUB 32, OP_ADD 23, OP_MUL 13, OP_IAND 6, OP_ICMPLT 6, OP_CMPEQ 5,
+  expm1: stand-alone [199, 200, 201, 202], compiled [201, 202, 203, 204] instructions; rne stand-alone ALU OP_FMA 51, OP_SUB 40, OP_SELECT 33, OP_ADD 27, OP_MUL 14, OP_IAND 5, OP_ICMPLT 5, OP_ISUB 3,
+  log: stand-alone [241], compiled [243] instructions; rne stand-alone ALU OP_FMA 85, OP_SUB 49, OP_SELECT 32, OP_ADD 32, OP_MUL 18, OP_IAND 6, OP_ICMPLT 4, OP_CMPEQ 2, OP_IOR 2, OP_ISHR 2, OP_IADD 2,
+  log2: stand-alone [235], compiled [237] instructions; rne stand-alone ALU OP_FMA 87, OP_SUB 46, OP_SELECT 32, OP_ADD 28, OP_MUL 17, OP_IAND 6, OP_ICMPLT 4, OP_IOR 2, OP_ISHR 2, OP_IADD 2, OP_CMPEQ 2
+  log1p: stand-alone [275, 277], compiled [277, 279] instructions; rne stand-alone ALU OP_FMA 92, OP_SUB 58, OP_SELECT 39, OP_ADD 34, OP_MUL 20, OP_ICMPLT 7, OP_IAND 6, OP_IOR 2, OP_IADD 2, OP_NEG 2,
+  sin: stand-alone [392], compiled [394] instructions; rne stand-alone ALU OP_FMA 116, OP_SUB 91, OP_ADD 62, OP_SELECT 38, OP_MUL 31, OP_IAND 11, OP_IXOR 9, OP_NEG 6, OP_ICMPLT 5, OP_IADD 3, OP_ISUB 3
+  cos: stand-alone [388], compiled [390] instructions; rne stand-alone ALU OP_FMA 115, OP_SUB 91, OP_ADD 62, OP_SELECT 37, OP_MUL 31, OP_IAND 9, OP_IXOR 9, OP_NEG 6, OP_ICMPLT 4, OP_IADD 3, OP_ISUB 3,
+  tan: stand-alone [409], compiled [411] instructions; rne stand-alone ALU OP_FMA 128, OP_SUB 93, OP_ADD 64, OP_SELECT 40, OP_MUL 33, OP_IXOR 11, OP_IAND 9, OP_NEG 6, OP_ICMPLT 5, OP_IADD 3, OP_ISUB 3
+  atan: stand-alone [206], compiled [208] instructions; rne stand-alone ALU OP_FMA 67, OP_SUB 34, OP_SELECT 31, OP_ADD 27, OP_MUL 15, OP_IXOR 12, OP_IAND 7, OP_ICMPLT 5, OP_RECIP_SEED 2, OP_MIN 1, OP_
+  asin: stand-alone [259], compiled [261] instructions; rne stand-alone ALU OP_FMA 83, OP_SUB 42, OP_ADD 34, OP_SELECT 33, OP_MUL 29, OP_IXOR 17, OP_IAND 6, OP_ICMPLT 6, OP_RECIP_SEED 2, OP_MAX 1, OP_
+  acos: stand-alone [255], compiled [257] instructions; rne stand-alone ALU OP_FMA 82, OP_SUB 42, OP_ADD 34, OP_SELECT 33, OP_MUL 29, OP_IXOR 16, OP_IAND 5, OP_ICMPLT 4, OP_RECIP_SEED 2, OP_MAX 1, OP_
+  atan2: stand-alone [248], compiled [250] instructions; rne stand-alone ALU OP_FMA 67, OP_SELECT 57, OP_SUB 34, OP_ADD 27, OP_MUL 19, OP_IXOR 14, OP_ICMPLT 11, OP_IAND 8, OP_CMPEQ 4, OP_RECIP_SEED 2,
+# MPFR's first session, 17:42:10, as the terminal showed it, is in the ledger; the second follows
+# libcft's reference on the fuzz corpora (seq_ref, this desktop, one core), 2026-11-10 18:02:57; load 0.00 0.00 0.00
+seq_ref: fuzz-fp32.bin: 200 cases, 10630 lanes, 0 refused by libcft, 0.1 s (one core); runs reporting a deposit overflow 55, a strict scratch range 15, a mark 84
+  = ref-fuzz-fp32.out
+seq_ref: fuzz-fp64.bin: 200 cases, 11396 lanes, 0 refused by libcft, 0.1 s (one core); runs reporting a deposit overflow 58, a strict scratch range 14, a mark 73
+  = ref-fuzz-fp64.out
+seq_ref: fuzz-fp128.bin: 200 cases, 11224 lanes, 0 refused by libcft, 0.1 s (one core); runs reporting a deposit overflow 59, a strict scratch range 11, a mark 78
+  = ref-fuzz-fp128.out
+seq_ref: fuzz-fp256.bin: 200 cases, 11412 lanes, 0 refused by libcft, 0.1 s (one core); runs reporting a deposit overflow 61, a strict scratch range 15, a mark 95
+  = ref-fuzz-fp256.out
+# MPFR on one core of this desktop (cft-gpu), 2026-11-10 18:02:57; load 0.00 0.00 0.00
+mpfr_bench: MPFR 4.2.1, GMP 6.3.0; one core, per-element calls over 4096 elements, mpfr+754 (narrowed range, check_range and subnormalize), round to nearest
+mpfr_bench: exp at 53 bits (binary64): 820.2 ns an element (best of 60 passes; mean 1225.5), 1.219e+06 a second
+mpfr_bench: sin at 53 bits (binary64): 1429.3 ns an element (best of 38 passes; mean 1927.9), 6.996e+05 a second
+mpfr_bench: atan at 53 bits (binary64): 1989.3 ns an element (best of 30 passes; mean 2466.9), 5.027e+05 a second
+mpfr_bench: fma at 237 bits (binary256): 65.3 ns an element (best of 878 passes; mean 83.4), 1.532e+07 a second
+mpfr_bench: exp at 237 bits (binary256): 1660.8 ns an element (best of 39 passes; mean 1932.4), 6.021e+05 a second
+mpfr_bench: sin at 237 bits (binary256): 2145.6 ns an element (best of 29 passes; mean 2528.3), 4.661e+05 a second
+mpfr_bench: atan at 237 bits (binary256): 6190.3 ns an element (best of 10 passes; mean 7362.8), 1.615e+05 a second
+# done 2026-11-10 18:02:59
+# the identities: cft_fma diff --op, this desktop (17:45:36 to 17:46:45)
+== p2_ident 2026-11-10 17:45:36
+== built 2026-11-10 17:46:15
+diff: 200000 cases, seed 1, on cpu, one thread: generic and fixed differ on 0; first chunk (200000 cases) sha256 inputs 15f6d14cf02ca2eeebf4e1d133d06594efa8d6ff1bd0edbfdf6221e77f2967cd, generic 5010e777db905b8a2c5779295a9210433b9401f9835855055bb6c461197b5536, fixed 5010e777db905b8a2c5779295a9210433b9401f9835855055bb6c461197b5536; kernel ms: generator 34.2, generic 73.6 (2.719e+06 FMA/s), fixed 66.9 (2.988e+06 FMA/s): GREEN
+diff --op add (steered): 200000 cases, seed 1, on cpu, one thread: generic and fixed differ on 0; first chunk (200000 cases) sha256 inputs 290d14adf9c700275e75f02c3d75f8e23276b0e32e3601fbd525034162393a14, generic ce928430fb8ba23cfd77117fd4865e05f9afcd55e972269ccfb3642753d999db, fixed ce928430fb8ba23cfd77117fd4865e05f9afcd55e972269ccfb3642753d999db; kernel ms: generator 111.7, generic 72.0 (2.78e+06 FMA/s), fixed 93.7 (2.135e+06 FMA/s): GREEN
+diff --op sub (steered): 200000 cases, seed 1, on cpu, one thread: generic and fixed differ on 0; first chunk (200000 cases) sha256 inputs f64f124c433a832e63987ec81aec280192d7e0c5703bd1425e8c4306f7b47bf8, generic ce928430fb8ba23cfd77117fd4865e05f9afcd55e972269ccfb3642753d999db, fixed ce928430fb8ba23cfd77117fd4865e05f9afcd55e972269ccfb3642753d999db; kernel ms: generator 98.8, generic 71.7 (2.789e+06 FMA/s), fixed 86.6 (2.31e+06 FMA/s): GREEN
+diff --op mul (steered): 200000 cases, seed 1, on cpu, one thread: generic and fixed differ on 0; first chunk (200000 cases) sha256 inputs 15f6d14cf02ca2eeebf4e1d133d06594efa8d6ff1bd0edbfdf6221e77f2967cd, generic e4048b0b16f2d49c7e8feef70519938191dea09ecb1ac63fd61fe148dd685240, fixed e4048b0b16f2d49c7e8feef70519938191dea09ecb1ac63fd61fe148dd685240; kernel ms: generator 42.8, generic 68.9 (2.903e+06 FMA/s), fixed 71.4 (2.802e+06 FMA/s): GREEN
+0, NVIDIA GeForce RTX 4070, 1951 MiB, 30 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+diff: 16777216 cases, seed 20261110, [5060Ti]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b, generic 0bb5295edfc0754f893cd7bb5ce169175fdc3f9263271597f54d90ffcf03adc9, fixed 0bb5295edfc0754f893cd7bb5ce169175fdc3f9263271597f54d90ffcf03adc9; kernel ms: generator 652.5, generic 125.7 (1.335e+08 FMA/s), fixed 17.7 (9.456e+08 FMA/s): GREEN
+diff --op add (steered): 268435456 cases, seed 20261110, [5060Ti]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs 21ae7619bd17863f2b7d4bd4ded47b8be1310bd24e033d464db4d46c18b9419e, generic b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73, fixed b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73; kernel ms: generator 1327.9, generic 1387.6 (1.935e+08 FMA/s), fixed 303.2 (8.853e+08 FMA/s): GREEN
+diff --op sub (steered): 268435456 cases, seed 20261110, [5060Ti]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs 86ad800f077a685a202ca4469e6c7c36f445ccb34eec5802efe5e065296494ba, generic b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73, fixed b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73; kernel ms: generator 1388.1, generic 1695.8 (1.583e+08 FMA/s), fixed 306.8 (8.751e+08 FMA/s): GREEN
+diff --op mul (steered): 268435456 cases, seed 20261110, [5060Ti]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b, generic c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55, fixed c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55; kernel ms: generator 807.5, generic 579.2 (4.635e+08 FMA/s), fixed 286.6 (9.365e+08 FMA/s): GREEN
+0, NVIDIA GeForce RTX 4070, 1961 MiB, 28 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 56 %
+diff --op add (steered): 67108864 cases, seed 20261110, [4070]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs 21ae7619bd17863f2b7d4bd4ded47b8be1310bd24e033d464db4d46c18b9419e, generic b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73, fixed b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73; kernel ms: generator 441.7, generic 359.8 (1.865e+08 FMA/s), fixed 144.9 (4.63e+08 FMA/s): GREEN
+diff --op sub (steered): 67108864 cases, seed 20261110, [4070]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs 86ad800f077a685a202ca4469e6c7c36f445ccb34eec5802efe5e065296494ba, generic b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73, fixed b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73; kernel ms: generator 438.0, generic 351.8 (1.908e+08 FMA/s), fixed 147.4 (4.554e+08 FMA/s): GREEN
+diff --op mul (steered): 67108864 cases, seed 20261110, [4070]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b, generic c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55, fixed c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55; kernel ms: generator 292.9, generic 199.3 (3.367e+08 FMA/s), fixed 90.4 (7.426e+08 FMA/s): GREEN
+0, NVIDIA GeForce RTX 4070, 1967 MiB, 6 %
+1, NVIDIA GeForce RTX 5060 Ti, 14 MiB, 0 %
+== p2_ident done 2026-11-10 17:46:45
+# the identities on the RX 7600 (18:03:25 to 18:03:44). Two earlier runs are not kept here: 17:47:45 to 17:48:04 (0 differing, shown in the terminal) and one about 18:03 started by mistake with its output discarded
+== p2_box3 2026-11-10 18:03:25
+  0    0  1200 MHz    0 %      56 MB     8120 MB     8176 MB   0.68 %
+    PROCESS_INFO: No running processes detected
+diff: 16777216 cases, seed 20261110, [RX7600]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b, generic 0bb5295edfc0754f893cd7bb5ce169175fdc3f9263271597f54d90ffcf03adc9, fixed 0bb5295edfc0754f893cd7bb5ce169175fdc3f9263271597f54d90ffcf03adc9; kernel ms: generator 65.7, generic 232.9 (7.203e+07 FMA/s), fixed 13.3 (1.258e+09 FMA/s): GREEN
+diff --op add (steered): 67108864 cases, seed 20261110, [RX7600]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs 21ae7619bd17863f2b7d4bd4ded47b8be1310bd24e033d464db4d46c18b9419e, generic b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73, fixed b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73; kernel ms: generator 438.4, generic 832.9 (8.057e+07 FMA/s), fixed 92.8 (7.228e+08 FMA/s): GREEN
+diff --op sub (steered): 67108864 cases, seed 20261110, [RX7600]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs 86ad800f077a685a202ca4469e6c7c36f445ccb34eec5802efe5e065296494ba, generic b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73, fixed b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73; kernel ms: generator 441.4, generic 849.4 (7.901e+07 FMA/s), fixed 106.6 (6.295e+08 FMA/s): GREEN
+diff --op mul (steered): 67108864 cases, seed 20261110, [RX7600]: generic and fixed differ on 0; first chunk (2097152 cases) sha256 inputs b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b, generic c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55, fixed c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55; kernel ms: generator 232.4, generic 535.0 (1.254e+08 FMA/s), fixed 75.7 (8.864e+08 FMA/s): GREEN
+  0    0  1200 MHz   39 %      56 MB     8120 MB     8176 MB   0.68 %
+== p2_box3 done 2026-11-10 18:03:44
