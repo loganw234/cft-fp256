@@ -68,7 +68,7 @@ def test_the_table_is_the_old_eight_the_new_seven_the_wide_thirty_then_the_wide_
 
 
 def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
-    # parcel M4X2: the routine op words (nine, each with its digest in the word) are tile ops by a rule of their own, read from routine_sweep.c's op grammar;
+    # parcel M4X2: the routine op words (21: twelve routines one each, atan2 at nine x; each with its digest in the word) are tile ops by a rule of their own, read from routine_sweep.c's op grammar;
     # the table is the other fifty-one, exactly
     driver = {op for op, reach in csl.OP_REACH.items() if reach == "tile" and not FE.ROUTINE_OP_RE.match(op)}
     table = set(FE.STRESS_TILE_OPS)
@@ -94,7 +94,7 @@ def test_a_run_that_served_every_item_of_the_catalog_passes_the_reach_check(
 def test_the_routine_rule_and_the_drivers_op_reach_say_the_same_of_every_routine_op_word(csl):
     """Parcel M4X2: the rule (a pattern of the op grammar) matches exactly the routine ops OP_REACH calls tile, both ways, and no op of the table of fifty-one."""
     routine = {it.op for it in csl.sweep_items(mpfr=True) if it.tool == "routine"}
-    assert len(routine) == 9
+    assert len(routine) == 21        # twelve routines one op word each, atan2 at nine x
     assert {op for op, reach in csl.OP_REACH.items() if reach == "tile" and FE.ROUTINE_OP_RE.match(op)} == routine
     assert all(FE.is_tile_op(op) for op in routine) and not any(FE.ROUTINE_OP_RE.match(op) for op in FE.STRESS_TILE_OPS)
     assert not any(FE.ROUTINE_OP_RE.match(op) for op in csl.OP_REACH if op not in routine)
