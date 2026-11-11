@@ -385,18 +385,22 @@ one-step vector. On the software backend all ten are the
 `acceptance-rev8` runner stage, in the full census only (until 2026-10-16
 the eight whose compiles take minutes).
 
-Ten routine entries follow the ten (the first six parcel MA's, M1's build,
-item 6; the last four parcel M2A's, M2's build, wave 4): the committed
+Twelve routine entries follow the ten (the first six parcel MA's, M1's build,
+item 6; the next four parcel M2A's, M2's build, wave 4; the last two parcel
+M4A's, M4's build, wave 5): the committed
 variational references that hold the math library's rules, each at fp64
 and fp256, in `programs/systems/compiled-tangent/` - Lotka-Volterra in
 logarithmic variables (exp), two diodes and a source (expm1, log1p) and a
 self-heating culture (exp2, log, log2), then the pendulum (sin, and cos in
-its tangent) and the attitude (sin, cos and tan). A routine needs flag
+its tangent) and the attitude (sin, cos and tan), then the phase follower
+(atan2, and atan, asin and acos in its tangent; round rdn; 7,997 and 8,605
+instructions, which stream past a tile's store of 4,096). A routine needs flag
 control, which no revision-7 target publishes, so they are this set's
-alone; the rule puts all ten on the quad, from the images' own words, and
+alone; the rule puts all twelve on the quad, from the images' own words, and
 they need no compile and no mpmath. Each has a structured lane a tile (the
 pendulum at fp64 has none, by name: the committed trig families have no
-sin or cos centre at fp64 under rne): an argument at a centre of the
+sin or cos centre at fp64 under rne; the follower's atan2 lane sets two
+components, a pair): an argument at a centre of the
 function's structured family, where the routine's in-lane test cannot
 decide the last bit and marks the lane - bit 7 of its byte and STATUS[6].
 At fp256 the radian entries also declare a RANGE LANE, the recipe's

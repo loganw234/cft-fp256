@@ -1902,6 +1902,316 @@
    ],
    "target": "u50-rev8-quad",
    "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/phasefollower-rk4-tangent-fp64.bank",
+   "bank_sha256": "cf5107de957570007005508e764f54d1ed5e023ad0d24c7091f45c51a51d4c21",
+   "boundaries": [
+    "18877671bc897a6a91d7e5ff3f5e66cb4825a58589fb0f448b98f514c5c53242",
+    "173c690651d8984ab343d46b2dab753ce63c0dec6c07bfa42fa79c7bd454eaa9",
+    "dcc5eb75ee8fbb32743812320e776d114c3792e56d8de90547823c1ef7100ff0",
+    "ae5e45066dba8d0f64c6e7414465675267b2a327c315cac49232695ec2436eb8",
+    "7c8c01fec768705d31a08b34b1497021304183cc4346219545a520fc9d597ace"
+   ],
+   "depth": 4096,
+   "flags": [
+    31,
+    30,
+    30,
+    30
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/phasefollower-rk4-tangent-fp64.cftp",
+   "image_sha256": "b7e71019d7effab1cbf2b8521500b6923146a27ba2039b4903e9cb6616d1b26b",
+   "init_sha256": "5d086c63e0014139b23acd5755401746d79700ba42d505a776ccd6f6a714c785",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "8dee2bfc2dac9805a6094c95d9eb7756dc9d63183d17a4d93b8555562f885b3d",
+    "ca4bb3b96323991c4de98bf8d5ed2d85b6ad2ddf20a26db2759fc620105a6791",
+    "ca4bb3b96323991c4de98bf8d5ed2d85b6ad2ddf20a26db2759fc620105a6791",
+    "ca4bb3b96323991c4de98bf8d5ed2d85b6ad2ddf20a26db2759fc620105a6791"
+   ],
+   "lanes": 256,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      67,
+      144
+     ],
+     [
+      131,
+      144
+     ],
+     [
+      195,
+      145
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "phasefollower-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 10,
+   "source": "programs/systems/phasefollower-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    64,
+    67,
+    126,
+    127,
+    128,
+    131,
+    190,
+    191,
+    192,
+    195,
+    254,
+    255
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "arguments": [
+      "0x3c00000000000000",
+      "0x3ff000000000000b"
+     ],
+     "centres": [
+      [
+       1,
+       63
+      ],
+      [
+       "u",
+       11
+      ]
+     ],
+     "components": [
+      1,
+      0
+     ],
+     "function": "atan2",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3e88000000000000",
+     "centre": [
+      3,
+      24
+     ],
+     "component": 3,
+     "function": "asin",
+     "lane": 67,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3ca1a62633145c07",
+     "centre": [
+      "bits",
+      "0x3ca1a62633145c07"
+     ],
+     "component": 4,
+     "function": "acos",
+     "lane": 131,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x434d02967c31cdb5",
+     "centre": [
+      "bits",
+      "0x434d02967c31cdb5"
+     ],
+     "component": 3,
+     "function": "atan",
+     "lane": 195,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/phasefollower-rk4-tangent-fp256.bank",
+   "bank_sha256": "f09a8e57f5dc0554c703c33a6a0d1a98b73be87d5c4886bd41794b0ada8e1e5c",
+   "boundaries": [
+    "8083b0fab339cd1a5c8acbc045ba4e25ea32ccd2019474f86b4c7307528ba2c7",
+    "59ad274447bb71a0decb6ece9bb161ed09b3bddfada082432a691a625ad9c015",
+    "f8a68bd6c6a7676f3d6378cc57104006ebb4587d01523f6826b05e6ca92526d8",
+    "5f3e362601eb42e81ad7a90789e2188fece2d8a62de494da1a714a707378819f",
+    "c922b28a048c586352c69c54274a5b024e9721b2c15376da6e78c556ba3e9394"
+   ],
+   "depth": 4096,
+   "flags": [
+    31,
+    30,
+    30,
+    30
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/phasefollower-rk4-tangent-fp256.cftp",
+   "image_sha256": "07a50f58a4b6bf7afa360a3cb38d4db4abfbc44707953be82f77cc2e572d7c88",
+   "init_sha256": "bd37f26ebddf77c45ee7ac7c3a8d41d5479d77f4f10c5aab5f792d2d8a99a2da",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "0aadfff728a056f97a1a0f07d73cc5801d572262832f730df27a58de201c4636",
+    "d6730400973b13bbb70571b6219ed6550ac30c60409a58f52310463ee0c6ed2b",
+    "d6730400973b13bbb70571b6219ed6550ac30c60409a58f52310463ee0c6ed2b",
+    "d6730400973b13bbb70571b6219ed6550ac30c60409a58f52310463ee0c6ed2b"
+   ],
+   "lanes": 64,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      19,
+      144
+     ],
+     [
+      35,
+      144
+     ],
+     [
+      51,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "phasefollower-rk4-tangent-fp256",
+   "segments": 4,
+   "slots": 10,
+   "source": "programs/systems/phasefollower-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    16,
+    19,
+    30,
+    31,
+    32,
+    35,
+    46,
+    47,
+    48,
+    51,
+    62,
+    63
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "arguments": [
+      "0x3ffb880000000000000000000000000000000000000000000000000000000000",
+      "0x3ffff00000000000000000000000000000000000000000000000000000000000"
+     ],
+     "centres": [
+      [
+       3,
+       72
+      ],
+      [
+       1,
+       0
+      ]
+     ],
+     "components": [
+      1,
+      0
+     ],
+     "function": "atan2",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3ffb880000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      3,
+      72
+     ],
+     "component": 3,
+     "function": "atan",
+     "lane": 19,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3ffba20000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      9,
+      72
+     ],
+     "component": 3,
+     "function": "asin",
+     "lane": 35,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x3ff12cd9128a5043cc71a026ef7ca8cd9e69d218d98158536f92f8a1ba7f09ab",
+     "centre": [
+      "bits",
+      "0x3ff12cd9128a5043cc71a026ef7ca8cd9e69d218d98158536f92f8a1ba7f09ab"
+     ],
+     "component": 4,
+     "function": "acos",
+     "lane": 51,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
   }
  ],
  "made": "programs/acceptance.py --set rev8 --write: libcft's software backend, cft-segrun --scratch-depth at each entry's target's depth, open certificates, each accepted by cft-audit in full and by the golden spot check",

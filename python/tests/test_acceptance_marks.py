@@ -138,7 +138,9 @@ def test_each_function_is_one_the_images_manifest_holds_and_none_never_marks():
         for fn, comp, _c in A.STRUCTURED[name]:
             assert fn in held, (name, fn, held)
             assert fn not in ("exp2", "log2")      # no family (parcel VMP)
-            assert comp in (0, 1)
+            comps = comp if isinstance(comp, tuple) else (comp,)
+            n_state = 5 if name.startswith("phasefollower") else 2
+            assert all(c in range(n_state) for c in comps)
 
 
 def test_centre_bits_known_values():
