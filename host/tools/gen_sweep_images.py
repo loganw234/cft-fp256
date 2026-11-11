@@ -16,7 +16,7 @@ For each routine name and each rounding attribute at fp32 it writes, into the ne
 and manifest.txt: a header, then one `image` line for each file set (name, attribute, instructions, words, the sha256 of each of
 the three files, the fragment's dag_digest, the commit) and, for a name whose five attributes were all written, a `digest` line:
 the first 32 bits of the sha256 of the five attributes' image and bank bytes, rne to rmm, image then bank, which is the `-d` word
-routine-sweep's op names take. A name that is not built at fp32 (none of the four inverse routines: atan is parcel M4F1's, asin, acos and atan2 are parcel M4F2's) is
+routine-sweep's op names take. A name that is not built at fp32 is
 skipped and named, in the manifest and on stdout. A DIR that exists is refused (exit 2), nothing written.
 
 The marks come from one table (MARKS): at fp32 exp marks five lanes under rtz, rdn and rup and none under rne and rmm (host/tests/

@@ -107,13 +107,14 @@ def count(state: str, key: str) -> int:
 OP = ""      # a soak job's op (argv[1] after the binary), for rules that name one
 
 # Parcel M4X2: host/tools/routine_sweep.c, as the dry run and the build step's test doubles meet it. THE STAND-IN'S OWN COPIES (the suite holds
-# them to hw/card_stress_lib.py's ROUTINE_DIGESTS and to the box's `routine-sweep list`, box/tool-m4x/list.out): the digests of the nine
+# them to hw/card_stress_lib.py's ROUTINE_DIGESTS and to the real `routine-sweep list`, the fixture hw/card_stress_fixtures/rs-list.txt): the digests of the thirteen
 # routines that have images, and the instructions and words of exp's five (the tool's own image lines, step1 of the same run); every
 # other routine's image lines carry the exp numbers - a count that adds up, not a measurement - and a hash the stand-in makes up.
 ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
 ROUTINE_ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
 ROUTINE_STANDIN_DIGESTS = {"exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb", "log2": "c274c957",
-                           "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e"}
+                           "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e",
+                           "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8"}
 ROUTINE_EXP_SIZES = {"rne": (387, 71), "rtz": (385, 71), "rdn": (385, 71), "rup": (384, 70), "rmm": (387, 71)}
 ROUTINE_OP = re.compile(r"^(%s)-f32(?:-x([0-9a-f]{8}))?(?:-d([0-9a-f]{8}))?$" % "|".join(ROUTINE_NAMES))
 EXP_SMOKE_LANE = 0x33ffffff           # exp's marked lane in the lead's smoke slice: rtz and rdn guess 1.0, rup the next float up (all right)

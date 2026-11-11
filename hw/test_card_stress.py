@@ -5628,11 +5628,14 @@ DOC_WIDE_C5 = {"rint128-class": (137_344, 2, (274_688, 0), "class", "tile"), "ri
                "cvtto128-class": (91_872, 4, (367_488, 0), "class", "host"), "cvtto256-class": (205_440, 4, (821_760, 0), "class", "host"),
                "cvtfrom128-class": (50_923, 1, (50_923, 0), "class", "host"), "cvtfrom256-class": (50_923, 1, (50_923, 0), "class", "host")}
 DOC_WIDE_C5_NAMES = [f"{op}-{m}" for op in DOC_WIDE_C5 for m in M5]
-# parcel M4X2: the nine routine items' names, typed here from host/tools/routine_sweep.c's op grammar and the box's `routine-sweep list` (the
-# digests: box/tool-m4x/list.out, hw/card_stress_fixtures/rs-list.txt), in the tool's order
+# parcels M4X2 and M4CAT: the thirteen routines' digests and item names, typed here from host/tools/routine_sweep.c's op grammar and the real
+# `routine-sweep list` (hw/card_stress_fixtures/rs-list.txt), in the tool's order; atan2 is nine items (ATAN2_X), the others one each
 DOC_ROUTINE_DIGESTS = [("exp", "043b3bb5"), ("exp2", "ce1e05a9"), ("expm1", "e63ada45"), ("log", "e84c29cb"), ("log2", "c274c957"),
-                       ("log1p", "38ea27d9"), ("sin", "05eb28b1"), ("cos", "98b93d46"), ("tan", "dbfd4a4e")]
-DOC_ROUTINE_NAMES = [f"{n}-f32-d{d}-all" for n, d in DOC_ROUTINE_DIGESTS]
+                       ("log1p", "38ea27d9"), ("sin", "05eb28b1"), ("cos", "98b93d46"), ("tan", "dbfd4a4e"),
+                       ("atan", "d22abd22"), ("asin", "005fc862"), ("acos", "2f8ca421"), ("atan2", "a86a60d8")]
+DOC_ATAN2_XS = [0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb]    # the lead's nine, in his order
+DOC_ROUTINE_OPS = [f"{n}-f32-d{d}" for n, d in DOC_ROUTINE_DIGESTS if n != "atan2"] + [f"atan2-f32-x{x:08x}-d{DOC_ROUTINE_DIGESTS[-1][1]}" for x in DOC_ATAN2_XS]
+DOC_ROUTINE_NAMES = [f"{op}-all" for op in DOC_ROUTINE_OPS]
 WIDE_C5_LOGS = (("wc-rint128-class.txt", "rint128-class-rne"), ("wc-rint256-class.txt", "rint256-class-rmm"),
                 ("wc-scaleb128-class.txt", "scaleb128-class-rup"), ("wc-scaleb256-class.txt", "scaleb256-class-rdn"),
                 ("wc-rint128-f32.txt", "rint128-f32-rne"), ("wc-rint256-f32.txt", "rint256-f32-rmm"),
@@ -5716,7 +5719,7 @@ def format_table_checks(src: str = HERE) -> list:
     want.update(wide_c5)
     with lib_from(src) as L2:
         full = L2.sweep_items(mpfr=True)
-        routine_ops = {it.op for it in full if it.tool == "routine"}         # parcel M4X2: nine more ops, all fp32, checked apart below
+        routine_ops = {it.op for it in full if it.tool == "routine"}         # parcels M4X2 and M4CAT: twenty-one more ops (twelve routines one op each, atan2 nine x), all fp32, checked apart below
         ops = {it.op for it in full} - routine_ops
         c("format: the C tool's table of modes gives the 30 wide ops their formats (fp64 x 2, fp128 x 14, fp256 x 14), and they are the library's wide ops",
           set(wide_c) == set(L2.WIDE_OPS) and sorted(Counter(wide_c.values()).items()) == [("fp128", 14), ("fp256", 14), ("fp64", 2)], str(sorted(Counter(wide_c.values()).items())))
@@ -5729,8 +5732,8 @@ def format_table_checks(src: str = HERE) -> list:
           str(sorted(Counter(wide_c5.values()).items())))
         c("format: the table names every op of the full catalog (80 ops) and no other, and the documents' table is over the same 80",
           set(L2.OP_FORMAT) - routine_ops == ops and len(ops) == 80 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
-        c("format: the nine routine ops (parcel M4X2) are the table's other nine - 89 ops in all - and each is fp32, the format of the programs they run",
-          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) == 9
+        c("format: the routine ops (parcels M4X2, M4CAT: twelve routines one op each and atan2 at nine x, 21 op words) are the table's other 21 - 101 ops in all - and each is fp32, the format of the programs they run",
+          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) == 21
           and routine_ops == {n.rsplit("-all", 1)[0] for n in DOC_ROUTINE_NAMES} and all(L2.OP_FORMAT[op] == "fp32" for op in routine_ops),
           str(sorted(routine_ops)))
         want.update({op: "fp32" for op in routine_ops})
@@ -6605,9 +6608,9 @@ def rs_standin(args: list, env_extra=None, src: str = HERE) -> "tuple[int, str]"
 
 
 def routine_catalog_checks(src: str = HERE) -> list:
-    """The nine routine items in the catalog (parcel M4X2): only with mpfr=True and after the 287, the first 287 and the 125 unchanged field for
-    field, every field of the nine, their digests held to the real tool's `list` and to the generator's manifest (both the box's, as fixtures), the
-    atan2 items through a table of a test's own, the claims, and the group each item is in."""
+    """The 21 routine items in the catalog (parcels M4X2, M4CAT): only with mpfr=True and after the 287, the first 287 and the 125 unchanged field for
+    field, every field of the 21, their digests held to the real tool's `list` and to the generator's manifest (fixtures), the atan2 items
+    (nine, from the real table), the claims, and the group each item is in."""
     out: list = []
 
     def c(n, ok, d=""):
@@ -6623,19 +6626,19 @@ def routine_catalog_checks(src: str = HERE) -> list:
           and all(i.group == "base" for i in full[:125]) and all(i.group == "wide" for i in full[125:287]) and not any(i.tool == "routine" for i in full[:287]),
           f"{len(old)} {h(old)[:12]} {h(full[:287])[:12]}")
         rs = full[287:]
-        c("routine catalog: the nine routine items follow the 287, in the tool's order, named <op word>-all, and the catalog is 296 items with mpfr and 125 without",
-          len(full) == 296 and [it.name for it in rs] == DOC_ROUTINE_NAMES and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
+        c("routine catalog: the 21 routine items (twelve routines one each, atan2 nine) follow the 287, in the tool's order, named <op word>-all, and the catalog is 308 items with mpfr and 125 without",
+          len(full) == 308 == 287 + len(DOC_ROUTINE_NAMES) and [it.name for it in rs] == DOC_ROUTINE_NAMES and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
         bad = []
-        for it, (nm, dg_) in zip(rs, DOC_ROUTINE_DIGESTS):
+        for it, op_ in zip(rs, DOC_ROUTINE_OPS):
             got = (it.tool, it.kind, it.op, it.mode, it.verdict_mode, it.exact, it.per_encoding, it.space, it.level, it.whole, it.mpfr, it.reach, it.format,
                    it.extra_cases, it.seed_index, it.group, it.base_seed, it.layout_dependent)
-            want = ("routine", "exhaustive", f"{nm}-f32-d{dg_}", "all", "all", True, 5, 1 << 32, "exhaustive", (5 << 32, 0), True, "tile", "fp32",
+            want = ("routine", "exhaustive", op_, "all", "all", True, 5, 1 << 32, "exhaustive", (5 << 32, 0), True, "tile", "fp32",
                     0, None, "routine", 0, False)
             if got != want:
                 bad.append(f"{it.name}: {got} vs {want}")
         c("routine catalog: each item runs routine-sweep's `all` mode (the op word the item's name ends in -all), is exact with five checks an encoding over 2^32 encodings "
-          "and none skipped (whole space 5 x 2^32, 0), reaches the tile, is fp32, takes no seed, and is in group routine", not bad and len(rs) == 9, "; ".join(bad[:2]))
-        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the nine op words, both built from the digest table (a new digest needs no third edit)",
+          "and none skipped (whole space 5 x 2^32, 0), reaches the tile, is fp32, takes no seed, and is in group routine", not bad and len(rs) == 21, "; ".join(bad[:2]))
+        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the 21 op words, both built from the digest table (a new digest needs no third edit)",
           all(L2.OP_REACH.get(it.op) == "tile" and L2.OP_FORMAT.get(it.op) == "fp32" for it in rs)
           and {op for op in L2.OP_REACH if L2.ROUTINE_OP.match(op)} == {it.op for it in rs} == {op for op in L2.OP_FORMAT if L2.ROUTINE_OP.match(op)})
         # the digests: the real tool's own `list` (the box's, at c99df121) and the generator's manifest (the same run's), parsed here, never read from the table they test
@@ -6644,41 +6647,32 @@ def routine_catalog_checks(src: str = HERE) -> list:
         noimg = [m.group(1) for m in lst if m and not m.group(3)]
         man = fixture("rs-images-manifest.txt")
         mdig = re.findall(r"^digest (\w+) ([0-9a-f]{8})$", man, re.M)
-        c("routine catalog: ROUTINE_DIGESTS is the real tool's `list` (rs-list.txt: nine routines with five images and a digest each, four with no image), in its order; and the "
-          "generator's manifest of the same run (rs-images-manifest.txt) has the same nine `digest` lines; no routine without a digest has an item",
+        c("routine catalog: ROUTINE_DIGESTS is the real tool's `list` (rs-list.txt: thirteen routines with five images and a digest each, none with no image), in its order; and the "
+          "generator's manifest of the same run (rs-images-manifest.txt) has the same thirteen `digest` lines",
           len(lst) == 13 and all(lst) and list(L2.ROUTINE_DIGESTS.items()) == listed == mdig == DOC_ROUTINE_DIGESTS
-          and noimg == ["atan", "asin", "acos", "atan2"] and not any(n in L2.ROUTINE_DIGESTS for n in noimg), f"{listed} {mdig}")
+          and noimg == [] and len(listed) == 13, f"{listed} {mdig}")
         c("routine catalog: every routine item's op word is the tool's op grammar - <name>-f32, then -x<8 hex> (atan2 alone) and -d<8 hex> - and its digest is the table's",
           all(L2.ROUTINE_OP.match(it.op) and L2.ROUTINE_OP.match(it.op).group(3) == L2.ROUTINE_DIGESTS[it.op.split("-")[0]] for it in rs)
           and not L2.ROUTINE_OP.match("exp-f32-d043b3b") and not L2.ROUTINE_OP.match("exp-f32-d043b3bb5-all") and not L2.ROUTINE_OP.match("nosuch-f32"))
         # claims: by space and level, never "swept", none with ", under " (the wide claims block takes those), the images' digest named
-        c("routine catalog: each claim names the space (every fp32 x), the routine as the compiled program, its images' digest, the five attributes, the unmarked lanes' bits and "
+        c("routine catalog: each of the twelve claims of the one-op routines (atan2's nine are checked below) names the space (every fp32 x), the routine as the compiled program, its images' digest, the five attributes, the unmarked lanes' bits and "
           "flags equal to MPFR's, the marked lanes counted and their guess compared, not decided, and the level (L1 over the fp32 slice); none says 'swept' or contains ', under '",
           all(isinstance(it.claim, str) and f"every fp32 x through {it.op.split('-')[0]} as the compiled program (its images' digest {L2.ROUTINE_DIGESTS[it.op.split('-')[0]]})" in it.claim
               and "each of the five attributes" in it.claim and "an unmarked lane's bits and flags equal to MPFR's" in it.claim
               and "a marked lane counted and its guess compared, not decided" in it.claim and it.claim.endswith("(L1 over the fp32 slice)")
-              and "swept" not in it.claim and ", under " not in it.claim for it in rs), rs[0].claim if rs else "no routine item")
-        # atan2: one item for each of the lead's nine x, in his order, through a table of a test's own (atan2 has no digest in the real table until its fp32 program is built)
-        xs = [0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb]
+              and "swept" not in it.claim and ", under " not in it.claim for it in rs[:12]) and len(rs[:12]) == 12 and not any(it.op.startswith("atan2-") for it in rs[:12]),
+          rs[0].claim if rs else "no routine item")
+        # atan2: one item for each of the lead's nine x, in his order, from the real table
+        xs = DOC_ATAN2_XS
         c("routine catalog: ATAN2_X is the lead's nine x in his order (1, -1, one ulp above 1, 2^40, the largest normal, the smallest normal, a subnormal, two full significands)",
           [x for x, _ in L2.ATAN2_X] == xs and len({x for x, _ in L2.ATAN2_X}) == 9)
-        tbl = {"atan2": "12345678"}
-        ops = [op for _n, _x, _d, op in L2.routine_ops(tbl)]
-        saved = (dict(L2.OP_REACH), dict(L2.OP_FORMAT))
-        try:
-            L2.OP_REACH.update({op: L2.TILE for op in ops})
-            L2.OP_FORMAT.update({op: "fp32" for op in ops})
-            at = L2.routine_items(tbl)
-        finally:
-            L2.OP_REACH.clear()
-            L2.OP_REACH.update(saved[0])
-            L2.OP_FORMAT.clear()
-            L2.OP_FORMAT.update(saved[1])
-        c("routine catalog: a table that has atan2 makes nine atan2 items, one an x, op atan2-f32-x<x>-d<digest>, named ...-all, in the lead's order, each in group routine",
-          [it.op for it in at] == [f"atan2-f32-x{x:08x}-d12345678" for x in xs] and [it.name for it in at] == [f"atan2-f32-x{x:08x}-d12345678-all" for x in xs]
-          and all(it.group == "routine" and it.exact and it.per_encoding == 5 for it in at), str([it.name for it in at][:2]))
+        at = [it for it in rs if it.op.startswith("atan2-")]
+        a2d = L2.ROUTINE_DIGESTS["atan2"]
+        c("routine catalog: the real table makes nine atan2 items, one an x, op atan2-f32-x<x>-d<digest>, named ...-all, in the lead's order, each in group routine",
+          [it.op for it in at] == [f"atan2-f32-x{x:08x}-d{a2d}" for x in xs] and [it.name for it in at] == [f"atan2-f32-x{x:08x}-d{a2d}-all" for x in xs]
+          and all(it.group == "routine" and it.exact and it.per_encoding == 5 for it in at) and rs[-9:] == at, str([it.name for it in at][:2]))
         c("routine catalog: an atan2 claim says every fp32 y for that x and what x is, and not the whole space of (y, x) pairs (Logan's answer 1), and never ', under '",
-          all(f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest 12345678)" in it.claim
+          all(f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest {a2d})" in it.claim
               and "not the whole space of (y, x) pairs" in it.claim and ", under " not in it.claim and "swept" not in it.claim
               for it, (x, what) in zip(at, L2.ATAN2_X)), at[0].claim)
         c("routine catalog: an op the tables do not hold is refused BY NAME where the item is made (OP_REACH first, then OP_FORMAT), as any item",
@@ -6687,7 +6681,7 @@ def routine_catalog_checks(src: str = HERE) -> list:
         sp = importlib.util.spec_from_file_location("rs_standin_copy", os.path.join(src, "card_stress_standin.py"))
         sm = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(sm)
-        c("routine catalog: the stand-in's own table of digests (the nine) and its list of the thirteen names are the library's and the box's `list`",
+        c("routine catalog: the stand-in's own table of digests (the thirteen) and its list of the thirteen names are the library's and the real tool's `list`",
           sm.ROUTINE_STANDIN_DIGESTS == dict(L2.ROUTINE_DIGESTS) and list(sm.ROUTINE_NAMES) == list(L2.ROUTINE_NAMES) == [n for n, _ in listed] + noimg
           and list(sm.ROUTINE_ATTRS) == list(L2.ROUTINE_ATTRS))
     return out
@@ -6963,13 +6957,13 @@ def routine_driver_checks(env: Env, src: str = HERE) -> list:
     return out
 
 
-ROUTINE_SERVED = [f"{n}-f32-d{d}-all" for n, d in DOC_ROUTINE_DIGESTS]
+ROUTINE_SERVED = list(DOC_ROUTINE_NAMES)          # the 21 items: exp..tan (index 0..8), atan, asin, acos, then atan2 at its nine x
 
 
 def scn_routine_items(env: Env, src: str = HERE) -> list:
-    """The nine routine items named by --sweep-items and served by the driver against the stand-in, with --mpfr-prefix: exp covered whole and its whole-space event, every slice's
+    """The 21 routine items named by --sweep-items and served by the driver against the stand-in, with --mpfr-prefix: exp covered whole and its whole-space event, every slice's
     record carrying the marks, the times and the group, the lane exp marks found in its slice, the run stopped on STOP; the report's routine block, group line and rates bucket; the
-    reducer on a copy; and, without --mpfr-prefix, all nine refused by name."""
+    reducer on a copy; and, without --mpfr-prefix, exp and tan (two of the 21) refused by name."""
     out: list = []
 
     def c(n, ok, d=""):
@@ -7013,7 +7007,7 @@ def scn_routine_items(env: Env, src: str = HERE) -> list:
       [e["item"] for e in ev if e["item"] == expn] == [expn] and not r.events("whole_space_mismatch")
       and next(e for e in ev if e["item"] == expn)["cases"] == 5 << 32 and next(e for e in ev if e["item"] == expn)["skipped"] == 0, str([e["item"] for e in ev]))
     served = {x["sweep"]["item"] for x in legs}
-    c("routine items: all nine items were served (each at least one slice) in the quad's tiles, and the run's status file has a `routine` line with their marks",
+    c("routine items: all 21 items were served (each at least one slice) in the quad's tiles, and the run's status file has a `routine` line with their marks",
       served == set(ROUTINE_SERVED) and bool(re.search(r"^routine    \d+ slice\(s\) of the routine items: marked \d+ \(off the list 0, guesses wrong 0\)",
                                                           read_bytes(os.path.join(r.out, "status.txt")).decode("utf-8", "replace"), re.M)), str(sorted(served)))
     log0 = log_text(r, mine[0]) if mine else ""
@@ -7032,7 +7026,7 @@ def scn_routine_items(env: Env, src: str = HERE) -> list:
     rr = ((rj.get("sweep") or {}).get("routine") or [])
     exp_r = next((x for x in rr if x["item"] == expn), {})
     n_exp = len(mine)
-    c("routine items: the report states the routine group on a line of its own and the sentence naming the groups, no base group line (the run served routine items alone), the nine rows with "
+    c("routine items: the report states the routine group on a line of its own and the sentence naming the groups, no base group line (the run served routine items alone), the 21 rows with "
       "the format fp32 in their last column",
       p.returncode == 0 and re.search(r"^  group routine: \d+ exhaustive item\(s\) seen; covered \d+ of \d+ encodings", t, re.M) and "  group base:" not in t
       and "group routine is the routine sweeps' items" in t and re.search(rf"^  {re.escape(expn)}\s+\d+.*\s+tile\s+fp32$", t, re.M), t[t.find("exhaustive items"):][:900])
@@ -7063,10 +7057,10 @@ def scn_routine_items(env: Env, src: str = HERE) -> list:
     except ValueError:
         dj = {}
     sv = [k for k in (dj.get("now") or {}).get("classes", []) if k["served"]]
-    c("routine items: with the flag turned off in a copy, the reducer reads the driver's own routine records: one served class (the tile's), the nine rows each with format fp32 and group routine, "
+    c("routine items: with the flag turned off in a copy, the reducer reads the driver's own routine records: one served class (the tile's), the 21 rows each with format fp32 and group routine, "
       "the routine group alone in the class's groups and totals, and the night's `after.groups` written (a class with a routine row served has it)",
       q.returncode == 0 and len(sv) == 1 and sv[0]["kind"] == "tile" and {x["item"]: (x["format"], x["group"]) for x in sv[0]["items"]} == {n: ("fp32", "routine") for n in ROUTINE_SERVED}
-      and [(g["group"], g["items"]) for g in sv[0]["groups"]] == [("routine", 9)]
+      and [(g["group"], g["items"]) for g in sv[0]["groups"]] == [("routine", len(ROUTINE_SERVED))]
       and sorted(((dj.get("nights") or [{}])[-1].get("after") or {}).get("groups", {}).get(sv[0]["id"], {})) == ["routine"], f"rc {q.returncode}: {q.stderr[-200:]} {str(sv)[:300]}")
     # without --mpfr-prefix: refused by name
     r2 = start_driver(env, "routinerefused", ["--until", until(300), "--sweep-items", f"{ROUTINE_SERVED[0]},{ROUTINE_SERVED[8]},rint64-class-rne"] + SWEEP_ALL_BASE, src=src, to_file=True)
@@ -7122,12 +7116,12 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     s1, s2 = A.steps.get("routine images") or {}, A.steps.get("mpfr routine-sweep") or {}
     m = re.search(r"into (\S+) \(a new directory, kept\)", s1.get("detail", ""))
     d1 = m.group(1) if m else ""
-    c("routine build A: the step `routine images` ran the generator into a NEW directory under the run's output (sweep-images-<stamp>), checked the manifest's commit against HEAD and its nine `digest` "
-      "lines against the table, and kept the directory; the step `mpfr routine-sweep` listed the nine with five images and the table's digests and passed the smoke job (45 cases, 3 marked lanes) with "
+    c("routine build A: the step `routine images` ran the generator into a NEW directory under the run's output (sweep-images-<stamp>), checked the manifest's commit against HEAD and its thirteen `digest` "
+      "lines against the table, and kept the directory; the step `mpfr routine-sweep` listed the thirteen with five images and the table's digests and passed the smoke job (45 cases, 3 marked lanes) with "
       "the oracle line at the pin - while the driver itself held an image in its environment (the job was started without it, or the soak's CPU rule would have refused its DEVICE line)",
       s1.get("ok") is True and s2.get("ok") is True and os.path.basename(d1).startswith("sweep-images-") and os.path.dirname(d1) == os.path.abspath(A.out) and os.path.isdir(d1)
-      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 9 routines" in s1.get("detail", "")
-      and "names the 9 routines with five images" in s2.get("detail", "") and "45 cases, 3 marked lanes right and on the list" in s2.get("detail", "")
+      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 13 routines" in s1.get("detail", "")
+      and "names the 13 routines with five images" in s2.get("detail", "") and "45 cases, 3 marked lanes right and on the list" in s2.get("detail", "")
       and "names MPFR 4.2.2 with GMP 6.3.0" in s2.get("detail", "") and A.rc == 0, f"rc {A.rc}: {s1} {s2}")
     c("routine build A: the xrt step holds routine-sweep to ldd after the literal list (links libxrt_coreutil), and the run served the routine item and a wide one and passed them",
       (A.steps.get("xrt routine-sweep") or {}).get("ok") is True and {x["sweep"]["item"] for x in A.legs(kind="sweep", status="pass")} >= {item, "sqrt128-f32-rne"},
@@ -7153,6 +7147,9 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     red("moved", {"FAKE_GEN_MOVE": "exp"}, "routine images", ("exp: the generator's digest is 043b3bb0", "ROUTINE_DIGESTS has 043b3bb5", "fragment moved", "new, its coverage from nothing"),
         "a moved fragment (the generator's exp digest is not the table's)")
     red("dropped", {"FAKE_GEN_DROP": "tan"}, "routine images", ("tan: the generator's digest is not given", "ROUTINE_DIGESTS has dbfd4a4e"), "a routine whose digest line the manifest lacks")
+    red("moved-atan", {"FAKE_GEN_MOVE": "atan"}, "routine images", ("atan: the generator's digest is d22abd20", "ROUTINE_DIGESTS has d22abd22", "fragment moved"),
+        "a moved fragment (the generator's atan digest is not the table's)")
+    red("dropped-atan2", {"FAKE_GEN_DROP": "atan2"}, "routine images", ("atan2: the generator's digest is not given", "ROUTINE_DIGESTS has a86a60d8"), "atan2, whose digest line the manifest lacks")
     red("commit", {"FAKE_GEN_COMMIT": "0" * 40}, "routine images", ("the manifest's commit is", "this checkout's HEAD is"), "a manifest made from another commit")
     red("genfail", {"FAKE_GEN_FAIL": "1"}, "routine images", ("gen_sweep_images.py --out <dir>` exited 1",), "a generator that exits 1")
     red("noman", {"FAKE_GEN_NOMAN": "1"}, "routine images", ("no readable manifest.txt",), "a generator that writes no manifest")
@@ -7164,10 +7161,10 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
         json.dump([{"leg": "soak", "op": "exp-f32-d043b3bb5", "nth": [1], "do": "offlist"}], fh)
     red("marks", {"CFT_STANDIN_SCENARIO": sc, "CFT_STANDIN_STATE": os.path.join(env.tmp, "routine-scenario-state")}, "mpfr routine-sweep", ("marks", "1 off the list"),
         "marks that are not the smoke's (one lane off the list, where the smoke has three right ones on it)")
-    E = rd("routine-build-extra", ["--mpfr-prefix", pfx], {"FAKE_GEN_EXTRA": "digest atan2 12345678"})
+    E = rd("routine-build-extra", ["--mpfr-prefix", pfx], {"FAKE_GEN_EXTRA": "digest nosuch 12345678"})
     s = E.steps.get("routine images") or {}
-    c("routine build: a manifest digest the table lacks (atan2, built before it has an item) is SAID in the step and does not fail it",
-      s.get("ok") is True and "also has digests for atan2" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
+    c("routine build: a manifest digest the table lacks (a name that is none of the thirteen) is SAID in the step and does not fail it",
+      s.get("ok") is True and "also has digests for nosuch" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
     return out
 
 
@@ -7186,7 +7183,7 @@ def routine_fe_checks(src: str = HERE) -> list:
     fe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fe)
     ops = [op for _n, _d in DOC_ROUTINE_DIGESTS for op in [f"{_n}-f32-d{_d}"]]
-    c("routine figure_extracts: the rule - each of the nine op words (and an atan2 word with its x) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
+    c("routine figure_extracts: the rule - each of the thirteen routines' op words (and an atan2 word with its x) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
       all(fe.is_tile_op(op) and op not in fe.STRESS_TILE_OPS for op in ops) and fe.is_tile_op("atan2-f32-x3f800000-d12345678") and not fe.is_tile_op("exp-f32-d043b3bb")
       and not fe.is_tile_op("exp-f32-d043b3bb5-all") and not fe.is_tile_op("sqrt33") and fe.is_tile_op("sqrt32"), str([op for op in ops if not fe.is_tile_op(op)]))
     served = set(ops) | {"sqrt32", "rem32"}
@@ -9658,13 +9655,19 @@ def plants(env: Env) -> None:
          lambda env, src: routine_catalog_checks(src), ["routine catalog: each item runs routine-sweep's"]),
         ("M4X2: the routine items are left out of the catalog",
          [("card_stress_lib.py", "        items += routine_items()\n", "        pass\n")],
-         lambda env, src: routine_catalog_checks(src), ["routine catalog: the nine routine items follow the 287"]),
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: the 21 routine items"]),
         ("M4X2: exp's digest in the table is not the tool's",
          [("card_stress_lib.py", '    "exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb"', '    "exp": "043b3bb4", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb"')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),
+        ("M4CAT: atan's digest in the table is not the tool's",
+         [("card_stress_lib.py", '"atan": "d22abd22", "asin"', '"atan": "d22abd23", "asin"')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),
+        ("M4CAT: the table has asin and acos in another order",
+         [("card_stress_lib.py", '"asin": "005fc862", "acos": "2f8ca421"', '"acos": "2f8ca421", "asin": "005fc862"')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),
         ("M4X2: a routine claim says 'under' an attribute",
          [("card_stress_lib.py", '    return (f"{space}, each of the five attributes: an unmarked', '    return (f"{space}, under each of the five attributes: an unmarked')],
-         lambda env, src: routine_catalog_checks(src), ["routine catalog: each claim names the space"]),
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: each of the twelve claims"]),
         ("M4X2: an atan2 claim forgets that it is not the whole space of pairs",
          [("card_stress_lib.py", '                 f"not the whole space of (y, x) pairs")', '                 f"")')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: an atan2 claim says"]),
