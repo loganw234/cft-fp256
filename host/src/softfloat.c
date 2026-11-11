@@ -17,14 +17,14 @@ const cft_fmt_desc cft_sf_formats[4] = {
 
 /* ---- packed constants ------------------------------------------- */
 
-static void sf_set_ones(cft_bn *r, int lo, int nbits)
+CFT_HD static void sf_set_ones(cft_bn *r, int lo, int nbits)
 {
     int i;
     for (i = 0; i < nbits; i++)
         cft_bn_setbit(r, lo + i);
 }
 
-static void sf_set_field(cft_bn *r, int lo, int nbits, uint32_t val)
+CFT_HD static void sf_set_field(cft_bn *r, int lo, int nbits, uint32_t val)
 {
     int i;
     for (i = 0; i < nbits; i++)
@@ -32,14 +32,14 @@ static void sf_set_field(cft_bn *r, int lo, int nbits, uint32_t val)
             cft_bn_setbit(r, lo + i);
 }
 
-static void sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out)
+CFT_HD static void sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out)
 {
     cft_bn_zero(out);
     if (sign)
         cft_bn_setbit(out, f->width - 1);
 }
 
-static void sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out)
+CFT_HD static void sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out)
 {
     cft_bn_zero(out);
     sf_set_ones(out, f->man_w, f->exp_w);
@@ -48,14 +48,14 @@ static void sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out)
 }
 
 /* The canonical quiet NaN: the only NaN arithmetic here ever emits. */
-static void sf_qnan(const cft_fmt_desc *f, cft_bn *out)
+CFT_HD static void sf_qnan(const cft_fmt_desc *f, cft_bn *out)
 {
     cft_bn_zero(out);
     sf_set_ones(out, f->man_w, f->exp_w);
     cft_bn_setbit(out, f->man_w - 1);
 }
 
-static void sf_max_normal(const cft_fmt_desc *f, int sign, cft_bn *out)
+CFT_HD static void sf_max_normal(const cft_fmt_desc *f, int sign, cft_bn *out)
 {
     cft_bn_zero(out);
     sf_set_ones(out, 0, f->man_w);
@@ -64,7 +64,7 @@ static void sf_max_normal(const cft_fmt_desc *f, int sign, cft_bn *out)
         cft_bn_setbit(out, f->width - 1);
 }
 
-static void sf_one(const cft_fmt_desc *f, cft_bn *out)
+CFT_HD static void sf_one(const cft_fmt_desc *f, cft_bn *out)
 {
     cft_bn_zero(out);
     sf_set_field(out, f->man_w, f->exp_w, (uint32_t)f->bias);
@@ -82,7 +82,7 @@ typedef struct {
     int    signaling;
 } sf_unp;
 
-static void sf_unpack(const cft_fmt_desc *f, const cft_bn *x, sf_unp *u)
+CFT_HD static void sf_unpack(const cft_fmt_desc *f, const cft_bn *x, sf_unp *u)
 {
     uint32_t ef = cft_bn_extract(x, f->man_w, f->exp_w);
     cft_bn_zero(&u->m);
@@ -117,7 +117,7 @@ static void sf_unpack(const cft_fmt_desc *f, const cft_bn *x, sf_unp *u)
 
 /* ---- rounding ---------------------------------------------------- */
 
-static int sf_round_up(int rnd, int sign, int guard, int sticky, int lsb)
+CFT_HD static int sf_round_up(int rnd, int sign, int guard, int sticky, int lsb)
 {
     switch (rnd) {
     case CFT_SF_RNE: return guard && (sticky || lsb);
@@ -138,7 +138,7 @@ static int sf_round_up(int rnd, int sign, int guard, int sticky, int lsb)
  * nearest attributes here and 9.5 says so in as many words:
  * "roundTiesTowardZero carries all overflows (see 7.4) to infinity
  * with the sign of the intermediate result". */
-static int sf_overflow_gives_inf(int rnd, int sign)
+CFT_HD static int sf_overflow_gives_inf(int rnd, int sign)
 {
     switch (rnd) {
     case CFT_SF_RTZ: return 0;
@@ -150,7 +150,7 @@ static int sf_overflow_gives_inf(int rnd, int sign)
 
 /* 754 6.3: an exact zero sum of oppositely-signed operands is +0 in
  * every attribute except roundTowardNegative. */
-static int sf_cancel_zero_sign(int rnd)
+CFT_HD static int sf_cancel_zero_sign(int rnd)
 {
     return rnd == CFT_SF_RDN ? 1 : 0;
 }
@@ -162,7 +162,7 @@ static int sf_cancel_zero_sign(int rnd)
  * caller guarantees q > e whenever it is set (see sf_round_pack).
  * Given that, guard = (rem >= half) is unaffected by eps < 1, and eps
  * folds into the sticky bit and into inexactness. */
-static int sf_round_at(const cft_bn *m, int e, int q, int sign, int rnd,
+CFT_HD static int sf_round_at(const cft_bn *m, int e, int q, int sign, int rnd,
                        int sticky, cft_bn *kept, int *inexact)
 {
     int shift = q - e;
@@ -189,7 +189,7 @@ static int sf_round_at(const cft_bn *m, int e, int q, int sign, int rnd,
 /* Round the exact non-zero magnitude (m + eps) * 2^e into the format.
  * m must be non-zero, and must have more than `prec` bits whenever
  * `sticky` is set - which is what keeps sf_round_at's shift positive. */
-static int sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
+CFT_HD static int sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
                          int e, int sticky, int rnd,
                          cft_bn *out, uint32_t *flags)
 {
@@ -309,7 +309,7 @@ static int sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
  * the operand pairs that probe these boundaries.
  */
 
-static int sf_nan_result(const cft_fmt_desc *f, const sf_unp *ua,
+CFT_HD static int sf_nan_result(const cft_fmt_desc *f, const sf_unp *ua,
                          const sf_unp *ub, const sf_unp *uc,
                          cft_bn *out, uint32_t *flags)
 {
@@ -321,7 +321,7 @@ static int sf_nan_result(const cft_fmt_desc *f, const sf_unp *ua,
     return 0;
 }
 
-static int sf_fma(const cft_fmt_desc *f, const cft_bn *xa, const cft_bn *xb,
+CFT_HD static int sf_fma(const cft_fmt_desc *f, const cft_bn *xa, const cft_bn *xb,
                   const cft_bn *xc, int rnd, cft_bn *out, uint32_t *flags)
 {
     sf_unp ua, ub, uc;
@@ -435,7 +435,7 @@ static int sf_fma(const cft_fmt_desc *f, const cft_bn *xa, const cft_bn *xb,
  * quirks of realising a + c as a * 1.0 + c are then the same quirks
  * everywhere, rather than three implementations of "addition".
  */
-static int sf_steer(const cft_fmt_desc *f, int op,
+CFT_HD static int sf_steer(const cft_fmt_desc *f, int op,
                     const cft_bn *xa, const cft_bn *xb, const cft_bn *xc,
                     cft_bn *ra, cft_bn *rb, cft_bn *rc)
 {
@@ -478,14 +478,14 @@ static int sf_steer(const cft_fmt_desc *f, int op,
  * implementations diverge, and here there is exactly one source.
  */
 
-static void sf_magnitude(const cft_fmt_desc *f, const cft_bn *x, cft_bn *r)
+CFT_HD static void sf_magnitude(const cft_fmt_desc *f, const cft_bn *x, cft_bn *r)
 {
     cft_bn_copy(r, x);
     cft_bn_clearbit(r, f->width - 1);
 }
 
 /* x < y for non-NaN operands, IEEE comparison, so -0 == +0. */
-static int sf_numeric_lt(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD static int sf_numeric_lt(const cft_fmt_desc *f, const cft_bn *xa,
                          const cft_bn *xb)
 {
     cft_bn ma, mb;
@@ -502,7 +502,7 @@ static int sf_numeric_lt(const cft_fmt_desc *f, const cft_bn *xa,
     return sa ? (cft_bn_cmp(&ma, &mb) > 0) : (cft_bn_cmp(&ma, &mb) < 0);
 }
 
-static int sf_is_nan(const cft_fmt_desc *f, const cft_bn *x, int *signaling)
+CFT_HD static int sf_is_nan(const cft_fmt_desc *f, const cft_bn *x, int *signaling)
 {
     cft_bn frac;
     if (cft_bn_extract(x, f->man_w, f->exp_w) != f->exp_mask)
@@ -518,7 +518,7 @@ static int sf_is_nan(const cft_fmt_desc *f, const cft_bn *x, int *signaling)
 
 /* 754-2019 9.6. `number` selects the ...Number variants, which return
  * the non-NaN operand instead of propagating the NaN. */
-static void sf_minmax(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD static void sf_minmax(const cft_fmt_desc *f, const cft_bn *xa,
                       const cft_bn *xb, int want_max, int number,
                       cft_bn *out, uint32_t *flags)
 {
@@ -563,7 +563,7 @@ static void sf_minmax(const cft_fmt_desc *f, const cft_bn *xa,
 /* 754-2019 5.11 quiet comparison, yielding 1.0 or +0.0 rather than a
  * condition code - which is what makes it the operand a later SELECT
  * consumes, and what makes branchless conditional code expressible. */
-static void sf_compare(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD static void sf_compare(const cft_fmt_desc *f, const cft_bn *xa,
                        const cft_bn *xb, int want,
                        cft_bn *out, uint32_t *flags)
 {
@@ -591,12 +591,12 @@ static void sf_compare(const cft_fmt_desc *f, const cft_bn *xa,
 /* Shifts take their count from b's low bits, modulo the width. Every
  * format here is a power-of-two number of bits, so this is exactly the
  * low log2(width) bits and no count can be out of range. */
-static int sf_shift_amount(const cft_fmt_desc *f, const cft_bn *xb)
+CFT_HD static int sf_shift_amount(const cft_fmt_desc *f, const cft_bn *xb)
 {
     return (int)(cft_bn_extract(xb, 0, 32) & (uint32_t)(f->width - 1));
 }
 
-static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
+CFT_HD static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
                          const cft_bn *xb, cft_bn *out)
 {
     switch (op) {
@@ -660,7 +660,7 @@ static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
 
 /* Nearest integer to 2^18 / (1 + (i + 1/2)/2^9); ties (impossible,
  * proven by test_seeds.py) would round to even. In (2^17, 2^18). */
-static uint32_t seed_recip_entry(uint32_t i)
+CFT_HD static uint32_t seed_recip_entry(uint32_t i)
 {
     /* 1uL, not 1u: `unsigned int` is SIXTEEN bits on an 8-bit AVR and
      * a shift by 28 is then undefined - measured as zero, which makes
@@ -679,7 +679,7 @@ static uint32_t seed_recip_entry(uint32_t i)
 /* Nearest integer to 2^17 / sqrt(mid), mid = (1 + (i + 1/2)/2^9) *
  * 2^odd, decided by exact comparison against the squared midpoint -
  * no floating point anywhere. In (2^16, 2^17). */
-static uint32_t seed_rsqrt_entry(uint32_t j)
+CFT_HD static uint32_t seed_rsqrt_entry(uint32_t j)
 {
     uint32_t odd = j >> 9, i = j & 511u;
     uint64_t m2 = (uint64_t)(((1u << 10) + (i << 1) + 1u)) << odd;
@@ -703,7 +703,7 @@ static uint32_t seed_rsqrt_entry(uint32_t j)
 /* round_pack without the flags: the pack of the seed value into a
  * subnormal result at the range edges is defined as RNE and is part
  * of the spec, not a mode choice. */
-static void seed_pack(const cft_fmt_desc *f, int sign, uint32_t r, int e,
+CFT_HD static void seed_pack(const cft_fmt_desc *f, int sign, uint32_t r, int e,
                       cft_bn *out)
 {
     cft_bn m;
@@ -712,7 +712,7 @@ static void seed_pack(const cft_fmt_desc *f, int sign, uint32_t r, int e,
     (void)sf_round_pack(f, sign, &m, e, 0, CFT_SF_RNE, out, &discard);
 }
 
-static int sf_recip_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
+CFT_HD static int sf_recip_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
 {
     int sign = cft_bn_bit(x, f->width - 1);
     uint32_t ef = cft_bn_extract(x, f->man_w, f->exp_w);
@@ -747,7 +747,7 @@ static int sf_recip_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
     return 0;
 }
 
-static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
+CFT_HD static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
 {
     int sign = cft_bn_bit(x, f->width - 1);
     uint32_t ef = cft_bn_extract(x, f->man_w, f->exp_w);
@@ -805,21 +805,21 @@ static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
  * group, and cft_run_ex refused an index table on a or b as "an
  * operand the opcode does not read". Its arithmetic is unchanged by
  * this line, and so is every other opcode's answer here. */
-int cft_sf_op_assigned(int op)
+CFT_HD int cft_sf_op_assigned(int op)
 {
     return (op >= 0 && op <= 14) || (op >= 16 && op <= 23) ||
            (op >= CFT_SF_SUM && op <= CFT_SF_SUMABS) ||
            op == CFT_SF_IMUL || op == CFT_SF_MAXALL;
 }
 
-int cft_sf_is_reduction(int op)
+CFT_HD int cft_sf_is_reduction(int op)
 {
     return op == CFT_SF_SUM || op == CFT_SF_DOT ||
            op == CFT_SF_SUMSQ || op == CFT_SF_SUMABS ||
            op == CFT_SF_MAXALL;
 }
 
-unsigned cft_sf_op_operands(int op)
+CFT_HD unsigned cft_sf_op_operands(int op)
 {
     switch (op) {
     case CFT_SF_FMA:      return 1u | 2u | 4u;
@@ -857,7 +857,7 @@ unsigned cft_sf_op_operands(int op)
 
 /* One leaf. For sum that is the element itself; for dot it is the
  * ROUNDED product, which is what makes dot(a,b) == sum(mul(a,b)). */
-static int reduce_leaf(const cft_fmt_desc *f, int op, int rnd,
+CFT_HD static int reduce_leaf(const cft_fmt_desc *f, int op, int rnd,
                        const void *a, const void *b, size_t esz, size_t i,
                        cft_bn *out, uint32_t *flags)
 {
@@ -877,7 +877,7 @@ static int reduce_leaf(const cft_fmt_desc *f, int op, int rnd,
     return 0;
 }
 
-int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
+CFT_HD int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
                   const void *a, const void *b, size_t esz,
                   size_t lo, size_t hi,
                   cft_bn *out, uint32_t *flags)
@@ -936,7 +936,7 @@ int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
     return 0;
 }
 
-int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
+CFT_HD int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
                    const cft_bn *a, const cft_bn *b, const cft_bn *c,
                    cft_bn *out, uint32_t *flags)
 {
@@ -1010,7 +1010,7 @@ int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
 
 /* ---- canonical tile ranges ---------------------------------------- */
 
-size_t cft_sf_canonical_ranges(size_t n, size_t parts,
+CFT_HD size_t cft_sf_canonical_ranges(size_t n, size_t parts,
                                size_t *lo_out, size_t *hi_out, size_t cap)
 {
     size_t count, i, k;
@@ -1073,21 +1073,21 @@ size_t cft_sf_canonical_ranges(size_t n, size_t parts,
  * static; these are the only doors.
  */
 
-int cft_sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
+CFT_HD int cft_sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
                       int e, int sticky, int rnd,
                       cft_bn *out, uint32_t *flags)
 {
     return sf_round_pack(f, sign, m, e, sticky, rnd, out, flags);
 }
 
-void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out) { sf_qnan(f, out); }
+CFT_HD void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out) { sf_qnan(f, out); }
 
-void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out)
+CFT_HD void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out)
 {
     sf_inf(f, sign, out);
 }
 
-void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out)
+CFT_HD void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out)
 {
     sf_zero(f, sign, out);
 }

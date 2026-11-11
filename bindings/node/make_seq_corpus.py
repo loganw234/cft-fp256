@@ -79,7 +79,7 @@ SEED = 2609
 PER_FORMAT = 48
 CORRUPT_RATE = 0.32
 # Two n ladders. The narrow one straddles libcft's 64-lane block
-# (host/src/program.c BLOCK_LANES) in both directions; the wide one
+# (host/src/seq_exec.h BLOCK_LANES) in both directions; the wide one
 # does not, because the recording would be enormous and the blocking
 # is not format-dependent.
 N_NARROW = [1, 2, 3, 5, 8, 63, 64, 65, 100]

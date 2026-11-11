@@ -13,25 +13,25 @@
 
 #include "bigint.h"
 
-static void bn_norm(cft_bn *r)
+CFT_HD static void bn_norm(cft_bn *r)
 {
     while (r->n > 0 && r->v[r->n - 1] == 0)
         r->n--;
 }
 
-static int u32_bitlen(uint32_t x)
+CFT_HD static int u32_bitlen(uint32_t x)
 {
     int n = 0;
     while (x) { n++; x >>= 1; }
     return n;
 }
 
-void cft_bn_zero(cft_bn *r)
+CFT_HD void cft_bn_zero(cft_bn *r)
 {
     r->n = 0;
 }
 
-void cft_bn_copy(cft_bn *r, const cft_bn *a)
+CFT_HD void cft_bn_copy(cft_bn *r, const cft_bn *a)
 {
     int i;
     if (r == a)
@@ -41,25 +41,25 @@ void cft_bn_copy(cft_bn *r, const cft_bn *a)
     r->n = a->n;
 }
 
-int cft_bn_is_zero(const cft_bn *a)
+CFT_HD int cft_bn_is_zero(const cft_bn *a)
 {
     return a->n == 0;
 }
 
-void cft_bn_set_u32(cft_bn *r, uint32_t x)
+CFT_HD void cft_bn_set_u32(cft_bn *r, uint32_t x)
 {
     r->v[0] = x;
     r->n = x ? 1 : 0;
 }
 
-int cft_bn_bitlen(const cft_bn *a)
+CFT_HD int cft_bn_bitlen(const cft_bn *a)
 {
     if (a->n == 0)
         return 0;
     return (a->n - 1) * 32 + u32_bitlen(a->v[a->n - 1]);
 }
 
-int cft_bn_bit(const cft_bn *a, int i)
+CFT_HD int cft_bn_bit(const cft_bn *a, int i)
 {
     int limb = i >> 5;
     if (i < 0 || limb >= a->n)
@@ -67,7 +67,7 @@ int cft_bn_bit(const cft_bn *a, int i)
     return (int)((a->v[limb] >> (i & 31)) & 1u);
 }
 
-void cft_bn_setbit(cft_bn *r, int i)
+CFT_HD void cft_bn_setbit(cft_bn *r, int i)
 {
     int limb = i >> 5, j;
     if (i < 0 || limb >= CFT_BN_LIMBS)
@@ -79,7 +79,7 @@ void cft_bn_setbit(cft_bn *r, int i)
     r->v[limb] |= 1u << (i & 31);
 }
 
-void cft_bn_clearbit(cft_bn *r, int i)
+CFT_HD void cft_bn_clearbit(cft_bn *r, int i)
 {
     int limb = i >> 5;
     if (i < 0 || limb >= r->n)
@@ -88,7 +88,7 @@ void cft_bn_clearbit(cft_bn *r, int i)
     bn_norm(r);
 }
 
-uint32_t cft_bn_extract(const cft_bn *a, int lo, int nbits)
+CFT_HD uint32_t cft_bn_extract(const cft_bn *a, int lo, int nbits)
 {
     int limb, off;
     uint32_t l0, l1;
@@ -106,7 +106,7 @@ uint32_t cft_bn_extract(const cft_bn *a, int lo, int nbits)
     return (uint32_t)acc;
 }
 
-void cft_bn_mask(cft_bn *r, int nbits)
+CFT_HD void cft_bn_mask(cft_bn *r, int nbits)
 {
     int limb = nbits >> 5, bits = nbits & 31;
     if (nbits <= 0) { r->n = 0; return; }
@@ -118,7 +118,7 @@ void cft_bn_mask(cft_bn *r, int nbits)
     bn_norm(r);
 }
 
-int cft_bn_cmp(const cft_bn *a, const cft_bn *b)
+CFT_HD int cft_bn_cmp(const cft_bn *a, const cft_bn *b)
 {
     int i;
     if (a->n != b->n)
@@ -129,7 +129,7 @@ int cft_bn_cmp(const cft_bn *a, const cft_bn *b)
     return 0;
 }
 
-int cft_bn_low_nonzero(const cft_bn *a, int k)
+CFT_HD int cft_bn_low_nonzero(const cft_bn *a, int k)
 {
     int full = k >> 5, bits = k & 31, i;
     if (k <= 0)
@@ -142,7 +142,7 @@ int cft_bn_low_nonzero(const cft_bn *a, int k)
     return 0;
 }
 
-int cft_bn_shl(cft_bn *r, const cft_bn *a, int k)
+CFT_HD int cft_bn_shl(cft_bn *r, const cft_bn *a, int k)
 {
     int limbs, bits, an, rn, i;
     if (k < 0)
@@ -165,7 +165,7 @@ int cft_bn_shl(cft_bn *r, const cft_bn *a, int k)
     return 0;
 }
 
-void cft_bn_shr(cft_bn *r, const cft_bn *a, int k)
+CFT_HD void cft_bn_shr(cft_bn *r, const cft_bn *a, int k)
 {
     int limbs = k >> 5, bits = k & 31, an = a->n, rn, i;
     if (k < 0 || limbs >= an) { r->n = 0; return; }
@@ -179,7 +179,7 @@ void cft_bn_shr(cft_bn *r, const cft_bn *a, int k)
     bn_norm(r);
 }
 
-int cft_bn_add(cft_bn *r, const cft_bn *a, const cft_bn *b)
+CFT_HD int cft_bn_add(cft_bn *r, const cft_bn *a, const cft_bn *b)
 {
     int n = a->n > b->n ? a->n : b->n, i;
     uint64_t carry = 0;
@@ -200,7 +200,7 @@ int cft_bn_add(cft_bn *r, const cft_bn *a, const cft_bn *b)
     return 0;
 }
 
-void cft_bn_sub(cft_bn *r, const cft_bn *a, const cft_bn *b)
+CFT_HD void cft_bn_sub(cft_bn *r, const cft_bn *a, const cft_bn *b)
 {
     int i, n = a->n;
     uint64_t borrow = 0;
@@ -214,7 +214,7 @@ void cft_bn_sub(cft_bn *r, const cft_bn *a, const cft_bn *b)
     bn_norm(r);
 }
 
-int cft_bn_mul(cft_bn *r, const cft_bn *a, const cft_bn *b)
+CFT_HD int cft_bn_mul(cft_bn *r, const cft_bn *a, const cft_bn *b)
 {
     cft_bn t;
     int i, j;
@@ -239,7 +239,7 @@ int cft_bn_mul(cft_bn *r, const cft_bn *a, const cft_bn *b)
     return 0;
 }
 
-int cft_bn_inc(cft_bn *r)
+CFT_HD int cft_bn_inc(cft_bn *r)
 {
     int i;
     for (i = 0; i < r->n; i++) {
@@ -252,7 +252,7 @@ int cft_bn_inc(cft_bn *r)
     return 0;
 }
 
-void cft_bn_dec(cft_bn *r)
+CFT_HD void cft_bn_dec(cft_bn *r)
 {
     int i;
     for (i = 0; i < r->n; i++) {
@@ -262,7 +262,7 @@ void cft_bn_dec(cft_bn *r)
     bn_norm(r);
 }
 
-void cft_bn_and(cft_bn *r, const cft_bn *a, const cft_bn *b)
+CFT_HD void cft_bn_and(cft_bn *r, const cft_bn *a, const cft_bn *b)
 {
     int n = a->n < b->n ? a->n : b->n, i;
     for (i = 0; i < n; i++)
@@ -271,7 +271,7 @@ void cft_bn_and(cft_bn *r, const cft_bn *a, const cft_bn *b)
     bn_norm(r);
 }
 
-void cft_bn_or(cft_bn *r, const cft_bn *a, const cft_bn *b)
+CFT_HD void cft_bn_or(cft_bn *r, const cft_bn *a, const cft_bn *b)
 {
     int n = a->n > b->n ? a->n : b->n, i;
     for (i = 0; i < n; i++)
@@ -280,7 +280,7 @@ void cft_bn_or(cft_bn *r, const cft_bn *a, const cft_bn *b)
     bn_norm(r);
 }
 
-void cft_bn_xor(cft_bn *r, const cft_bn *a, const cft_bn *b)
+CFT_HD void cft_bn_xor(cft_bn *r, const cft_bn *a, const cft_bn *b)
 {
     int n = a->n > b->n ? a->n : b->n, i;
     for (i = 0; i < n; i++)
@@ -289,7 +289,7 @@ void cft_bn_xor(cft_bn *r, const cft_bn *a, const cft_bn *b)
     bn_norm(r);
 }
 
-void cft_bn_load(cft_bn *r, const uint8_t *le, int nbytes)
+CFT_HD void cft_bn_load(cft_bn *r, const uint8_t *le, int nbytes)
 {
     int limbs = (nbytes + 3) / 4, i;
     if (limbs > CFT_BN_LIMBS)
@@ -308,7 +308,7 @@ void cft_bn_load(cft_bn *r, const uint8_t *le, int nbytes)
     bn_norm(r);
 }
 
-void cft_bn_store(const cft_bn *a, uint8_t *le, int nbytes)
+CFT_HD void cft_bn_store(const cft_bn *a, uint8_t *le, int nbytes)
 {
     int i;
     for (i = 0; i < nbytes; i++) {

@@ -27351,3 +27351,129 @@ Base 21b98aec (main, with M4F2 merged), phase 1 alone from it (5e663794); M4L's 
 **The plants** (scratch script plants.py: each in a copy of python/ and programs/systems/, run against the named tests, red by name, the real tree green on the same tests): `ROUTINE_SOURCE` without atan2: 3 failed (the two tables tests and the call loop's); `cftc.MATH` without atan2: 7 failed (the tables tests, and the no-mpmath ones: an ImportError where `routine-unavailable` is owed); the manifest's `six` left calling the four the six: 1 failed (the manifest's wording); a cap row lowered by one (atan2 at fp64): 18 failed; a fragment at another attribute: 12 failed; at another format: 3 failed (the digests among them); MAX emitted as MIN: 32 failed; atan2's inputs swapped in the binding: 12 failed; an inverse instruction at another attribute: 4 failed. In-test plants (test_cftc_invtrig.py): the attribute, the mark's SELECT arm, a bank word, a fragment made for another attribute or format and a cap one under, for each of the four; MIN and MAX swapped; the binding in two places; the seven rule changes in the follower.
 
 **Known limits.** (1) The generated differential and the committed set are scratch scripts; the pack's 21 sources are BELIEVED. (2) The generated sources loop 20 times on sw, against M2C's 41; the constant is lowered for a third of them. (3) The follower's lanes are a box with a count, not every argument; the shapes of atan2 with one zero tangent are in no committed reference. (4) The generated compiled-tangent bytes were made on this desktop under two hash seeds; the C half of the corpus check ran with a hand-built cft-segrun of this tree (command above), the gate's is the lead's on the box. (5) The test edits outside the brief's list were forced: test_cftc.py's and test_cftc_trig.py's `version 7` assertions (6 lines) are 8, and `test_a_fragment_of_no_routine_is_refused_by_name` names the fifteen.
+
+## 2026-11-11 - parcel G1A's: host/src compiles for a GPU as it is - CFT_HD in the tree, the sequencer's executor in seq_exec.h, HIP=1's one-unit compile check (the GPU backend's round 1; author G1A, Opus 5.5)
+
+The GPU backend's round 1 (the lead's plan of 2026-11-11), its first parcel: the tree's own text compiles for a GPU, where study GPU-A compiled a copy edited at every build (docs/studies/GPU-A-hip.md). The lead's answers before the first edit: the executor is one header, seq_exec.h, with no device-only .c; the device is one translation unit, as GPU-A's was, with no relocatable device code, so HIP=1 builds a compile check of one unit. Code at **67beb00b**, from 7e6e62e5. "The base" below is a `git archive` of 7e6e62e5. Every figure is MEASURED here unless marked.
+
+**What changed.**
+- `host/include/cft_config.h`: CFT_HD. It is `__host__ __device__` under `__HIPCC__`, `__CUDACC__` or `CFT_DEVICE_BUILD`, and empty otherwise; a definition made before the header is kept, as GPU-A's harnesses make one.
+- E1 on 105 lines: bigint.h 24, bigint.c 26, softfloat.h 16, softfloat.c 39. devcopy.py's own `derive` wrote them, and its `check_one` holds them to the base: every difference is one E1 insertion on a line E1 applies to, and every such line carries it.
+- `host/src/seq_exec.h`, new, 925 lines. It holds devcopy's 28 SEQ_PIECES, taken from the base's program.c as 24 blocks of 637 lines, in program.c's order. Each piece keeps its own leading comment; four macros that share a comment block with a piece move with it (SEQ_MAX_QUIET, SEQ_REGHI_MASK, SEQ_KX9_MASK, SEQ_IMM_RESERVED), and so does the "---- execution ----" banner. The blocks carry three edits and no other: E1 on the pieces' 12 function lines; `#define BLOCK_LANES      64` between `#ifndef BLOCK_LANES` and `#endif`, under a three-line comment; and seq_run_block's `cft_sf_compute(` as `CFT_SEQ_ALU(`, whose default is cft_sf_compute. After the blocks come seq_program_run's per-lane work, as four `CFT_HD static inline` functions: seq_scratch_reach, seq_lanes_deposits, seq_lanes_in and seq_lanes_out.
+- `host/src/program.c` includes seq_exec.h with its other includes. seq_program_run calls the four where their code stood: the deposits once a run, before its first block (`seq_lanes_deposits(prog, A, 0, n, esz)`); the reach once a run; lanes in and out once a block. Its device dispatch passes `A->counts`, and the `counts` local is gone. Once the read-back moved, only the dispatch used it, and the loopback's board profile (CFT_NO_REMOTE) warned it unused. This parcel's own loopback compile found that, and it was fixed before the commit.
+- `host/Makefile`: `HIP ?= 0`, with HIP_ROOT, HIP_PLATFORM (amd by default, or nvidia) and HIP_ARCH. Under HIP=1, `hip-unit` refuses any other platform and a missing hipcc by name, writes gen/hip/cft_hip_unit.hip (host/gen/ is ignored) and compiles it. Under HIP=0 it refuses by name.
+- `host/tools/hip_unit.py` writes two things. The unit: hip_runtime.h, CFT_NO_AUGMENTED, BLOCK_LANES 1, the tree's bigint.c, softfloat.c and seq_exec.h, and two kernels, never launched, that call cft_sf_compute and the executor's per-lane path so that the device compilers generate their code. GPU-A's shims: src/bigint.c, src/softfloat.c, src/seqcore.c (BLOCK_LANES 1, CFT_SEQ_ALU as the runner's CFT_GPUA_ALU), include/cft.h and sha/sha256.h, each an #include of the tree's file. Every file is read back and compared whole. `check DIR` compares again, and `selftest` plants six faults, each refused by name.
+- The Arduino copy, by sync.py: 36 files, seq_exec.h new among them.
+
+**Not a pure move, token by token.** Comments and whitespace are not tokens here. The comparison is the scratch script lanes_tokens.py: difflib over the base's lines and the tip's functions.
+- seq_lanes_in keeps all 390 tokens of the base's locals (program.c:2484 to :2498) and the block's setup loop (:2701 to :2743), in order. It adds its signature and `size_t i;`, and the loop is dedented one level.
+- seq_lanes_out keeps all 196 tokens of `counts`, `pso` and the read-back (:2753 to :2786). It adds its signature and `size_t i;`.
+- seq_scratch_reach is :2678 to :2694, but `B->depth` is the argument `depth` (twice). It adds its signature, `uint32_t scr_reach = 0;` and `return scr_reach;`.
+- seq_lanes_deposits is the zero-fill (:2636 to :2656) over lanes first to first + count - 1:
+  - `(uint8_t *)deposits` becomes `(uint8_t *)A->deposits`;
+  - `memset(pd, 0, n * ...)` becomes `memset(pd + first * prog->max_deposits * esz, 0, count * ...)`;
+  - the masked loop is `for (i = first; i < first + count; i++)`.
+  Called with (0, n), the host makes the same calls in the same order.
+- seq_program_run has 924 tokens where it had 1,605, 892 of them in common. The moved locals and bodies are out, the four calls are in, and `counts` is gone from its locals and from the dispatch.
+- Comments. The deposit and reach comments moved into their functions. The reach comment's last line, "calloc zeroed all of it for the first block.", stays at its call site, and the function's says "0 for a program that has no scratch.". One moved comment's "seq_load_in below" now says "above", since seq_lanes_in follows seq_load_in in the header.
+
+**augmented.c is left without CFT_HD.** With E1 alone (10 lines) it does not compile for NVIDIA. `hipcc -x cu` at sm_120 (HIP 7.2.4 on CUDA 12.9) gives:
+- `augmented.c(426): error: identifier "cft_sf_formats" is undefined in device code` (aug_batch reads the host's table);
+- `warning #20011-D: calling a __host__ function("cft_absent_format_refusal") from a __host__ __device__ function("aug_validate") is not allowed`.
+
+For AMD (ROCm 10.1, HIP 7.16.26385, gfx1102) it compiles, rc 0. So the unit and GPU-A's builds define CFT_NO_AUGMENTED, and the runner refuses augadd by name.
+
+**The host's proof.** On this desktop, with mingw64 gcc 16.1.0, `-std=c99 -O2 -Wall -Wextra -Wpedantic -Wshadow`, and TMP and TEMP in Windows form. The final pass ran 08:58:24 to 09:03:35 on the working tree's host/, which is 67beb00b's. The Arduino copy's check and the loopback's four profiles were run again at the commit. The desktop's CPU load was 8 % by Win32_Processor, read once, after the runs; another parcel's verifier was at work on it.
+- **The E1 files.** bigint.o (6,798 bytes) and softfloat.o (16,278) are byte-identical at base and tip. `gcc -E -P` gives 395 and 926 lines at both, and 50 and 79 of them differ, each by one leading space where the empty CFT_HD expands at the head of a line. `diff -w` finds them equal, and so does a comparison with one leading space taken off every line of both. The brief expected the preprocessed text to be identical. It is not, by that space; the objects are. Control: bigint.c with `carry = s >> 31` differs.
+- **program.o.** Its text is 32,664 bytes at the base and 32,856 at the tip, with the same 14 text symbols: the four functions are inlined. By function (corrected at send-back 1, whose paragraph below gives the command and the count), 12 of the 13 functions have the same instruction stream at base and tip. Only cft_program_run_ex differs, 1,702 instructions to 1,724 (1,680 to 1,706 without nops), because seq_program_run is inlined into it with the four inlined into seq_program_run.
+- **The pieces**, by the scratch script pieces_check.py. Raw: every one of the 28, located in the base by devcopy's own seq_pieces, is in seq_exec.h byte for byte and in order, with E1 12, BL 1 and ALU 1 and no other edit, and no piece's first line is left in program.c. Preprocessed (`gcc -E -P` of program.c at base and tip): the 12 functions and 4 types are equal once the empty CFT_HD's leading space is removed. CFT_SEQ_ALU and BLOCK_LANES expand to the base's text, so the two macro edits leave nothing to name there; the 12 #define pieces are held by the raw half. Five plants, each refused by name: an operator in seq_run_block, BLOCK_LANES 32, the ALU hook reverted, and a piece missing (raw); an operator in seq_decode (preprocessed).
+- **git's own count** (`git diff --color-moved=plain --color-moved-ws=allow-indentation-change 7e6e62e5 67beb00b`): 772 of program.c's 793 removed lines are moves, and 805 of seq_exec.h's 925 added lines.
+- **make -n.** `make -n -B CC=gcc OS=Windows_NT all api-test.exe device-test.exe remote-test.exe` prints the same 70 lines at base and tip. HIP=0 is the default, and `HIP=0` given explicitly prints the same. `make hip-unit` at HIP=0 refuses by name.
+- **The build and its tests.** `make all` and api-test, device-test and remote-test by name: 14 s, 0 warnings. api-test: "all contract checks passed". device-test `sw -n 96` and `sw -b -n 96`, the selfcheck stage's two: rc 0, their logs (455 and 123 lines) equal to the base's but the build-id line. remote-test was built but not run: it needs a server, and the remote stage was not run.
+- **seq_check**, the gate's command (`python -B host/tests/seq_check.py --trials 250 --formats fp32 fp64 fp128 fp256`, Miniconda 3.12, each tree's own cft.dll): base 104 s, tip 104 s, and 95 s at the final text. rc 0 each, and the three logs are byte-identical, 59 lines.
+- **The certificate corpus.** `python -B certificates/corpus.py check`: 257 checks, 0 failed, 19 skipped (no tool given). With `--tool host/cft-segrun.exe`: 329 checks, 0 failed, 0 skipped, 29 s. No hand build was needed. `make all` built cft-segrun.exe and cft-audit.exe with mingw64's gcc first on PATH and TMP and TEMP on make's command line; M4L's record built them by hand with `cc -pipe` after `make` failed on its temporary file.
+- **The Arduino copy.** `python -B bindings/arduino/sync.py`, then `--check`: "36 vendored files, all identical to host/". The loopback's four profiles (full, tiny, tiny128, board), compiled from the copy with its own flags into scratch: 0 warnings each.
+- **profiles-check**, `-j4`: at base and tip each, "libcft compiles at all 20 profiles and switches ..., and all 5 refused combinations are refused by name", 51 s, 0 warnings.
+- **The WebAssembly module's 17 sources**: host/Makefile's SRC as build.sh derives it, and wasm_api.c. `gcc -E -P -std=c99 -O2 -D__EMSCRIPTEN__ -Ihost/include` with a stub emscripten.h, at base and tip:
+  - 4 identical: sha256.c, backend_remote.c, build_id.c and wasm_api.c;
+  - 12 equal but for the empty CFT_HD's leading space: bigint.c, softfloat.c, and the ten that include their headers;
+  - program.c different, 3,314 lines to 3,346 (`wc -l`; corrected at send-back 1).
+  gcc gave rc 0 on all 34 runs and no output was empty. The control, a line of code added to a copy of wasm_api.c, reads different. **So the module's rebuild is owed. It is the lead's, after the merge.**
+- **Linux** (cft-gpu, gcc 13.3). GPU-A's `build_seq.sh ref`, unchanged, built libcft.a at the tip and at the base, 0 warnings each. seq_ref on 11 program corpora gives byte-identical outputs from the two.
+
+**The device proof.** GPU-A's two harnesses, unchanged, built against the tree's files.
+- **The corpora**, made here (Windows, Miniconda 3.12, mpmath 1.3.0): gen_corpus.py conformance, 4 s; stream, 52 s; gen_programs.py `--formats fp32 fp64 fp128 fp256 --golden`, 77 s. The 8 corpus files equal captured/corpus.sha256.
+- **GPU-A's routines-fp32 sum is stale on main.** Main's generator writes 130 fp32 routine cases where GPU-A's wrote 90, because M4F2 (fb30a89b, 2026-11-10 12:46) is on main and not in gpu-a (010b2551). So routines-fp32.bin does not equal captured/programs.sha256. GPU-A's own corpus was made again at 010b2551 (a `git archive` of that commit's host, python, programs, vectors and the study; 19 s): 90 cases, 90fa09fc..., the captured sum. Main's is run as well, as routines-fp32-now (c1bdeb1b..., 130 cases).
+- **The references.** With the tip's references (seq_ref, above), all 21 lines of captured/programs.sha256 are OK. routines-fp32-now's reference is 0a369fe3..., from tip and base alike.
+- **The builds.** In place of devcopy's devsrc, `hip_unit.py gpua DIR` (5 files, checked whole). They use build.sh's and build_seq.sh's compile lines, with the copy's includes replaced by `-I DIR -I DIR/sha` (cft_fma) or `-I DIR -I DIR/include -I DIR/sha -I docs/studies/gpu-a` (cft_seq). cft_seq takes `-DCFT_NO_AUGMENTED`, as build_seq.sh gives, and sha256.o is made as build.sh makes it.
+  - nvidia: `hipcc -x cu -isystem /opt/rocm-7.2.4/include -O2 -std=c++17 -gencode arch=compute_120,code=sm_120 -Xptxas -v` (HIP 7.2.4, CUDA 12.9, HIP_PLATFORM=nvidia). Eight builds, and two g++ CPU builds beside them, took 87 s, three at a time:
+    - cft_fma plain, rmm-as-rne and drop-flag 8;
+    - cft_seq s64 (`-DCFT_MAX_FORMAT=1 -DCFT_NO_TRANSCEND`), s256 (`-DCFT_BN_LIMBS=40 -DCFT_NO_TRANSCEND`), s256f (with `-DCFT_GPUA_FIXED`), s64-mask and s64-konst.
+    No warning came from the tree's files. The only warning is the harness's own #177-D in cft_seq.hip (ms_since, unused in its GPU builds).
+  - amd: `hipcc -O2 -std=c++17 --offload-arch=gfx1102 -Rpass-analysis=kernel-resource-usage` (ROCm 10.1, HIP 7.16.26385). The same eight builds: 21 s for cft_fma's three and 27 s for cft_seq's five, 0 warnings.
+- **RTX 5060 Ti** (HIP device 1, bus 0000:05:00.0, sm_120, in this desktop's WSL distro cft-gpu). 67beb00b's tree ran 09:09:58 to 09:10:27. The same results came at 08:55:46 to 08:56:15, on the text before two comment edits and the `counts` fix. nvidia-smi ran before each step; the 4070 showed 2 to 4 % from the display and was not used. Plants first:
+  - flip (conf-fp256 with bit 0 of case 12345's expected d flipped): 1 result differs, under rup, output sha256 da932116...; RED, and gen_corpus.py verify RED;
+  - rmm-as-rne: 51 results differ, all under rmm, ffe3f2eb93608966...; RED, GPU-A's hash;
+  - drop-flag 8: 1,452 flags differ (290/291/290/291/290), f0ca15e06fcbefb5...; RED, GPU-A's hash;
+  - cft_seq mask: 24 of 130 fp64 routine cases differ, e1537046...; RED, GPU-A's hash;
+  - cft_seq konst: 130 of 130 differ, 70225177...; RED, GPU-A's hash.
+  GREEN, each by the harness's sha256 and gen_corpus.py verify's hashlib, with 0 results and 0 flags differing and 0 refused:
+  - conf-fp32 dd3d83be..., conf-fp64 3a8a9b2c..., conf-fp128 fcc92da3...;
+  - conf-fp256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9;
+  - stream-fp256 (1,000,000 cases) 9c7f2f6e....
+  GREEN against the references:
+  - routines fp32 (GPU-A's 90) a7ff1aef..., fp64 4eb03cc3..., fp128 30b7a930..., fp256 dd159120...;
+  - fuzz 735f6e86..., 347c9957..., e8f855b4..., 9dec942c...;
+  - systems 581b9c30... and bench 6cba53d3..., on s256 and on s256f; s256f also on fuzz-fp256 and routines-fp256;
+  - routines-fp32-now 0a369fe3....
+  augadd was refused by name. The runner holds 48 registers and 8,000 B of local memory a thread at 40 limbs.
+- **RX 7600**: the RX 7600 machine (nvidia-box), gfx1102, bus 0000:03:00.0, working in ~/g1a only. It took a tarball of the tree's files, the corpora and the references, checked there file by file against a manifest made here (302 files). The tarball's 274 tree files are 67beb00b's, checked against the commit, except hip_unit.py: its unit text gained hip_runtime.h after the tarball was made (below), and the replacement copied to the machine has the commit's sha256. amd-smi and ps ran before each step; no other GPU process was listed. Plants ran 09:01:21 to 09:01:25 and corpora 09:01:33 to 09:01:54: the same results and the same hashes as the 5060 Ti, line for line. The runner holds 74 registers and 8,724 B local a thread at 40 limbs.
+- **The CPU builds** (g++ `-DCFT_GPUA_CPU`, the same shims): conf-fp32 to conf-fp256, stream-fp256, routines fp32, fp32-now and fp64, and fuzz fp32 and fp64, all GREEN at the same hashes.
+
+**HIP=1** (`make -C host HIP=1 ... hip-unit`, in the tree):
+- nvidia (cft-gpu, `HIP_PLATFORM=nvidia HIP_ROOT=/opt/rocm-7.2.4`, HIP_ARCH 89 120; CFT_BN_LIMBS 64, BLOCK_LANES 1): rc 0, 46 s.
+  - the seq kernel: 101 registers and 12,352 B of stack at sm_89, 46 and 12,608 at sm_120;
+  - the alu kernel: 40 registers, 3,432 and 3,688 B.
+- amd (the RX 7600 machine, HIP_ROOT /opt/rocm, gfx1102): rc 0, 6 s. The alu kernel: 40 VGPRs, 4,532 B of scratch; the seq kernel: 65 VGPRs, 13,716 B.
+- **The first amd compile failed**, for two reasons:
+  - without `#include <hip/hip_runtime.h>`, threadIdx is undeclared;
+  - seq_exec.h's two memset calls (the deposits and the scratch, moved text) had no device overload: "reference to __host__ function 'memset' in __host__ __device__ function". HIP-Clang declares its device memset in hip_runtime.h; nvcc has one built in.
+  The unit now includes hip_runtime.h first, so any unit that includes seq_exec.h needs it before.
+
+**What the split does to the studies' scripts.** The note of today at the head of docs/studies/GPU-A-hip.md has it whole. devcopy.py's `--seq` and `--selftest` refuse at 67beb00b, so GPU-A's build_seq.sh and its runbooks stop, and so does GPU-C's make_bundle.sh, at s64. build.sh still builds. GPU-D's OpenCL C text moves from 02efcc15... to 9d49589f... because of cft_config.h's CFT_HD block; its counted edits and its check are unchanged. Their files are not edited, at the lead's word.
+
+**Size**, by numstat over 7e6e62e5..67beb00b: 4,243 changed lines.
+- host/: 2,252 (1,354 added, 898 removed). By git's move detection, 1,577 of them are moves: 772 out of program.c and 805 into seq_exec.h. The 675 that are not:
+  - E1: 210;
+  - cft_config.h: 30;
+  - the Makefile: 47;
+  - hip_unit.py: 231;
+  - seq_exec.h's new lines: 120;
+  - program.c: 16 added and 21 removed.
+- bindings/arduino: 1,991, sync.py's copy of the same files, with vendor.json's 17.
+
+**Not run, and known limits.**
+1. The four per-lane functions have run on a host only. The unit compiles them for both vendors through a kernel that is never launched, and GPU-A's runner keeps its own (gpua_seq_lane). G1B's backend is the first to run them on a GPU.
+2. The RTX 4070 was not used, and nothing was built for it but hip-unit's sm_89.
+3. GPU-A's stale routines-fp32 sum is left as it is, as the study's record. Main's corpus is checked here against libcft, not against a capture.
+4. The unit is a compile check: nothing is linked or launched.
+5. Not run here: the card's device-test and seq_check on the U50 (the lead's, on amd-arc-box, after the verifier); the box's gate; the remote stage; the WebAssembly module's rebuild (owed, and the lead's).
+6. `gcc -E -P` of the E1 files differs from the base's by one leading space a line. What is byte-identical is the objects.
+
+GPU time: about a minute on the RTX 5060 Ti, in two sessions, and about 25 s on the RX 7600. Before the commit: `python -B python/check_docs_index.py` rc 0, `python -B python/project_figures.py --check` rc 0, `git diff --check` clean, and the added lines and the message scanned for personal paths and host names: none.
+
+**Send-back 1** (the lead, 2026-11-11, `Data/runs/2026-11-11-gpu-backend/briefs/G1A-sendback-1.md`, after verifier VG1A's pass at 36daa67d: no regression, one wrong answer; corrected in a new commit, no GPU run).
+
+1. **The program.o bullet's per-function counts did not reproduce.** My first count took every line of `objdump -d` that begins with an address. That counts a long instruction's continuation line of raw bytes as an instruction, and it counts the alignment padding before the next function.
+   - Re-measured with mingw64 gcc 16.1.0, the entry's flags and GNU objdump 2.46: `objdump -d --no-show-raw-insn -r program.o` at base and tip, by the scratch script fncount.py. An instruction is a line of a function's body with an address, a tab and a mnemonic. A nop is one whose mnemonic or prefix starts with "nop", or `xchg %ax,%ax`. A function's stream is its non-nop instructions, with the addresses made symbolic and objdump's `# <sym+off>` notes dropped.
+   - 12 of the 13 functions have the same stream at base and tip.
+   - cft_program_run_ex differs: 1,702 instructions to 1,724, which is 1,679 to 1,703 without nops, or 1,680 to 1,706 if the two-byte `xchg %ax,%ax` is kept as an instruction, as VG1A counted.
+   - cft_program_digest is 82 lines to 114 with the same 62 non-nop instructions (63 with the xchg form, VG1A's 63). The 32 more are padding before the next function.
+   - cft_program_load's stream differs only in those notes, which name places in the unlinked object's own layout.
+   - Control: one register changed throughout the tip's dump leaves 6 of the 13 the same.
+   - The bullet above is corrected in place.
+2. **The WebAssembly count.** `gcc -std=c99 -O2 -D__EMSCRIPTEN__ -I<stub> -Ihost/include -E -P host/src/program.c | wc -l` gives 3,314 at the base and 3,346 at 67beb00b. The 3,347 above was an earlier run's count, before the `counts` fix took one declaration out. It is corrected in place.
+3. **Two comments the split made false**, approved by the lead in this pass, now name host/src/seq_exec.h: python/cft_golden/cert.py:67 to :68 (BLOCK_LANES) and bindings/node/make_seq_corpus.py:82.
+   - cert.py is one of the files the vectors' model stamp covers, so the stamp moves. vectors/gen_vectors.py's `model_digest()` is 7935e7cd... at 36daa67d and e2e1c172... at this commit, so verify's vectors_whole regenerates the vectors once.
+   - `python -B -m pytest -p no:cacheprovider -q python/tests/test_cert*.py -n 4`: 209 passed in 25.5 s.
+   - Three more mentions the split made stale were found and left, since they were not approved: host/tools/orbits.c:1849 ("which host/src/program.c keeps in a private enum": the control codes are seq_exec.h's), docs/studies/OPT-D-contract.md:656 and docs/ROUND2.md:342, the last two records of their dates.

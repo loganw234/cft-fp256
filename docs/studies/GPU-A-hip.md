@@ -21,6 +21,52 @@ two sessions' spread, the package names, the generator's coverage).
 follows this part's appendix: libcft's sequencer programs, one thread a
 lane, bit for bit on all three cards, and their rates.
 
+**Noted 2026-11-11 (the GPU backend's round 1, parcel G1A): the device
+copy is now the tree's own text.** Section 2's E1 is made in host/src:
+CFT_HD (host/include/cft_config.h) stands where devcopy.py put it, 105
+lines of bigint.h, bigint.c, softfloat.h and softfloat.c. Part 2's
+executor is host/src/seq_exec.h: devcopy's 28 pieces moved out of
+program.c byte for byte, E3 and E4 made the file's own macros
+(BLOCK_LANES, default 64, and CFT_SEQ_ALU, default cft_sf_compute), and
+seq_program_run's per-lane setup and read-back, which P2.3's runner
+re-expressed, are four functions there that the host's run calls.
+`host/tools/hip_unit.py gpua DIR` writes, in place of devcopy's copy,
+files that each `#include` the tree's own file. Built against them, with
+build.sh's and build_seq.sh's compile lines, cft_fma.hip and cft_seq.hip,
+unchanged, give this study's hashes on the RTX 5060 Ti and the RX 7600
+(docs/VALIDATION.md, G1A).
+
+What no longer runs as written, from the split's commit (`67beb00b`) on,
+and why: devcopy.py's `--seq` and its `--selftest` refuse, "program.c:
+piece '#define SEQ_NREG ' found 0 times, not once", because program.c no
+longer holds the pieces. devcopy.py is kept, unedited, as this study's
+record.
+- **This study's**: build_seq.sh (it runs `--seq`); run_wsl_nvidia.sh and
+  run_amd.sh (so run_rx7600.sh and run_mi300x.sh), which begin with the
+  selftest; and run_seq.sh, which runs it after its corpus check (that
+  check already refused main's routines-fp32, whose captured sum predates
+  M4F2: VALIDATION's G1A entry). Each runs as written at `010b2551`, this
+  study's commit. build.sh alone still builds: devcopy's copy without
+  `--seq` makes 0 E1 edits of a tree that carries CFT_HD and passes its
+  check. At the split's tree, build against `hip_unit.py gpua`'s files
+  with build.sh's or build_seq.sh's compile lines, `-I DIR -I DIR/include
+  -I DIR/sha` for the copy's (VALIDATION's G1A entry has the lines).
+- **GPU-C's** (`studies/gpu-c/`, as written at its commit `abbfad72`):
+  build_chipstar.sh builds cft_fma as far as devcopy (OK, 0 E1 edits;
+  chipStar's compile not run here) and stops at devcopy for cft_seq
+  (`--seq`), so make_bundle.sh stops at its fourth build, s64.
+- **GPU-D's** (`studies/gpu-d/`, as written at its commit `f49fae53`, where
+  the text is 02efcc15...): build_ocl.sh
+  still builds as far as its text. devcopy makes 0 edits, and oclcopy.py
+  makes its counted edits unchanged (I 7, O1 2, O2 7, O3 1, O4 2, no other
+  difference) and its `--check` passes. But the OpenCL C text is 96,078
+  bytes, sha256 9d49589f..., where it was 94,634, 02efcc15..., because
+  it carries cft_config.h whole and cft_config.h gained the CFT_HD block
+  (30 lines, unused there: the text defines CFT_HD first). The copies of
+  bigint and softfloat inside it are byte for byte the same. Not
+  compiled or run here.
+- GPU-B's build.sh runs devcopy without `--seq`, so it still copies.
+
 ## The answer
 
 **One HIP source works on both vendors, bit for bit.** MEASURED, results and
