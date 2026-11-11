@@ -1,0 +1,67 @@
+# GPU-D, the M2 Pro's GPU through Apple's OpenCL 1.2, 2026-11-11 (MEASURED). Lines verbatim from the
+# harness and ocl_run.sh's summaries, cut at 300 to 600 characters; the diagnosis variants put
+# __attribute__((optnone, noinline)), or noinline alone, on the named functions.
+== the first run at default options (05:58): conf-fp256 and stream-fp256 by attribute, one refused lane
+check: corpus/conf-fp256.bin on Apple M2 Pro (Apple, OpenCL 1.2, driver 1.2 1.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 3447 results and 3447 flags differ, 3447 refused; differing by attribute 871/29/829/847/871; sha256 c3fea42f6173f50e0c16188465ab506c6c7b95765814a8669bbd2d6d0e89ea2b; kernel 0.056 ms, end to end 4.162 ms: RED
+check: corpus/stream-fp256.bin on Apple M2 Pro (Apple, OpenCL 1.2, driver 1.2 1.0): fp256, 1000000 cases (rne 200000 rtz 200000 rdn 200000 rup 200000 rmm 200000); 199592 results and 199592 flags differ, 199592 refused; differing by attribute 51075/0/48622/48820/51075; sha256 1431dd0480f64b3bbd8aa47af0d17301f1fcb467169ad166f47e52268631c09e; kernel 1.064 ms, end to end 56.101 ms: RED
+  DIFF case 4 rnd 0: a bfffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff b bffff00000000000000000000000000000000000000000000000000000000001 c ffffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+       got d 0000000000000000000000000000000000000000000000000000000000000000 flags 0x80
+      want d ffffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff flags 0x10
+== the final bundle at default options (06:10): RED
+== ocl_run.sh 2026-11-11 06:10:25, harness flags: (none), OCL_ICD_VENDORS=unset, stack limit 8176 KB
+PLANT flip: NOT AS EXPECTED (RED with GPU-A's output sha256 da932116555557be... wanted)
+PLANT rmm-as-rne: NOT AS EXPECTED (RED with GPU-A's output sha256 ffe3f2eb93608966... wanted)
+PLANT drop-flag: NOT AS EXPECTED (RED with GPU-A's output sha256 f0ca15e06fcbefb5... wanted)
+check: corpus/conf-fp32.bin fp32 18435 cases, sha256 d8653d9c8a438a38ed248d218eee6f679cbd68db48b58f2630a75ffdf21b799f, kernel 0.036 ms, end to end 3.653 ms: RED
+check: corpus/conf-fp64.bin fp64 18440 cases, sha256 6f2f14e58ee7ad147620420a6fd942bc7803d6d6c9b1ce35a2d6313c4b7e26a3, kernel 0.041 ms, end to end 4.009 ms: RED
+check: corpus/conf-fp128.bin fp128 18545 cases, sha256 5b7b71231e13b96eceff062bfea7fbb7a3ad965b8714644675eb53518b1ea0dd, kernel 0.039 ms, end to end 3.784 ms: RED
+check: corpus/conf-fp256.bin fp256 18360 cases, sha256 c3fea42f6173f50e0c16188465ab506c6c7b95765814a8669bbd2d6d0e89ea2b, kernel 0.064 ms, end to end 5.070 ms: RED
+check: corpus/stream-fp32.bin fp32 1000000 cases, sha256 e0b71df46d19ea26b2ba5adf20b74d8ffc97f16862b4d9e3d684507df563dfb3, kernel 0.635 ms, end to end 29.559 ms: RED
+check: corpus/stream-fp256.bin fp256 1000000 cases, sha256 1431dd0480f64b3bbd8aa47af0d17301f1fcb467169ad166f47e52268631c09e, kernel 0.919 ms, end to end 47.515 ms: RED
+== ocl_run.sh 2026-11-11 06:10:27 rc=1  (SOMETHING DIFFERS)
+== the final bundle with --opts -cl-opt-disable on every build (06:10)
+PLANT flip: RED, as it must be; output sha256 da932116555557be... as GPU-A's
+PLANT rmm-as-rne: RED, as it must be; output sha256 ffe3f2eb93608966... as GPU-A's
+PLANT drop-flag: RED, as it must be; output sha256 f0ca15e06fcbefb5... as GPU-A's
+check: corpus/conf-fp32.bin fp32 18435 cases, sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae, kernel 0.045 ms, end to end 3.736 ms: GREEN
+verify: conf-fp32.out against conf-fp32.bin: 18435 cases, 0 results and 0 flags differ; hashlib sha256 dd3d83be8ba2477c93246ff9e41214923ceb0687367b4d159d06ba251e7636ae
+check: corpus/conf-fp64.bin fp64 18440 cases, sha256 3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f, kernel 0.109 ms, end to end 6.444 ms: GREEN
+verify: conf-fp64.out against conf-fp64.bin: 18440 cases, 0 results and 0 flags differ; hashlib sha256 3a8a9b2cb98a5be99890a164720c2efd97f1653a5a9445b5de9ed5276c0e769f
+check: corpus/conf-fp128.bin fp128 18545 cases, sha256 fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25, kernel 0.140 ms, end to end 7.645 ms: GREEN
+verify: conf-fp128.out against conf-fp128.bin: 18545 cases, 0 results and 0 flags differ; hashlib sha256 fcc92da36e24b19ce6a83d21f6459b1b04502a6518f60266259845ac21fccf25
+check: corpus/conf-fp256.bin fp256 18360 cases, sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9, kernel 0.203 ms, end to end 10.635 ms: GREEN
+verify: conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+check: corpus/stream-fp32.bin fp32 1000000 cases, sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577, kernel 1.477 ms, end to end 64.145 ms: GREEN
+verify: stream-fp32.out against stream-fp32.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 15545866e2b21b6fc6c6ca91f8cb8dbb78b094e2d788004edfffe6afe7c98577
+check: corpus/stream-fp256.bin fp256 1000000 cases, sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7, kernel 2.995 ms, end to end 133.949 ms: GREEN
+verify: stream-fp256.out against stream-fp256.bin: 1000000 cases, 0 results and 0 flags differ; hashlib sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7
+bench: corpus/stream-fp256.bin: fp256, 1000000 lanes, work-group 256, 10 reps; kernel ms min 2.739 median 2.765 max 2.773; end to end ms min 120.946 median 122.050 max 122.439; 3.616e+08 FMA/s kernel, 8.193e+06 FMA/s end to end (medians); 2.8 ns a lane; kernel by the host clock ms min 115.216 median 116.295 max 116.653, 8.599e+06 FMA/s
+== ocl_run.sh 2026-11-11 06:10:31 rc=0  (ALL AS EXPECTED)
+== rates (06:05), stream-fp256, 1M lanes, 10 reps: -cl-opt-disable, then default options (a RED build)
+bench: corpus/stream-fp256.bin on Apple M2 Pro (Apple, OpenCL 1.2, driver 1.2 1.0): fp256, 1000000 lanes, work-group 256, 10 reps; kernel ms min 2.747 median 2.768 max 2.782; end to end ms min 121.444 median 122.181 max 124.515; 3.613e+08 FMA/s kernel, 8.185e+06 FMA/s end to end (medians); 2.8 ns a lane; kernel by the host clock ms min 115.716 median 116.469 max 117.028, 8.586e+06 FMA/s
+timing: kernel 2.751 ms by the profiling events, 116.614 ms by the host clock (enqueue to clFinish, inputs written); end to end 123.547 ms
+kernel ms min 0.745 median 0.751 max 0.785; end to end ms min 37.937 median 38.883 max 41.165; 1.331e+09 FMA/s kernel, 2.572e+07 FMA/s end to end (medians); 0.8 ns a lane; kernel by the host clock ms min 32.176 median 32.716 max 33.781, 3.057e+07 FMA/s
+== diagnosis only, scratch variants of the text (06:03:36 to 06:03:41), conf-fp256:
+v00-none: build 3.5 ms; 3447 results and 3447 flags differ, 3447 refused, by attribute 871/29/829/847/871: RED
+v01-all-bigint: build 80.8 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v02-all-softfloat: build 71.4 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v03-softfloat-1st-half: build 106.9 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v04-softfloat-2nd-half: build 100.8 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v05-cft_bn_inc: build 137.6 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v06-sf_round_at: build 134.8 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v07-sf_round_pack: build 135.6 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v08-cft_bn_shr: build 136.5 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v09-cft_bn_low_nonzero: build 137.4 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v10-sf_round_up: build 139.0 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v11-cft_bn_bit: build 136.1 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v12-sf_fma: build 134.3 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+== round 2 (06:04:28 to 06:04:33; printed to the terminal, copied here verbatim): noinline alone, and the lane
+v13-noinline-cft_bn_bit: build 137.5 ms; 3322 results and 3322 flags differ, 1819 refused, by attribute 846/4/804/822/846: RED
+v14-noinline-sf_fma: build 140.4 ms; 3447 results and 3447 flags differ, 3447 refused, by attribute 871/29/829/847/871: RED
+v15-noinline-gpua_fma_lane: build 138.7 ms; 3447 results and 3447 flags differ, 3447 refused, by attribute 871/29/829/847/871: RED
+v16-optnone-gpua_fma_lane: build 135.0 ms; 0 results and 0 flags differ, 0 refused, by attribute 0/0/0/0/0: GREEN
+v17-noinline-cft_bn_inc: build 138.9 ms; 485 results and 485 flags differ, 485 refused, by attribute 97/97/97/97/97: RED
+== v13's output file read by a scratch script (06:05:17, printed to the terminal, verbatim): wrong WITHOUT a refusal
+1503 lanes differ and are NOT refusals (flags != 0x80); by attribute [375, 0, 0, 753, 375]
+  case 9 rnd 0: got 0000000000000000000000000000000000000000000000000000000000000000 flags 0x00
+           want 4000080000000000000000000000000000000000000000000000000000000000 flags 0x10

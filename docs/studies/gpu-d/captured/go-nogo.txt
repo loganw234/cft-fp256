@@ -1,0 +1,43 @@
+# GPU-D item 0, 2026-11-11 (MEASURED): the harness's info lines (device, program, build, its
+# log, kernel) and oclcopy's lines, verbatim; long lines cut at 300 characters; home paths as ~;
+# trailing spaces removed (PoCL's first log line ends in one).
+== PoCL 7.2 CPU device, cft-gpu, 05:44, the text before edit O4 (sha256 e65dcf2a...):
+program: /root/gpu-d/build/cft_fma.cl, 94539 bytes, sha256 e65dcf2a779c7fe7f98c849b2b8506eed9ea7602ca9850e3e2d0a729907cf33e; build options "-cl-std=CL1.2"
+build: FAILED, clBuildProgram 2069.2 ms (this process's first build; a runtime may cache); log below
+---- build log ----
+Error(s) while linking:
+Recursion detected in function: 'cft_sf_reduce'
+-> Infringing function: 'cft_sf_reduce'
+Device cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F failed to build the program
+---- end of build log ----
+== PoCL 7.2, 05:46, the text with O4:
+oclcopy: 5 files + gpua_fma_lane + fma_kernel.cl -> cft_fma.cl: edits I 7, O1 2, O2 7, O3 1, O4 2, no other difference; 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d
+device: platform 0 of 1, Portable Computing Language, OpenCL 3.0 PoCL 7.2  Linux, Release, RELOC, SPIR-V, LLVM 22.1.8, SLEEF, POCL_DEBUG; device 0 of 1, cpu-alderlake-12th Gen Intel(R) Core(TM) i5-12400F (Portable Computing Language, OpenCL 3.0 PoCL HSTR: cpu-x86_64-pc-linux-gnu-alderlake, driver 7.
+program: /root/gpu-d/build/cft_fma.cl, 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d; build options "-cl-std=CL1.2"
+build: built, clBuildProgram 1790.8 ms (this process's first build; a runtime may cache); log empty
+kernel: work-group size 4096 (CL_KERNEL_WORK_GROUP_SIZE), preferred multiple 8; private memory 0 bytes a work-item, local 0 (as the runtime reports them)
+== Apple M2 Pro GPU, 05:47 (the Mac's own build):
+oclcopy: 5 files + gpua_fma_lane + fma_kernel.cl -> cft_fma.cl: edits I 7, O1 2, O2 7, O3 1, O4 2, no other difference; 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d
+device: platform 0 of 1, Apple, OpenCL 1.2 (Jul 31 2026 20:36:30); device 0 of 1, Apple M2 Pro (Apple, OpenCL 1.2, driver 1.2 1.0); 16 compute units
+program: build/cft_fma.cl, 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d; build options "-cl-std=CL1.2"
+build: built, clBuildProgram 164.6 ms (this process's first build; a runtime may cache); log empty
+kernel: work-group size 256 (CL_KERNEL_WORK_GROUP_SIZE), preferred multiple 32; private memory 0 bytes a work-item, local 0 (as the runtime reports them)
+== RX 7600, ROCm 10.1 OpenCL, 05:48 (the cft-gpu binary, ~/gpu-d/vendors/amd.icd):
+device: platform 0 of 1, AMD Accelerated Parallel Processing, OpenCL 2.1 AMD-APP (3684.0); device 0 of 1, gfx1102 (AMD Accelerated Parallel Processing, OpenCL 2.0, driver 3684.0 (HSA1.1,LC)); 16 compute units
+program: cft_fma.cl, 94634 bytes, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d; build options "-cl-std=CL1.2"
+build: built, clBuildProgram 1503.8 ms (this process's first build; a runtime may cache); log empty
+kernel: work-group size 256 (CL_KERNEL_WORK_GROUP_SIZE), preferred multiple 32; private memory 4796 bytes a work-item, local 0 (as the runtime reports them)
+== the text without O4 (sha256 4d48953f...), 05:48: the RX 7600, then the M2 Pro
+program: cft_fma-noO4.cl, 94545 bytes, sha256 4d48953fbb5175956c35750f93a871916eafe3f146983a4231ee887011c11388; build options "-cl-std=CL1.2"
+build: built, clBuildProgram 1606.4 ms (this process's first build; a runtime may cache); log empty
+program: cft_fma-noO4.cl, 94545 bytes, sha256 4d48953fbb5175956c35750f93a871916eafe3f146983a4231ee887011c11388; build options "-cl-std=CL1.2"
+build: built, clBuildProgram 137.7 ms (this process's first build; a runtime may cache); log empty
+== oclcopy.py --selftest, in cft-gpu (06:13):
+selftest: plant 'host/src's table line changed (O1 finds 0)' refused: edit O1 in src/softfloat.c: '\nconst cft_fmt_desc cft_sf_formats[4] = {' found 0 times, not 1
+selftest: plant 'a second `half >>= 1;` in host/src (O2 finds 2)' refused: edit O2 in src/softfloat.c: 'half >>= 1;' found 2 times, not 1
+selftest: plant 'an include added to bigint.h (the text would miss it)' refused: an #include survived the edits: #include <string.h>
+selftest: plant 'the lane edited in cft_fma.hip (the check of the old text)' refused: the text's line 8 is not the derivation's: ' *   cft_fma.hip dc3ae2259d435a6087ddc719d605a0e9396c60bf (gpua_fma_lane, line 68)'
+selftest: plant 'a caller of the excluded cft_sf_reduce in the kernel (O4's check)' refused: O4: cft_sf_reduce( appears 2 times outside the excluded lines, not once (a caller was added?)
+selftest: plant 'one byte of the written text changed' refused: the text's line 2334 is not the derivation's: '            half_ = 2;'
+selftest: honest text accepted, sha256 02efcc1531f10bbdd32fa92a9d00e822d1648157d120eb99abc867347e67524d
+selftest: OK, 6 plants refused by name
