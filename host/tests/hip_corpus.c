@@ -5,6 +5,7 @@
  * public API, on any device:
  *
  *     hip-corpus ARTIFACT CORPUS OUT        ARTIFACT: sw, or hip:N
+ *     hip-corpus ARTIFACT CORPUS OUT --sample K:SEED   (below, before main)
  *
  * It reads the two corpus layouts and runs them; it computes nothing
  * itself. What it writes is GPU-A's output layout, so the sha256 of OUT
@@ -97,14 +98,27 @@ static void *xmalloc(size_t n)
 
 /* ---- the elementwise corpus ------------------------------------------- */
 
+/* --sample K:SEED (elementwise corpora): pass 1 on K cases, chosen by
+ * selection sampling (Knuth's algorithm S) - case i is taken when the
+ * next draw of xorshift64 (shifts 13, 7, 17, seeded with SEED), modulo
+ * the n - i cases left, is below the number still to take, which takes
+ * exactly K - and pass 2 whole. With no pass 1 over every case there is
+ * no output to hash, so both passes are held to the corpus's own
+ * expected values instead: each sampled case's d and flags exactly,
+ * each pass-2 call's d byte for byte and its flags to the OR of its
+ * cases' expected flags. OUT is left empty. For a device whose single
+ * calls would hold it too long for a whole pass 1 (study GPU-A's stream
+ * corpus, 1M cases). */
+static unsigned long long sample_k, sample_seed;
+
 static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
                     uint8_t digest[32])
 {
     const uint32_t fmt = rd32(raw + 8), esz = rd32(raw + 12);
     const uint64_t n = (uint64_t)rd32(raw + 16) | (uint64_t)rd32(raw + 20) << 32;
-    const uint8_t *a, *b, *c, *rnd, *want_d, *want_f;
-    uint8_t *d, *fl, *ga, *gb, *gc, *gd;
-    size_t i, bad_d = 0, bad_f = 0, p2_bad = 0;
+    const uint8_t *a, *b, *c, *rnd, *want_d, *want_f, *ref_d, *ref_f;
+    uint8_t *d, *fl, *ga, *gb, *gc, *gd, *sel = NULL;
+    size_t i, bad_d = 0, bad_f = 0, p2_bad = 0, taken = 0;
     double t0, t1, t2;
     int k, rc = 0;
 
@@ -121,18 +135,42 @@ static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
     want_f = want_d + n * esz;
     d = (uint8_t *)xmalloc(n * esz + n);
     fl = d + n * esz;
+    ref_d = d;                  /* pass 2 is held to pass 1, or in a */
+    ref_f = fl;                 /* sample to the corpus's expected */
+    if (sample_k) {
+        unsigned long long x = sample_seed;
+        if (sample_k > n) {
+            fprintf(stderr, "hip-corpus: --sample %llu of %lu cases\n", sample_k,
+                    (unsigned long)n);
+            free(d);
+            return 2;
+        }
+        sel = (uint8_t *)xmalloc(n);
+        for (i = 0; i < n; i++) {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            sel[i] = x % (n - i) < sample_k - taken;
+            taken += sel[i];
+        }
+        ref_d = want_d;
+        ref_f = want_f;
+    }
 
     /* pass 1: a case a call */
     t0 = now_s();
     for (i = 0; i < n; i++) {
         uint32_t f = 0;
-        const cft_status st = cft_run(dev, CFT_FMA, (cft_format)fmt,
-                                      (cft_round)rnd[i], a + i * esz, b + i * esz,
-                                      c + i * esz, d + i * esz, 1, &f, NULL);
+        cft_status st;
+        if (sel && !sel[i])
+            continue;
+        st = cft_run(dev, CFT_FMA, (cft_format)fmt, (cft_round)rnd[i], a + i * esz,
+                     b + i * esz, c + i * esz, d + i * esz, 1, &f, NULL);
         if (st != CFT_OK) {
             printf("pass 1: case %lu: %s - %s\n", (unsigned long)i, cft_strerror(st),
                    cft_last_error());
             free(d);
+            free(sel);
             return 1;
         }
         fl[i] = (uint8_t)f;
@@ -156,7 +194,7 @@ static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
             memcpy(ga + m * esz, a + i * esz, esz);
             memcpy(gb + m * esz, b + i * esz, esz);
             memcpy(gc + m * esz, c + i * esz, esz);
-            want_or |= fl[i];
+            want_or |= ref_f[i];
             m++;
         }
         if (!m)
@@ -174,36 +212,48 @@ static int run_elem(cft_device *dev, const uint8_t *raw, size_t len, FILE *out,
         for (i = 0; i < n; i++) {
             if (rnd[i] != k)
                 continue;
-            if (memcmp(gd + m * esz, d + i * esz, esz)) {
+            if (memcmp(gd + m * esz, ref_d + i * esz, esz)) {
                 if (p2_bad++ < 5)
                     printf("pass 2: attribute %s: case %lu of the corpus (element %lu "
-                           "of the call) differs from its own call's d\n",
-                           RND[k], (unsigned long)i,
-                           (unsigned long)m);
+                           "of the call) differs from %s d\n", RND[k], (unsigned long)i,
+                           (unsigned long)m, sel ? "the corpus's expected" : "its own call's");
             }
             m++;
         }
         if (got != want_or) {
             p2_bad++;
-            printf("pass 2: attribute %s, %lu cases: flags 0x%02x, the OR of pass 1's "
-                   "0x%02x\n", RND[k], (unsigned long)m,
-                   (unsigned)got, (unsigned)want_or);
+            printf("pass 2: attribute %s, %lu cases: flags 0x%02x, the OR of %s 0x%02x\n",
+                   RND[k], (unsigned long)m, (unsigned)got,
+                   sel ? "the corpus's expected" : "pass 1's", (unsigned)want_or);
         }
     }
     t2 = now_s();
-    fwrite(d, 1, n * esz + n, out);
-    cft_sha256(d, n * esz + n, digest);
-    printf("elementwise %s: %lu cases; pass 1 (a case a call) %.1f s, pass 2 (five "
-           "calls) %.1f s and %s; against the corpus's expected values %lu results "
-           "and %lu flags differ\n", cft_format_name((cft_format)fmt), (unsigned long)n,
-           t1 - t0, t2 - t1, p2_bad ? "DISAGREED with pass 1" : "agreed with pass 1",
-           (unsigned long)bad_d, (unsigned long)bad_f);
+    if (sel) {
+        printf("elementwise %s: %lu cases, SAMPLED (--sample %llu:%llu): pass 1 on %lu "
+               "of them (a case a call) %.1f s, %lu results and %lu flags differing from "
+               "the corpus's expected; pass 2 (five calls, every case) %.1f s, %s the "
+               "corpus's expected d and each call's flags the OR of its cases' expected; "
+               "no output, no hash\n", cft_format_name((cft_format)fmt), (unsigned long)n,
+               sample_k, sample_seed, (unsigned long)taken, t1 - t0, (unsigned long)bad_d,
+               (unsigned long)bad_f, t2 - t1, p2_bad || rc ? "DIFFERING FROM" : "equal to");
+        rc = rc || p2_bad || bad_d || bad_f;
+    } else {
+        fwrite(d, 1, n * esz + n, out);
+        cft_sha256(d, n * esz + n, digest);
+        printf("elementwise %s: %lu cases; pass 1 (a case a call) %.1f s, pass 2 (five "
+               "calls) %.1f s and %s; against the corpus's expected values %lu results "
+               "and %lu flags differ\n", cft_format_name((cft_format)fmt), (unsigned long)n,
+               t1 - t0, t2 - t1, p2_bad ? "DISAGREED with pass 1" : "agreed with pass 1",
+               (unsigned long)bad_d, (unsigned long)bad_f);
+        rc = rc || p2_bad;
+    }
     free(ga);
     free(gb);
     free(gc);
     free(gd);
     free(d);
-    return rc || p2_bad ? 1 : 0;
+    free(sel);
+    return rc ? 1 : 0;
 }
 
 /* ---- the program corpus ------------------------------------------------ */
@@ -401,8 +451,18 @@ int main(int argc, char **argv)
     cft_status st;
     int rc, i;
 
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s sw|hip:N CORPUS OUT\n", argv[0]);
+    if (argc == 6 && !strcmp(argv[4], "--sample")) {
+        char *e = NULL;
+        sample_k = strtoull(argv[5], &e, 10);
+        if (e && *e == ':')
+            sample_seed = strtoull(e + 1, &e, 10);
+        if (!sample_k || !sample_seed || !e || *e) {
+            fprintf(stderr, "hip-corpus: --sample K:SEED, two decimal numbers above "
+                    "zero\n");
+            return 2;
+        }
+    } else if (argc != 4) {
+        fprintf(stderr, "usage: %s sw|hip:N CORPUS OUT [--sample K:SEED]\n", argv[0]);
         return 2;
     }
     printf("libcft build %s\n", cft_build_id());
@@ -420,14 +480,16 @@ int main(int argc, char **argv)
     }
     if (len >= 24 && !memcmp(raw, "CFTGPUA1", 8))
         rc = run_elem(dev, raw, len, out, digest);
-    else if (len >= 48 && !memcmp(raw, "CFTSEQA1", 8))
+    else if (len >= 48 && !memcmp(raw, "CFTSEQA1", 8) && !sample_k)
         rc = run_progs(dev, raw, len, out, digest);
     else {
-        fprintf(stderr, "hip-corpus: %s is neither corpus layout\n", argv[2]);
+        fprintf(stderr, "hip-corpus: %s is %s\n", argv[2], sample_k
+                ? "not an elementwise corpus, which --sample is for"
+                : "neither corpus layout");
         rc = 2;
     }
     fclose(out);
-    if (rc != 2) {
+    if (rc != 2 && !sample_k) {
         printf("%s on %s: sha256 ", argv[2], argv[1]);
         for (i = 0; i < 32; i++)
             printf("%02x", digest[i]);
