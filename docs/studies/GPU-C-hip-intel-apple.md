@@ -57,7 +57,7 @@ ordinary integer multiplication in the copy.
 
 | route | what it does | state | one source? |
 |---|---|---|---|
-| chipStar on macOS, docs/MacOS.md | HIP to SPIR-V run by **PoCL on the CPU**; "macOS's built-in OpenCL runtime does not support SPIR-V" | v1.3.0 "adds macOS support"; needs LLVM 20 to 22 built from source, Xcode command-line tools, Homebrew | yes, **CPU only, no Metal** |
+| chipStar on macOS, docs/MacOS.md | HIP to SPIR-V run by **PoCL on the CPU**; "macOS's built-in OpenCL runtime does not support SPIR-V" | v1.3.0 "adds macOS support"; MacOS.md at v1.3.0: "LLVM/Clang (18, 19, or 20) with patches", tested at LLVM 19.0, built from source from CHIP-SPV's forks (llvm-project branch `chipStar-llvm-19`; PoCL branch `macos-chipstar`), Xcode command-line tools, Homebrew | yes, **CPU only, no Metal** |
 | chipStar native Vulkan backend (README) | SPIR-V for Vulkan compute | experimental, "requires LLVM 24+", Vulkan 1.3 driver, libclc; commits on it as late as 2026-11-10; whether it runs on Apple was **not read** | yes, unproven on Apple |
 | KosmicKrisp (Mesa; LunarG), docs.mesa3d.org, lunarg.com | Vulkan on Metal 4 for Apple Silicon, macOS 26 or later | Vulkan 1.3 conformant, later 1.4 (Phoronix, October 2026); shaderInt64 not read | the Vulkan driver a Vulkan route would use |
 | MoltenVK, github.com/KhronosGroup/MoltenVK | Vulkan on Metal, SPIR-V to MSL at run time | README: "Khronos has deprecated MoltenVK"; community best-effort; Khronos points Apple Silicon at KosmicKrisp | as above |
@@ -85,7 +85,8 @@ The WSL distro cft-gpu is Ubuntu 24.04, 12 threads, 47 GB (MEASURED). The one sc
 | chipStar v1.3.0 (commit ed3bc0cb), submodules | github.com/CHIP-SPV | built here | 48 MB | /opt/gpu-c/chipstar |
 
 Why each build was from source (the lead's rule: packaged where the stated minimum is met): Canonical's PoCL is
-5.0 and chipStar's notes want PoCL 7 and say the apt PoCL lacks SPIR-V; Ubuntu's SPIRV headers (1.4.309) are
+5.0 (MEASURED, apt-cache) and chipStar's Getting_Started.md (READ, on `main`) says the apt PoCL lacks SPIR-V; the v1.3.0
+release page says only "PoCL support updated to version 7" and no page I read gives a minimum; I did not run PoCL 5.0; Ubuntu's SPIRV headers (1.4.309) are
 too old for the translator, and no llvm-spirv is packaged for 22; chipStar has no package. **The patched LLVM
 that chipStar's README names was not needed and not built.**
 
@@ -172,7 +173,9 @@ Windows-hosted tools need a developer-account download (READ), which is outside 
 So no compile-only Metal check was possible, and none is claimed.
 
 5.2 **Why chipStar's SPIR-V cannot go to Metal through SPIRV-Cross (MEASURED).** The SPIR-V chipStar made
-from `cft_fma.hip` is 372,272 bytes, `OpCapability Kernel`, `OpMemoryModel Physical64 OpenCL`.
+from `cft_fma.hip` is, by two methods (MEASURED 20:34, same source and flags): **428,976 bytes** as the translator wrote it
+(`hipcc --save-temps`, the file `cft_fma-hip-spirv64-generic.out`), and **372,272 bytes** as `spirv-extractor` (chipStar's tool)
+pulls it out of the linked binary `cft_fma`; the capabilities are the same in both: `OpCapability Kernel`, `OpMemoryModel Physical64 OpenCL`.
 `spirv-cross --msl` on it prints "SPIRV-Cross threw an exception: Kernel capability not supported."
 (SPIRV-Cross 2021.01.15 from Ubuntu; an old build, so a newer one might differ: BELIEVED not). `spirv-val
 --target-env vulkan1.3` rejects it on the addressing model. It validates clean under the OpenCL environment.
@@ -190,7 +193,7 @@ three edits `softfloat.c` compiles clean. These are edits to a *scratch copy*; t
 in devcopy.py. What this shows: the arithmetic is nearly OpenCL C already. What it does not show: that it runs, that
 Apple's compiler accepts it, or that callers passing `&cft_sf_formats[i]` (a `__constant` pointer) to private
 parameters compile (they do not; a private copy is needed) (BELIEVED).
-The same text would also run on Intel through its own OpenCL (NEO) without chipStar.
+The same text would also run on Intel through its own OpenCL (NEO) without chipStar (BELIEVED; not run).
 
 5.5 **The device copy as MSL.** MEASURED, the copy has 65 function definitions, 82 lines with a pointer
 parameter or declaration, no recursion, no function pointer, no goto, no 128-bit integer. MSL needs an address
@@ -213,7 +216,10 @@ space on each pointer (BELIEVED), so a scripted edit, a sibling of devcopy.py's 
 [gpu-c/RUNBOOK-ARC.txt](gpu-c/RUNBOOK-ARC.txt): the card, the install list for amd-arc-box with sizes and sums, the
 bundle, the run, what a failure means, the removal. **Card recommendation: the A750.** READ: the A750 (56A1) is
 supported by the in-kernel i915 driver on Ubuntu 24.04 kernels 6.2 and later; the B580 needs the xe driver and
-kernel 6.11 (initial) to 6.12 (full support); the box ran kernel 6.8.0-139 (docs/BENCHMARKS.md:67). A B580 would
+kernel 6.11 (initial) to 6.12 (full support) (both READ once, 2026-11-10, with a summarising fetch tool, from
+https://dgpu-docs.intel.com/overview/supported-hardware/i915-driver-gpus.html and .../xe-driver-gpus.html; a second
+reader could not fetch them, so treat as BELIEVED until checked on the box); the box ran kernel 6.8.0-139 (docs/BENCHMARKS.md:67, a
+record of 2026-09-08, not re-checked). A B580 would
 need a new kernel on the box that hosts the U50, whose XRT modules follow the kernel. Install default: **nothing
 system-wide**, five Canonical packages (15.6 MB) extracted in a home directory. [gpu-c/RUNBOOK-M2.txt](gpu-c/RUNBOOK-M2.txt):
 facts to collect, the compile-only Metal test once the edit exists, the CPU leg, the Vulkan probe.
@@ -230,7 +236,7 @@ facts to collect, the compile-only Metal test once the edit exists, the CPU leg,
 | not recommended | SYCL (DPC++, AdaptiveCpp), SYCLomatic, WebGPU | a rewrite of the arithmetic and its proof | **no, a second implementation** |
 
 One observation for planning: an OpenCL C harness would serve the Arc (NEO), a Mac (Apple's OpenCL), PoCL on any
-CPU, and AMD or NVIDIA OpenCL as well, with one edit set. chipStar is the cheaper route for Intel today only
+CPU, and AMD or NVIDIA OpenCL as well (BELIEVED; none of these was run), with one edit set. chipStar is the cheaper route for Intel today only
 because the HIP harness already exists.
 
 ## 9. Questions for Logan
@@ -252,8 +258,10 @@ suite, the second kernel (`--kernel fixed`), the `diff` stream, GPU-A's hazard r
 transcendentals, `cft_seq` at fp32 and fp128, anything on a Mac, clspv, MoltenVK, KosmicKrisp, AdaptiveCpp,
 DPC++, SYCLomatic, wgpu. Not read: dgpu-docs' client install page (my fetch returned nothing), Intel's graphics
 PPA, Apple's MSL specification (over 10 MB), AdaptiveCpp's backend list, chipStar's Vulkan backend page, any
-chipStar issue list. The releases page prints LLVM 20 to 22 for v1.3.0 while the README on `main` prints 21 to 23:
-the tag's tree matched neither exactly (its patches directory is the older layout), and clang 22 worked.
+chipStar issue list. Three pages give three LLVM ranges for chipStar: the releases page for v1.3.0 prints 20, 21, 22; the README at the v1.3.0
+tag (as the lead read it) prints 18, 19, 20, and docs/MacOS.md at that tag "18, 19, or 20 with patches", tested at 19.0;
+the README on `main` prints 21, 22, 23. Clang 22 (unpatched, with the wrapper) worked for this kernel, which is outside
+the tag's README range; the study does not say it is supported.
 
 ## 11. Record and removal
 

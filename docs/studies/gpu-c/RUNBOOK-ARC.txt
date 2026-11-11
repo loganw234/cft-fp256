@@ -8,10 +8,11 @@ Intel's runtime and the card.
 
 ## 0. Which card, and the hardware question (my recommendation)
 
-- **Fit the A750, not the B580.** READ (dgpu-docs.intel.com, i915 page, 2026-11-10): the A750 (56A1) runs on
-  the in-kernel i915 driver, supported on Ubuntu 24.04 kernels 6.2 and later. READ (xe page): the B580 (E20B)
-  needs the xe driver, kernel 6.11 for initial and Ubuntu 24.04 with 6.12 for full support. READ
-  (docs/BENCHMARKS.md:67): the box ran kernel 6.8.0-139 on 2026-09-08. A B580 would need a newer kernel, and
+- **Fit the A750, not the B580.** READ once on 2026-11-10 through a summarising fetch tool (a second reader could not fetch
+  them: treat as BELIEVED until checked) - https://dgpu-docs.intel.com/overview/supported-hardware/i915-driver-gpus.html:
+  the A750 (56A1) runs on the in-kernel i915 driver, Ubuntu 24.04 kernels 6.2 and later; .../xe-driver-gpus.html: the B580
+  (E20B) needs the xe driver, kernel 6.11 for initial and Ubuntu 24.04 with 6.12 for full support. READ (docs/BENCHMARKS.md:67,
+  a record of 2026-09-08, not re-checked): the box ran kernel 6.8.0-139. A B580 would need a newer kernel, and
   the U50's XRT 2.19 modules are built against the running kernel: do not change it.
 - The swap needs the box powered down. The U50's nightly runs 18:00 to 07:45: do it in the day, and check the
   U50 afterwards (`xbutil examine`). Whether a power cycle is acceptable is Logan's call.
@@ -40,7 +41,8 @@ sha256sum *.deb                      # compare with the ledger's sums (5b95f0d6.
 for d in *.deb; do dpkg -x $d ../root; done
 echo ~/gpuc-neo/root/usr/lib/x86_64-linux-gnu/intel-opencl/libigdrcl.so > ~/gpuc-neo/vendors/intel.icd
 export OCL_ICD_VENDORS=~/gpuc-neo/vendors LD_LIBRARY_PATH=~/gpuc-neo/root/usr/lib/x86_64-linux-gnu
-clinfo -l        # must list the Arc (clinfo is Canonical's, 'apt install clinfo' if absent; arc_run.sh runs it if present)
+clinfo -l        # must list the Arc. clinfo is optional and not in the bundle: if absent, skip it (arc_run.sh runs it only if
+                 # present); installing it (apt install clinfo) would be a system change, so it is not part of the default path
 ```
 On the desktop the extraction was run: the ICD loads and its libraries resolve; with no Intel GPU clinfo shows
 0 platforms, as it must. Not run: any of it on an Intel GPU.

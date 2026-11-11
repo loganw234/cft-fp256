@@ -35,7 +35,7 @@ plant drop-flag bin/cft_fma-plant-uf check corpus/conf-fp256.bin - --device $DEV
 echo "== corpora"
 for f in conf-fp32 conf-fp64 conf-fp128 conf-fp256 stream-fp256; do
     o=$(timeout 110 bin/cft_fma check corpus/$f.bin out/$f.out --device $DEV 2>&1 | S | tail -1)
-    echo "$o" | cut -c1-300
+    sed -E 's/ on .*: (fp[0-9]+), ([0-9]+) cases.*(sha256 [0-9a-f]{64}).*(: [A-Z]+)$/ \1 \2 cases, \3\4/' <<< "$o"
     grep -q "GREEN" <<< "$o" && grep -q "sha256 ${EXP[$f]}" <<< "$o" || { echo "$f: NOT as expected"; rc=1; }
 done
 echo "== programs (GPU-A part 2; sums of the corpora and references checked first)"
