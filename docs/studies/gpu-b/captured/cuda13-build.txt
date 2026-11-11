@@ -1,0 +1,35 @@
+Cuda compilation tools, release 13.3, V13.3.73
+Build cuda_13.3.r13.3/compiler.38244171_0
+== (a) HIP from source, CUDA 13, no C1 18:25:48
+== configure 2026-11-10 18:25:48
+configure rc=0
+== build 2026-11-10 18:25:54
+build rc=0
+== install 2026-11-10 18:25:54
+install rc=0
+configure rc=0
+23:CMake Warning:
+28:CMake Warning:
+build rc=0
+install rc=0
+total 648
+== attempt A (plain nvcc on toolchain_check.hip, no patch) 18:26:05
+nvcc rc=0
+0
+== cft_fma, plain nvcc 18:26:06
+rc=0
+== cft_fma, hipcc 18:26:26
+rc=0
+== toolchain_check binaries 18:26:45
+-rwxr-xr-x 1 root root   35160 Nov 10 18:26 ~/gpu-b13/out/tc_hipcc
+-rwxr-xr-x 1 root root 1098088 Nov 10 18:26 ~/gpu-b13/out/tc_plain
+== (b) GPU-A's HIP 7.2.4 leg (build.sh nvidia) 18:26:49
+rc=0
+== (b) GPU-A's header leg (build.sh cuda) 18:27:08
+rc=2
+<tree>/docs/studies/gpu-a/cft_fma.hip(551): error: class "hipDeviceProp_t" has no member "clockRate"
+1 error detected in the compilation of "<tree>/docs/studies/gpu-a/cft_fma.hip".
+== (b) the header leg again, with a clockRate shim (CUDA 13's cudaDeviceProp has no clockRate) 18:27:09
+shim: lines added: 5
+compile rc=0
+link rc=0

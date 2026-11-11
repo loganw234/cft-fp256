@@ -1,0 +1,34 @@
+# attempt A, no change: nvcc 12.9 on toolchain_check.hip (errors only)
+~/gpu-b/src/rs-10.1/projects/hip/include/hip/hip_runtime.h:37:10: fatal error: hip/hip_version.h: No such file or directory
+# after build_hip_nv.sh (hip_version.h generated), no change to the headers:
+nvidia_detail/nvidia_hip_runtime_api.h(468): error: identifier "cudaExecutionContext_t" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(469): error: identifier "cudaDevResourceDesc_t" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(470): error: identifier "cudaDevResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(471): error: identifier "cudaDevSmResourceGroupParams" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(472): error: identifier "cudaDevResourceType" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(483): error: forward declaration of enum type is nonstandard
+nvidia_detail/nvidia_hip_runtime_api.h(484): error: forward declaration of enum type is nonstandard
+nvidia_detail/nvidia_hip_runtime_api.h(485): error: forward declaration of enum type is nonstandard
+nvidia_detail/nvidia_hip_runtime_api.h(486): error: identifier "cudaDevSmResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(487): error: identifier "cudaDevWorkqueueConfigResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(488): error: identifier "cudaDevWorkqueueResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(1190): error: identifier "cudaErrorStreamDetached" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(1322): error: identifier "CUDA_ERROR_STREAM_DETACHED" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(1455): error: identifier "CUDA_ERROR_STREAM_DETACHED" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(1651): error: identifier "cudaErrorStreamDetached" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3661): error: identifier "cudaDevResourceGenerateDesc" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3668): error: identifier "cudaDevSmResourceSplit" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3675): error: identifier "cudaDevSmResourceSplitByCount" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3680): error: identifier "cudaDeviceGetDevResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3685): error: identifier "cudaGreenCtxCreate" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3689): error: identifier "cudaExecutionCtxDestroy" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3694): error: identifier "cudaExecutionCtxStreamCreate" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3698): error: identifier "cudaDeviceGetExecutionCtx" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3703): error: identifier "cudaExecutionCtxGetDevResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3707): error: identifier "cudaExecutionCtxGetDevice" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3711): error: identifier "cudaExecutionCtxGetId" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3716): error: identifier "cudaStreamGetDevResource" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3720): error: identifier "cudaExecutionCtxRecordEvent" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3724): error: identifier "cudaExecutionCtxSynchronize" is undefined
+nvidia_detail/nvidia_hip_runtime_api.h(3728): error: identifier "cudaExecutionCtxWaitEvent" is undefined
+30 errors detected in the compilation of "<tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip".

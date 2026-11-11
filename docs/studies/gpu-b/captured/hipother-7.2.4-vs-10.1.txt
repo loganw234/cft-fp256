@@ -1,0 +1,17 @@
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_channel_descriptor.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_channel_descriptor.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_atomics.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_atomics.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_bf16.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_bf16.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_complex.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_complex.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_cooperative_groups.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_cooperative_groups.h differ
+Only in ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail: nvidia_hip_cooperative_groups_reduce.h
+Only in ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail: nvidia_hip_cooperative_groups_scan.h
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_gl_interop.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_gl_interop.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_math_constants.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_math_constants.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_runtime.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_runtime.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_runtime_api.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_runtime_api.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_texture_types.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_texture_types.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hip_unsafe_atomics.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hip_unsafe_atomics.h differ
+Files ~/gpu-b/src/hipother-7.2.4/hipnv/include/hip/nvidia_detail/nvidia_hiprtc.h and ~/gpu-b/src/rs-10.1/projects/hipother/hipnv/include/hip/nvidia_detail/nvidia_hiprtc.h differ
+# hipother nvidia_detail, tag rocm-7.2.4 against therock-10.1 (diff -ru)
+added lines: 365
+removed lines: 202

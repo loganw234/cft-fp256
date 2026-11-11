@@ -1,0 +1,48 @@
+--- hipconfig --platform
+rc=0
+nvidia
+--- hipconfig --version
+rc=0
+7.16.26385-7da43026e4
+--- hipconfig --compiler
+rc=0
+nvcc
+--- hipconfig --full
+rc=0
+HIP version: 7.16.26385-7da43026e4
+
+==hipconfig
+HIP_PATH           :/opt/gpu-b
+ROCM_PATH          :/opt/gpu-b
+HIP_COMPILER       :nvcc
+HIP_PLATFORM       :nvidia
+HIP_RUNTIME        :cuda
+--- hipcc --version
+rc=0
+HIP version: 7.16.26385-7da43026e4
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2025 NVIDIA Corporation
+Built on Tue_May_27_02:21:03_PDT_2025
+Cuda compilation tools, release 12.9, V12.9.86
+Build cuda_12.9.r12.9/compiler.36037853_0
+--- hipcc -O2 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o p1.o
+rc=1
+nvcc fatal   : Don't know what to do with '<tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip'
+failed to execute:/usr/local/cuda/bin/nvcc  -Wno-deprecated-gpu-targets  -isystem "/opt/gpu-b/include"  -O2 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o "p1.o"
+--- hipcc -O2 --offload-arch=sm_89 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o p2.o
+rc=1
+nvcc fatal   : Unknown option '--offload-arch=sm_89'
+failed to execute:/usr/local/cuda/bin/nvcc  -Wno-deprecated-gpu-targets  -isystem "/opt/gpu-b/include"  -O2 --offload-arch=sm_89 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchai
+--- hipcc -O2 -gencode arch=compute_89,code=sm_89 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o p3.o
+rc=1
+nvcc fatal   : Don't know what to do with '<tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip'
+failed to execute:/usr/local/cuda/bin/nvcc  -Wno-deprecated-gpu-targets  -isystem "/opt/gpu-b/include"  -O2 -gencode arch=compute_89,code=sm_89 -c <tree>/docs/studies/gpu-b/..
+--- hipcc -x cu -O2 -gencode arch=compute_89,code=sm_89 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o p4.o
+rc=1
+<tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip:11:10: fatal error: hip/hip_runtime.h: No such file or directory
+   11 | #include <hip/hip_runtime.h>
+      |          ^~~~~~~~~~~~~~~~~~~
+compilation terminated.
+failed to execute:/usr/local/cuda/bin/nvcc  -x cu -O2 -gencode arch=compute_89,code=sm_89 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o "p4.o"
+--- hipcc -x cu -isystem /opt/gpu-b/include -O2 -std=c++17 -gencode arch=compute_89,code=sm_89 -gencode arch=compute_120,code=sm_120 -c <tree>/docs/studies/gpu-b/../gpu-a/toolchain_check.hip -o p5.o
+rc=0
