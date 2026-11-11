@@ -1,0 +1,39 @@
+-- 18:27:28 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 21 %, 2061 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ tc_plain
+toolchain_check: HIP_VERSION 71626385, 1 device(s)
+device 0: NVIDIA GeForce RTX 5060 Ti, cc 12.0, arch '¾õC"', bus 0000:05:00.0, 36 CUs/SMs, warp 32: 0 of 1048576 lanes wrong
+toolchain_check: PASS
+-- 18:27:29 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 21 %, 2061 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ tc_hipcc
+toolchain_check: HIP_VERSION 71626385, 1 device(s)
+device 0: NVIDIA GeForce RTX 5060 Ti, cc 12.0, arch '', bus 0000:05:00.0, 36 CUs/SMs, warp 32: 0 of 1048576 lanes wrong
+toolchain_check: PASS
+-- 18:27:30 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 21 %, 2059 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ cft_fma (plain) conf-fp256
+check: ~/gpu-a/corpus/conf-fp256.bin on NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 re
+verify: plain-conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+-- 18:27:31 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 4 %, 2061 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ cft_fma (hipcc-build) conf-fp256
+check: ~/gpu-a/corpus/conf-fp256.bin on NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 re
+verify: hipcc-build-conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+-- 18:27:33 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 21 %, 2061 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ cft_fma (a724) conf-fp256
+check: ~/gpu-a/corpus/conf-fp256.bin on NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 re
+verify: a724-conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+-- 18:27:34 nvidia-smi
+0, NVIDIA GeForce RTX 4070, 7 %, 2061 MiB
+1, NVIDIA GeForce RTX 5060 Ti, 0 %, 14 MiB
++ cft_fma (acuda13) conf-fp256
+check: ~/gpu-a/corpus/conf-fp256.bin on NVIDIA GeForce RTX 5060 Ti (sm_120, bus 0000:05:00.0): fp256, 18360 cases (rne 3672 rtz 3672 rdn 3672 rup 3672 rmm 3672); 0 results and 0 flags differ, 0 re
+verify: acuda13-conf-fp256.out against conf-fp256.bin: 18360 cases, 0 results and 0 flags differ; hashlib sha256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9
+== run_cuda13.sh gpu rc=0 2026-11-10 18:27:35

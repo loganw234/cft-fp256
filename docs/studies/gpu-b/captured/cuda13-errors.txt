@@ -1,0 +1,2 @@
+<tree>/docs/studies/gpu-a/cft_fma.hip(551): error: class "hipDeviceProp_t" has no member "clockRate"
+1 error detected in the compilation of "<tree>/docs/studies/gpu-a/cft_fma.hip".

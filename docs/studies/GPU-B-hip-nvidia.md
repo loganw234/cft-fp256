@@ -25,7 +25,8 @@ tool, with where; web pages were read on 2026-11-10), **COMPUTED**,
   about 6 minutes wall (16:50 to 16:56) with one change.** The sources are
   `rocm-systems` tag `therock-10.1` and `llvm-project` tag `therock-10.1`; the
   builds are ROCm's own CMake; the change is C1, thirteen lines wrapped in
-  `#if CUDA_VERSION >= 13010`, for CUDA 12.9 (section 3).
+  `#if CUDA_VERSION >= 13010`, for CUDA 12.9 (section 3). **Under CUDA 13.3 it
+  needs no change at all** (MEASURED, section 3b).
 - **MEASURED: the result is bit for bit GPU-A's.** `toolchain_check` passes on
   the RTX 5060 Ti with 0 of 1,048,576 lanes wrong, and the fp256 conformance
   corpus is GREEN with sha256 `da932116...a9`, the hash in GPU-A's captured
@@ -137,6 +138,49 @@ by the NVIDIA `hipGetDeviceProperties`; I did not read that function.
 lines, 365 lines added and 202 removed (about 9 % of the file set in about a
 year of releases), all 12 old files differ and 2 are new.
 
+## 3b. Under CUDA 13.3 (follow-up, 18:20 to 18:27)
+
+At Logan's word of 18:18 (install CUDA 13; no patch set, no contact with AMD)
+CUDA 13.3.73, the newest the NVIDIA WSL repository offers (13.0 to 13.3 are
+there), went into cft-gpu **beside** 12.9: 11 component packages, 370 MB (nvcc,
+cudart-dev, crt, cccl, profiler-api, driver-dev and what they pull in;
+versions, sizes and index sums in `captured/cuda13-packages.txt`). apt's plan
+was read first: 11 installs, 0 removals, no `cuda`, `cuda-drivers` or `nvidia-*`
+(MEASURED). **One side effect, undone:** the packages joined the `cuda`
+alternatives group at a higher priority, so `/usr/local/cuda` pointed at 13.3
+for about 28 s (18:20:50 to 18:21:18) until I set it back to 12.9 by hand
+(manual mode). A run started in that window would have used 13.3; GPU-A's legs
+use 12.9. Every run below names `/usr/local/cuda-13.3` itself.
+
+Prefix `/opt/gpu-b13`, work directory `~/gpu-b13`, RTX 5060 Ti only, `nvidia-smi`
+before each run (no compute process), about 5 s of GPU in all
+(`run_cuda13.sh build|gpu`; `captured/cuda13-*.txt`). MEASURED:
+
+| leg | build under 13.3 | `toolchain_check` | conf-fp256 sha256 (5060 Ti) |
+|---|---|---|---|
+| HIP 7.16 from the 10.1 sources, **no C1**, plain nvcc | E2 and E5 as before; attempt A **0 errors** (12.9: 30); `cft_fma` rc 0 | PASS, 0 of 1,048,576 wrong | `da932116...a9` GREEN |
+| the same, through the hipcc built from source (GPU-A's line) | rc 0 | PASS | `da932116...a9` GREEN |
+| GPU-A's HIP 7.2.4 frozen layer (`build.sh nvidia`, `/opt/rocm-7.2.4` read only) | rc 0, 0 errors | not run | `da932116...a9` GREEN |
+| GPU-A's 52-line header (`build.sh cuda`) | **1 error**: `cft_fma.hip(551): class "hipDeviceProp_t" has no member "clockRate"` | not run | no binary |
+| the same with a copy of the header plus one field (`mk_shim13.py`, 5 lines of the copy differ) | rc 0 | not run | `da932116...a9` GREEN |
+
+The one error is the study header's, not HIP's: CUDA 13's `cudaDeviceProp` has
+no `clockRate` (BELIEVED cause: CUDA 13 removed the member; I did not read
+NVIDIA's notes), which HIP's `hipDeviceProp_t` has and `cft_fma.hip` prints.
+The shim fills it from `cudaDeviceGetAttribute`; GPU-A's header is untouched
+and the shim is generated into the work directory, not committed as a header.
+The hipcc probe (N1 to N3) was not rerun under 13.3.
+
+**Which CUDA each step needs:**
+
+| step | CUDA 12.9 | CUDA 13.3 |
+|---|---|---|
+| assemble HIP 7.16 from the 10.1 sources (E2, E5) | builds, no nvcc used | the same |
+| compile and run code against it | needs C1 | needs nothing |
+| GPU-A's HIP 7.2.4 leg | builds (GPU-A) | builds |
+| GPU-A's header leg | builds (GPU-A) | needs the `clockRate` shim |
+| 13.0, 13.1, 13.2 | not installed, not run | |
+
 ## 4. What "official" would take
 
 "Official" has three readings; the estimates are mine and each states its
@@ -149,9 +193,9 @@ tags. MEASURED: about 6 minutes from first clone to a passing card run, about
 each ROCm release needs a re-pin and a re-run; ESTIMATE 1 to 2 hours (basis:
 the six minutes, plus reading 10.1's diff if the build breaks; 7.2.4 to 10.1
 changed 9 % of the headers and broke only on a CUDA-version mismatch).
-**With CUDA 13.1 or later C1 is BELIEVED unnecessary** (AMD's CI builds the
-same headers on 13.2); not run: no CUDA 13 here, and a further CUDA version
-needs the lead's word.
+**With CUDA 13.3 C1 is unnecessary: MEASURED** (section 3b). CUDA 13.0, 13.1
+and 13.2 were not installed and not run; AMD's CI builds the same headers on
+13.2, so the guard value 13010 in C1 stays BELIEVED.
 
 **(b) A fork kept in step with ROCm's releases, packaged.** What it adds to
 (a), with ESTIMATE and basis:
@@ -211,25 +255,24 @@ needs the lead's word.
    set against `amd/hipcc` (section 4 (b) 1) and consider offering it upstream
    only with Logan's word.
 4. **Watch one thing:** the day `nvidia_detail` needs a CUDA newer than the
-   one on the machines. That is the first place the recipe breaks (C1 was it).
+   one on the machines. That is the first place the recipe breaks (C1 was it;
+   CUDA 13.3 removes it, and the study header's `clockRate` is the same kind
+   of break the other way).
 
-Questions for Logan:
-- Which "official" did he mean: AMD shipping packages again (unlikely, row 9),
-  or building HIP for NVIDIA from AMD's sources (done)?
-- May a CUDA 13.x go into cft-gpu, to test that C1 is unnecessary there (a
-  download of several GB; the lead's word is needed)?
-- Is the recipe wanted as a verification stage (three clones, nvcc, a card;
-  skipped by name where absent), or left as a study?
-- Is it worth writing the N1 to N3 patch set and its tests (1 to 2 days),
-  though the harness does not need it?
-- May anyone ask AMD anything (an issue on `rocm-systems` is the route its
-  README names)? I did not.
+Logan's answers of 18:18: "official" meant building HIP for NVIDIA from AMD's
+sources (done); CUDA 13 goes in (done, section 3b); the recipe becomes a
+verification stage (the lead's separate parcel, not part of this study); no
+N1 to N3 patch set and no contact with AMD. **For that stage** (ESTIMATE, from
+section 3b): build the recipe under CUDA 13.x, where it needs no patch; keep
+12.9 for GPU-A's legs; give the header leg its `clockRate` field before it is
+built under 13.
 
 ## 6. Not run
 
-- A CUDA 13.x build: none installed. C1's threshold (13010) is BELIEVED, from
-  AMD's CI container and the names missing in 12.9; the exact CUDA release
-  that introduced them was not read.
+- CUDA 13.0, 13.1 and 13.2: not installed, not run. C1's threshold (13010) is
+  BELIEVED, from AMD's CI container and the names missing in 12.9; the exact
+  CUDA release that introduced them was not read. The hipcc probe and the
+  other corpora under 13.3: not run.
 - `hip-tests` on NVIDIA, with or without a GPU; the other seven corpora; the
   second (fixed-limb) kernel; the plants; the 2^30 differential; the RTX 4070.
   Only the fp256 conformance corpus and `toolchain_check`, on the RTX 5060 Ti.
@@ -246,7 +289,8 @@ Questions for Logan:
 `build_hip_nv.sh SRC PREFIX` (E2), `build_hipcc.sh SRC PREFIX` (E5),
 `attempt_a.sh PREFIX OUT` (E1, E3), `patch_cuda12.py HEADER` (C1),
 `build.sh plain|hipcc OUT 89 120` (E4, E8), `build_tc.sh OUT` (the two `toolchain_check` binaries the runs need), `hipcc_probe.sh PREFIX OUT` (E7),
-`pack_deb.sh` (E9), `gpu_run.sh OUT CORPUS 1` (the runs), `collect.sh DEST`
+`pack_deb.sh` (E9), `gpu_run.sh OUT CORPUS 1` (the runs), `run_cuda13.sh build|gpu`,
+`mk_shim13.py`, `collect13.sh DEST` (section 3b; they take `CUDA_HOME`), `collect.sh DEST`
 (the scrubbed captures in `captured/`; the configure and clone-size lines are in the ledger only).
 Clone commands: `git clone --depth 1 --filter=blob:none --sparse --branch
 therock-10.1 <url>`, then `git sparse-checkout set <paths>`.

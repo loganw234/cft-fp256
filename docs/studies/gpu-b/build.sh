@@ -20,7 +20,7 @@ ROOT=${ROOT:-$(cd "$here/../../.." && pwd)}
 HP=${HP:-/opt/gpu-b}
 MODE=${1:?MODE}; OUT=${2:?OUTDIR}; shift 2
 SRC="$A/cft_fma.hip"
-export PATH=/usr/local/cuda/bin:$PATH
+export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}; export CUDA_PATH=$CUDA_HOME; export PATH=$CUDA_HOME/bin:$PATH
 mkdir -p "$OUT/sha"
 run() { echo "+ $*"; "$@"; }
 echo "== build.sh $MODE $(date '+%F %T') HP=$HP DEFS='${DEFS:-}'"

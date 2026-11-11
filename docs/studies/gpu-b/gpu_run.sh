@@ -11,7 +11,7 @@
 # for (up to 60 s), then the run is skipped and said so.
 OUT=${1:?OUTROOT}; C=${2:?CORPUS_DIR}; D=${3:-1}
 here=$(cd "$(dirname "$0")" && pwd)
-export PATH=/usr/local/cuda/bin:/usr/lib/wsl/lib:$PATH
+export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}; export CUDA_PATH=$CUDA_HOME; export PATH=$CUDA_HOME/bin:/usr/lib/wsl/lib:$PATH
 smi() {
     echo "-- $(date '+%T') nvidia-smi"
     nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used --format=csv,noheader
