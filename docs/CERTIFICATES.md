@@ -3305,17 +3305,18 @@ revision 8's three targets joined cftc's built-in table), profile 3.1
 (2026-10-13), the language at 1.1 (2026-10-15, M1's build, item 3),
 cftc's output version 6 (2026-10-15, item 4, when the compiler took the
 math library's six), the language at 1.2 (2026-11-02, M2's build, when
-the language took sin, cos and tan) and cftc's output version 7 (the same
-day, when the compiler took them). Each of cftc's four steps moved the
+the language took sin, cos and tan), cftc's output version 7 (the same
+day, when the compiler took them) and the language at 1.3 (2026-11-11,
+M4's build, when the language took atan, asin, acos and atan2). Each of cftc's four steps moved the
 same eight certificates - the sourced and rebuilt Lorenz-63 cases and six
 controls, the ones that name a compile - by their `compiler` lines and
 hash lines alone, and the manifest by their eight digests (36 lines at 7:
 20 `compiler`, 8 `hash` and 8 manifest `certificate` lines); profiles 3 and
 3.1 each moved all 37 by their profile and hash lines, with seven
-supersedes lines and four signatures; each of the language's two steps
+supersedes lines and four signatures; each of the language's three steps
 moved the 24 that name a source by their `language` and hash lines, and
-the manifest by their digests (72 lines at 1.2: 24 `language`, 24 `hash`
-and 24 manifest `certificate` lines). Every measured
+the manifest by their digests (72 lines at 1.2 and again at 1.3: 24
+`language`, 24 `hash` and 24 manifest `certificate` lines). Every measured
 header line is `unknown`, as the example's `build-id` is, but in
 `signed-fp64`, which spells each out.
 
