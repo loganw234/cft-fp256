@@ -22,7 +22,7 @@ one process at a time:
             special classes (zeros, infinities, quiet and signalling NaNs, the subnormal and normal ends, +-1, the neighbours of
             every power of two from 2^-149 to 2^127, exp's and exp2's overflow and underflow edges, exp2's tie at emin - p, log1p's
             and expm1's -1 edges), and atan2 over the nine x of M4X's list against the pools' y
-  agree     for each of --names (default the nine; atan, asin, acos and atan2 by --names) and each attribute, two 256-lane slices: the tool passes them, and every unmarked lane's
+  agree     for each of --names (default the nine; atan, asin, acos and atan2 by --names; atan2 at three of its x) and each attribute, two 256-lane slices: the tool passes them, and every unmarked lane's
             mathlib.evaluate answer is the oracle's (so a lane the tool calls right is the fragment's own), and the tool's marks
             are evaluate's
   marks     exp's five marking lanes under each attribute (0, 5, 5, 5, 0 over slices that hold them, none off the list, no guess
@@ -453,30 +453,40 @@ def slice_lanes(lo, n):
 
 
 AGREE_SLICES = (0x3f7fff80, 0x40490f00)
+ATAN2_XS_RUN = (X9[0], X9[3], X9[8])     # the x that agree and whole run atan2 at: 1, 2^40, a full negative significand; the oracle group runs all nine
+
+
+def ops_of(name):
+    """[(op word, wrap)] of a name: <name>-f32 and the lane as it is, or for atan2 one op word a fixed x (ATAN2_XS_RUN) and the lane y paired with that x
+    for mathlib.evaluate, which takes atan2's (y, x)."""
+    if name != "atan2":
+        return [(f"{name}-f32", lambda y: y)]
+    return [(f"atan2-f32-x{x:08x}", lambda y, x=x: (y, x)) for x in ATAN2_XS_RUN]
 
 
 def group_agree(tool, names):
     FP32, ml, routines, sf, T, har = mods()
     rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
     for n in names:
+      for op, wrap in ops_of(n):
         for attr in ATTRS:
             f = ml.fragment(n, FP32, rnd_of[attr])
             for lo in AGREE_SLICES:
                 lanes = slice_lanes(lo, 256)
-                got, why = tool_oracle(tool, f"{n}-f32", attr, lanes)
+                got, why = tool_oracle(tool, op, attr, lanes)
                 bad, py_marked = [], 0
                 for x in lanes:
-                    bits, fw = ml.evaluate(f, x)
+                    bits, fw = ml.evaluate(f, wrap(x))
                     if fw & ml.MARK:
                         py_marked += 1
                     elif got is None or got[x] != (bits, fw):
                         bad.append(x)
-                rc, text, m = tool.run(f"{n}-f32", lo, lo + 256, attr)
-                ok, why2 = judge_run(rc, text, f"{n}-f32", attr, lo, lo + 256, 1)
+                rc, text, m = tool.run(op, lo, lo + 256, attr)
+                ok, why2 = judge_run(rc, text, op, attr, lo, lo + 256, 1)
                 mk = marks_of(text)
-                check(f"agree: {n} {attr} [{lo:#x}, +256): every unmarked lane of mathlib.evaluate is the oracle's in bits and flags",
+                check(f"agree: {op} {attr} [{lo:#x}, +256): every unmarked lane of mathlib.evaluate is the oracle's in bits and flags",
                       not bad and got is not None, f"{[hex(x) for x in bad[:3]]} {why}")
-                check(f"agree: {n} {attr} [{lo:#x}, +256): the tool passes the slice and its marks ({mk and mk[0]}) are evaluate's "
+                check(f"agree: {op} {attr} [{lo:#x}, +256): the tool passes the slice and its marks ({mk and mk[0]}) are evaluate's "
                       f"({py_marked})", ok and mk is not None and mk[0] == py_marked, f"{why2} {mk}")
 
 
@@ -529,10 +539,11 @@ def slices_of(bits):
 def group_whole(tool, names, bits):
     n = 1 << bits
     for name in names:
+      for op, _wrap in ops_of(name):
         for what, lo in slices_of(bits).items():
-            rc, text, m = tool.run(f"{name}-f32", lo, lo + n, "all")
-            ok, why = judge_run(rc, text, f"{name}-f32", "all", lo, lo + n, 5)
-            check(f"whole: {name} all over 2^{bits} lanes {what} [{lo:#x}, +{n:#x}): judged by L.parse_soak", ok, why)
+            rc, text, m = tool.run(op, lo, lo + n, "all")
+            ok, why = judge_run(rc, text, op, "all", lo, lo + n, 5)
+            check(f"whole: {op} all over 2^{bits} lanes {what} [{lo:#x}, +{n:#x}): judged by L.parse_soak", ok, why)
     lo = slices_of(bits)["around 1"]
     for attr in (ATTRS if "exp" in names else ()):      # once, with exp
         rc, text, m = tool.run("exp-f32", lo, lo + n, attr)
