@@ -5630,6 +5630,9 @@ DOC_WIDE_C5 = {"rint128-class": (137_344, 2, (274_688, 0), "class", "tile"), "ri
 DOC_WIDE_C5_NAMES = [f"{op}-{m}" for op in DOC_WIDE_C5 for m in M5]
 # parcels M4X2 and M4CAT: the thirteen routines' digests and item names, typed here from host/tools/routine_sweep.c's op grammar and the real
 # `routine-sweep list` (hw/card_stress_fixtures/rs-list.txt), in the tool's order; atan2 is nine items (ATAN2_X), the others one each
+# PROVENANCE of the two fixtures (parcel M4CAT, 2026-11-11): WSL cft2204 on the desktop, from a bundle clone of the branch tip just before the fixtures'
+# own commit: `make -C host MPFR=1 routine-sweep` (MPFR 4.1.0, GMP 6.2.1), `python3 -B host/tools/gen_sweep_images.py --out <new dir>` (its manifest.txt
+# is rs-images-manifest.txt, whose `commit` line names the commit built), `CFT_SWEEP_IMAGES=<that dir> host/routine-sweep list` (rs-list.txt); neither edited.
 DOC_ROUTINE_DIGESTS = [("exp", "043b3bb5"), ("exp2", "ce1e05a9"), ("expm1", "e63ada45"), ("log", "e84c29cb"), ("log2", "c274c957"),
                        ("log1p", "38ea27d9"), ("sin", "05eb28b1"), ("cos", "98b93d46"), ("tan", "dbfd4a4e"),
                        ("atan", "d22abd22"), ("asin", "005fc862"), ("acos", "2f8ca421"), ("atan2", "a86a60d8")]
