@@ -139,9 +139,10 @@ Instructions, by format fp32, fp64, fp128 and fp256: sin 939, 406, 382 and
 389; cos 936, 402, 378 and 385; tan 993, 419, 397 and 406; the same under
 every attribute. Live: 23, 26, 17 and 16 for each of the three, under
 every attribute. sin and cos hold two MIN and two MAX each, their clamp,
-which none of the other six has (MEASURED over the 220 fragments of the
-nine, at 19de866c: no MIN, MAX, MINNUM or MAXNUM elsewhere than in sin and
-cos). Their golden functions are transcend.py's too.
+which none of the other nine of the eleven has (MEASURED over the 220
+fragments of the eleven, at 19de866c: no MIN, MAX, MINNUM or MAXNUM
+elsewhere than in sin and cos). Their golden functions are transcend.py's
+too.
 
 The four, atan, asin, acos and atan2 (M4's build; mathlib.py builds them
 BESIDE the six and the three, in INV_NAMES, and the study is
@@ -150,7 +151,10 @@ the six's and the three's, under caps of their own (Logan's answer 9 of
 2026-10-23) - atan 15, asin 16, acos 16 and atan2 19 live at fp64, fp128
 and fp256, and 25, 25, 25 and 31 at fp32 (the triple word). atan2 is the
 first built routine of two inputs: ("a", "b") = (y, x), its golden
-function transcend's atan2 with y first.
+function transcend's atan2 with y first. The four hold MIN (and asin and
+acos MAX) against a bank word too: atan one MIN, asin one MIN and one MAX,
+acos one MIN and one MAX, atan2 one MIN (MEASURED in the 16 images at the
+four formats under rne, python/tests/test_cftc_invtrig.py).
 """
 
 from . import asm, divfull, seq

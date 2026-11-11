@@ -87,14 +87,15 @@ the language at 1.3): a source that names any of them - at run time, or
 folded where its operands are the constants atan(0), asin(0), acos(1) and
 atan2(0, c) for c >= 0 - which 7 refused, compiles, each run-time call an
 inlined routine, mathlib.py's fragment; atan2 is the second routine of two
-inputs, y then x, after division. For a source 7 compiled, 8 writes the
-same images, banks and text files as 7, and its manifests say version 8;
-nothing else in them moved (a manifest's routines block carries the four's
-own sentence only where its step holds one of the four). That is what
-parcel M4C measured, at both trees (the base 21b98aec's and its tip, the
-language's 1.3 merged): the 51 committed .cftl files outside the
-hard-workload pack (153 compiles on sw, u50-rev8 and u50-rev7 at 3 steps:
-122 images, only each manifest's version line moving, and 31 refusals,
+inputs, y then x, after division. For each source of the sets measured
+below, 8 writes the same images, banks and text files as 7, and its
+manifests say version 8; nothing else in them moved (a manifest's routines
+block carries the four's own sentence only where its step holds one of the
+four). That is what parcel M4C measured, at both trees (the base
+21b98aec's and its tip, the language's 1.3 merged): the 51 .cftl files
+committed at 21b98aec outside the hard-workload pack (55 at the tip, the
+phase follower's sources and canonical forms added; 153 compiles on sw,
+u50-rev8 and u50-rev7 at 3 steps: 122 images, only each manifest's version line moving, and 31 refusals,
 identical) and 330 compiles of 110 generated sources without the four
 (226 images, 20 of them on sw looped, only that line moving, and 104
 refusals, identical; the generated sources are tools of the parcel's
