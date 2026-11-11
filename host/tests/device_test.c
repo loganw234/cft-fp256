@@ -9046,8 +9046,8 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
      * (CFT_XRT_BIND), so the staged collects' marks are what keeps them
      * right - verifier-V8 removed those marks and the leg stayed green.
      * A card only: the software backend has no binds to decline, and a
-     * GPU declines one by situation alone, with no instrument to force
-     * it. */
+     * GPU declines one by situation (the cases backend_hip.cpp's
+     * bind_call names), with no instrument to force it. */
     if (xrt) {
         size_t d;
         /* ...and first, that the instrument declines at all - a pass
@@ -9138,15 +9138,18 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     } else {
         snprintf(label, sizeof label, "    stale copies (%s), outputs declined",
                  cft_format_name(fmt));
-        /* A GPU declines binds (buffers_resident), but by situation alone;
+        /* A GPU declines binds (buffers_resident), by situation - the
+         * cases backend_hip.cpp's bind_call names - and never on demand;
          * what it lacks is the instrument that declines them on demand. */
         if (hc->buffers_resident)
             not_here(NH_OTHER, "TESTED", label, "the leg declines every "
                      "output bind with the XRT backend's instrument, "
                      "CFT_XRT_BIND=decline-outputs, which the %s backend does "
-                     "not read: it declines an output only where two outputs "
-                     "of one call overlap or no memory can be had for the "
-                     "buffer's device copy", hc->backend);
+                     "not read: it declines an output by situation - where "
+                     "two outputs of one call overlap, the window runs past "
+                     "the buffer's end, the buffer is another handle's, or no "
+                     "memory can be had for the buffer's device copy or for "
+                     "its page states on the host", hc->backend);
         else
             not_here(NH_OTHER, "TESTED", label, "the %s backend has no bind "
                      "to decline", hc->backend);
