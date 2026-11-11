@@ -13,10 +13,11 @@
  *             refused by name, with the grammar in the sentence), index
  *             1, a device past the count, an xclbin; the capability word
  *             (formats 15, groups 0x7F, tiles 1, version 0, flags
- *             readable, backend "hip", buffers_resident 0, the software
+ *             readable, backend "hip", buffers_resident 1, the software
  *             handle's four capacities and its features less
  *             CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_AUGADD); the image
- *             identity refused by name; another scratch depth refused.
+ *             identity refused by name; a scratch depth refused, 2,048
+ *             and 256 alike.
  *   reduce    cft_reduce SUM and MAXALL against the software handle - the
  *             definition - bits and flags, at every n from 1 to 130 and
  *             every power of two with its neighbours up to 2^18 (-s), at

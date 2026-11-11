@@ -27595,7 +27595,7 @@ The two fixes from VG1B1's notes are in this parcel too. (i) hip-corpus's full m
 | device-test -b -n 96 | no-readback | RED, 776 of 4,824 | RED, 776 |
 | hip-corpus conf-fp64 (full mode) | drop-flag | RED, exit 1: 1,532 flags differ from the corpus's expected (fix (i); Part 1's runner counted them and exited 0, as VG1B1 found) | RED, the same |
 | the same | none | GREEN, 3a8a9b2c..., 0 and 0 | (green in the corpora below) |
-Without a plant every one of these is green, above and below.
+Without a plant every one of these is green, above and below. Different checks catch different residency faults, so both are needed: the verifier VG1B2's own plants found an unmasked output's edge upload skipped by hip-test's buffers leg alone, and cfth_buffer_host_wrote not staling its pages by device-test -b alone.
 
 **Pages.** In the plant build, `CFT_HIP_PAGE=32`: hip-test buffers green (84) and device-test -b green (4,824) on both GPUs. `CFT_HIP_PAGE=65536`: hip-test buffers green on both. device-test -b at 65,536 on the RX 7600 failed only "resident windows stay resident", at all four formats ("the carved buffer's stream was refilled 2 times on its 2nd and 3rd runs - a write beside a window staled it") - the measurement the 256-byte page rests on.
 

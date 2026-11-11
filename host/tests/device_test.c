@@ -7860,8 +7860,10 @@ static void check_publish_takes_effect(cft_device *sw, cft_device *hw,
  * fail, so a malformed value is refused by name.
  *
  * The software and remote backends keep no device copies and ignore the
- * instrument: the leg is NOT TESTED there, named once. It runs at every
- * format of an XRT device. */
+ * instrument, and a GPU's backend reads its own (CFT_HIP_UPLOAD, in a
+ * plant build; hip-test's buffers leg runs this sequence there): the leg
+ * is NOT TESTED on any of them, named once, with the reason that is
+ * true of it. It runs at every format of an XRT device. */
 static void check_failed_fill_retry(cft_device *sw, cft_device *hw,
                                     cft_format fmt, size_t n, uint32_t seed)
 {
@@ -7890,10 +7892,20 @@ static void check_failed_fill_retry(cft_device *sw, cft_device *hw,
         !caps.buffers_resident) {
         if (!said) {
             said = 1;
-            not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
-                     "the %s backend keeps no device copies of a resident "
-                     "buffer, so no upload can fail",
-                     caps.backend[0] ? caps.backend : "this");
+            /* A GPU keeps device copies too (buffers_resident), and its
+             * uploads can fail; what it lacks is this leg's instrument. */
+            if (caps.buffers_resident)
+                not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
+                         "the leg plants its failed upload with the XRT "
+                         "backend's instrument, CFT_XRT_UPLOAD=fail-fill, "
+                         "which the %s backend does not read; hip-test's "
+                         "buffers leg runs the same sequence on a GPU, with "
+                         "CFT_HIP_UPLOAD=fail-fill", caps.backend);
+            else
+                not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
+                         "the %s backend keeps no device copies of a resident "
+                         "buffer, so no upload can fail",
+                         caps.backend[0] ? caps.backend : "this");
         }
         goto out;
     }
@@ -9033,7 +9045,9 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     /* The same sequences with every output bind of the card DECLINED
      * (CFT_XRT_BIND), so the staged collects' marks are what keeps them
      * right - verifier-V8 removed those marks and the leg stayed green.
-     * A card only: the software backend has no binds to decline. */
+     * A card only: the software backend has no binds to decline, and a
+     * GPU declines one by situation alone, with no instrument to force
+     * it. */
     if (xrt) {
         size_t d;
         /* ...and first, that the instrument declines at all - a pass
@@ -9124,8 +9138,18 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     } else {
         snprintf(label, sizeof label, "    stale copies (%s), outputs declined",
                  cft_format_name(fmt));
-        not_here(NH_OTHER, "TESTED", label, "the %s backend has no bind to "
-                 "decline", hc->backend);
+        /* A GPU declines binds (buffers_resident), but by situation alone;
+         * what it lacks is the instrument that declines them on demand. */
+        if (hc->buffers_resident)
+            not_here(NH_OTHER, "TESTED", label, "the leg declines every "
+                     "output bind with the XRT backend's instrument, "
+                     "CFT_XRT_BIND=decline-outputs, which the %s backend does "
+                     "not read: it declines an output only where two outputs "
+                     "of one call overlap or no memory can be had for the "
+                     "buffer's device copy", hc->backend);
+        else
+            not_here(NH_OTHER, "TESTED", label, "the %s backend has no bind "
+                     "to decline", hc->backend);
     }
     printf("    stale copies (%s): %d of %d scenarios agree with the software "
            "backend, transcript for transcript - V7's sequences and every "
