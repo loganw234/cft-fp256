@@ -536,8 +536,9 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
     python/tests/mathlib_inv_harness.py, which `atan2_status` in
     python/tests/mathlib_inv_family.py uses) and the triple word's at fp32,
     2^-76 (`_tq_band_tw`; mathlib.py's `_build_atan2_tw`). The stages' U
-    legs hold lanes below the edge, and exact-quotient lanes above it that
-    are never marked, and none in the band at any format (MEASURED over
+    legs hold lanes below the edge, and exact-quotient lanes above it (not
+    marked at fp64, fp128 and fp256; at fp32 those under the image's 2^-76
+    are marked without being demanded), and none in the band at any format (MEASURED over
     the pairs and lanes the legs draw: docs/studies/M4-invtrig.md and
     docs/VALIDATION.md, the entry of M4SL); at fp32 their edge is the double
     word's, 2^-100, which `atan2_status` demands from, not the image's. The

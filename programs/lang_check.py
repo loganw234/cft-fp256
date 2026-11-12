@@ -4962,16 +4962,20 @@ def four_range_pairs(F, everything=False):
     uses at every format) to well below it, and a few above it. MEASURED, by
     atan2_status over these pairs at fp32, fp64, fp128 and fp256: the default
     draw is 9 pairs, 6 "mark" (below the band) and 3 "gated" (above it: exact
-    quotients, which the exact-quotient rule decides and never marks); the
-    draw with `everything` is 18 pairs, 13 "mark" and 5 "gated"; at every
+    quotients, which atan2_status leaves to the exact-quotient rule; at fp64,
+    fp128 and fp256 they are not marked, at fp32 those under the image's
+    2^-76 are, see below); the draw with `everything` is 18 pairs, 13 "mark" and 5 "gated"; at every
     format none is "either" (in the band) and none is on the main path. So
     no pair here is in the band; nor is any lane U1's four_lanes draws for
     atan2 (MEASURED, all four formats and five attributes, default and
     everything: statuses None, "gated" and "mark" only). At fp32 the image's
     own range edge is the triple word's, 2^-76 (mathlib.py's
     _build_atan2_tw, the harness's _tq_band_tw), above the 2^-100 the pairs
-    are drawn about: pairs between the two lie inside the fp32 image's range,
-    where the image marks, without being demanded."""
+    are drawn about: the exact-quotient pairs between the two lie inside the
+    fp32 image's range, whose check runs after the exact-quotient rule, so
+    the image marks them without their being demanded (MEASURED: 65 lanes
+    marked against 50 demanded in U1 at fp32, 3 pairs times 5 attributes;
+    one such pair, 1 2^-96 against 1 under rne, run alone: marked)."""
     iv, ih = inv()
     lo, _hi = ih._tq_band(F)
     e0 = lo.denominator.bit_length() - lo.numerator.bit_length() + 2
