@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "787cba95ae18219dd7acd702d1458511c0eedf5332a9f2c788d33d358402eba6"
+      "sha256": "8cd0fb4d3e7a0d4743f67e7f23ddb876ca4727b8ba3478a2f2c29beeeed60b0f"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -86,7 +86,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "641bfdc8e389a6c7f4f53028394cc27ba9e8124f849fd3aa73d394e04255477c"
+      "sha256": "93477c20033338a7548c7138ec85bc1941b5887ac01fcd4f49383bc3b5d924a8"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -136,7 +136,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "f0379687f0fb3625cdfa567c5cfbc8ea13a3c2f15ef9b4cdda9fa2656d5d71d0"
+      "sha256": "b18c7e86ca6e2b4f8b90aac3a29af72fef2dfadfa364950158a6c54e567ae2b1"
     },
     {
       "source": "host/src/reduce.c",

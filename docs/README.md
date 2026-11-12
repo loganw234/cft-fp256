@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Fifty-seven files, 99,745 lines. Flat in one directory they look like one
+Fifty-seven files, 100,184 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **29,321 lines you consult while working** — the three under *Start here*,
+- **29,494 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,894 lines of tool manual**, one per shipped program;
 - **4,366 lines of operations**, read when you are about to do something to
   hardware;
-- **58,164 lines of record and argument** — the ledger, the roadmap and the
+- **58,430 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -49,13 +49,13 @@ product, not the implementation.
 | [LANGUAGE.md](LANGUAGE.md) | 3,330 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), the math library's exp, expm1, exp2, log, log1p and log2 since the language's 1.1, and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 1,075 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 193 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 4,669 | The certificate, versions 1 and 2. Version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Version 2: what the run means - each segment's per-lane flags, every lane a routine marked replayed by the program's definition, the source it was compiled from or is defined by and a wider-source run of it, the profile and language its bits are claimed under, provenance with its privacy defaults, and a detached Ed25519 signature for either version. Complete enough to write a reader and an auditor of either from the page. And the segment runner, `cft-segrun`, that writes either version from the library, version 2 by default, its accuracy entries included; the audit tool, `cft-audit`, that audits both versions in C - version 1 with the same exact arithmetic, and version 2 with Ed25519 and SHA-512 of its own, every step that needs no source; and the golden certificates in `certificates/` that hold the writers to committed bytes, version 2's cases and thirty controls among them. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 4,674 | The certificate, versions 1 and 2. Version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Version 2: what the run means - each segment's per-lane flags, every lane a routine marked replayed by the program's definition, the source it was compiled from or is defined by and a wider-source run of it, the profile and language its bits are claimed under, provenance with its privacy defaults, and a detached Ed25,519 signature for either version. Complete enough to write a reader and an auditor of either from the page. And the segment runner, `cft-segrun`, that writes either version from the library, version 2 by default, its accuracy entries included; the audit tool, `cft-audit`, that audits both versions in C - version 1 with the same exact arithmetic, and version 2 with Ed25,519 and SHA-512 of its own, every step that needs no source; and the golden certificates in `certificates/` that hold the writers to committed bytes, version 2's cases and thirty controls among them. |
 
 ## Reference you call into
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,774 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,942 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 2,349 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the nine of them that also run on the tile: M1's six and M2's sin, cos and tan. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 656 | Programs as files: the assembler, the program library, the runner. |
@@ -98,7 +98,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 27,554 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 27,820 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [FIGURES.md](FIGURES.md) | 474 | Fifteen figures of the project - its history, its gate, the card's clocks and its long stress run, the benchmarks, the math library's costs - drawn by script from the record's own data, light and dark, each with a sidecar of its numbers and the digests of its sources, and held to the numbers the README and other documents state. The page is written by `python/project_figures.py`, the `generated` stage's seventh generator, not by hand. |
 | [ROADMAP.md](ROADMAP.md) | 7,115 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |

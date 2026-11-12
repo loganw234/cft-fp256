@@ -547,17 +547,25 @@ static cft_status open_impl(const char *who, const char *artifact, int index,
         dev->device_version = ver;
         dev->flags_readable = readable;
         dev->seq            = seq;
+#ifdef CFT_ENABLE_HIP
+        /* the GPU backend, behind this same seam (backend.h) */
+        dev->backend_name   = "hip";
+#else
         dev->backend_name   = "xrt";
+#endif
         dev->hw             = hw;
         *out = dev;
         return CFT_OK;
 #else
         /* No device backend is compiled into this build, so there is
          * genuinely no such device here - not a bad artifact, and not
-         * an unsupported operation. */
+         * an unsupported operation. The sentence names both device
+         * backends, an xclbin's and a GPU's ("hip:N"), and how each is
+         * built. */
         CFT_SAY("%s: %s names a device, and this libcft build has no "
                 "XRT backend (CFT_ENABLE_XRT is not defined; host/Makefile "
-                "builds it with XRT=1)", who, artifact);
+                "builds it with XRT=1) and no GPU backend (CFT_ENABLE_HIP; "
+                "HIP=1 builds the one that opens hip:N)", who, artifact);
         return CFT_ERR_NO_DEVICE;
 #endif
     }
@@ -693,6 +701,23 @@ CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out)
                           (unsigned long)CFT_OPEN_SCRATCH_MAX);
             return CFT_ERR_INVALID_ARGUMENT;
         }
+#ifdef CFT_ENABLE_HIP
+        /* A GPU has no image to fix its depth: the GPU backend does, at
+         * the software executor's 256 slots, and refuses every non-zero
+         * depth, 256 included - so its sentence says that, and the card's
+         * below stays the card's. */
+        if (args->artifact && strncmp(args->artifact, "hip:", 4) == 0) {
+            cft_set_error("cft_open_ex: scratch_depth %lu is a SOFTWARE "
+                          "handle's depth, and %s names a GPU, whose depth "
+                          "the GPU backend fixes at the software executor's "
+                          "256 slots, with no image to choose another "
+                          "(cft_caps.max_scratch) - any non-zero depth is "
+                          "refused for it, 256 included; open it with "
+                          "scratch_depth 0 and read the depth it has",
+                          (unsigned long)depth, args->artifact);
+            return CFT_ERR_UNSUPPORTED;
+        }
+#endif
         if (args->artifact) {
             cft_set_error("cft_open_ex: scratch_depth %lu is a SOFTWARE "
                           "handle's depth, and %s names a device, whose "
@@ -1379,6 +1404,12 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
      * everywhere, which is exactly true of it. */
 #ifdef CFT_ENABLE_XRT
     c.buffers_resident = (dev->backend == CFT_BACKEND_XRT) ? 1 : 0;
+#if defined(CFT_ENABLE_HIP) && !CFT_HIP_BUFFERS_RESIDENT
+    /* A GPU handle is this kind too (backend.h), and keeps no device
+     * copies while CFT_HIP_BUFFERS_RESIDENT is 0: its cft_alloc is host
+     * memory, so the word says so. */
+    c.buffers_resident = 0;
+#endif
 #else
     c.buffers_resident = 0;
 #endif

@@ -27552,3 +27552,269 @@ The study's section 8 item 10 and section 10 item 7, software side: `programs/ac
 
 **Not done / known limits.** (1) The flags half of the replay is held in the four's legs only through atan2's 74 marked lanes whose guess raises other flags (P5 is green in U1 atan, asin and acos). (2) The values half is read only on the one-call map images; where a sum can absorb a wrong guess (rk4, Euler, Stormer-Verlet, a map with h) the tally does not look. (3) The pinned cells that no map configuration read (atan fp64 rne; acos fp128 rtz and rup, fp256 rdn; atan2 fp64 rdn, fp128 rtz and rup) are named in the leg's line as not run. (4) The tangent leg's drawn systems have no marked lane wrong in its tangents; the controls U0f carries that. (5) U0e is shown of 14 images, not of every image the compiler can write. (6) `--four-all` was not run to completion on the desktop; its help describes the code's draws. (7) The band at the range's edge, where the seed's error decides ("either" in `atan2_status`), is exercised at no format. MEASURED in a scratch script, `atan2_status` over `four_range_pairs` at fp32, fp64, fp128 and fp256: the default draw is 9 pairs, 6 "mark" and 3 "gated" at each format (the "gated" ones are exact quotients, since y/x is a power of two: at fp64, fp128 and fp256 the exact-quotient rule decides them and they are not marked, at fp32 those under the image's 2^-76 are marked without being demanded - MEASURED by a scratch script over U1's atan2 lanes at fp32 under the five attributes: 65 marked against 50 demanded, and the 15 marked and not demanded are exactly the pairs 1 2^-96 / 1, 3 2^-96 / 3 and 5 2^-96 / 640 under each attribute, all "gated" by `atan2_status`, with no demanded lane unmarked; one such pair, 1 2^-96 against 1 under rne, run alone was marked too), the draw with `everything` is 18 pairs, 13 "mark" and 5 "gated"; none "either", none on the main path. U1's atan2 lanes (`four_lanes`, five attributes pooled, default / everything) are at fp32 300 / 400 lanes with statuses None 90 / 145, "gated" 160 / 170, "mark" 50 / 85; at fp64 488 / 928 with None 278 / 673 and the same "gated" and "mark"; at fp128 535 / 3,010 with None 325 / 2,755; at fp256 535 / 2,296 with None 325 / 2,041; none "either". The committed centres, ratio lanes and window lanes of INV_FAMILY (what U2, U3 and tangent leg U draw their structured atan2 operands from, besides the range pairs) are all None: 20 at fp64, 372 at fp128, 1,395 at fp256 (fp32 has none). At fp32 the range pairs and `atan2_status`'s demand are the double word's band, below about 2^-100 (`_tq_band`); the fp32 image marks below the triple word's 2^-76 (mathlib.py's `_build_atan2_tw`, the harness's `_tq_band_tw`), so lanes between the two edges are marked without being demanded. No false green follows: nothing is demanded clear at fp32 (`classify` raises there) and the image marks everything the demand asks. A later parcel can demand the fp32 range by `_tq_band_tw`; that harness code is outside this parcel's files.
 `CARD_STRESS_PLANT_APPLY_ONLY=1 bash hw/test-card-stress.sh --only plants` under Git Bash: card-stress test: 475 checks, 0 failed, 0 skipped, 0 s. The no-mpmath runs, both ways (`sys.modules["mpmath"] = None` in a driver, and MSYS2's Python 3.14): lang `--only four` 0 ok, 0 FAIL, 4 SKIP (U1, U2 and U3 by name, and the tally's `--only` line), tangent `--only four` 0 ok, 0 FAIL, 1 SKIP, rc 0 both. `--four-all`'s lane construction was run for every function, format and attribute (15,414 lanes, 5 s) and for U2's twelve sources; the legs themselves were not run on that draw.
+
+## 2026-11-11 - parcel G1B1's: a GPU as a libcft device, cft_open("hip:N") - the staged run, the fixed-tree reductions and the sequencer on the GPU, with refusals by name (the GPU backend's round 1, Part 1; author G1B1, Opus 5.5)
+
+**What.** host/src/backend_hip.cpp implements backend.h's device seam under the prefix `cfth_` (backend.h renames the `cftx_` names under `CFT_ENABLE_HIP`; host/Makefile's HIP=1 defines `CFT_ENABLE_XRT` with `CFT_ENABLE_HIP` and refuses HIP=1 with XRT=1), so device.c's device branches drive a GPU unchanged. It is the one device translation unit: the tree's bigint.c, softfloat.c and seq_exec.h compiled for the GPU, and three kernels - an element through `cft_sf_compute`, one level of the reduction tree, a program lane through seq_exec.h's four per-lane functions and `seq_run_block`, the program handed over as the loader's parsed form (`cft_seq_run_io.prog`, set by program.c). Every operand is staged; there are no resident buffers yet (`buffers_resident` 0). Tests: host/tests/hip_test.c, host/tests/hip_corpus.c, and device_test.c's hip arms. Commits b772b2788f1bbdaa32535eca5c239ed6999984a7 (the code) and 365bc9b4e2bb2d014db1426061b8a9898d105e47 (hip-corpus `--sample`, the lead's form for the RX 7600's stream run). docs/HOSTAPI.md, "The GPU backend", is the API's view.
+
+**Nothing in a HIP=0 build moved.** This desktop, mingw64 gcc 16.1.0, TMP and TEMP in Windows form; the base a `git archive 36daa67d`, the tip the worktree at 365bc9b4 copied without .git, so both build ids are "unknown". Final pass 11:35:12 to 11:45:28:
+- `make -n -B CC=gcc OS=Windows_NT all api-test.exe device-test.exe remote-test.exe`: identical, 70 lines. Builds rc 0, 0 warnings.
+- 28 objects byte-identical, bigint.o (6,798 B), softfloat.o (16,278 B), divsqrt.o (55,016 B) and build_id.o (799 B) among them. device.o/.lo and program.o/.lo differ. By function (objdump, branch targets and rip-relative offsets normalised):
+  - program.o: `cft_program_run_ex` gains one store, `mov %rsi,0x4d8(%rsp)` (`io.prog = prog`), with two spills reordered; `cft_program_digest` loses 16 nops of alignment padding; 11 functions identical;
+  - device.o: `cft_backend_program_run` copies `dio = *io`'s last 16 bytes (`lane_flags_bytes` and the new `prog`) with one movdqu/movups where it moved 8 with mov/mov; 52 functions identical; .rdata: the no-backend sentence, which now names the GPU backend and HIP=1.
+- api-test passed; `device-test sw -n 96` (455 lines) and `sw -b -n 96` (123 lines) equal to the base's but the build-id line, with device_test.c's edits in the tip.
+- seq_check, the gate's command (`--trials 250 --formats fp32 fp64 fp128 fp256`, each tree's own cft.dll): base 220 s, tip 223 s, rc 0, 59 lines byte-identical.
+- The certificate corpus: at the tip copy, 257 checks, 0 failed, 20 skipped (19 "no --tool given", and the history leg, since the copy has no .git); with its cft-segrun, 329, 0 failed, 1 skipped (the same leg); from the worktree with the tip copy's cft-segrun, 329 checks, 0 failed, 0 skipped.
+- The Arduino copy: `sync.py`, then `--check`: 36 vendored files, all identical to host/ (backend.h, device.c, program.c and vendor.json rewritten).
+- hip-test.exe and hip-corpus.exe build at HIP=0 with 0 warnings. hip-test.exe hip:0 prints the no-backend refusal, which names HIP=1, and NOT RUN for every leg (rc 0); hip-corpus.exe on the software handle gives conf-fp64's 3a8a9b2c... and routines-fp64's 4eb03cc3....
+
+**The card's path did not move.** device.c, program.c and divsqrt.c compiled with `-DCFT_ENABLE_XRT` and no XRT installed, at base and tip: rc 0, 0 warnings each. `gcc -E -P` differs only by backend.h's two added lines (`struct cft_program;` and the `prog` member) in all three, and by program.c's `io.prog = prog;`. Nothing of device.c's own text differs: its HIP lines are under `CFT_ENABLE_HIP`, and its sentence is in the branch without XRT. backend_xrt.cpp has no diff.
+
+**The builds.**
+- cft-gpu (this desktop's WSL distro), HIP 7.2.4's NVIDIA layer on CUDA 12.9: `make -j4 HIP=1 HIP_PLATFORM=nvidia HIP_ROOT=/opt/rocm-7.2.4 HIP_CUDA=/usr/local/cuda-12.9 all api-test device-test hip-test hip-corpus`, from a `git archive` of the worktree in /root/g1b. rc 0, 0 warnings: 79 s at HIP_ARCH 120; at the default 89 120, 220 s (default build) and 255 s (HIP_PLANTS=1).
+  - Resources (ptxas), sm_120: k_run 40 registers and 4,728 B of stack, k_level 40 / 4,208 B, k_seq 64 / 12,624 B. sm_89: 38 / 4,472, 39 / 4,208, 121 / 12,352.
+  - Every test binary `ldd`s libcudart.so.12 (cuda-12.9).
+  - nvcc's host pass is given `-Wall -Wextra` without `-Wshadow` and with `-Wno-unused-function`. Both warnings are of the tree's text there, and both were measured: softfloat.c has a local `half` beside CUDA's global type, and seq_exec.h's static `seq_run_block` has a caller in device code only.
+- The RX 7600 machine (nvidia-box), ROCm 10.1 (HIP 7.16.26385), gfx1102, from a `git archive` of host/ in ~/g1b: rc 0, 17 s, 0 warnings with `-Wall -Wextra -Wshadow`. k_run 46 VGPRs and 5,572 B of scratch a lane, k_level 46 / 5,572 B, k_seq 64 / 13,716 B. Every test binary `ldd`s libamdhip64.so.7.
+
+**The symbol check.** The unit renames softfloat.c's one datum (`#define cft_sf_formats cft_hip_sf_formats` before its includes); its functions are C++ names beside the C objects'.
+- `hip-symcheck`, which libcft.a and the shared library wait for, holds that no symbol defined in backend_hip.o (.lo) is defined in any other object: 85 symbols (86 in the plant build) against 258 in the 16 host objects on NVIDIA, 58 against 258 on AMD, none in both.
+- `make HIP=1 hip-symcheck-plant` compiles the unit with the rename removed. It is RED on both vendors and names `cft_sf_formats` (`nm`: `D cft_sf_formats` in symplant.o and in softfloat.o); the honest objects are green again after it.
+
+**The devices.** hip:0 in every run. On this desktop `CUDA_VISIBLE_DEVICES=1`, so the RTX 5060 Ti is the process's only device and the RTX 4070 is never touched; nvidia-smi ran before each run. `CFT_HIP_INFO=1` was set on every run, and its lines name the device:
+- `hip:0 = NVIDIA GeForce RTX 5060 Ti (sm_120, 36 multiprocessors, bus 0000:05:00.0, 16283 MiB), HIP platform nvidia, runtime 12090, driver 13040; of 1 visible, CUDA_VISIBLE_DEVICES=1`;
+- `hip:0 = AMD Radeon RX 7600 (gfx1102, 16 multiprocessors, bus 0000:03:00.0, 8176 MiB), HIP platform amd, runtime 71626385, driver 71626385; of 1 visible`. amd-smi and ps ran before each run there: no other GPU process was listed, and lemond was running, holding no VRAM that amd-smi showed.
+
+**Plants first.** Each plant is compiled in by HIP_PLANTS=1 alone (a build of its own) and chosen by `CFT_HIP_PLANT`. Each check ran with it, then without.
+- RTX 5060 Ti, 10:55:23 to 10:56:23 (the plant build of b772b278's host/):
+  - flip: RED on conf-fp256 (all 18,360 results differ, pass 2 disagrees with pass 1, 8a1e0c97...) and on device-test (96 of 1,144 at fp64);
+  - rmm-as-rne: RED on conf-fp256 (51 results, ffe3f2eb93608966..., GPU-A's planted hash) and on the full device-test -n 96 (one fp32 add tie, element 54). At `-f fp64` alone its 96 random elements hold no tie and it stayed green, which is why the recorded check is the full matrix;
+  - drop-flag: RED on conf-fp256 (1,452 flags, f0ca15e06fcbefb5..., GPU-A's) and on device-test (10 failed at fp64);
+  - reduce-carry: RED on hip-test's small fp64 reductions (475 of 7,801); reduce-flags: RED (3,745 of 7,801);
+  - seq-mask: RED on routines-fp64 (e1537046..., GPU-A's planted hash, 24 cases) and on device-test -s;
+  - seq-deposit: RED on fuzz-fp64 (7c568364...) and on device-test -s (2 failed). It is green on routines-fp64, whose every kept lane fills every deposit slot, so that corpus cannot show it;
+  - fail-launch: RED on hip-test (7,741 of 7,801: the first call fails by name and the poisoned handle refuses the rest). hip-test's plants leg is GREEN with it (26 checks): the failed call's sentence names the plant and says "close it and open it again"; the next run, a reduction, a segmented reduction and a program are refused as "left in an unknown state"; and a new handle agrees with the software handle.
+  The same checks without a plant, in the same build: GREEN.
+- RX 7600, 11:11:55 to 11:12:59 (the plant build of b772b278): every plant RED where it must be - flip (18,360 results; device-test 390 failed), rmm-as-rne (ffe3f2eb...; the full device-test 1 failed), drop-flag (f0ca15e0...; device-test 39 failed), reduce-carry (475), reduce-flags (3,745), seq-mask (e1537046... on routines-fp64, d734b1fc... on fuzz-fp64, device-test -s 52 failed), seq-deposit (7c568364... on fuzz-fp64, device-test -s 8 failed; green on routines-fp64, as above), fail-launch (7,741), and the plants leg GREEN. Without a plant, all GREEN.
+- The `--sample` mode's own plant, the RX 7600, 11:24:27 (the plant build of 365bc9b4): flip with `--sample 5000:7` on conf-fp256 RED (5,000 sampled results differ, and pass 2 differs from the expected d), and GREEN without.
+- The plants' instruments refuse malformed values by name at open (hip-test's plants leg):
+  - CFT_HIP_PLANT "bogus", "flip " (a trailing space), "FLIP", "flip,drop-flag", "1" and "stale-publish" (Part 2's, not in this build);
+  - CFT_HIP_CHUNK "abc", "7", "0", "12", "64 ", "-8", "1073741832" and "0x40";
+  - and, in every build, CFT_HIP_INFO "yes".
+  A default build opens with CFT_HIP_PLANT=bogus, which is how the leg tells the two builds apart (NOT RUN, named, in a default build).
+
+**The corpora.** Study GPU-A's, made here: Windows Miniconda 3.12, mpmath 1.3.0; all 19 corpus files equal GPU-A's captured sums, and GPU-A's own routines-fp32 was made again at 010b2551, as G1A did. hip-corpus runs an elementwise corpus as cft_run's contract lets it be checked. A call's flags are the OR over its elements, so pass 1 makes one call a case, the only way to have each case's flags; that is the hashed output. Pass 2 makes one call an attribute, held to pass 1 byte for byte and to the OR of its flags.
+- RTX 5060 Ti, 10:59:02 to 10:59:34 (b772b278's host/):
+  - conf-fp32 dd3d83be..., conf-fp64 3a8a9b2c..., conf-fp128 fcc92da3..., conf-fp256 da932116555557bef8fcd6980da18963b1420bfc892163c67b32d1cc53a2eba9. Each has 0 results and 0 flags differing from the corpus's expected; pass 1 takes 1.6 to 1.8 s for about 18,400 single calls (87 us a call), and pass 2 agrees;
+  - GPU-A's routines-fp32 (90 cases, at 010b2551) a7ff1aef...; main's routines-fp32 (130 cases) 0a369fe3...; routines fp64 4eb03cc3..., fp128 30b7a930..., fp256 dd159120...;
+  - fuzz 735f6e86..., 347c9957..., e8f855b4..., 9dec942c...; systems 581b9c30...; bench 6cba53d3... (24,576 lanes, so the program chunks of 2,048 were crossed).
+  Every one of the sixteen is GPU-A's or G1A's sum. refuse.bin is refused by the loader by name: "fp64 augadd: instruction 0 is AUGADD - 754-2019 9.5's augmentedAddition, revision 8 - and this device does not publish it (CAPS2[11] clear, cft_caps.seq_features bit 15 - CFT_SEQ_FEAT_AUGADD) ...".
+- RX 7600, 11:23:53 to 11:24:26 (365bc9b4): the same sixteen sums and the same refusal. Pass 1 there costs 234 us a call (3.7 to 4.4 s for each conformance corpus).
+- On the software handle the runner gives the same sums (cft-gpu's build and this desktop's HIP=0 build; conf-fp256, conf-fp64 and routines-fp64 run). refuse.bin is computed there, since the software handle carries augmentedAddition.
+
+**stream-fp256** (1,000,000 cases).
+- RTX 5060 Ti, 12:02:03 (365bc9b4, the default build), one run of about 95 s of GPU time approved by the lead as the one exception to the 60 s rule, with a stop at 240 s wall: GREEN, sha256 9c7f2f6e9130003b024c94a665222b53f2176d0cff7903d532a293cae8687cb7, GPU-A's and G1A's sum. 0 results and 0 flags differ from the corpus's expected, and pass 2 agrees with pass 1. The binary took 190.3 s. Pass 1 took 141.2 s, 141 us a call on a desktop loaded by other parcels, against 87 us at 10:52 when it was quiet. Its open came 58 s after the run's script started, and 43 s of once-a-second samples found it in state D on 9P (below).
+- RX 7600, 11:24:27: `--sample 100000:20261111`, the lead's form for this machine, where 1M single calls are about 240 s.
+  - Pass 1 ran on 100,000 cases chosen by selection sampling (Knuth's algorithm S over xorshift64 seeded 20261111), 23.3 s, with 0 results and 0 flags differing from the corpus's expected.
+  - Pass 2 ran over all 1,000,000 cases in five calls: d equal to the corpus's expected d byte for byte, and each call's flags the OR of its cases' expected flags.
+  - 23.8 s in all. The full-corpus hash is claimed on the 5060 Ti alone.
+
+**hip-test** - the reductions against the software handle, bits and flags, on six kinds of data: random finite values, the same with quiet and signalling NaNs, with infinities of both signs, with +infinity alone, values near the largest finite, and signed zeros.
+- RTX 5060 Ti, 10:59 to 11:06 (b772b278's host/), every run under 43 s:
+  - the open leg: 8 malformed spellings refused with the grammar; index 1; hip:999 and a 20-digit number naming the count; an xclbin "opens hip:N only"; the caps - backend "hip", formats 0xf, tiles 1, version 0, flags readable, seq_features 0x75f1f, the software handle's capacities 1048576/4294967295/512 and 256 slots, buffers_resident 0, and cft_supports equal to the software handle's for the seven groups at four formats; the image id refused by name with struct_size 0; cft_open_ex at 2,048 slots refused. With alias, two and plants: 119 checks, 0 failed, 2 NOT RUN (two devices: one visible; the plants: a default build);
+  - cft_reduce SUM and MAXALL at every n from 1 to 130, every format, every kind, every attribute: 31,204 compared, 0 failed, with n = 1 of a signalling NaN at each format (verbatim, no flags);
+  - the same at the 33 sizes 2^k - 1, 2^k and 2^k + 1 for k = 8 to 18, every kind: 1,981 a format at each of the four, 0 failed;
+  - cft_reduce_seg SUM and MAXALL with segments of 1, 2, 3, 7, 8, 64 and n: 199,440 at the small sizes, 2,310 a format at the large (random data), 0 failed;
+  - DOT, SUMSQ and SUMABS, whole and in segments of 3: 92,880 small, 990 a format large, 0 failed.
+- RX 7600, 11:24:55 to 11:27:48 (365bc9b4):
+  - the open, alias, two and plants legs: 119 checks, 0 failed, the same 2 NOT RUN;
+  - cft_reduce at the small sizes, each format: 7,801 each; the segmented form at the small sizes, fp64: 49,860; the composed ones at the small sizes, fp64: 23,220; cft_reduce at the large sizes, fp64 and fp256: 1,981 each. All 0 failed.
+  - Not run there, for its CPU's time and its 234 us a call: the segmented and composed forms past the small sizes and at the other formats, and the large reductions at fp32 and fp128.
+- On both: a scalar operand that d aliases. The GPU reads a snapshot of the scalar for every element; the software loop re-reads element 0 after writing it; the two differ from element 1 on, and each is held to its own rule.
+
+**device-test hip:0 -n 96** (the selfcheck stage's command): 4,405 checks, 0 failed, "the device and the software backend agree on every case that RAN, bits and flags" - 1.5 s on the 5060 Ti (10:59:36), 1.1 s on the RX 7600 (11:24:27). The NOT lines are the same on both:
+- NOT COMPARED 12: idx elem, seq indexed inputs, and seq indexed and masked, at each format. The device does not publish CFT_SEQ_FEAT_INDEXED (round 2), and each refusal by name is scored;
+- NOT TESTED 17: the completion witness at open (only an xclbin opens tiles); format refusals (all four formats carried); max_insns and max_consts one past, twice each (the software executor's own limits, which an image cannot pass); the 256-slot walk and the 300-slot block at each format (the depth is 256, as on the software handle); and three XRT tile legs (a program past an HBM channel, the completion witness's refusals, a resident output lost by a refused run);
+- NOT RUN 4: reductions with b and c poisoned, at each format - an XRT instrument.
+Its div/sqrt legs ran: 20 (4 formats x 5 attributes), each one cft_div and one cft_sqrt of 96 elements on hip:0. Through a device backend those take divsqrt.c's program route (divsqrt_route_program, divsqrt.c:1353 to :1370): per 4,096-element chunk the host classifies and centres, one cft_program_run (divsqrt.c:1203, :1310) runs the Newton image on the GPU's sequencer, and the host rounds. So the 20 legs made 40 program runs, one k_seq launch each by the code (96 lanes, one chunk).
+device-test's edits: is_xclbin() for the four places that took any artifact other than "sw" and "cft://" for an xclbin (the witness at open, -i's planted refusals and caps, --expect-refusal), and a "hip" arm in check_image_identity that requires the refusal by name. Its XRT-only legs skip themselves on backend "hip", as before.
+
+**Chunks** (`CFT_HIP_CHUNK`, plant build), so that small data crosses every boundary:
+- RX 7600 (11:22:17 to 11:23:53, and 11:29):
+  - CFT_HIP_CHUNK=8 device-test -n 96 GREEN (4,405 checks, 10.5 s): every elementwise run in chunks of 8, every program in chunks of 8 lanes;
+  - CFT_HIP_CHUNK=64, hip-test's small fp64 reductions GREEN (7,801);
+  - CFT_HIP_CHUNK=8: routines-fp64, fuzz-fp256 and conf-fp64 GREEN at their sums; systems.bin at 64 GREEN (581b9c30..., 8.6 s). At 8, systems ran past its 60 s limit (576 launches of nearly a whole program each): not a result.
+- RTX 5060 Ti (11:50:43 to 11:55:16, and 12:08 to 12:14):
+  - CFT_HIP_CHUNK=8 device-test -n 96 GREEN (4,405 checks); CFT_HIP_CHUNK=8, the small fp64 reductions GREEN (7,801);
+  - routines-fp64, fuzz-fp256 and conf-fp64 at 8, and systems at 64, GREEN at their sums.
+- On neither GPU did the forced chunk reach the large sizes. At CFT_HIP_CHUNK=1024 (the RX 7600) and 4096 (the 5060 Ti), each of those runs went past its 60 s limit (a round trip a chunk, hundreds a reduction): not results. The chunked tree is shown at the small sizes (chunks of 8 and of 64: up to 17 partials, reduced again in chunks). At the default stage no size up to 2^18 + 1 is chunked (fp256's chunk is 2^20 elements).
+
+**The open refuses a device the build has no code for.** A build for gfx1100 alone, opened on the gfx1102 card: "cft_open: hip:0 is gfx1102, and this libcft's GPU code was built for HIP_ARCH gfx1100 (amd platform): its kernels do not load there - device kernel image is invalid (hipErrorInvalidImage). Rebuild with HIP_ARCH naming gfx1102", CFT_ERR_NO_DEVICE.
+
+**Rates**: staged, i.e. host arrays in and host arrays out, through the public API; median of 10 after one warm-up; every result equal to the software handle's; scratch bench rate.c, not committed.
+- RX 7600 (11:27:48, 365bc9b4, load 1.3): fp32 FMA 212 to 217 M/s, SUM 206 to 373 M/s; fp64 FMA 113 M/s, SUM 163 to 255; fp128 FMA 57 to 58 M/s, SUM 103 to 131; fp256 FMA 26.6 to 27.0 M/s, SUM 55 M/s (n 1,048,576 and 4,194,304). The longest single call, fp256 FMA over 4,194,304 elements (eight chunks of 524,288), took 0.158 s whole, so every launch in it was shorter.
+- RTX 5060 Ti (12:05:33, 365bc9b4), measured under a desktop loaded by other parcels - a figure for the record, not a claim about the backend: fp256 FMA 25.4 to 27.1 M/s, SUM 64 to 72; fp128 FMA 57 to 58, SUM 171 to 175; fp64 FMA 37 to 85, SUM 292 to 302; fp32 FMA 154 to 234, SUM 298 to 516.
+These are staged rates, from round 1's first part. Residency (Part 2) and specialised kernels (round 3) are where study GPU-A's kernel-only figures come back.
+
+**9P stalls in cft-gpu.** CUDA's WSL libraries (/usr/lib/wsl/lib) load over 9P from the Windows side, and this desktop's file I/O congests it.
+- At 11:35, while this parcel's own host proof ran, three 5060 Ti runs sat in state D on p9_client_rpc until their 60 s limits and produced nothing.
+- At 11:47 to 11:56, with other parcels' work on the desktop, the starts of runs sat 20 to 67 s in D and then ran correctly.
+- From 12:02 every run was watched once a second, and the seconds in D are given above apart from each run's own time.
+These are wall seconds; the GPU was idle during them.
+
+**GPU time** (the test binaries' own run times, summed from their logs; the runs stopped by PID add under 2 minutes): RTX 5060 Ti 1,213 s over 75 runs, of which the 9P stalls are several minutes; RX 7600 722 s over 66 runs, of which 8.5 minutes are eight chunk runs sized too large for it, each past its 60 s limit. About 32 minutes in all, against the lead's 36 approved. The RTX 4070 was not used.
+
+**Size**, by numstat over 36daa67d..365bc9b4: 3,281 changed lines (3,267 added, 14 removed). backend_hip.cpp 1,624, hip_test.c 808, hip_corpus.c 501, the Makefile 159, backend.h 49, device_test.c 41, device.c 18, program.c 4, and the Arduino copy with vendor.json 77.
+
+**Not run, and known limits.**
+1. Part 1 only. No resident buffers: `buffers_resident` 0, `cft_alloc` gives host memory, and every operand of every call is staged. Part 2 (`cft_alloc` residency and the authority rule, items 9 and 10 of the brief) is G1B2's.
+2. Refused by name, round 2's: index tables (CFT_SEQ_FEAT_INDEXED clear), augmentedAddition (CFT_SEQ_FEAT_AUGADD clear, the unit built CFT_NO_AUGMENTED), and scratch depths other than 256.
+3. The staged per-call cost is 87 us on the 5060 Ti under WSL and 234 us on the RX 7600, so a small call is a round trip. Tuning is round 4's.
+4. Two devices in one process: NOT RUN on both machines (one visible GPU each; the RTX 4070 is not this parcel's). Two handles on one device ran, on both.
+5. The RX 7600's reductions cover the small sizes at every format, the large ones at fp64 and fp256, and the segmented and composed forms at fp64, small. The full coverage is the 5060 Ti's.
+6. stream-fp256 on the RX 7600 is the sampled form; the full-corpus hash is the 5060 Ti's.
+7. The forced chunk at the large reduction sizes completed on neither GPU (above).
+8. Not exercised, because no device ran out: the out-of-memory paths (an allocation refused, a launch refused for its local memory) and the 250 ms halving of a program's chunk. The doubling ran (bench.bin's 4,096-lane cases), and so did the fail-launch plant's poisoned handle.
+9. The code-object check was shown red on the RX 7600 (a gfx1100 build). It was not shown on NVIDIA: no sm_89-only build ran on the 5060 Ti.
+10. Under HIP=1, `make soak-chunk` would compile backend_hip.cpp with g++ through the generic `%.cpp` rule, and fail. Found by reading, not run.
+11. An XRT=1 build takes "hip:0" as a file to read, through the XRT backend, and does not refuse it by name. backend_xrt.cpp is not this parcel's to edit.
+12. device.c's no-backend sentence changed in the branch without XRT, so the WebAssembly module's sources moved and its rebuild is owed (the lead's, as G1A's was).
+13. Not run here: the card's device-test and seq_check on the U50, the box's gate, and G1C's gates (the conformance replay, seq_check and the certificate corpus through hip:N, the verify stage, the NVIDIA legs, rates against the quad and MPFR).
+
+## 2026-11-11 - parcel G1B2's: resident buffers on a GPU - cft_alloc's buffers kept on the device under cft.h's authority rule, a page at a time (the GPU backend's round 1, Part 2; author G1B2, Opus 5.5)
+
+**What.** `CFT_HIP_BUFFERS_RESIDENT` is 1 (backend.h), so a GPU handle's `cft_caps.buffers_resident` is 1, and backend_hip.cpp implements the buffer seam that Part 1 declined. A `cft_alloc`'d buffer gets ONE device allocation, made at its first binding and never resized, at the mirror's own offsets; its state is kept a page at a time, 256 bytes: STALE (the mirror is the truth), FRESH (the two agree) and DIRTY (a run wrote it, so the device is the truth).
+- A binding uploads the STALE pages its call reads: an input's whole window; an output's whole window under a lane mask; an unmasked output's edge pages only. Each contiguous run of pages goes up in one copy and is marked FRESH only once that copy has completed. A good run leaves its outputs' pages DIRTY.
+- `cft_buffer_from_device` brings DIRTY pages home. `cft_buffer_to_device` stales every page; it is refused (CFT_ERR_INVALID_ARGUMENT, the XRT backend's sentence, nothing changed) while any page is DIRTY.
+- A host write brings the DIRTY pages it touches home whole and stales them. After the write, a DIRTY page it only partly covered comes home around it.
+- A run that fails once a launch may have started leaves the resident buffers it writes LOST. A publish clears that.
+- An input that overlaps an output of the same call in the same buffer is staged, except cft_run's d == a and a program's scratch-in == scratch-out. Overlapping outputs are both staged (docs/HOSTAPI.md, "Two roles, one copy").
+- Plants: `stale-publish`, `no-readback` and `fresh-early`. `CFT_HIP_UPLOAD=fail-fill` is an instrument, and `CFT_HIP_PAGE` sets the page. Plant builds only; malformed values are refused by name.
+The two fixes from VG1B1's notes are in this parcel too. (i) hip-corpus's full mode exits 1 when a result or a flag differs from the corpus's expected values, as the sampled mode already did, and its header says so. (ii) cft_open_ex's refusal of a depth for a GPU says what is true: any non-zero depth is refused, 256 included, and a GPU has no image - the backend fixes the depth. That sentence is under `CFT_ENABLE_HIP` in device.c, so the card's sentence and every other build's text are unchanged.
+
+**Why 256 bytes, not 64 KiB** (accepted by the lead after the first green): device-test's "resident windows stay resident" runs a program over a buffer carved [a | counts | deposits] with n = 64, three times, and requires the stream a to bind resident on runs 2 and 3. With 64 KiB pages the counts - which the library writes on the host every run - share a's page, so a refills every run. Measured on the RX 7600 with `CFT_HIP_PAGE=65536`: that check failed at all four formats (4 failed), and nothing else did. A coarser page can make an unneeded refill and never a missed one, so the size is a residency-economy choice, not a correctness one. Its cost is one byte of state for each 256 bytes of a bound buffer, and a run of STALE pages is still one copy.
+
+**device_test.c, one line** (approved by the lead): check_stale_copies set `card_refuses = xrt && buffers_resident`, so it expected every non-XRT device to accept a publish over unread results. cft.h's rule is a device backend's, and the GPU refuses that publish too, so the line is now `card_refuses = buffers_resident`. Before it, 2 scenarios a format failed on the GPU on that alone; after it, all pass. It changes nothing elsewhere:
+- the software and remote backends report `buffers_resident` 0, so `card_refuses` is 0 either way;
+- an XRT handle has `buffers_resident` 1 exactly when its backend is xrt (device.c's cft_get_caps), so `xrt && buffers_resident` is `buffers_resident` there;
+- `device-test sw -b -n 96` at the tip gives the base's 123 lines but for the build-id line (below).
+
+**Nothing in a HIP=0 build moved.** This desktop, mingw64 gcc 16.1.0, the base a `git archive 38a4aadf` (Part 1's verified tip), the tip the worktree copied without .git, 15:12:51 to 15:22:33:
+- `make -n -B CC=gcc OS=Windows_NT all api-test.exe device-test.exe remote-test.exe`: identical, 70 lines. Builds rc 0, 0 warnings.
+- All 32 objects byte-identical, none differing: device.c's one addition is under `CFT_ENABLE_HIP`, and backend.h's is inside its HIP block.
+- api-test passed. `device-test sw -n 96` (455 lines) and `sw -b -n 96` (123 lines) are equal to the base's but for the build-id line, with device_test.c's `card_refuses` line in the tip.
+- seq_check, the gate's command, at base and tip at once: 220 s and 223 s, rc 0, 59 lines byte-identical.
+- The certificate corpus at the tip copy: 257 checks, 0 failed, 20 skipped (19 "no --tool given", and the history leg, since the copy has no .git). With its cft-segrun: 329 checks, 0 failed, 1 skipped. From the worktree with the tip copy's cft-segrun: 329 checks, 0 failed, 0 skipped.
+- hip-test.exe and hip-corpus.exe build at HIP=0 with 0 warnings. hip-test.exe hip:0 prints the no-backend refusal (rc 0, every leg NOT RUN). On the software handle, hip-corpus.exe gives conf-fp64's 3a8a9b2c... and routines-fp64's 4eb03cc3..., staged and `--resident` alike (the software handle reports 0 resident and 0 staged bindings: its buffers are host memory).
+- The Arduino copy: the proof's `--check` found backend.h and device.c changed, as it must after an edit to a vendored source. `sync.py` then rewrote both and vendor.json, and `--check` gives 36 vendored files, all identical to host/.
+
+**The card's path did not move.** device.c, program.c and divsqrt.c compiled with `-DCFT_ENABLE_XRT` and no XRT installed, at base and tip: rc 0, 0 warnings each. `gcc -E -P` base against tip: 0 lines differ in all three. The GPU's depth sentence and `CFT_HIP_BUFFERS_RESIDENT` exist only where `CFT_ENABLE_HIP` is defined.
+
+**The builds.**
+- The RX 7600 machine (nvidia-box), ROCm, gfx1102, from `git archive` copies of the worktree in ~/g1b2, default and plants: rc 0, 17 s each, 0 warnings. hip-symcheck: 58 symbols against 258 in the 16 host objects, none in both. Later edits were laid over these trees and rebuilt, also with 0 warnings.
+- cft-gpu (this desktop's WSL distro), HIP 7.2.4's NVIDIA layer on CUDA 12.9, HIP_ARCH 120 (the 5060 Ti's alone), in /root/g1b2, from the archive of the worktree at 15:21: default 174 s, plants 197 s, rc 0, 0 warnings. hip-symcheck: 101 symbols against 258 (102 in the plant build), none in both.
+- Resources, sm_120: k_run 40 registers and 4,728 B of stack, k_level 40 / 4,208 B, k_seq 64 / 12,624 B - Part 1's, unchanged; the kernels did not change.
+
+**The devices.** hip:0 in every run, named by `CFT_HIP_INFO=1` on each one (the line now gives the page: "page 256 bytes"). The RX 7600 had amd-smi and ps run before each run, and no other GPU process. The RTX 5060 Ti ran alone (`CUDA_VISIBLE_DEVICES=1`), with nvidia-smi before each run. The RTX 4070 was not used.
+
+**First green on a GPU: the RX 7600, 15:06 to 15:07.**
+- hip-test -l open,alias,buffers: 175 checks, 0 failed. The buffers leg's scenarios, each held to the software handle running the same calls on plain memory:
+  - a publish takes effect, at fp64 and fp256, and a repeat with nothing published binds resident (its counters: one more resident binding, no more staged);
+  - a publish over unread results is refused, `CFT_ERR_INVALID_ARGUMENT` with the XRT sentence, device_authority staying 1; after a read-back the publish is accepted, and the results are kept;
+  - d == a in place: the software handle's bits, and not staged;
+  - an output shifted one element over its own input: the input is staged ("an input that overlaps an output of the same call in this buffer is staged...") and every element reads the published value, the snapshot rule, twice;
+  - a masked program into a resident deposit window, then an unmasked one, then a masked one over a new sentinel: every byte the software handle's;
+  - a reduction's result written into a resident output window on the host, then a run into a moved, unaligned window over it and past it (150 elements from element 103), then another host write beside that window's start, then the read-back: every byte of the 4,800-byte buffer the software sequence's;
+  - sum, dot and the segmented maximum over resident windows from elements 0, 3 and 17: the software handle's; a's bindings 8 resident, 1 staged.
+- device-test hip:0 -b -n 96: 4,824 checks, 0 failed, once the `card_refuses` line was in (before it, 8 failed: the two publish-over-unread scenarios at each format, and nothing else). Stale copies: 101 of 101 scenarios at fp32, 103 of 103 at fp64, 103 of 103 at fp128 and 101 of 101 at fp256, transcript for transcript. "Resident windows stay resident" held at every format: the carved buffer's stream bound resident on its 2nd and 3rd runs, and a masked window was resident after a read-back and refilled after a publish. NOT TESTED by name there: the XRT-only legs (a failed fill's retry - the leg asks for backend "xrt"; S5 and S7's planted tile refusals; the declined outputs).
+- The plants build's buffers and plants legs: 119 checks, 0 failed, with:
+  - CFT_HIP_UPLOAD=fail-fill: the run refused with "the upload of a resident buffer's pages to hip:0 (AMD Radeon RX 7600) was failed on purpose by CFT_HIP_UPLOAD=fail-fill, after the host copy and before the device copy - nothing of this call ran, and the pages stay stale", and the output untouched; the retry gives the software handle's bytes for the new operand; a malformed value (`fill`) is refused by name;
+  - fail-launch: the failed run's resident output is LOST (staged_why "LOST: a run that wrote this resident buffer failed on the device (internal error: cft_run on hip:0 ...: the launch was reported failed after it ran (CFT_HIP_PLANT=fail-launch) ...", device_authority 0); its input is not; reading it back is CFT_ERR_INTERNAL with that sentence; a publish clears the loss;
+  - `CFT_HIP_PAGE` "0", "16", "100", "2097152", "256 ", "0x100", "-256" and "4k" refused by name; CFT_HIP_PLANT's bad names now include "stale" and "fail-fill" (Part 1's "stale-publish" is a plant now).
+- The reduction legs again on the RX 7600, since the staged reduction's stage layout changed with the resident path (15:15 to 15:17, cut as Part 1 cut them): reduce small at each format 7,801; reduce large fp64 and fp256 1,981 each; seg small fp64 49,860; compose small fp64 23,220 - all 0 failed. reduce-carry RED (475 of 7,801 failed) and reduce-flags RED (3,745 of 7,801), as in Part 1.
+
+**Plants first, then green, on both GPUs.**
+| check | plant | RX 7600 (15:08) | RTX 5060 Ti (15:30 to 15:37) |
+|---|---|---|---|
+| hip-test -l buffers | stale-publish | RED, 7 FAIL lines: "cft_buffer_to_device did not take effect - the run used the bytes published before" | RED, the same 7 |
+| hip-test -l buffers | no-readback | RED, 12 FAIL lines: "a resident run differs from the software handle's" | RED, the same 12 |
+| hip-test -l buffers | fresh-early | RED, exactly 1: "the retry after a failed upload: it answered for the OLD bytes - a failed upload left its pages fresh (KL-464's order)" | RED, the same 1 |
+| device-test -b -n 96 | stale-publish | RED, 12 of 4,824 | RED, 12 |
+| device-test -b -n 96 | no-readback | RED, 776 of 4,824 | RED, 776 |
+| hip-corpus conf-fp64 (full mode) | drop-flag | RED, exit 1: 1,532 flags differ from the corpus's expected (fix (i); Part 1's runner counted them and exited 0, as VG1B1 found) | RED, the same |
+| the same | none | GREEN, 3a8a9b2c..., 0 and 0 | (green in the corpora below) |
+Without a plant every one of these is green, above and below. Different checks catch different residency faults, so both are needed: the verifier VG1B2's own plants found an unmasked output's edge upload skipped by hip-test's buffers leg alone, and cfth_buffer_host_wrote not staling its pages by device-test -b alone.
+
+**Pages.** In the plant build, `CFT_HIP_PAGE=32`: hip-test buffers green (84) and device-test -b green (4,824) on both GPUs. `CFT_HIP_PAGE=65536`: hip-test buffers green on both. device-test -b at 65,536 on the RX 7600 failed only "resident windows stay resident", at all four formats ("the carved buffer's stream was refilled 2 times on its 2nd and 3rd runs - a write beside a window staled it") - the measurement the 256-byte page rests on.
+
+**The corpora with every operand resident** (`hip-corpus --resident`: every array in a buffer from cft_alloc, published before its call and read back after it; the program corpus makes fresh buffers a case). All 15 of GPU-A's corpora but stream-fp256 gave GPU-A's sha256 and exit 0, on both GPUs (the RX 7600 15:10:02 to 15:10:33, the 5060 Ti 15:33 to 15:36): conf fp32 dd3d83be..., fp64 3a8a9b2c..., fp128 fcc92da3..., fp256 da932116...; GPU-A's routines-fp32 a7ff1aef...; routines 0a369fe3..., 4eb03cc3..., 30b7a930..., dd159120...; fuzz 735f6e86..., 347c9957..., e8f855b4..., 9dec942c...; systems 581b9c30...; bench 6cba53d3.... Their counters show the residency: conf-fp32's pass 1 (18,435 single calls at windows of four buffers) 72,588 resident bindings and 1,172 staged; conf-fp256 64,265 and 9,195 (a page is 8 fp256 elements, so a fresh page's first call stages).
+
+**Rates**: through the public API, median of 10 after one warm-up; every result equal to the software handle's; scratch bench rate2.c, not committed. Staged is host arrays in and out. Resident is a, b and c published once in buffers and d a buffer: the call alone, its results left on the device, plus the call followed by `cft_buffer_from_device(d)`.
+- RX 7600 (15:10:44 to 15:11:20, a quiet machine: load 0.7 and the GPU 2% busy before):
+
+| | staged | resident | resident with a read-back each call |
+|---|---|---|---|
+| fp256 FMA, n 4,194,304 | 27.2 M/s | 132.1 M/s (4.9x) | 69.1 M/s |
+| fp256 FMA, n 1,048,576 | 26.8 | 128.7 | 68.5 |
+| fp64 FMA, n 4,194,304 | 112.0 | 627.8 | 302.6 |
+| fp32 FMA, n 4,194,304 | 212.6 | 933.9 | 513.0 |
+| fp256 SUM, n 4,194,304 | 54.6 | 92.1 | - |
+
+  The first resident call, which uploads the operands, took 0.139 s at fp256 and n 4,194,304. The longest resident call after it took 0.051 s.
+- RTX 5060 Ti (15:36 to 15:37, measured UNDER THIS DESKTOP'S LOAD, other parcels' work on it; Part 1's staged fp256 there was 25 to 27 M/s): fp256 FMA, n 4,194,304: staged 16.4 M/s, resident 66.5 M/s (4.1x), with a read-back each call 32.8 M/s; SUM staged 54.7, resident 126.4.
+- A program corpus, systems.bin (8 integrators, 4,608 lanes, one run a case), on the RX 7600, three times each way: 1.5 s staged and 1.5 s resident. A single run a case is compute-bound and uploads its operands once either way, so residency neither helps nor hurts it.
+
+**9P stalls in cft-gpu**, recorded apart from the runs' times (every run watched once a second): 122 s of the 32 runs' 245.6 s were seen in state D on p9_client_rpc, 83 s of them in four runs (14 to 30 s each: the first three, and bench.bin's) while this desktop was busy. No run was stopped; none reached its limit.
+
+**GPU time** (the test binaries' own run times, from their logs): RX 7600 265 s over 49 runs; RTX 5060 Ti 246 s over 32 runs, of which 122 s were 9P stalls. About 8.5 minutes, against the lead's 30. Every run was under 60 s. The RTX 4070 was not used.
+
+**Size**, by numstat over 38a4aadf..afa6c023: 1,763 changed lines (1,555 added, 208 removed). backend_hip.cpp 961, hip_test.c 474, hip_corpus.c 266, device.c 17, backend.h 9, device_test.c 6, and the Arduino copy with vendor.json 30.
+
+**Not run, and known limits.**
+1. The page is 256 bytes (above). A window that shares a page with something the library writes on the host refills that page at its next binding: correct, and at most 256 bytes a page, but not free. A buffer carved at 256-byte boundaries keeps every window resident.
+2. An input that overlaps an output of the same call is staged, so it costs a transfer that a card's per-role copies do not. Two exceptions are resident: cft_run's d == a, and a program's scratch-in == scratch-out. An output shifted over its own input gets the snapshot rule on a GPU, where the software loop's sequential order differs from element 1 on. That case is outside cft.h's aliasing rule, which allows the identical window alone.
+3. A resident run keeps the staged run's chunks (a launch never longer than the staged one), so its per-launch work is the same; whether bigger launches would gain more is round 4's.
+4. Not exercised, because no device ran out: a buffer the device has no memory for (staged, with the hipMalloc failure in staged_why); an upload or a read-back that fails for real (the instrument plants the first; the second poisons the handle by the same path as every failed copy).
+5. device-test's XRT-only legs are NOT TESTED on a GPU by name: a failed fill's retry (hip-test's buffers leg holds the GPU's to the same sequence), the planted tile refusals S5 and S7, and the declined outputs.
+6. The program corpora's --resident runs make fresh buffers for each case, so their bindings are mostly first-use uploads: they check correctness, not economy. The rates above are the economy.
+7. Not run here: the U50, the box's gate, and G1C's gates.
+
+## 2026-11-12 - the lead's send-back of G1B, from the combined gate: the writer's list of variables (cert2.ENVIRONMENT_NAMES and its two copies in C) names the seven that backend_hip.cpp reads (the GPU backend's round 1; author the lead, Opus 5.5)
+
+**What failed.** The combined box gate of 2026-11-12 (run 20261112-075634-ef9200e9, at the tip of M4's wave 5, the lead's LANGUAGE.md commit and G1B's merge) failed its golden stage on one test, python/tests/test_cert2.py's `test_the_environment_list_is_the_codes_getenv_calls`: 1 failed, 7,269 passed, 3 skipped (the box's usual three: two loopback, one math.fma), 5,027 s. backend_hip.cpp reads seven variables the list did not name: `CFT_HIP_CHUNK`, `CFT_HIP_INFO`, `CFT_HIP_PAGE`, `CFT_HIP_PLANT`, `CFT_HIP_UPLOAD`, `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`. Neither G1B's two parts nor their verifiers ran the golden suite in full. A regression under Logan's rule; the fix is mechanical, so the lead made it.
+
+**The fix.** The seven join the list in byte order, 23 names, in the three copies the gate holds equal:
+- python/cft_golden/cert2.py's `ENVIRONMENT_NAMES`, held to the code's calls and to byte order by test_cert2.py;
+- host/tools/audit.c's list between its markers, held to cert2's by host/tests/audit_check.py (the audit stage);
+- host/tools/segrun.c's `ENV_NAMES`, held to cert2's by host/tests/segrun_check_v2.py (the programs stage).
+
+segrun.c's note on `HEAD_TEXT_V2` said "the environment's sixteen variables". It now says twenty-three and gives an `env` line's most, 287 bytes: "env ", the longest name's 26, a space, 255 and the LF. COUNTED from `put_v2_header`, not measured, the header's lines past the identity lines are at most 14,334 bytes with twenty-three variables (12,325 with sixteen), under the 16,384 the trial adds:
+- eleven text lines at 255 characters, 2,954 bytes;
+- the other fixed lines, the issuer key's taken as a text, 600;
+- `initial` with a 64-character generator name and sixteen arguments at 255, 4,179;
+- the environment, 23 x 287 = 6,601.
+The `replay-method` lines, one for each run that replays, are not in this count, as they were not before.
+
+**What it changes.** A writer records a variable of the list only when it is set non-empty. None of the seven is set where the gate runs (the box's login environment has 0 of them), so every certificate the gate writes keeps its bytes. A reader now accepts an `env` line naming one of the seven; cert2 and cft-audit before this commit refuse such a line `malformed`. No certificate carries one, since no writer before this commit could write it.
+
+**Run here** (the desktop, on the fixed tree):
+- the three copies parsed as their three checks parse them: 23 names each, equal, in byte order, and equal to the set test_cert2's scan finds in host/src and segrun.c;
+- python/tests/test_cert2.py in full: 105 passed in 17.8 s at -n 4;
+- check_docs_index.py rc 0; project_figures.py --check rc 0.
+
+**Not run here:** the golden suite in full, and the audit and programs stages. They run on the box at the merge.
+
+## 2026-11-12 - the lead's second commit on G1B's send-back, from VLM1112b: CERTIFICATES.md's paragraph "The environment" names the writer's list's 23 variables, and test_cert2.py holds it to the list (the GPU backend's round 1; author the lead, Opus 5.5)
+
+**What was false.** docs/CERTIFICATES.md's paragraph "The environment" (the contract) named the writer's list's sixteen variables of 2026-10-02 as "every variable libcft and cft-segrun read". Since G1B's backend_hip.cpp that was false, and the lead's first commit (the entry above) left it so. VLM1112b (Sonnet) found it. No check held the paragraph to the list.
+
+**The fix.**
+- The paragraph names the 23 in the list's order, and says which seven are the GPU backend's and since when.
+- python/tests/test_cert2.py, `test_the_contract_names_the_environment_list`: the paragraph's backticked names, up to "A writer writes", equal `cert2.ENVIRONMENT_NAMES` in order. The paragraph's closing sentence says so.
+
+**Run here** (the desktop):
+- the new test on the paragraph as it stood, its control: FAILED, "At index 2 diff: 'CFT_SEGRUN_PLANT' != 'CFT_HIP_CHUNK'", with 7 more names on the list's side;
+- after the fix, the whole file: test_cert2.py 106 passed in 14.3 s at -n 4;
+- check_docs_index.py rc 0; project_figures.py --check rc 0.
+
+**Not changed:** docs/studies/CERT-V2.md names fifteen of the sixteen, all but `CFT_XRT_UPLOAD` (VLM1112b's pass 2; this sentence first said "the sixteen"). A design study is the record of its date, so it stays.

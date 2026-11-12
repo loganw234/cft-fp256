@@ -137,6 +137,17 @@ static void not_here(int kind, const char *word, const char *what,
         nh_compared++;
 }
 
+/* Does the artifact name an xclbin? Not "sw" (the software backend), a
+ * cft:// URL (a remote device) or "hip:N" (a GPU, the GPU backend): only
+ * an xclbin opens tiles, so only an xclbin takes the legs that plant an
+ * XRT instrument at open, plant the identity's refusals, or hold an
+ * image's identity to its file. */
+static int is_xclbin(const char *artifact)
+{
+    return strcmp(artifact, "sw") != 0 && strncmp(artifact, "cft://", 6) != 0 &&
+           strncmp(artifact, "hip:", 4) != 0;
+}
+
 /* One environment variable, set or removed, on either platform. */
 static void put_env(const char *name, const char *value)
 {
@@ -7849,8 +7860,10 @@ static void check_publish_takes_effect(cft_device *sw, cft_device *hw,
  * fail, so a malformed value is refused by name.
  *
  * The software and remote backends keep no device copies and ignore the
- * instrument: the leg is NOT TESTED there, named once. It runs at every
- * format of an XRT device. */
+ * instrument, and a GPU's backend reads its own (CFT_HIP_UPLOAD, in a
+ * plant build; hip-test's buffers leg runs this sequence there): the leg
+ * is NOT TESTED on any of them, named once, with the reason that is
+ * true of it. It runs at every format of an XRT device. */
 static void check_failed_fill_retry(cft_device *sw, cft_device *hw,
                                     cft_format fmt, size_t n, uint32_t seed)
 {
@@ -7879,10 +7892,20 @@ static void check_failed_fill_retry(cft_device *sw, cft_device *hw,
         !caps.buffers_resident) {
         if (!said) {
             said = 1;
-            not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
-                     "the %s backend keeps no device copies of a resident "
-                     "buffer, so no upload can fail",
-                     caps.backend[0] ? caps.backend : "this");
+            /* A GPU keeps device copies too (buffers_resident), and its
+             * uploads can fail; what it lacks is this leg's instrument. */
+            if (caps.buffers_resident)
+                not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
+                         "the leg plants its failed upload with the XRT "
+                         "backend's instrument, CFT_XRT_UPLOAD=fail-fill, "
+                         "which the %s backend does not read; hip-test's "
+                         "buffers leg runs the same sequence on a GPU, with "
+                         "CFT_HIP_UPLOAD=fail-fill", caps.backend);
+            else
+                not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
+                         "the %s backend keeps no device copies of a resident "
+                         "buffer, so no upload can fail",
+                         caps.backend[0] ? caps.backend : "this");
         }
         goto out;
     }
@@ -8856,8 +8879,10 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     size_t i;
     int k, fn, dir, which, runs = 0, agreed = 0, progs = 1, progs_so = 1,
         progs_bank = 1, progs_si = 1;
-    /* a card that keeps B resident refuses a publish over unread results */
-    const int card_refuses = xrt && hc->buffers_resident;
+    /* a device that keeps B resident - a card, or a GPU since its round 1's
+     * Part 2 - refuses a publish over unread results (cft.h's rule for a
+     * device backend; the software and remote backends keep none) */
+    const int card_refuses = hc->buffers_resident;
     /* an index table on a device: the gather V9's sequences run */
     const int indexed = (hc->seq_features & CFT_SEQ_FEAT_INDEXED) != 0;
     static const int declined[] = {SV_RWR, SV_DEP_OUT, SV_SO_OUT,
@@ -9020,7 +9045,9 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     /* The same sequences with every output bind of the card DECLINED
      * (CFT_XRT_BIND), so the staged collects' marks are what keeps them
      * right - verifier-V8 removed those marks and the leg stayed green.
-     * A card only: the software backend has no binds to decline. */
+     * A card only: the software backend has no binds to decline, and a
+     * GPU declines one by situation (the cases backend_hip.cpp's
+     * bind_call names), with no instrument to force it. */
     if (xrt) {
         size_t d;
         /* ...and first, that the instrument declines at all - a pass
@@ -9111,8 +9138,21 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     } else {
         snprintf(label, sizeof label, "    stale copies (%s), outputs declined",
                  cft_format_name(fmt));
-        not_here(NH_OTHER, "TESTED", label, "the %s backend has no bind to "
-                 "decline", hc->backend);
+        /* A GPU declines binds (buffers_resident), by situation - the
+         * cases backend_hip.cpp's bind_call names - and never on demand;
+         * what it lacks is the instrument that declines them on demand. */
+        if (hc->buffers_resident)
+            not_here(NH_OTHER, "TESTED", label, "the leg declines every "
+                     "output bind with the XRT backend's instrument, "
+                     "CFT_XRT_BIND=decline-outputs, which the %s backend does "
+                     "not read: it declines an output by situation - where "
+                     "two outputs of one call overlap, the window runs past "
+                     "the buffer's end, the buffer is another handle's, or no "
+                     "memory can be had for the buffer's device copy or for "
+                     "its page states on the host", hc->backend);
+        else
+            not_here(NH_OTHER, "TESTED", label, "the %s backend has no bind "
+                     "to decline", hc->backend);
     }
     printf("    stale copies (%s): %d of %d scenarios agree with the software "
            "backend, transcript for transcript - V7's sequences and every "
@@ -9381,6 +9421,10 @@ static unsigned char *read_whole(const char *path, size_t *len)
  *   software  refused by name: CFT_ERR_UNSUPPORTED, "software backend",
  *             struct_size 0
  *   remote    refused by name: CFT_ERR_UNSUPPORTED, "remote handle"
+ *   hip       refused by name: CFT_ERR_UNSUPPORTED, "the GPU backend loads
+ *             no device image", struct_size 0 - a GPU loads no image, and
+ *             what decides its bits is this library and the device's
+ *             compiler
  *
  * The by-design refusals have their own planted gate under -i:
  * check_image_plants, below.
@@ -9423,6 +9467,19 @@ static void check_image_identity(cft_device *dev, const char *artifact)
             im.struct_size == 0)
             printf("  image identity (%s): refused by name - %s\n",
                    caps.backend, msg);
+        return;
+    }
+    if (!strcmp(caps.backend, "hip")) {
+        static const char name[] = "the GPU backend loads no device image";
+        CHECK(st == CFT_ERR_UNSUPPORTED && strstr(msg, name) &&
+              im.struct_size == 0,
+              "the GPU's image identity: %s with struct_size %lu - it loads no "
+              "image, and must be refused by name (CFT_ERR_UNSUPPORTED, \"%s\", "
+              "struct_size 0), not answered: \"%s\"", cft_strerror(st),
+              (unsigned long)im.struct_size, name, msg);
+        if (st == CFT_ERR_UNSUPPORTED && strstr(msg, name) &&
+            im.struct_size == 0)
+            printf("  image identity (hip): refused by name - %s\n", msg);
         return;
     }
     if (strcmp(caps.backend, "xrt")) {
@@ -9984,11 +10041,10 @@ int main(int argc, char **argv)
                 argv[0]);
         return 2;
     }
-    if (expect_refusal &&
-        (!strcmp(artifact, "sw") || !strncmp(artifact, "cft://", 6))) {
+    if (expect_refusal && !is_xclbin(artifact)) {
         fprintf(stderr, "--expect-refusal is for an xclbin: the software "
-                "backend and a remote handle refuse the identity for what "
-                "they are, and every run already requires that\n");
+                "backend, a remote handle and a GPU refuse the identity for "
+                "what they are, and every run already requires that\n");
         return 2;
     }
     argv[1] = (char *)artifact;
@@ -10017,7 +10073,7 @@ int main(int argc, char **argv)
     {
         int open_witness = -1;
         char open_why[240] = "";
-        if (strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6)) {
+        if (is_xclbin(argv[1])) {
             cft_device *probe = NULL;
             cft_status ps;
             put_env("CFT_XRT_WITNESS", "busy-open");
@@ -10034,7 +10090,7 @@ int main(int argc, char **argv)
         /* -i: the identity's two by-design refusals, planted - before the
          * handle under test holds the tiles, as the witness is. */
         if (only_id) {
-            if (strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6))
+            if (is_xclbin(argv[1]))
                 check_image_plants(argv[1]);
             else
                 not_here(NH_OTHER, "RUN", "  the planted identity refusals",
@@ -10202,7 +10258,7 @@ int main(int argc, char **argv)
     check_image_identity(sw, NULL);
     check_image_identity(hw, strcmp(argv[1], "sw") ? argv[1] : NULL);
     /* -i on an xclbin: the planted handles' decode, held to this one's. */
-    if (only_id && strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6))
+    if (only_id && is_xclbin(argv[1]))
         check_plant_caps(hw);
     fflush(stdout);
     if (only_id) {

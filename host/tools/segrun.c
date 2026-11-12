@@ -1520,12 +1520,13 @@ static void host_arch_raw(char *out, size_t cap)
  * byte order. segrun_check holds this table to that list, so a variable
  * joins it with the code that reads it. */
 static const char *const ENV_NAMES[] = {
-    "CFT_DIVSQRT_FULL", "CFT_DIVSQRT_SEQ", "CFT_SEGRUN_PLANT",
+    "CFT_DIVSQRT_FULL", "CFT_DIVSQRT_SEQ", "CFT_HIP_CHUNK", "CFT_HIP_INFO",
+    "CFT_HIP_PAGE", "CFT_HIP_PLANT", "CFT_HIP_UPLOAD", "CFT_SEGRUN_PLANT",
     "CFT_TIMEOUT_MS", "CFT_TRANSCEND_MINPREC", "CFT_XRT_BIND",
     "CFT_XRT_CAPS", "CFT_XRT_MASK_ADDR_OVERRIDE", "CFT_XRT_PROGRAM_CUTS",
     "CFT_XRT_REDUCE_BC", "CFT_XRT_TILES", "CFT_XRT_TILE_ORDER",
     "CFT_XRT_TRACE", "CFT_XRT_UPLOAD", "CFT_XRT_WITNESS",
-    "XCL_EMULATION_MODE" };
+    "CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "XCL_EMULATION_MODE" };
 #define N_ENV_NAMES (sizeof ENV_NAMES / sizeof ENV_NAMES[0])
 
 /* ---- the hashes: cert_write.h's, refused by the name each returns ---- */
@@ -2468,7 +2469,9 @@ static void write_side(size_t r, uint64_t k, const char *tail,
  * that can replay; the source lines, under 1 KiB beside each param's,
  * whose literal is at most a bigint's decimal; the header's lines past
  * version 1's - the texts at 255 characters, sixteen generator arguments,
- * the environment's sixteen variables - under 16 KiB. */
+ * the environment's twenty-three variables (an `env` line at most 287
+ * bytes: "env ", the longest name's 26, a space, 255 and the LF) - under
+ * 16 KiB. */
 #define SEGMENT_LANES_TEXT 72
 #define REPLAY_TEXT        200
 #define SOURCE_TEXT        1024
