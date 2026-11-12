@@ -1,4 +1,4 @@
-# GPU-E, captured 2026-11-11 13:22:48: python -B docs/studies/gpu-e/cost_model.py on this desktop (no inputs; the
+# GPU-E, captured 2026-11-12 08:02:27: python -B docs/studies/gpu-e/cost_model.py on this desktop (no inputs; the
 # script is deterministic). Trimmed: sections 1, 2, 7 and 6 whole; of 5a the a2 rows at N = 1e6;
 # of 5b the binary128 rows; 5c, 4 and the a1/a3 rows omitted (the study's tables carry them).
 == 1. the device (COMPUTED from READ): clock 2.100 GHz, 32-bit issue 4.085e+13 lane-instructions/s
@@ -14,30 +14,30 @@
 
 == 2. one test particle, 7 partners (the planet and 6 moons) and J2+J4: ops a step attempt
    format form    eps     passes | add    mul    fma   div   sqrt | FMA-eq a step | a substep-pass
-   fp64   fma     1e-09  3.025 | 3890   2728   641   184   157  | 11636         | 496
-   fp64   rebound 1e-09  3.025 | 4398   3495   133   992   157  | 23529         | 1029
-   fp128  fma     1e-09  8.010 | 9438   6497   1688  469   401  | 30042         | 516
-   fp128  rebound 1e-09  8.010 | 10784  8624   342   2532  401  | 66119         | 1146
-   fp128  fma     1e-12  5.660 | 6823   4720   1195  335   286  | 21557         | 516
-   fp128  rebound 1e-12  5.660 | 7773   6206   244   1806  286  | 47263         | 1146
-   fp256  fma     1e-09 19.980 | 22761  15546  4202  1151  988  | 98207         | 692
-   fp256  rebound 1e-09 19.980 | 26117  20941  845   6231  988  | 233537        | 1651
-   fp256  fma     1e-16 11.035 | 12805  8783   2323  641   550  | 54897         | 692
-   fp256  rebound 1e-16 11.035 | 14659  11737  469   3467  550  | 130140        | 1651
-   fp256  fma     1e-24  7.075 | 8397   5790   1492  415   356  | 35723         | 692
-   fp256  rebound 1e-24  7.075 | 9586   7662   303   2243  356  | 84366         | 1651
-   fp256 FMA form: the force is 79% of a substep-pass; div and sqrt are 74% of the force
-   specialised x6.7 on every op gains x6.7; on FMA/ADD/MUL only, div and sqrt generic: x1.54
-   specialised x30.0 on every op gains x30.0; on FMA/ADD/MUL only, div and sqrt generic: x1.67
+   fp64   fma     1e-09  3.025 | 4134   3016   508   384   179  | 15145         | 654
+   fp64   rebound 1e-09  3.025 | 4642   3783   0     1191  179  | 27038         | 1188
+   fp128  fma     1e-09  8.010 | 10066  7238   1346  982   459  | 40562         | 700
+   fp128  rebound 1e-09  8.010 | 11412  9366   0     3046  459  | 76639         | 1331
+   fp128  fma     1e-12  5.660 | 7269   5248   951   700   327  | 29045         | 700
+   fp128  rebound 1e-12  5.660 | 8220   6734   0     2172  327  | 54750         | 1331
+   fp256  fma     1e-09 19.980 | 24310  17377  3357  2419  1129 | 137099        | 968
+   fp256  rebound 1e-09 19.980 | 27667  22773  0     7499  1129 | 272429        | 1927
+   fp256  fma     1e-16 11.035 | 13666  9801   1854  1345  628  | 76501         | 968
+   fp256  rebound 1e-16 11.035 | 15520  12754  0     4171  628  | 151744        | 1927
+   fp256  fma     1e-24  7.075 | 8953   6447   1189  870   406  | 49673         | 968
+   fp256  rebound 1e-24  7.075 | 10142  8319   0     2698  406  | 98316         | 1927
+   fp256 FMA form: the force is 85% of a substep-pass; div and sqrt are 81% of the force, 69% of the substep-pass; J2+J4 is 40% of the force
+   specialised x6.7 on every op gains x6.7; on FMA/ADD/MUL only, div and sqrt generic: x1.36
+   specialised x30.0 on every op gains x30.0; on FMA/ADD/MUL only, div and sqrt generic: x1.43
 
   -- a2: one wave a system (57 particles + planet + 6 moons)
    format eps    N     | (i) occ. 5/6 w | (ii) live lanes, work x | (iii) HBM held | HBM bw gen/spec | generic       | specialised
-   fp64   1e-09 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   3.8 GB  1.8% |  0.18% /   2.2% | 2 min .. 5 min | 11 s..20 s
-   fp128  1e-09 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   5.2 GB  2.5% |  0.24% /   3.1% | 8 min ..20 min | 40 s..75 s
-   fp128  1e-12 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   5.2 GB  2.5% |  0.24% /   3.0% | 16 min..38 min | 77 s..2 min
-   fp256  1e-09 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   8.0 GB  3.9% |  0.18% /   2.3% | 55 min.. 2.2 h | 4 min..8 min
-   fp256  1e-16 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   8.0 GB  3.9% |  0.18% /   2.2% | 5.1 h ..12.3 h | 25 min..46 min
-   a1's work a lane over a lone test particle's: fp64 1e-09 x5.59, fp128 1e-09 x5.38, fp128 1e-12 x5.39, fp256 1e-09 x5.23, fp256 1e-16 x5.24
+   fp64   1e-09 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   3.8 GB  1.8% |  0.14% /   1.7% | 3 min .. 7 min | 14 s..26 s
+   fp128  1e-09 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   5.2 GB  2.5% |  0.18% /   2.3% | 11 min..27 min | 54 s..101 s
+   fp128  1e-12 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   5.2 GB  2.5% |  0.18% /   2.2% | 22 min..52 min | 103 s..3 min
+   fp256  1e-09 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   8.0 GB  3.9% |  0.13% /   1.6% | 77 min.. 3.1 h | 6 min..12 min
+   fp256  1e-16 1e+06 | 1.00 / 1.00    | 1.000, x1.123          |   8.0 GB  3.9% |  0.13% /   1.6% | 7.2 h ..17.2 h | 34 min..64 min
+   a1's work a lane over a lone test particle's: fp64 1e-09 x5.97, fp128 1e-09 x5.84, fp128 1e-12 x5.85, fp256 1e-09 x5.77, fp256 1e-16 x5.78
    largest N that HBM holds (state, plus the generic scratch of 6 waves): fp64 1.63e+08, fp128 8.16e+07, fp256 4.08e+07
    a3 over the C ring to the F ring, uniform in radius: useful steps / shared steps = 0.617
 
@@ -49,20 +49,20 @@
    fp128  1e-12 N=1000000 5e+11 pairs: 1.13e+15 FMA-eq a step; an orbit: generic 518.6 d..3.4 yr, specialised 41.5 d..77.8 d; the CPU layout 2.8e+15 B; collision search 0.30% of a step
 
 == 7. a2 runs, FMA form, in orbits at the Encke gap (13.81 h each)
-   N=1e+06 10 orbits fp128  eps 1e-09: 1.22e+13 FMA-eq; generic 83 min .. 3.3 h; specialised 7 min .. 12 min
-   N=1e+06 10 orbits fp64   eps 1e-09: 4.73e+12 FMA-eq; generic 22 min .. 53 min; specialised 107 s .. 3 min
-   N=1e+05 10 orbits fp256  eps 1e-09: 3.99e+12 FMA-eq; generic 3.2 h .. 9.2 h; specialised 15 min .. 35 min
-   N=1e+06 10 orbits fp128  eps 1e-12: 2.35e+13 FMA-eq; generic 2.7 h .. 6.4 h; specialised 13 min .. 24 min
-   N=1e+06 10 orbits fp256  eps 1e-09: 3.99e+13 FMA-eq; generic 9.2 h .. 22.2 h; specialised 44 min .. 83 min
-   N=1e+06 10 orbits fp256  eps 1e-16: 2.22e+14 FMA-eq; generic 2.1 d .. 5.1 d; specialised 4.1 h .. 7.7 h
-   N=3e+05  3 orbits fp128  eps 1e-09: 1.1e+12 FMA-eq; generic 9 min .. 25 min; specialised 41 s .. 93 s
-   N=3e+05  3 orbits fp64   eps 1e-09: 4.26e+11 FMA-eq; generic 2 min .. 7 min; specialised 11 s .. 25 s
-   N=1e+05  1 orbits fp256  eps 1e-09: 3.99e+11 FMA-eq; generic 19 min .. 55 min; specialised 92 s .. 3 min
+   N=1e+06 10 orbits fp128  eps 1e-09: 1.65e+13 FMA-eq; generic 112 min .. 4.5 h; specialised 9 min .. 17 min
+   N=1e+06 10 orbits fp64   eps 1e-09: 6.16e+12 FMA-eq; generic 29 min .. 69 min; specialised 2 min .. 4 min
+   N=1e+05 10 orbits fp256  eps 1e-09: 5.57e+12 FMA-eq; generic 4.5 h .. 12.9 h; specialised 21 min .. 48 min
+   N=1e+06 10 orbits fp128  eps 1e-12: 3.16e+13 FMA-eq; generic 3.6 h .. 8.6 h; specialised 17 min .. 32 min
+   N=1e+06 10 orbits fp256  eps 1e-09: 5.57e+13 FMA-eq; generic 12.9 h .. 31.0 h; specialised 62 min .. 116 min
+   N=1e+06 10 orbits fp256  eps 1e-16: 3.09e+14 FMA-eq; generic 3.0 d .. 7.2 d; specialised 5.7 h .. 10.7 h
+   N=3e+05  3 orbits fp128  eps 1e-09: 1.48e+12 FMA-eq; generic 12 min .. 34 min; specialised 56 s .. 2 min
+   N=3e+05  3 orbits fp64   eps 1e-09: 5.54e+11 FMA-eq; generic 3 min .. 9 min; specialised 14 s .. 32 s
+   N=1e+05  1 orbits fp256  eps 1e-09: 5.57e+11 FMA-eq; generic 27 min .. 77 min; specialised 2 min .. 5 min
 
 == 6. the ladder: a2, FMA form, 10 orbits, on GPU-A's MEASURED rates (READ :437-439, :463-465), the device full (ESTIMATE)
-   RX 7600     N=3e+04 fp64   eps 1e-09: generic 10 min
-   RX 7600     N=3e+04 fp128  eps 1e-09: generic 39 min
-   RX 7600     N=3e+04 fp256  eps 1e-09: generic 4.3 h; specialised 14 min
-   RTX 5060 Ti N=1e+05 fp64   eps 1e-09: generic 11 min
-   RTX 5060 Ti N=1e+05 fp128  eps 1e-09: generic 52 min
-   RTX 5060 Ti N=1e+05 fp256  eps 1e-09: generic 7.7 h; specialised 75 min
+   RX 7600     N=3e+04 fp64   eps 1e-09: generic 13 min
+   RX 7600     N=3e+04 fp128  eps 1e-09: generic 52 min
+   RX 7600     N=3e+04 fp256  eps 1e-09: generic 6.0 h; specialised 20 min
+   RTX 5060 Ti N=1e+05 fp64   eps 1e-09: generic 14 min
+   RTX 5060 Ti N=1e+05 fp128  eps 1e-09: generic 70 min
+   RTX 5060 Ti N=1e+05 fp256  eps 1e-09: generic 10.8 h; specialised 105 min
