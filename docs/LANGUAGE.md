@@ -508,10 +508,20 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
     the assembler and the internal check take as any instruction. asin(y)
     and acos(y) of one operand share their front: 255 instructions
     together against 438 apart at fp64 (measured, the study's question 1).
-    And their rules write no routine node: each costs a vector one
-    run-time division after a primal-only denominator the compiler shares,
-    so the follower of a phase (atan2 of two state components and the unary
-    three of one) is committed at fp64 and fp256 with its compiled bytes
+    And their rules write no routine node of their own: each costs a
+    vector one run-time division after a primal-only denominator the
+    compiler shares. A compiled image's tangent step can still hold calls
+    of the four, as copies of primal calls: the step graph gives an
+    unlabelled node one use, so a rule that reads a call a second time (a
+    product or a quotient of the call by another value does) is given the
+    call written again. `next x = atan(y) * x` with a tangent vector holds
+    one atan in its primal step and a second in its tangent step, and in
+    "atan and atan2, a map" at fp64 under rne the copies are 394 of the
+    image body's 2,383 instructions (computed, M4SL's entry of 2026-11-11
+    in VALIDATION.md). The follower of a phase (atan2 of two state
+    components and the unary three of one) holds none of the four in its
+    tangent step (python/tests/test_cftc_invtrig.py), and is committed at
+    fp64 and fp256 with its compiled bytes
     (`programs/systems/compiled-tangent/`). A function of a constant is
     folded by the language - `atan(0)`, `asin(0)` and `acos(1)` to their
     values, `atan2(0, c)` for a constant c >= 0 - and compiles as the
@@ -758,7 +768,14 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
   then asin's, acos's and atan's, calls times the fragment's instructions
   at fp64); an atan2 operand every call takes from one bank slot, as the
   1.5 of `atan2(x, 1.5)`, is read from the bank and kept out of the
-  records, which are then one slot a call. A batch of one call is never looped - its loop would only add the
+  records, which are then one slot a call. A batch whose loop body would
+  need more registers than the allocator has (atan2 at fp32: 32, or 31
+  with one input from a bank slot, against 29) is declined when the loop
+  reaches it: it stays inlined, where the allocator spills, the loop goes
+  on to the next batch, and the manifest's `routines.call_loop_declined`
+  lists it (op, depth, calls, registers, room); a step that no loop could
+  shorten enough is then held to the target's own capacities (M4's
+  build, parcel M4LF). A batch of one call is never looped - its loop would only add the
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled
   inlined past the constant: the software targets, whose instruction
@@ -2119,8 +2136,12 @@ not differentiable is given its fixed value in the last column.
 docs/studies/M4-invtrig.md, section 7, which Logan approved as recommended
 on 2026-10-23, answer 10). Each rule is a division of da (or of a numerator
 that reads the tangents) by a denominator that reads no tangent, so each
-call costs a vector one run-time division, the denominator shared across
-vectors, and no rule writes a routine node.
+rule costs a vector one run-time division, the denominator shared across
+vectors, and no rule writes a routine node of its own. A compiled image
+can still hold copies of the four's primal calls in its tangent step,
+where a rule reads a call a second time: "atan, asin, acos and atan2 in
+the compiler", under "The operations" above, says when, and what the
+copies cost.
 - **atan:** `da / fma(a, a, 1)`. The denominator is 1 + a·a, one fma
   rounding, primal-only; then the division: two roundings.
 - **asin:** `da / sqrt(fma(-a, a, 1))`. 1 - a·a is one fma (the negation of
