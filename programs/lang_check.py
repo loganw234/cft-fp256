@@ -207,9 +207,10 @@ besides.
      python/tests/mathlib_inv_family.py at fp64, fp128 and fp256, their
      neighbours, the ratio and zero claims, the harness's committed
      structured lanes (mathlib_inv_harness.STRUCT) - and atan2's
-     tiny-quotient range pairs at every format. Every lane classify() calls
-     "mark" is marked, and in the map, map-with-h and Euler configurations
-     (one call at the first step) every lane it calls "clear" is not. fp32
+     tiny-quotient range pairs at every format. Every lane of the leg's
+     draw that classify() calls "mark" is marked, and in the map,
+     map-with-h and Euler configurations (one call at the first step) every
+     lane of the draw it calls "clear" is not. fp32
      has no family and classify() raises there, so of the four only atan2's
      range lanes are demanded at fp32 (atan2_status), and the other three
      have no demanded lane there. On the map configurations the rule's
@@ -4902,7 +4903,9 @@ def leg_three(count, rng_for, everything=False):
 #     invalid, the lane "gated", never demanded marked;
 #   - fp32 has no family and classify() raises there (THRESHOLD_B has no fp32
 #     key), so of the four only atan2 has a demanded lane at fp32 - the
-#     tiny-quotient range, decided by atan2_status. The other three have NO
+#     tiny-quotient range, decided by atan2_status (the double word's band,
+#     below about 2^-100 at fp32; the fp32 image's edge is the triple word's
+#     2^-76, so the fp32 band is not exercised). The other three have NO
 #     demanded lane at fp32, and the legs say so rather than demand nothing
 #     silently;
 #   - atan2 marks every lane whose exact |y / x| is below the lower edge of
@@ -4952,11 +4955,17 @@ def four_demand(fn, F, rnd, lane):
 
 
 def four_range_pairs(F, everything=False):
-    """[(lane, label)]: atan2 pairs about the tiny-quotient range's edge
-    (mathlib_inv_harness._tq_band), at every format, fp32 included: y/x of
-    c 2^-e, with c in 1, 3 and 5 and x in 1, 3 and 5 2^7 (the census's), e
-    from where the range's bottom is passed (lane under it: marked), through
-    the edge (the band: either), to a few past it above (main path)."""
+    """[(lane, label)]: atan2 pairs about the edge of the double word's
+    tiny-quotient range (mathlib_inv_harness._tq_band, the edge
+    atan2_status uses at every format), at every format, fp32 included: y/x
+    of c 2^-e, with c in 1, 3 and 5 and x in 1, 3 and 5 2^7 (the census's),
+    e from where that edge's bottom is passed (lane under it: marked),
+    through the edge (the band: either), to a few past it above (the main
+    path at fp64, fp128 and fp256). At fp32 the image's own range edge is the
+    triple word's, 2^-76 (mathlib.py's _build_atan2_tw, the harness's
+    _tq_band_tw), above the 2^-100 these pairs straddle: the pairs past
+    the double word's edge lie inside the fp32 image's range and are marked
+    there without being demanded, and the fp32 band is not exercised."""
     iv, ih = inv()
     lo, _hi = ih._tq_band(F)
     e0 = lo.denominator.bit_length() - lo.numerator.bit_length() + 2

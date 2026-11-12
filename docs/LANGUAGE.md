@@ -530,11 +530,16 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
     every lane whose exact |y / x| (y not zero, x positive, |y| < x) is
     below the lower edge of its tiny-quotient range, whatever the test
     says. It marks on its computed quotient, so in the narrow band above
-    that edge, where the seed's error decides (`atan2_status` in
-    python/tests/mathlib_inv_family.py, the band `_tq_band` in
-    python/tests/mathlib_inv_harness.py), a lane may be marked or not, and
-    above the band the test decides (docs/studies/M4-invtrig.md; the
-    stages' U legs hold lanes below the edge and in the band). The
+    that edge, where the seed's error decides, a lane may be marked or not,
+    and above the band the test decides. The edge and the band are the
+    double word's at fp64, fp128 and fp256 (`_tq_band` in
+    python/tests/mathlib_inv_harness.py, which `atan2_status` in
+    python/tests/mathlib_inv_family.py uses) and the triple word's at fp32,
+    2^-76 (`_tq_band_tw`; mathlib.py's `_build_atan2_tw`). The stages' U
+    legs hold lanes below the edge and in the band at fp64, fp128 and
+    fp256, and at fp32 lanes below the double word's edge, 2^-100, which
+    is the edge `atan2_status` demands from, so the fp32 band is not
+    exercised (docs/studies/M4-invtrig.md). The
     language's definition is unchanged by a mark: a
     marked lane is replayed by the definition, `lang.run`, and the
     image's guess is compared only as a guess. Next to an exact case -
@@ -3231,7 +3236,9 @@ inverse family's centres, atan2's tiny-quotient range pairs at every
 format, the harness's committed lanes and the guess tally), U2 (generated
 sources) and U3 (the call loop), and the `tangent` stage's leg U. fp32 has
 no inverse family and its theory has no threshold, so of the four only
-atan2's range lanes are demanded marked at fp32, and the legs say so. A
+atan2's range lanes below the double word's edge, 2^-100, are demanded
+marked at fp32 (the image marks below the triple word's 2^-76), and the
+legs say so. A
 looped batch of two atan2 calls at fp32 stops cftc with an internal error
 (exit 70), which U3 does not exercise (its fp32 source calls atan2 once);
 each is skipped by name without mpmath. The routines themselves are held to softfloat by
