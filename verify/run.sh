@@ -29,7 +29,9 @@
 #                                      # backend (hip; skipped by name elsewhere)
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
 #                                      # node, wasm, images, estimates-full,
-#                                      # acceptance-far, acceptance-rev8)
+#                                      # acceptance-far, acceptance-rev8, and
+#                                      # the GPU backend's two other NVIDIA
+#                                      # builds, hip-nvcc and hip-source)
 #   HIP_ROOT=/opt/rocm-7.2.4 HIP_PLATFORM=nvidia HIP_DEVICE=1 bash verify/run.sh --only hip
 #                                      # the GPU backend on the second GPU
 #                                      # nvidia-smi lists, through HIP 7.2.4's
@@ -545,6 +547,11 @@ need() {  # docker|host-cc|xclbinutil ...
       hipcc) [ -x "${HIP_ROOT:-/opt/rocm}/bin/hipcc" ] \
         || STAGE_SKIP_REASON="no hipcc at ${HIP_ROOT:-/opt/rocm}/bin/hipcc (set HIP_ROOT; HIP_PLATFORM=nvidia for HIP 7.2.4's NVIDIA layer, HIP_ROOT=/opt/rocm-7.2.4)";;
       gpu) STAGE_SKIP_REASON=$(hip_gpu_reason);;
+      # The full census's two other NVIDIA builds of it (`hip-nvcc`, `hip-source`).
+      nvcc) [ -x "${HIP_CUDA:-/usr/local/cuda}/bin/nvcc" ] \
+        || STAGE_SKIP_REASON="no nvcc at ${HIP_CUDA:-/usr/local/cuda}/bin/nvcc (HIP_CUDA)";;
+      hipsrc) { [ -x "$(hipsrc_root)/bin/hipcc" ] && [ -d "$(hipsrc_root)/include/hip" ]; } \
+        || STAGE_SKIP_REASON="no HIP built from source at $(hipsrc_root) (verify/build-hip-nvidia.sh builds it from pinned sources: a download of about 180 MB, the lead's word)";;
       # Any other name is a command that must be on PATH - rustc,
       # julia, go, dotnet, Rscript, node - or, on Windows, in the
       # mingw64 bin directory HOSTMAKE prepends (pacman's go lives
@@ -1838,7 +1845,7 @@ hip_platform() {
 hip_list() {  # <platform>: HIP_LISTER, the platform's lister, and HIP_LISTED, the GPUs it shows
   HIP_LISTER=""; HIP_LISTED=0
   case "$1" in
-    nvidia)
+    nvidia|cuda)
       if command -v nvidia-smi >/dev/null 2>&1; then
         HIP_LISTER="nvidia-smi -L"
         HIP_LISTED=$(nvidia-smi -L 2>/dev/null | grep -cE '^GPU [0-9]+:')
@@ -1860,7 +1867,7 @@ hip_gpu_reason() {  # -> need's skip reason for `gpu`, or nothing when the liste
   if [ -z "$HIP_LISTER" ]; then
     if ! command -v nvidia-smi >/dev/null 2>&1 && ! command -v amd-smi >/dev/null 2>&1; then
       echo "no GPU: neither nvidia-smi nor amd-smi on PATH"
-    elif [ "$p" = nvidia ]; then
+    elif [ "$p" != amd ]; then
       echo "no GPU: no nvidia-smi on PATH, the lister for HIP_PLATFORM=$p"
     else
       echo "no GPU: neither amd-smi nor rocminfo on PATH, the listers for HIP_PLATFORM=$p"
@@ -1926,12 +1933,13 @@ do_hip() {
   local plat dev=${HIP_DEVICE:-0} root=${HIP_ROOT:-/opt/rocm} arch=${HIP_ARCH:-} \
         tree="$RUNDIR/hip-tree" ptree="$RUNDIR/hip-tree-plants" L="$RUNDIR/hip-logs" \
         C="$RUNDIR/hip-corpora" O="$RUNDIR/hip-out" V="$RUNDIR/hip-vectors" \
-        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap
+        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap vendor
   local -a mk bad=()
   local -A SW=()
   plat=$(hip_platform)
-  case "$plat" in nvidia|amd) ;;
-    *) echo "FAIL  HIP_PLATFORM=$plat: the stage builds for nvidia or amd"; return 1;; esac
+  case "$plat" in nvidia|amd|cuda) ;;
+    *) echo "FAIL  HIP_PLATFORM=$plat: the stage builds for nvidia, amd or cuda (plain nvcc)"; return 1;; esac
+  [ "$plat" = amd ] && vendor=amd || vendor=nvidia
   if ! [[ $dev =~ ^[0-9]{1,9}$ ]]; then
     echo "FAIL  HIP_DEVICE=$dev is not a device number (a decimal: 0 is the first GPU the platform's lister shows)"
     return 1
@@ -1941,7 +1949,7 @@ do_hip() {
   hip_list "$plat"
   # The chosen GPU is the only one this stage's processes see: hip:0 inside
   # is HIP_DEVICE outside.
-  if [ "$plat" = nvidia ]; then
+  if [ "$vendor" = nvidia ]; then
     export CUDA_VISIBLE_DEVICES=$dev CUDA_DEVICE_ORDER=PCI_BUS_ID
     unset HIP_VISIBLE_DEVICES
     line=$(nvidia-smi --query-gpu=name,pci.bus_id,compute_cap,memory.used,utilization.gpu \
@@ -1958,16 +1966,16 @@ do_hip() {
     fi
   fi
   b=""
-  if [ "$plat" = nvidia ]; then
+  if [ "$vendor" = nvidia ]; then
     b=", HIP_CUDA ${HIP_CUDA:-/usr/local/cuda, as the Makefile defaults it,} = $(readlink -f "${HIP_CUDA:-/usr/local/cuda}")"
   fi
   echo "hip: platform $plat, HIP_ROOT $root$b; $HIP_LISTER lists $HIP_LISTED GPU(s), HIP_DEVICE=$dev: ${line:-(no line from the lister)}"
-  if [ "$plat" = nvidia ]; then b="CUDA_VISIBLE_DEVICES=$dev CUDA_DEVICE_ORDER=PCI_BUS_ID"; else b="HIP_VISIBLE_DEVICES=$dev"; fi
+  if [ "$vendor" = nvidia ]; then b="CUDA_VISIBLE_DEVICES=$dev CUDA_DEVICE_ORDER=PCI_BUS_ID"; else b="HIP_VISIBLE_DEVICES=$dev"; fi
   echo "hip: every process here sees that GPU alone, as hip:0 - $b"
   if [ -n "${HIP_ARCH:-}" ]; then
     echo "hip: HIP_ARCH=$arch, as set"
   elif [ -n "$arch" ]; then
-    if [ "$plat" = nvidia ]; then b="the compute capability nvidia-smi gives"; else b="the gfx name rocminfo gives"; fi
+    if [ "$vendor" = nvidia ]; then b="the compute capability nvidia-smi gives"; else b="the gfx name rocminfo gives"; fi
     echo "hip: HIP_ARCH=$arch, the device's own: $b"
   else
     echo "NOTE  hip: the device's architecture could not be read, so the build takes host/Makefile's default HIP_ARCH (every architecture it names)"
@@ -1980,14 +1988,14 @@ do_hip() {
   rm -rf "$tree" "$ptree"
   mkdir -p "$tree"
   if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    (cd "$ROOT" && git ls-files -z --cached --others --exclude-standard -- host \
+    (cd "$ROOT" && git ls-files -z --cached --others --exclude-standard -- host docs/studies/gpu-a/cudahip \
       | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done \
       | tar --null -T - -cf -) | tar -xf - -C "$tree" || { echo "FAIL  the copy of host/ into $tree"; return 1; }
     b=""; [ -n "$DIRTY" ] && b=" (the tree is DIRTY)"
     echo "hip: the copy, $tree/host: $(find "$tree/host" -type f | wc -l) files - host/ as git tracks it at $COMMIT with the working tree's edits, and the untracked files git does not ignore$b"
   else
     # host/'s contents, never a link to it: `make clean` below runs in the copy
-    mkdir -p "$tree/host" && cp -a "$ROOT/host/." "$tree/host/" && [ ! -L "$tree/host" ] \
+    mkdir -p "$tree/host" "$tree/docs/studies/gpu-a" && cp -a "$ROOT/host/." "$tree/host/" && [ ! -L "$tree/host" ] \n      && cp -a "$ROOT/docs/studies/gpu-a/cudahip" "$tree/docs/studies/gpu-a/" \
       && make -C "$tree/host" clean >/dev/null 2>&1 \
       || { echo "FAIL  the copy of host/ into $tree"; return 1; }
     echo "hip: the copy, $tree/host: $(find "$tree/host" -type f | wc -l) files - host/ whole (no git here: commit $COMMIT), cleaned by its own make clean in the copy"
@@ -2245,6 +2253,31 @@ do_hip() {
 HIP_CORPORA="conf-fp32 conf-fp64 conf-fp128 conf-fp256 routines-fp32 routines-fp64 routines-fp128 routines-fp256 fuzz-fp32 fuzz-fp64 fuzz-fp128 fuzz-fp256 systems bench"
 need hipcc gpu host-cc python mpmath
 stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (flip, drop-flag, seq-mask, reduce-carry red and green without them), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check, the certificate corpus's conformance test, device-test and hip-test, every run naming its device; skipped by name without hipcc or a GPU" -- do_hip
+
+# The same stage on the two other ways to build the backend for NVIDIA
+# (plan decision 3; Logan, 2026-11-10: "install CUDA 13 and make the recipe
+# a stage"), each in the full census alone: they need a toolchain the gate's
+# hosts do not have. `hip-nvcc` is plain nvcc and no HIP at all,
+# host/Makefile's HIP_PLATFORM=cuda, through study GPU-A's header extended
+# for the backend (docs/studies/gpu-a/cudahip); HIP_CUDA chooses the CUDA.
+# `hip-source` is HIP built from ROCm's own sources for NVIDIA, the study
+# GPU-B's recipe, which verify/build-hip-nvidia.sh makes from pinned tags
+# into HIPSRC_ROOT (default verify/_hip-nvidia-prefix; it downloads, so it
+# is run by hand, never by a stage), under CUDA 13 (HIPSRC_CUDA, default
+# /usr/local/cuda-13.3: the recipe needs no patch there). Each is skipped by
+# name without its toolchain, as `images` is without IMAGES, or without an
+# NVIDIA GPU. Both hold the GPU to everything `hip` does: the same legs, the
+# same plants, the same sums.
+do_hip_nvcc() { HIP_PLATFORM=cuda do_hip; }
+HIP_PLATFORM=cuda need nvcc gpu host-cc python mpmath
+stage hip-nvcc "the GPU backend built by plain nvcc with no HIP (HIP_PLATFORM=cuda through study GPU-A's header) on this host's NVIDIA GPU, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, every run naming its device; skipped by name without nvcc or an NVIDIA GPU" -- do_hip_nvcc
+
+hipsrc_root() { echo "${HIPSRC_ROOT:-$ROOT/verify/_hip-nvidia-prefix}"; }
+do_hip_source() {
+  HIP_ROOT=$(hipsrc_root) HIP_PLATFORM=nvidia HIP_CUDA=${HIPSRC_CUDA:-/usr/local/cuda-13.3} do_hip
+}
+HIP_ROOT=$(hipsrc_root) HIP_PLATFORM=nvidia need hipsrc gpu host-cc python mpmath
+stage hip-source "the GPU backend built by HIP compiled from ROCm's own sources for NVIDIA (HIPSRC_ROOT, made by verify/build-hip-nvidia.sh from pinned tags) under CUDA 13, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, every run naming its device; skipped by name without that prefix or an NVIDIA GPU" -- do_hip_source
 
 # ---- report --------------------------------------------------------
 {

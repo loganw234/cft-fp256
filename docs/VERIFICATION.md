@@ -444,7 +444,7 @@ is the only thing that skips work. (cft-rebound is the sibling repo with
 a content-addressed gate cache and a warm five-second check; this runner
 does not have one.)
 
-`bash verify/run.sh --list` prints all fifty-four stages with a marker
+`bash verify/run.sh --list` prints all fifty-six stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second

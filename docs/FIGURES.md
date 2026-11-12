@@ -135,12 +135,12 @@ verify-growth --write`; the numbers and digests are in `docs/img/figures/verify-
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/verify-stages-dark.svg">
-  <img alt="The 54 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 15 more in gate, 8 only in the full census." src="img/figures/verify-stages-light.svg">
+  <img alt="The 56 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 15 more in gate, 10 only in the full census." src="img/figures/verify-stages-light.svg">
 </picture>
 
-**Shows.** What the gate is made of: 54 stages in 8 groups, 31 in the quick budget, 15 more in the
-gate budget and 8 only in the full census (sim, simmc, acceptance-far, acceptance-rev8,
-estimates-full, node, wasm, images).
+**Shows.** What the gate is made of: 56 stages in 8 groups, 31 in the quick budget, 15 more in the
+gate budget and 10 only in the full census (sim, simmc, acceptance-far, acceptance-rev8,
+estimates-full, node, wasm, images, hip-nvcc, hip-source).
 
 **Does not show.** What each stage proves or how long it takes: docs/VERIFICATION.md is the map of
 that. The grouping is this script's (python/project_figures.py), not the runner's: a stage it does
