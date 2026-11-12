@@ -1331,9 +1331,12 @@ stage acceptance-far "the hard workloads' own oracle on the four images past the
 # Since parcel M2A (M2's build, wave 4) it runs four more, the radian case:
 # the committed pendulum and attitude references at fp64 and fp256 (sin,
 # cos, tan), the pendulum at fp64 with no structured lane by name and the
-# two fp256 entries with the range lane declared. An entry left out of this
-# list is run by no stage.
-REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,gray_scott_extended_fp64,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64,riccati_extended_fp64,lotkavolterra-rk4-tangent-fp64,lotkavolterra-rk4-tangent-fp256,diode-rk4-tangent-fp64,diode-rk4-tangent-fp256,culture-rk4-tangent-fp64,culture-rk4-tangent-fp256,pendulum-rk4-tangent-fp64,pendulum-rk4-tangent-fp256,attitude-rk4-tangent-fp64,attitude-rk4-tangent-fp256
+# two fp256 entries with the range lane declared. Since parcel M4A (M4's
+# build, wave 5) it runs two more, the inverse-trigonometric case: the
+# committed phase follower at fp64 and fp256 (atan2, asin, acos and atan),
+# four structured lanes a tile that mark, atan2's a pair. An entry left out
+# of this list is run by no stage.
+REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,gray_scott_extended_fp64,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64,riccati_extended_fp64,lotkavolterra-rk4-tangent-fp64,lotkavolterra-rk4-tangent-fp256,diode-rk4-tangent-fp64,diode-rk4-tangent-fp256,culture-rk4-tangent-fp64,culture-rk4-tangent-fp256,pendulum-rk4-tangent-fp64,pendulum-rk4-tangent-fp256,attitude-rk4-tangent-fp64,attitude-rk4-tangent-fp256,phasefollower-rk4-tangent-fp64,phasefollower-rk4-tangent-fp256
 do_acceptance_rev8() {
   HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" "$SHLIB_NAME" || return 1
   PY "$ROOT/programs/acceptance.py" --set rev8 --legs set,oracle \
@@ -1342,7 +1345,7 @@ do_acceptance_rev8() {
      --lib "$ROOT/host/$SHLIB_NAME"
 }
 need host-cc python
-stage acceptance-rev8 "the revision-8 set on libcft's software backend, all twenty of its entries: ten hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks, and ten routine references of the math library's six and of sin, cos and tan, their committed images, each with a structured lane a tile that marks (but the pendulum at fp64, by name) and, at fp256 for sin, cos and tan, the range lane declared; one fixed run each at the image's depth, held to committed boundary hashes, flags and STATUS (and the routine entries' marked lanes and per-lane blocks, read by a ctypes probe of libcft), cft-audit in full, the golden spot check (and the golden mark check), the device's identity and the rule, its controls caught; each workload's image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
+stage acceptance-rev8 "the revision-8 set on libcft's software backend, all twenty-two of its entries: ten hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks, and twelve routine references of the math library's six, of sin, cos and tan, and of atan, asin, acos and atan2, their committed images, each with a structured lane a tile that marks (but the pendulum at fp64, by name) and, at fp256 for sin, cos and tan, the range lane declared; one fixed run each at the image's depth, held to committed boundary hashes, flags and STATUS (and the routine entries' marked lanes and per-lane blocks, read by a ctypes probe of libcft), cft-audit in full, the golden spot check (and the golden mark check), the device's identity and the rule, its controls caught; each workload's image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):

@@ -76,7 +76,7 @@ def mpmath_modules():
 
 def test_the_four_follow_the_six_on_the_quad_by_the_rule():
     names = [n for n, _s, _t in A.REV8_ROUTINES]
-    assert len(names) == 10 and tuple(names[6:]) == NAMES
+    assert len(names) == 12 and tuple(names[6:10]) == NAMES
     by = {e["name"]: e for e in A.entries("rev8")}
     for n in NAMES:
         e = by[n]

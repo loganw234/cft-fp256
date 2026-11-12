@@ -1030,8 +1030,8 @@ def group_commands(src: str = HERE) -> list:
         only = r8[r8.index("--only") + 1].split(",")
         c("acceptance-rev8 on the quad: --set rev8 --target u50-rev8-quad --images DIR",
           r8[r8.index("--set") + 1] == "rev8" and r8[r8.index("--target") + 1] == "u50-rev8-quad" and "--images" in r8)
-        c("acceptance-rev8 on the quad: eight workloads and the ten routine entries, the two long compiles left out",
-          len(only) == 18 and "riccati_extended_fp64" not in only and "gray_scott_extended_fp64" not in only
+        c("acceptance-rev8 on the quad: eight workloads and the twelve routine entries, the two long compiles left out",
+          len(only) == 20 and "riccati_extended_fp64" not in only and "gray_scott_extended_fp64" not in only
           and all(e in only for e in mod.REV8_ROUTINE_ENTRIES), str(only))
         c("acceptance-rev8 on the quad: the routine entries make the leg name --lib, this tree's host/libcft.so (the "
           "XRT-linked one the build step checked)",
@@ -1057,8 +1057,8 @@ def group_commands(src: str = HERE) -> list:
             for ext in (".cftp", ".bank"):
                 open(os.path.join(tmp, "imgs", e + ext), "w").close()
         r8c = d.leg_cmd("acceptance-rev8", q, 1)
-        c("acceptance-rev8: with every workload cached the quad runs nineteen, riccati and the ten routine entries "
-          "included, and the timeout drops its compile allowance", len(r8c.argv[r8c.argv.index("--only") + 1].split(",")) == 19
+        c("acceptance-rev8: with every workload cached the quad runs twenty-one, riccati and the twelve routine entries "
+          "included, and the timeout drops its compile allowance", len(r8c.argv[r8c.argv.index("--only") + 1].split(",")) == 21
           and r8c.timeout == t_uncached - mod.REV8_FIRST_COMPILE_ALLOWANCE, f"{r8c.timeout} vs {t_uncached}")
         c("acceptance-rev8: the routine entries are never 'uncached' (their image and bank are committed files): with "
           "the workloads cached the timeout is the leg's own, not the leg's plus the 4-hour compile allowance",
@@ -1094,7 +1094,7 @@ def group_commands(src: str = HERE) -> list:
         c("timeouts: every leg has one, from the card's measured times with a floor",
           all(mod.DEFAULT_TIMEOUTS[leg] >= 300 for leg in mod.BATTERY))
         ok8, why8 = rev8_table_matches(mod)
-        c("REV8_ENTRIES is acceptance.py's table: REV8's ten workloads then REV8_ROUTINES' ten, entry for entry and target "
+        c("REV8_ENTRIES is acceptance.py's table: REV8's ten workloads then REV8_ROUTINES' twelve, entry for entry and target "
           "for target (read from its source), and acceptance.py has no other REV8 name this test has not been shown", ok8, why8)
         # the sweep's argv is the soak scripts' job line, one slice
         d.items = L.sweep_items()
@@ -1156,10 +1156,10 @@ def group_commands(src: str = HERE) -> list:
 
 def rev8_table_matches(mod) -> tuple:
     """(ok, why): the driver's table is programs/acceptance.py's REV8 (ten workloads, a name and a target each) and then
-    its REV8_ROUTINES (ten routine entries, a name, a system and a target each), read from the source: every entry,
+    its REV8_ROUTINES (twelve routine entries, a name, a system and a target each), read from the source: every entry,
     every target and the order, with the routine names the leg treats as having no compile the same ten. Parcel MA added
     REV8_ROUTINES (six entries) on 2026-10-19 and this test read REV8 alone, counting its ten, so the six went by unseen;
-    parcel M2A added four on 2026-11-04 and the count moved with them; so any other
+    parcel M2A added four on 2026-11-04 and parcel M4A two on 2026-11-11, and the count moved with them; so any other
     module-level name that begins REV8 makes this red until it has been looked at and added to `known`."""
     with open(os.path.join(ROOT, "programs", "acceptance.py"), "r", encoding="utf-8") as fh:
         text = fh.read()
@@ -1176,7 +1176,7 @@ def rev8_table_matches(mod) -> tuple:
         table[target].append(name)
     known = {"REV8", "REV8_ROUTINES", "REV8_STEPS", "REV8_ORDER", "REV8_TILES"}
     other = sorted(set(re.findall(r"^(REV8\w*) = ", text, re.M)) - known)
-    ok = (table == mod.REV8_ENTRIES and len(pairs) == 10 and len(trips) == 10
+    ok = (table == mod.REV8_ENTRIES and len(pairs) == 10 and len(trips) == 12
           and list(mod.REV8_ROUTINE_ENTRIES) == [n for n, _s, _t in trips] and not other)
     return ok, (f"REV8 has {len(pairs)} entries and REV8_ROUTINES {len(trips)}; the table differs by "
                 f"{sorted({n for v in table.values() for n in v} ^ {n for v in mod.REV8_ENTRIES.values() for n in v})}; "
@@ -8291,7 +8291,7 @@ def plants(env: Env) -> None:
            "        self.last_tel = rec\n")],
          scn_telemetry, ["telemetry: the stand-in's temperature rises with time and the samples show it, in order"]),
         ("the revision-8 table drops a routine entry",
-         [("card_stress.py", '"attitude-rk4-tangent-fp64", "attitude-rk4-tangent-fp256")', '"attitude-rk4-tangent-fp64")')],
+         [("card_stress.py", '"phasefollower-rk4-tangent-fp64", "phasefollower-rk4-tangent-fp256")', '"phasefollower-rk4-tangent-fp64")')],
          lambda env, src: group_commands(src), ["REV8_ENTRIES is acceptance.py's table"]),
         ("a routine entry counts as an image that is not cached",
          [("card_stress.py", "            missing = [e for e in chosen if e not in REV8_ROUTINE_ENTRIES\n                       and not all(",

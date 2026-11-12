@@ -113,10 +113,11 @@ Each leg's controls: a state bit and a lane's FLAGS planted in a copy of
 its first program's vector, each caught.
 
 THE REVISION-8 SET (`--set rev8`; REV8 and REV8_ROUTINES below;
-programs/acceptance-rev8.json holds what each entry must give): twenty
-entries of two kinds - the ten hard workloads, and ten routine references:
-six since parcel MA (M1's build, item 6; the last section here) and four
-since parcel M2A (M2's build, wave 4). THE
+programs/acceptance-rev8.json holds what each entry must give): twenty-two
+entries of two kinds - the ten hard workloads, and twelve routine
+references: six since parcel MA (M1's build, item 6; the last section
+here), four since parcel M2A (M2's build, wave 4) and two since parcel M4A
+(M4's build, wave 5). THE
 WORKLOADS: the hard workloads that missed
 u50-rev7-quad and a revision-8 image holds, measured by parcel W8
 (2026-10-12; docs/VALIDATION.md), each compiled here for the image the
@@ -173,14 +174,17 @@ so a card day compiles once and reads them back. The routine entries read
 the committed files and ignore it.
 
 THE ROUTINE ENTRIES (REV8_ROUTINES, after the ten workloads in entries() and
-the record): ten committed variational references. Parcel MA (M1's build,
+the record): twelve committed variational references. Parcel MA (M1's build,
 item 6) put in the first six, which hold the math library's six rules between
 them - Lotka-Volterra in logarithmic variables (exp), two diodes and a source
 (expm1, log1p) and a self-heating culture (exp2, log, log2); parcel M2A
 (M2's build, wave 4; the software side of the study's section 10 item 7)
 added the radian case, the pendulum (sin in the step, cos in its tangent)
-and the attitude (sin and cos of phi, tan of theta). Each is at fp64 and
-fp256, as programs/systems/compiled-tangent/ holds it. Their image and bank
+and the attitude (sin and cos of phi, tan of theta); parcel M4A (M4's
+build, wave 5; the software side of the study's section 10 item 7) the
+inverse-trigonometric case, ONE system, the phase follower (atan2 of two
+state components, and atan, asin and acos each of one), compiled round rdn.
+Each is at fp64 and fp256, as programs/systems/compiled-tangent/ holds it. Their image and bank
 are those committed files, held byte for byte to the record's digests: no
 compile, and no mpmath, which only the compiler's build of the routines
 needs.
@@ -188,9 +192,12 @@ needs.
     which no revision-7 target publishes (python/cftc/targets.py; the
     manifests' accepted_by lists no revision-7 target), so these entries
     can enter this set alone and never the acceptance set, whose record
-    stays as it was. The rule puts all ten on the quad, from each image's
-    own words (rule_target; the manifests give 1,537 to 3,642 instructions,
-    a tile holds 4,096, 256 scratch slots declared, no R21).
+    stays as it was. The rule puts all twelve on the quad, from each image's
+    own words (rule_target; no R21 in any, 256 scratch slots declared). The
+    ten of parcels MA and M2A are 1,537 to 3,642 instructions, which a
+    tile's store of 4,096 holds; the follower's two are 7,997 (fp64) and
+    8,605 (fp256), past it, so they STREAM from the image as the workloads
+    do (REV8's note), and are the twelve's largest.
   - The lanes: the references' recipe (SHAKE-256 lanes in the system's box,
     the special lanes on tiles 1 to 3, the special tangents) on one block a
     tile of the quad, and a STRUCTURED lane on each tile (STRUCTURED): the
@@ -198,15 +205,39 @@ needs.
     family of a function the reference holds - python/tests/
     mathlib_family.py's FAMILY at rne for the six; python/tests/
     mathlib_trig_family.py's TRIG_FAMILY at the entry's own attribute for
-    the radian case, the pendulum's rne and the attitude's rdn - the
-    arguments next to an exact case where the routine's in-lane test
+    the radian case, the pendulum's rne and the attitude's rdn; python/
+    tests/mathlib_inv_family.py's INV_FAMILY at rdn, the follower's own
+    attribute, for the inverse case - the arguments next to an exact case where the routine's in-lane test
     cannot decide the last bit (the study's section 3.5; docs/LANGUAGE.md,
     "A marked lane") - and the recipe's tangent. That argument is the one
     the first stage of the first step meets, so the lane marks in segment 0:
     bit 7 of its byte (R23; 0x90, the mark and INEXACT) and STATUS[6]
-    (0x40) of the segment. The six can all mark. exp2 and log2 have no
+    (0x40) of the segment. All twelve entries but the pendulum at fp64 mark
+    in segment 0 (the exception below). exp2 and log2 have no
     family (parcel VMP): the culture's lanes mark through log alone, and its
     eight exp2 and log2 calls (nor its divisions) never mark.
+    The follower's lanes (M4A), one function a tile, c = component 0, s = 1,
+    phi = 2, q = 3, v = 4: atan2(s, c) is the only call with two operands,
+    so its tile's recipe item is a PAIR, (function, (y's component, x's
+    component), (y's centre, x's centre)), y first, and its descriptor has
+    `components`, `centres` and `arguments` where a single lane's has
+    `component`, `centre` and `argument` (those are what they were). A
+    centre is (c, e), ("u", c), ("d", c) or, for a window, a literal
+    ("bits", "0x...") of the format's width, so that the set needs no
+    mpmath; test_acceptance_invtrig.py holds each literal to
+    mathlib_inv_family.py. At fp64 under rdn: atan2 the ratio ("ratio",
+    "deep", 11) (s = 2^-63, c = 1 + 11 ulp, outside the box on purpose),
+    asin 3 2^-25 (q = 3 2^-24, so that q * 0.5 is the centre), acos the
+    window ("win", "pio2", "grid", 0) (v = twice its centre) and atan the
+    same window (q = its centre, near 2^52, where asin(q * 0.5) is outside
+    its domain in the same lane). At fp256 under rdn: atan2 3 2^-72 against
+    c = 1, atan 3 2^-72 (where asin(q * 0.5) = asin(3 2^-73) is a centre
+    too, so two calls mark in that lane), asin 9 2^-73 (q = 9 2^-72, where
+    atan(q) is clear) and acos a window. THE STUDY'S OWN CASE, atan(3 2^-26)
+    under rne at fp64, is a centre of INV_FAMILY under rne and of no rdn
+    list, and the follower is compiled rdn (the M4 contract's decision 5):
+    it is NOT reached by these entries, and a second reference under rne
+    is a decision not taken here.
     The pendulum at fp64 has NO structured lane, accepted by name
     (NO_STRUCTURED, the reason kept in the record): TRIG_FAMILY has no sin or
     cos centre at fp64 under rne. Its lanes run all the same, and no lane of
@@ -221,8 +252,11 @@ needs.
     `range`). The segments are measured, not assumed: on the software
     backend (2026-11-04) lane 31 carried byte 0x90 in segments 0 to 3 of both
     entries, with STATUS 0x40 in each. At fp64 TRIG_RANGE is None, and the
-    six's fragments carry no range: no other entry has one. Every other lane
-    of every segment carries no mark.
+    six's fragments carry no range, and the inverse fragments have none: of the
+    twelve entries the two fp256 radian entries alone declare one (the
+    follower's, measured on the software backend on 2026-11-11, mark in
+    segment 0 only, on the four structured lanes). Every other lane of
+    every segment carries no mark.
   - The segments: the set's four, of the image's own ten steps.
   - A version-1 certificate carries no per-lane block: cft-segrun asks the
     library for R23's byte a lane only at format version 2 (host/tools/
@@ -253,8 +287,9 @@ needs.
     until then the comparison was skipped for want of the key and the
     verdict line still said the marks and hashes were the set's. The line
     names only what was compared (marks_compared).
-  - The controls, on the first routine entry that has a structured lane (an
-    entry without one is named, with "no mark control was possible"): the
+  - The controls, on the first routine entry that has a structured lane of
+    one component (an entry without one is named, with "no mark control was
+    possible"; the follower's pair is not one): the
     marked lane's byte with bit 7 cleared, STATUS[6] cleared, a lane marked
     that the recipe does not mark, STATUS[6] in a segment with no marked
     lane, a flag word the lanes do not OR to, a probe whose end state or
@@ -268,7 +303,11 @@ needs.
     cleared in a segment where it is expected, STATUS[6] cleared in segment 2,
     its argument put under 2^1024 (an expected mark gone missing), the golden
     half's byte for it changed, and the declaration edited or deleted in the
-    record.
+    record. And, on every entry whose recipe names atan, asin, acos or atan2
+    (the follower's), each such lane's first component (y's for the pair)
+    moved off its centre by a step and a dense tail (inv_controls): the
+    lane, run alone on seq.py from segment 0's start, no longer marks - the
+    control for window and ratio centres as for the tiny ones.
 
 One verdict line an entry and a program, and a total. Every check prints
 `ok` or `FAIL`, and none is skipped: without cft-segrun or cft-audit the
@@ -336,9 +375,11 @@ REFERENCES = (
     ("lorenz96-rk4-tangent-fp256", "compiled-tangent", "lorenz96-rk4", ()),
 )
 # lang_check's boxes, written here so that the set is its own. The last
-# five are the routine references' (programs/tangent_check.py's MATH_BOX):
-# boxes that keep the logarithms in their domains and the angles away from
-# tan's poles.
+# six are the routine references' (programs/tangent_check.py's MATH_BOX):
+# boxes that keep the logarithms in their domains, the angles away from
+# tan's poles, the phase follower's c and s (components 0 and 1) where
+# atan2(s, c) stays off its jump, and its q and v where asin(q/2) and
+# acos(v/2) stay in their domain.
 BOX = {"lorenz63-rk4": [(-20, 20), (-25, 25), (5, 45)],
        "lorenz96-rk4": None,                      # every component (-3, 3)
        "henonheiles-lf": [(Fraction(-2, 5), Fraction(2, 5))] * 4,
@@ -346,7 +387,10 @@ BOX = {"lorenz63-rk4": [(-20, 20), (-25, 25), (5, 45)],
        "diode-rk4": [(0, 4), (0, 4)],
        "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)],
        "pendulum-rk4": [(-1, 1), (-1, 1)],
-       "attitude-rk4": [(-1, 1), (-1, 1)]}
+       "attitude-rk4": [(-1, 1), (-1, 1)],
+       "phasefollower-rk4": [(Fraction(1, 2), 1),
+                             (-Fraction(1, 2), Fraction(1, 2)),
+                             (-1, 1), (-1, 1), (-1, 1)]}
 TANGENT_BOX = (-2, 2)
 
 # The workloads that fit u50-rev7-quad, and their steps a segment, the same
@@ -393,7 +437,7 @@ REV8_STEPS = 2
 REV8_ORDER = ("u50-rev8-quad", "u50-rev8", "u50-rev8-deep")
 REV8_TILES = {"u50-rev8-quad": 4, "u50-rev8": 1, "u50-rev8-deep": 1}
 
-# The revision-8 set's routine entries: ten committed variational
+# The revision-8 set's routine entries: twelve committed variational
 # references, each at fp64 and fp256, as programs/systems/compiled-tangent/
 # holds them. Parcel MA (M1's build, item 6) put in the first six, which hold
 # the math library's six between them - Lotka-Volterra in logarithmic
@@ -401,15 +445,21 @@ REV8_TILES = {"u50-rev8-quad": 4, "u50-rev8": 1, "u50-rev8-deep": 1}
 # culture (exp2, log, log2); parcel M2A (M2's build, wave 4, the software
 # side of the study's section 10 item 7) added the last four, the radian
 # case: the pendulum (sin in the step, cos in its tangent) and the attitude
-# (sin and cos of phi, tan of theta). Their images and banks are the
+# (sin and cos of phi, tan of theta); parcel M4A (M4's build, wave 5) added
+# the last two, the inverse-trigonometric case: the phase follower, whose
+# step holds atan2 and whose tangent atan, asin and acos, compiled round rdn.
+# Their images and banks are the
 # committed files, held byte for byte to the record's digests, so the entries
 # need no compile and no mpmath. A routine needs flag control (FLAG_CONTROL,
 # CAPS2[14]), which no revision-7 target publishes (python/cftc/targets.py),
 # so these can enter the revision-8 set alone, on the image the rule picks -
 # read from each image's own words, as the workloads' is: the quad, for all
-# ten (1,537 to 3,642 instructions, a tile holds 4,096; 256 scratch slots
-# declared; no R21; rule_target answered u50-rev8-quad for each of the last
-# four on 2026-11-04). Each is (name, system, the target the rule must
+# twelve (no R21; 256 scratch slots declared; the first ten are 1,537 to
+# 3,642 instructions, which a tile's store of 4,096 holds, and the follower's
+# two are 7,997 and 8,605, which it does not: they stream from the image, as
+# the workloads do; rule_target answered u50-rev8-quad for each of the last
+# four on 2026-11-04 and for the follower's two on 2026-11-11). Each is
+# (name, system, the target the rule must
 # give), one entry to a line: hw/test_card_stress.py reads them by line.
 REV8_ROUTINES = (
     ("lotkavolterra-rk4-tangent-fp64", "lotkavolterra-rk4", "u50-rev8-quad"),
@@ -421,7 +471,9 @@ REV8_ROUTINES = (
     ("pendulum-rk4-tangent-fp64", "pendulum-rk4", "u50-rev8-quad"),
     ("pendulum-rk4-tangent-fp256", "pendulum-rk4", "u50-rev8-quad"),
     ("attitude-rk4-tangent-fp64", "attitude-rk4", "u50-rev8-quad"),
-    ("attitude-rk4-tangent-fp256", "attitude-rk4", "u50-rev8-quad"))
+    ("attitude-rk4-tangent-fp256", "attitude-rk4", "u50-rev8-quad"),
+    ("phasefollower-rk4-tangent-fp64", "phasefollower-rk4", "u50-rev8-quad"),
+    ("phasefollower-rk4-tangent-fp256", "phasefollower-rk4", "u50-rev8-quad"))
 
 # The structured lanes: a lane on purpose whose argument sits at the centre
 # of a function's structured family (python/tests/mathlib_family.py, the
@@ -452,6 +504,20 @@ REV8_ROUTINES = (
 # has none: TRIG_FAMILY has no sin or cos centre at fp64 under rne (NO_
 # STRUCTURED). python/tests/test_acceptance_trig.py holds each centre to
 # TRIG_FAMILY and to the trig theory (classify).
+# The inverse case's (parcel M4A) are python/tests/mathlib_inv_family.py's
+# INV_FAMILY at rdn, the follower's attribute. The follower's state is c, s,
+# phi, q, v (components 0 to 4) and its calls atan2(s, c), asin(q * 0.5),
+# atan(q) and acos(v * 0.5). atan2 has two operands, so its item is a PAIR:
+# (the function, (y's component, x's component), (y's centre, x's centre)),
+# y first. A window centre is a literal ("bits", "0x...") built by
+# mathlib_inv_family in a test, so that this set needs no mpmath. In the
+# lane of a tile every call that reads the set components sees them: the
+# fp256 atan tile (q = 3 2^-72) is a centre of asin too (asin(3 2^-73)),
+# and the fp64 atan tile's q, near 2^52, puts asin(q * 0.5) outside its
+# domain (python/tests/test_acceptance_invtrig.py pins what the theory says
+# of each). The study's own case, atan(3 2^-26) under rne at fp64, is NOT
+# reached by this reference: it is a centre under rne, and the follower is
+# compiled rdn.
 STRUCTURED = {
     "lotkavolterra-rk4-tangent-fp64": (
         ("exp", 1, (1, 53)), ("exp", 0, (3, 53)),
@@ -480,7 +546,16 @@ STRUCTURED = {
         ("cos", 0, (3, 26)), ("cos", 0, (3, 25))),
     "attitude-rk4-tangent-fp256": (
         ("cos", 0, (1, 70)), ("tan", 1, (3, 72)),
-        ("sin", 0, (3, 71)), ("tan", 1, (3, 73)))}
+        ("sin", 0, (3, 71)), ("tan", 1, (3, 73))),
+    "phasefollower-rk4-tangent-fp64": (
+        ("atan2", (1, 0), ((1, 63), ("u", 11))), ("asin", 3, (3, 24)),
+        ("acos", 4, ("bits", "0x3ca1a62633145c07")),
+        ("atan", 3, ("bits", "0x434d02967c31cdb5"))),
+    "phasefollower-rk4-tangent-fp256": (
+        ("atan2", (1, 0), ((3, 72), (1, 0))), ("atan", 3, (3, 72)),
+        ("asin", 3, (9, 72)),
+        ("acos", 4, ("bits", "0x3ff12cd9128a5043cc71a026ef7ca8cd9e69d218"
+                              "d98158536f92f8a1ba7f09ab")))}
 # the structured lane of tile t is lane t * BLOCK + this: past the spot
 # check's ordinary lanes 0 to 2 and clear of the special lanes at the end of
 # tiles 1 to 3
@@ -694,8 +769,17 @@ def centre_bits(fmt, centre):
     ulp above 1. python/tests/mathlib_family.py's argument() in softfloat
     alone, so that the set needs no mpmath (test_acceptance_marks.py holds
     the two equal). expm1's second family, ("n", n) = RN(-n ln 2), needs
-    ln 2 and is not built here."""
+    ln 2 and is not built here. ("bits", "0x...") is a literal encoding of
+    the format's width, for the window centres, which need mpmath to
+    derive (the phase follower's: test_acceptance_invtrig.py builds each
+    from python/tests/mathlib_inv_family.py and holds it equal)."""
     a, b = centre
+    if a == "bits":
+        if not (isinstance(b, str) and b.startswith("0x")
+                and len(b) == 2 + fmt.width // 4):
+            raise ValueError(f"{centre!r} is not a {fmt.name} encoding of "
+                             f"{2 + fmt.width // 4} characters")
+        return int(b, 16)
     if a == "u":
         return sf.one_bits(fmt) + b
     if a == "d":
@@ -706,13 +790,32 @@ def centre_bits(fmt, centre):
     raise ValueError(f"{centre!r} is not a centre this set builds")
 
 
+def held_functions(entry):
+    """The math library's functions an image calls: the keys of its
+    manifest's routines.calls, less the division and the root the
+    compiler's own routines are (an entry without a manifest holds none)."""
+    mf = (ROOT / entry["image"]).with_suffix(".manifest.json")
+    if not mf.is_file():
+        return frozenset()
+    calls = json.loads(mf.read_bytes()).get("routines", {}).get("calls", {})
+    return frozenset(calls) - {"div", "sqrt"}
+
+
 def structured_lanes(entry, fmt, block, slots, tiles):
     """Set the entry's structured lanes in `block`, in place: one a tile,
     the tile's lane STRUCTURED_LANE, its state component the centre's
     encoding and everything else the recipe's - the tangent too. -> the
     record's descriptors, a tile each; the lane marks in segment 0. An empty
     recipe is accepted for an entry that names its reason (NO_STRUCTURED) -
-    -> [] - and refused for any other, as is a reason beside lanes."""
+    -> [] - and refused for any other, as is a reason beside lanes.
+    A recipe item is (function, component, centre), or, for atan2, a PAIR:
+    (function, (y's component, x's component), (y's centre, x's centre)),
+    y first. The pair's descriptor has the keys "components", "centres" and
+    "arguments" where a single lane's has "component", "centre" and
+    "argument" (a single lane's descriptor is the same as before). A pair
+    naming a component twice, a pair for any function but atan2, a single
+    component for atan2, and a function the entry's image does not call
+    (its manifest's routines.calls) are refused by name."""
     recipe = entry["structured"]
     if not recipe and entry.get("no_structured"):
         return []
@@ -725,9 +828,37 @@ def structured_lanes(entry, fmt, block, slots, tiles):
     if len(recipe) != tiles:
         raise ValueError(f"{len(recipe)} structured lanes for {tiles} tiles")
     blk = BLOCK[fmt.name]
+    held = held_functions(entry)
     out = []
     for tile, (fn, comp, centre) in enumerate(recipe):
         lane = tile * blk + STRUCTURED_LANE
+        if held and fn not in held:
+            raise ValueError(f"{entry['name']}: tile {tile}'s function "
+                             f"{fn} is not one the image calls "
+                             f"({sorted(held)})")
+        hexw = f"#0{2 + fmt.width // 4}x"
+        if isinstance(comp, (tuple, list)):
+            if fn != "atan2":
+                raise ValueError(f"{entry['name']}: tile {tile}: a pair of "
+                                 f"components for {fn}, which reads one "
+                                 f"operand")
+            if len(comp) != 2 or len(centre) != 2:
+                raise ValueError(f"{entry['name']}: tile {tile}: a pair "
+                                 f"names two components and two centres")
+            if comp[0] == comp[1]:
+                raise ValueError(f"{entry['name']}: tile {tile}: a pair "
+                                 f"names component {comp[0]} twice")
+            bits = [centre_bits(fmt, c) for c in centre]
+            for c, b in zip(comp, bits):
+                block[lane * slots + c] = b
+            out.append({"lane": lane, "tile": tile, "segment": 0,
+                        "function": fn, "components": list(comp),
+                        "centres": [list(c) for c in centre],
+                        "arguments": [format(b, hexw) for b in bits]})
+            continue
+        if fn == "atan2":
+            raise ValueError(f"{entry['name']}: tile {tile}: atan2 reads two "
+                             f"operands, and the recipe names one component")
         bits = centre_bits(fmt, centre)
         block[lane * slots + comp] = bits
         out.append({"lane": lane, "tile": tile, "segment": 0,
@@ -1100,8 +1231,13 @@ def mark_problems(structured, blocks, status, ranged=()):
     marks |= {(k, r["lane"]) for r in ranged for k in r["segments"]}
     for s in structured:
         seg, lane = s["segment"], s["lane"]
-        who = (f"lane {lane} (tile {s['tile']}, {s['function']} at "
-               f"component {s['component']} = centre {s['centre']})")
+        if "components" in s:
+            who = (f"lane {lane} (tile {s['tile']}, {s['function']} at "
+                   f"components {s['components']} = centres "
+                   f"{s['centres']})")
+        else:
+            who = (f"lane {lane} (tile {s['tile']}, {s['function']} at "
+                   f"component {s['component']} = centre {s['centre']})")
         if not blocks[seg][lane] & seq.LANE_MARKED:
             out.append(f"{who} has byte {blocks[seg][lane]:#04x} in segment "
                        f"{seg}, without bit 7")
@@ -2275,6 +2411,50 @@ def mark_controls(args, kept):
           f"copy of the probe's block is caught by the golden mark check")
 
 
+INV_FUNCTIONS = ("atan", "asin", "acos", "atan2")
+
+
+def inv_controls(args, kept):
+    """The inverse routines' structured lanes, each moved off its centre
+    (parcel M4A): for each lane of an entry whose recipe names one of
+    INV_FUNCTIONS, the lane's FIRST named component (y's for a pair) put
+    off_centre_dense's step away, the lane run alone on seq.py from
+    segment 0's start - as mark_controls does for its first entry - and
+    its byte must no longer carry bit 7. The dense tail is the trig
+    centres' reason (off_centre_dense): at fp256 the plain step of 2^-20
+    left atan's lane 3 2^-72 marked (byte 0x90, measured 2026-11-11) though
+    the theory (classify) calls the moved first-stage argument clear; the
+    cause was not isolated (BELIEVED: a later stage's argument, derived
+    from a short dyadic, is again short, and a short tiny dyadic marks).
+    The dense step is clear by the theory (test_acceptance_invtrig.py). That is the control for window
+    and ratio centres as well as the tiny ones: a lane that still marked
+    would mean the mark came from something else in the lane (asin of an
+    argument outside its domain, in the fp64 atan window's lane), not
+    from the centre."""
+    name, rec, want, image, bank, init, files, data, d, run0, depth, probe         = kept
+    fmt = FORMATS[rec["format"]]
+    slots = rec["slots"]
+    print(f"-- the inverse routines' off-centre controls, on {name}",
+          flush=True)
+    prog = seq.Program.from_bytes(image, scratch_depth=depth)
+    for s in rec["structured"]:
+        if s["function"] not in INV_FUNCTIONS:
+            continue
+        comp = s["components"][0] if "components" in s else s["component"]
+        lane, seg = s["lane"], s["segment"]
+        start = cert.state_values(fmt, files[seg])[lane * slots:
+                                                   (lane + 1) * slots]
+        was = start[comp]
+        start[comp] = off_centre_dense(fmt, was)
+        r = seq.run(prog, [0], [0], [0], bank=bank_values(prog, bank),
+                    scratch_in=start, scratch_depth=depth)
+        check(not r.lane_flags[0] & seq.LANE_MARKED,
+              f"control: lane {lane} ({s['function']}, tile {s['tile']}) "
+              f"with component {comp} moved off its centre by a relative "
+              f"2^-20 and a dense tail no longer marks on seq.py (byte "
+              f"{r.lane_flags[0]:#04x})")
+
+
 def range_controls(args, kept):
     """The range lane's checks, each watched failing on the first routine
     entry that declares one, in a copy of its own blocks, statuses and
@@ -2390,7 +2570,7 @@ def leg_set(args, work, selected):
                 f"{sorted(set(want) ^ set(have))}")
             return [f"FAIL  the set: {record.name}'s entries differ"]
     verdicts, records, kept, first, routine = [], [], None, None, None
-    ranged, unmarked = None, []
+    ranged, unmarked, inv = None, [], []
     for e in entries(args.set):
         if selected and e["name"] not in selected:
             continue
@@ -2407,8 +2587,12 @@ def leg_set(args, work, selected):
             # the routine entries (a probe ran): the first with a structured
             # lane takes the marks' controls, the first with a range lane the
             # range's; one with neither is named
-            if art[1]["structured"] and routine is None:
+            if (art[1]["structured"] and routine is None
+                    and "component" in art[1]["structured"][0]):
                 routine = art
+            if any(x["function"] in INV_FUNCTIONS
+                   for x in art[1]["structured"]):
+                inv.append(art)
             if art[1].get("range") and ranged is None:
                 ranged = art
             if not art[1]["structured"]:
@@ -2419,6 +2603,8 @@ def leg_set(args, work, selected):
             rev8_controls(args, kept, first)
     if routine:
         mark_controls(args, routine)
+    for art in inv:
+        inv_controls(args, art)
     if ranged:
         range_controls(args, ranged)
     for rec in unmarked:

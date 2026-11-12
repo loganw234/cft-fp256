@@ -292,8 +292,9 @@ two agree is what the byte-for-byte check proves.
                          admission test, and the `acceptance` runner
                          stage; the revision-8 set, the hard workloads
                          only revision 8's images hold and the math
-                         library's ten routine references (the six of M1
-                         and, since parcel M2A, the radian case), in its
+                         library's twelve routine references (the six of M1
+                         and, since parcels M2A and M4A, the radian case
+                         and the inverse-trigonometric case), in its
                          own record
 
 A program earns a row by having a check: something that runs it and

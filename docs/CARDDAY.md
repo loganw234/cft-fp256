@@ -1014,40 +1014,51 @@ printf it matches.
   resume-1020 to nightly-1024), says how many cycles did not say what they left out when a file has both kinds, and has no such section for a
   file that has only the old.
 - **The revision-8 leg** runs the entries the image is (`--target`): programs/acceptance.py's
-  rule puts nineteen on the quad - nine workloads and the ten routine entries (the six the math
-  library added on 2026-10-19 and the four of the radian case, parcel M2A, 2026-11-04) - one on the deep and **none on the single** (where R21 alone keeps a
+  rule puts twenty-one on the quad - nine workloads and the twelve routine entries (the six the math
+  library added on 2026-10-19, the four of the radian case, parcel M2A, 2026-11-04, and the two of
+  the inverse-trigonometric case, parcel M4A, 2026-11-11) - one on the deep and **none on the single** (where R21 alone keeps a
   workload off the quad, which none does), so the single's battery **leaves the leg out** (since 2026-10-27; before, it was recorded as a skipped
   leg on every visit): `cycle_start` names it in `left_out` with the rule's text, and the report's LEGS LEFT OUT section says so.
   Two entries compile for 40 minutes and 2.2 hours (Gray-Scott extended, the deep's only entry,
   and Riccati extended): **they are left out unless their image and bank are already in
-  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs eighteen (eight
-  workloads and the ten routine entries) and the deep's leg is skipped, by name, with that reason.
+  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs twenty (eight
+  workloads and the twelve routine entries) and the deep's leg is skipped, by name, with that reason.
   The driver does not compile them in the background; seed that directory from the lead's W8
-  images and it runs nineteen on the quad and one on the deep. The eight workloads that compile in
+  images and it runs twenty-one on the quad and one on the deep. The eight workloads that compile in
   minutes compile once, on the first visit of the quad, and are read back after.
-  **The ten routine entries** (the Lotka-Volterra, diode and culture references of the six, and
-  the pendulum and the attitude of sin, cos and tan, each at fp64 and
+  **The twelve routine entries** (the Lotka-Volterra, diode and culture references of the six,
+  the pendulum and the attitude of sin, cos and tan, and the phase follower of atan, asin, acos and
+  atan2, each at fp64 and
   fp256: `REV8_ROUTINES` in programs/acceptance.py, the section "The math library's routine entries in the revision-8 set" below)
   have nothing to compile or to cache: their image and bank are committed files under
   programs/systems/compiled-tangent/, which `--images` does not touch, so they never add the
   compile allowance to the leg's timeout. They need libcft's shared library for the mark probe,
   and the leg names this tree's own, host/libcft.so, with `--lib`, rather than leave it to `$CFT_LIB`
   (acceptance.py's default); the build step has already asserted that library is XRT-linked. Of the
-  box the ten ask nothing the driver's build does not already make. They were missing from the
+  box the twelve ask nothing the driver's build does not already make. They were missing from the
   driver from 2026-10-19 to 2026-10-20: `REV8_ENTRIES` is a table in hw/card_stress.py, and its test
   read `REV8` alone and counted its ten. The test now holds the table to `REV8` and
   `REV8_ROUTINES`, entry for entry and target for target, and goes red on any other `REV8` name in
   programs/acceptance.py that it has not been shown. The six took 57 s on the card (MEASURED, the
   lead's, below); the leg's 2400 s was 5.9 times the quad's fifteen, 353 s for the nine workloads
   (2026-10-12) and 57 s for the six, 410 s (COMPUTED). The four of parcel M2A (2026-11-04) join the
-  quad's argv, so it holds nineteen, and the 2400 s still covers all ten routine entries: the
+  quad's argv, so it held nineteen, and the 2400 s still covered all ten routine entries: the
   nightly's fifteen took 464.5 s at the median (397.5 to 470.4 s over 188 passes, READ in
   Data/runs/2026-10-12-math-round/box/nightly-1103/run/driver.log, the nights to 2026-11-04), and
   the four's set leg took 64 s on the software backend (MEASURED, 110 checks, unniced, one process;
   the desktop read 4 per cent by Win32_Processor after the next run), against 113 s for the six there (parcel MA); on the card the four are
   ESTIMATED at 40 to 70 s (the six's 57 s, scaled by the software times), so the nineteen at 505 to 540 s
   (ESTIMATE) and the 2400 s 4.4 to 4.8 times that. The four took 64 s on the card (MEASURED, the lead's
-  card leg, rev8q, 2026-11-04, below). The first nightly after the merge has the nineteen's figure. The smoke (`--quick`) runs one of them,
+  card leg, rev8q, 2026-11-04, below). The first nightly after the merge has the nineteen's figure.
+  **Parcel M4A (2026-11-11) adds the follower's two**, so the quad holds twenty-one: the follower's
+  images are 7,997 and 8,605 instructions, past a tile's store of 4,096, and stream; their set leg took
+  56.1 s (fp64) and 42.5 s (fp256) on the software backend (MEASURED, `--legs set,oracle --only` the two,
+  unniced, one process, 118 s the run, the desktop at 100 per cent by `wmic` before it), against the four's
+  64 s. The four's card leg took 64 s, the same as their software leg, so the two are ESTIMATED at their
+  software 98.6 s on the card, and the twenty-one at 604 to 639 s (the nineteen's 505 to 540 s plus 98.6 s),
+  so the 2400 s is 3.8 to 4.0 times that (COMPUTED from the estimate) and still covers all twelve routine
+  entries; the card's own figure is the first nightly's
+  after the merge. The smoke (`--quick`) runs one of them,
   `lotkavolterra-rk4-tangent-fp64`, beside `phi4_extended_fp64`: about 10 s more (COMPUTED, 57 s
   over six), the routine path on the card in the smoke instead of in the long run's first cycle.
 - **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
@@ -2984,6 +2995,96 @@ for sin, cos and tan, entry by entry, including the wrong guess past 2^1024 and 
 which the six's leg could not show. It does not run an rtz image (no reference is rtz; the nightly
 seq-check's trig part is the fragment-level evidence) and it does not run the attitude's tan at fp64
 (TRIG_FAMILY has no tan centre at fp64 under rdn).
+
+## The inverse-trigonometric routine entries in the revision-8 set (added 2026-11-11; the card leg is not yet run)
+
+M4's build, the study's section 10 item 7 (docs/studies/M4-invtrig.md): STATUS[6] and the lane byte on a
+structured argument of atan, asin, acos and atan2, and the acceptance set with an inverse-trigonometric case.
+Parcel M4A built the software side (docs/VALIDATION.md, 2026-11-11): `programs/acceptance.py --set rev8` holds
+**two routine entries more**, after the ten of the sections above - the committed phase follower
+(`phasefollower-rk4-tangent-fp64`, `-fp256`: atan2 of two state components in the step, and atan, asin and acos
+each of one in its tangent system, **round rdn**) of `programs/systems/compiled-tangent/`. The driver's
+docstring ("The routine entries") is the definition. **The card leg has not run; the lead adds its results
+below after the run.**
+
+What is different from the sections above:
+- **Quad only, again, and past the store.** The rule puts both on `u50-rev8-quad` (MEASURED 2026-11-11:
+  `rule_target` answered it from each image's own words; 7,997 and 8,605 instructions, 256 scratch slots
+  declared, no R21). They are past the 4,096 a tile holds in its store and **stream from the image**, as the
+  workloads do - unlike the ten, which fit. `--target u50-rev8-deep` and `--target u50-rev8` select neither.
+- **The structured lanes** are centres of `python/tests/mathlib_inv_family.py`'s INV_FAMILY **at rdn**, the
+  follower's own attribute (its source says `round rdn`), one a tile, marking in segment 0. The follower's
+  state is c, s, phi, q, v and its calls atan2(s, c), asin(q * 0.5), atan(q), acos(v * 0.5). At fp64: atan2 the
+  ratio centre (s = 2^-63, c = 1 + 11 ulp), asin 3 2^-25 (q = 3 2^-24), acos and atan the pi/2 windows (the
+  atan lane's q is near 2^52, where asin(q * 0.5) is outside its domain in the same lane, so that lane's byte
+  is 0x91, the mark and INVALID). At fp256: atan2 3 2^-72 against c = 1, atan 3 2^-72 (asin(3 2^-73) of the
+  same lane is a centre too), asin 9 2^-73, acos a window. **atan2's tile sets two components, a pair**: the
+  record's descriptor has `components` [1, 0] (y, then x), `centres` and `arguments`.
+- **The study's own case is not on this leg.** `atan(3 2^-26)` under rne at fp64 is a centre of INV_FAMILY
+  under rne and of no rdn list; the follower is compiled rdn (the M4 contract's decision 5). Reaching it
+  needs a second reference compiled under rne, or a hand-run `cft-segrun` of a small image: the lead's
+  decision, not part of this leg. A pass here does not show it.
+- **No range lane.** The inverse fragments have no range rule; no lane of any segment marks but the four
+  structured lanes of segment 0 (MEASURED on the software backend, STATUS [64, 0, 0, 0] at both formats).
+- **The record** gained entries only: the other twenty entries' records are unchanged byte for byte (the
+  old file up to its last entry's closing brace is a prefix of the new one).
+
+On amd-arc-box, from the root of the branch's checkout (no other card user), the build and the checks are
+the radian section's:
+
+    source /opt/xilinx/xrt/setup.sh
+    make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so
+    ldd host/cft-segrun | grep xrt        # libxrt_coreutil
+    ldd host/libcft.so  | grep xrt        # the same; none means an XRT=0 build
+    X=$HOME/cardday-rev8q/cft_hw_quad.xclbin
+    sha256sum $X                          # 4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b
+    PF=phasefollower-rk4-tangent-fp64,phasefollower-rk4-tangent-fp256
+    python3 programs/acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad \
+        --segrun host/cft-segrun --audit host/cft-audit --lib host/libcft.so \
+        --only $PF > invtrig-rev8q.log 2>&1; echo rc=$?
+    # then the same with --golden all, to invtrig-golden-rev8q.log
+    # and the ten again on the same tree, as the regression (the names of REV8_ROUTINES[:10]):
+    python3 programs/acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad \
+        --segrun host/cft-segrun --audit host/cft-audit --lib host/libcft.so \
+        --only lotkavolterra-rk4-tangent-fp64,lotkavolterra-rk4-tangent-fp256,diode-rk4-tangent-fp64,diode-rk4-tangent-fp256,culture-rk4-tangent-fp64,culture-rk4-tangent-fp256,pendulum-rk4-tangent-fp64,pendulum-rk4-tangent-fp256,attitude-rk4-tangent-fp64,attitude-rk4-tangent-fp256 \
+        > routines-rev8q.log 2>&1; echo rc=$?
+
+**What it must print** (the software backend's run, MEASURED 2026-11-11 on the desktop; the card's
+differences are marked):
+- exit 0, and last, `acceptance rev8: 2 of 2 PASS on $X as u50-rev8-quad (set); N checks ok, 0 failed, S s`.
+  The software backend counts 54 checks for `--legs set,oracle` on the two (one run, 118 s, the desktop at 100 per cent);
+  N on a card is BELIEVED one more (the probe-on-another-image control, which needs an image), as at the radian four.
+- two `PASS` lines. The software backend's, which the card's must equal but for `xrt`:
+  - `phasefollower-rk4-tangent-fp64 ... flags [31, 30, 30, 30], status [64, 0, 0, 0]; every digest the set's,
+    cft-audit accepts in full, ... the spot check holds, 4 structured lanes mark (bit 7, STATUS[6])`
+  - `phasefollower-rk4-tangent-fp256 ... flags [31, 30, 30, 30], status [64, 0, 0, 0]; ...` the same
+- **each mark named**, in the `the structured lanes mark` line: lanes [3, 67, 131, 195] at fp64 (bytes 0x90
+  and 0x91) and [3, 19, 35, 51] at fp256 (0x90) carry bit 7 in segment 0, `bit 7 is set on no other lane of any
+  segment, STATUS[6] in no other segment`; and one `the golden mark check` line for segment 0, then `the golden
+  mark check re-ran every segment the probe saw a lane mark in: [0]`.
+- **the probe's backend line** on each entry: `the mark probe opened the certificate's device: xrt, 4 tiles,
+  4096 slots a lane, image 4f9921a25af65444`.
+- the controls: with these two alone the set's own controls run on the first entry, no marks control runs
+  (the first entry with a structured lane of one component is not among them), and the inverse routines'
+  off-centre controls run on each (4 `ok` lines an entry: the lane's first component moved off its centre by a
+  step and a dense tail no longer marks on seq.py). With the ten, the marks' controls run on Lotka-Volterra at fp64
+  as before. None `FAIL`.
+- a failure names its check: a structured lane that does not mark is `lane L (tile T, atan2 at components [1,
+  0] = centres [...]) has byte 0x10 in segment 0, without bit 7`; an unexpected mark is `segment K: lanes [L]
+  carry bit 7, and the recipe marks none of them`.
+
+**Time (ESTIMATE).** The software backend took 56.1 s and 42.5 s for the two (118 s the run) at `--legs set,oracle`
+(MEASURED, one process, unniced, the desktop at 100 per cent by `wmic` before the run, other sessions on it),
+against 364 s for the twelve routine entries together. `--golden all`: the golden audit took 770.9 s for the fp64 entry (834.4 s the entry, 871 s and 36 checks the run, 14 min 33 s
+by `time`, the desktop at 100 per cent by `wmic` with other sessions on it; MEASURED, 2026-11-11, one entry, `--legs set`).
+**The fp256 entry's golden audit: the lead's, on amd-arc-box at the wave's gate (not run here).** The card's set leg for the two is ESTIMATED
+at 50 to 90 s, and the whole run (the two, `--golden all`, the ten again) at about 15 to 25 minutes of card time,
+with the build apart.
+
+**What it proves, if it passes:** the device reproduces the software backend's guess, mark and lane byte for
+atan, asin, acos and atan2 at fp64 and fp256 under rdn, entry by entry, including atan2's pair, the windows and
+the ratio centre, and the inverse fragments streaming from an image past the store. It does not show the study's
+case under rne (above), and nothing about the sweep's range rule for atan2's tiny-quotient band.
 
 ## What to record
 
