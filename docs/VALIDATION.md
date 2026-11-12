@@ -27669,4 +27669,4 @@ The `replay-method` lines, one for each run that replays, are not in this count,
 - after the fix, the whole file: test_cert2.py 106 passed in 14.3 s at -n 4;
 - check_docs_index.py rc 0; project_figures.py --check rc 0.
 
-**Not changed:** docs/studies/CERT-V2.md names the sixteen too. A design study is the record of its date, so it stays.
+**Not changed:** docs/studies/CERT-V2.md names fifteen of the sixteen, all but `CFT_XRT_UPLOAD` (VLM1112b's pass 2; this sentence first said "the sixteen"). A design study is the record of its date, so it stays.
