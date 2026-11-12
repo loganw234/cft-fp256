@@ -527,9 +527,14 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
     past 2^1024 whatever the test says, and there the guess is wrong in
     some lanes (the study, docs/studies/M2-trig.md; the stages' T legs
     hold such lanes). atan2 also marks, at every format fp32 included,
-    every lane in its tiny-quotient range (|y / x| under a bound the
-    format sets, y not zero, x positive) whatever the test says
-    (docs/studies/M4-invtrig.md; the stages' U legs hold such lanes). The
+    every lane whose exact |y / x| (y not zero, x positive, |y| < x) is
+    below the lower edge of its tiny-quotient range, whatever the test
+    says. It marks on its computed quotient, so in the narrow band above
+    that edge, where the seed's error decides (`atan2_status` in
+    python/tests/mathlib_inv_family.py, the band `_tq_band` in
+    python/tests/mathlib_inv_harness.py), a lane may be marked or not, and
+    above the band the test decides (docs/studies/M4-invtrig.md; the
+    stages' U legs hold lanes below the edge and in the band). The
     language's definition is unchanged by a mark: a
     marked lane is replayed by the definition, `lang.run`, and the
     image's guess is compared only as a guess. Next to an exact case -

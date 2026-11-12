@@ -4905,8 +4905,10 @@ def leg_three(count, rng_for, everything=False):
 #     tiny-quotient range, decided by atan2_status. The other three have NO
 #     demanded lane at fp32, and the legs say so rather than demand nothing
 #     silently;
-#   - atan2's tiny-quotient range is marked whatever the test says, so the
-#     demand of it is classify's own ("mark") with no separate range test;
+#   - atan2 marks every lane whose exact |y / x| is below the lower edge of
+#     its tiny-quotient range whatever the test says (in the band above the
+#     edge the seed's error decides: "either"), so the demand of it is
+#     classify's own ("mark") with no separate range test;
 #   - the replay's values half has real wrong guesses to count where
 #     python/tests/mathlib_inv_harness.py pins them (STRUCT_GUESS_WRONG), and
 #     U1 asserts a nonzero count exactly at those (function, format) cells.

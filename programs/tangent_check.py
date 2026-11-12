@@ -3776,7 +3776,9 @@ def leg_three(count, rng, everything=False):
 # tangent vector and two, and runs them on seq.py under the rule, as leg T
 # does for the three. Structured centres of the families
 # (python/tests/mathlib_inv_family.py) are put in the primal, and atan2's
-# tiny-quotient range pairs (marked whatever the test says) at every format.
+# tiny-quotient range pairs at every format (a pair below the range's lower
+# edge is marked whatever the test says; one in the band at the edge may go
+# either way, and one above it is the test's).
 #
 # NO LANE IS MARKED BY THE TANGENT'S ROUTINE ALONE, as leg T's third control
 # shows for cos. That is a reading of the rules, not a measurement of every
