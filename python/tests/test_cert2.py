@@ -663,6 +663,19 @@ def test_the_environment_list_is_the_codes_getenv_calls():
     assert env == (("CFT_TIMEOUT_MS", "1"),)
 
 
+def test_the_contract_names_the_environment_list():
+    """docs/CERTIFICATES.md's paragraph "The environment" names the
+    writer's list, cert2.ENVIRONMENT_NAMES, in its order - so the contract
+    cannot keep a list the code has outgrown. It named sixteen while the
+    GPU backend read seven more (the lead, 2026-11-12)."""
+    text = (ROOT / "docs" / "CERTIFICATES.md").read_text(encoding="utf-8")
+    start = text.index("**The environment.**")
+    para = text[start:text.index("\n\n", start)]
+    named = re.findall(r"`([A-Z][A-Z0-9_]*)`",
+                       para[:para.index("A writer writes")])
+    assert tuple(named) == tuple(cert2.ENVIRONMENT_NAMES)
+
+
 def test_the_run_and_source_lines(mk, lz):
     for prefix, value in (
             ("run 0 ", "run 0 wider-source"),

@@ -4060,18 +4060,23 @@ checked. Every provenance line but four is REPORTED:
   withheld.
 
 **The environment.** The writer's list is every variable libcft and
-cft-segrun read: `CFT_DIVSQRT_FULL`, `CFT_DIVSQRT_SEQ`, `CFT_SEGRUN_PLANT`,
-`CFT_TIMEOUT_MS`, `CFT_TRANSCEND_MINPREC`, `CFT_XRT_BIND`, `CFT_XRT_CAPS`,
-`CFT_XRT_MASK_ADDR_OVERRIDE`, `CFT_XRT_PROGRAM_CUTS`, `CFT_XRT_REDUCE_BC`,
-`CFT_XRT_TILES`, `CFT_XRT_TILE_ORDER`, `CFT_XRT_TRACE`, `CFT_XRT_UPLOAD`,
-`CFT_XRT_WITNESS` and `XCL_EMULATION_MODE`. A writer writes those that are
+cft-segrun read: `CFT_DIVSQRT_FULL`, `CFT_DIVSQRT_SEQ`, `CFT_HIP_CHUNK`,
+`CFT_HIP_INFO`, `CFT_HIP_PAGE`, `CFT_HIP_PLANT`, `CFT_HIP_UPLOAD`,
+`CFT_SEGRUN_PLANT`, `CFT_TIMEOUT_MS`, `CFT_TRANSCEND_MINPREC`,
+`CFT_XRT_BIND`, `CFT_XRT_CAPS`, `CFT_XRT_MASK_ADDR_OVERRIDE`,
+`CFT_XRT_PROGRAM_CUTS`, `CFT_XRT_REDUCE_BC`, `CFT_XRT_TILES`,
+`CFT_XRT_TILE_ORDER`, `CFT_XRT_TRACE`, `CFT_XRT_UPLOAD`, `CFT_XRT_WITNESS`,
+`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES` and `XCL_EMULATION_MODE`.
+Seven of them, the five CFT_HIP_ names and the two VISIBLE_DEVICES, are
+the GPU backend's (backend_hip.cpp, built by HIP=1), on the list since
+2026-11-12. A writer writes those that are
 set, by name, and
 none carries a path. The reader holds `env` to the list: a name off it
 is refused `malformed`, so a certificate carries no variable but those -
 not a home directory, a user name or a path - and a variable joins the
 list with the code that reads it. test_cert2.py holds the list to the
-code's `getenv` calls and libcft's instrument seeds, so a new variable
-cannot be missed.
+code's `getenv` calls and libcft's instrument seeds, and this paragraph
+to the list, so a new variable cannot be missed.
 
 **The times.** Where they are known, `started` is no later than
 `finished`, and `finished` no later than `issued`, and so `started` no

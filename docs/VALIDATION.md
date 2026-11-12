@@ -27655,3 +27655,18 @@ The `replay-method` lines, one for each run that replays, are not in this count,
 - check_docs_index.py rc 0; project_figures.py --check rc 0.
 
 **Not run here:** the golden suite in full, and the audit and programs stages. They run on the box at the merge.
+
+## 2026-11-12 - the lead's second commit on G1B's send-back, from VLM1112b: CERTIFICATES.md's paragraph "The environment" names the writer's list's 23 variables, and test_cert2.py holds it to the list (the GPU backend's round 1; author the lead, Opus 5.5)
+
+**What was false.** docs/CERTIFICATES.md's paragraph "The environment" (the contract) named the writer's list's sixteen variables of 2026-10-02 as "every variable libcft and cft-segrun read". Since G1B's backend_hip.cpp that was false, and the lead's first commit (the entry above) left it so. VLM1112b (Sonnet) found it. No check held the paragraph to the list.
+
+**The fix.**
+- The paragraph names the 23 in the list's order, and says which seven are the GPU backend's and since when.
+- python/tests/test_cert2.py, `test_the_contract_names_the_environment_list`: the paragraph's backticked names, up to "A writer writes", equal `cert2.ENVIRONMENT_NAMES` in order. The paragraph's closing sentence says so.
+
+**Run here** (the desktop):
+- the new test on the paragraph as it stood, its control: FAILED, "At index 2 diff: 'CFT_SEGRUN_PLANT' != 'CFT_HIP_CHUNK'", with 7 more names on the list's side;
+- after the fix, the whole file: test_cert2.py 106 passed in 14.3 s at -n 4;
+- check_docs_index.py rc 0; project_figures.py --check rc 0.
+
+**Not changed:** docs/studies/CERT-V2.md names the sixteen too. A design study is the record of its date, so it stays.
