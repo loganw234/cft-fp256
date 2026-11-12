@@ -27630,3 +27630,28 @@ Without a plant every one of these is green, above and below. Different checks c
 5. device-test's XRT-only legs are NOT TESTED on a GPU by name: a failed fill's retry (hip-test's buffers leg holds the GPU's to the same sequence), the planted tile refusals S5 and S7, and the declined outputs.
 6. The program corpora's --resident runs make fresh buffers for each case, so their bindings are mostly first-use uploads: they check correctness, not economy. The rates above are the economy.
 7. Not run here: the U50, the box's gate, and G1C's gates.
+
+## 2026-11-12 - the lead's send-back of G1B, from the combined gate: the writer's list of variables (cert2.ENVIRONMENT_NAMES and its two copies in C) names the seven that backend_hip.cpp reads (the GPU backend's round 1; author the lead, Opus 5.5)
+
+**What failed.** The combined box gate of 2026-11-12 (run 20261112-075634-ef9200e9, at the tip of M4's wave 5, the lead's LANGUAGE.md commit and G1B's merge) failed its golden stage on one test, python/tests/test_cert2.py's `test_the_environment_list_is_the_codes_getenv_calls`: 1 failed, 7,269 passed, 3 skipped (the box's usual three: two loopback, one math.fma), 5,027 s. backend_hip.cpp reads seven variables the list did not name: `CFT_HIP_CHUNK`, `CFT_HIP_INFO`, `CFT_HIP_PAGE`, `CFT_HIP_PLANT`, `CFT_HIP_UPLOAD`, `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`. Neither G1B's two parts nor their verifiers ran the golden suite in full. A regression under Logan's rule; the fix is mechanical, so the lead made it.
+
+**The fix.** The seven join the list in byte order, 23 names, in the three copies the gate holds equal:
+- python/cft_golden/cert2.py's `ENVIRONMENT_NAMES`, held to the code's calls and to byte order by test_cert2.py;
+- host/tools/audit.c's list between its markers, held to cert2's by host/tests/audit_check.py (the audit stage);
+- host/tools/segrun.c's `ENV_NAMES`, held to cert2's by host/tests/segrun_check_v2.py (the programs stage).
+
+segrun.c's note on `HEAD_TEXT_V2` said "the environment's sixteen variables". It now says twenty-three and gives an `env` line's most, 287 bytes: "env ", the longest name's 26, a space, 255 and the LF. COUNTED from `put_v2_header`, not measured, the header's lines past the identity lines are at most 14,334 bytes with twenty-three variables (12,325 with sixteen), under the 16,384 the trial adds:
+- eleven text lines at 255 characters, 2,954 bytes;
+- the other fixed lines, the issuer key's taken as a text, 600;
+- `initial` with a 64-character generator name and sixteen arguments at 255, 4,179;
+- the environment, 23 x 287 = 6,601.
+The `replay-method` lines, one for each run that replays, are not in this count, as they were not before.
+
+**What it changes.** A writer records a variable of the list only when it is set non-empty. None of the seven is set where the gate runs (the box's login environment has 0 of them), so every certificate the gate writes keeps its bytes. A reader now accepts an `env` line naming one of the seven; cert2 and cft-audit before this commit refuse such a line `malformed`. No certificate carries one, since no writer before this commit could write it.
+
+**Run here** (the desktop, on the fixed tree):
+- the three copies parsed as their three checks parse them: 23 names each, equal, in byte order, and equal to the set test_cert2's scan finds in host/src and segrun.c;
+- python/tests/test_cert2.py in full: 105 passed in 17.8 s at -n 4;
+- check_docs_index.py rc 0; project_figures.py --check rc 0.
+
+**Not run here:** the golden suite in full, and the audit and programs stages. They run on the box at the merge.
