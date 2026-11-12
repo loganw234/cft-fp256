@@ -3317,8 +3317,8 @@ def group_rates():
     # -- the other levels' items are out of the rows by the catalog, not by luck: no class or random or host item has an op in the table
     check(not any(it.op in R.RATE_OP for it in cat if it.level in ("class", "random") or it.reach != "tile"), "rates: no class-level, random or host item's op has a rate op")
     # -- parcel M4X2: the routine items (tile, exhaustive) are left out of the rates by a bucket of their own: no routine op has a rate op, and the catalog has them
-    check(sum(1 for it in cat if it.tool == "routine") == 9 and not any(it.op in R.RATE_OP for it in cat if it.tool == "routine"),
-          "rates: the nine routine items' ops have no rate op (their slices are the 'routine' bucket of left_out)")
+    check(sum(1 for it in cat if it.tool == "routine") == 21 and not any(it.op in R.RATE_OP for it in cat if it.tool == "routine"),
+          "rates: the 21 routine items' ops (twelve routines one each, atan2 nine x; parcel M4CAT) have no rate op (their slices are the 'routine' bucket of left_out)")
     # -- no probe: the card-alone cells are '-' and the text says so; nothing is put in their place
     eq(X["probe"], None, "rates: a run with no probe leg has probe None, not zeros")
     check(all(r["card"] is None for r in X["rows"]) and all(r["card_alone"] == "-" and r["ratio"] == "-" for r in tab if r["tile"] in ("all", "only")),

@@ -1191,9 +1191,8 @@ def test_the_sweep_generator_builds_atan_at_fp32(tmp_path):
     files (no lane of atan must mark at fp32: the census); the manifest's
     `digest atan` line equal to the manifest's own rule over the five atan
     images and banks (the first 32 bits of the sha256 of rne to rmm, image
-    then bank); the nine `digest` lines of the other routines equal to
-    hw/card_stress_lib.py's ROUTINE_DIGESTS row for row, the four inverse
-    routines being names the table lacks, and none skipped. And the
+    then bank); the thirteen `digest` lines equal to
+    hw/card_stress_lib.py's ROUTINE_DIGESTS row for row, and none skipped. And the
     program of each atan fragment has 477 instructions and 60 words
     (MEASURED: the compiled shape adds QUIET, ENDQUIET, RAISE, the deposit and
     HALT to the body's 472)."""
@@ -1226,10 +1225,10 @@ def test_the_sweep_generator_builds_atan_at_fp32(tmp_path):
         spec.loader.exec_module(lib)
     finally:
         sys.modules.pop("card_stress_lib", None)
-    nine = {d[1]: d[2] for d in digests if d[1] in lib.ROUTINE_DIGESTS}
-    assert len(nine) == 9 and nine == dict(lib.ROUTINE_DIGESTS)
-    assert not any(n in lib.ROUTINE_DIGESTS
-                   for n in ("atan", "asin", "acos", "atan2"))
+    cat = {d[1]: d[2] for d in digests if d[1] in lib.ROUTINE_DIGESTS}
+    assert len(cat) == 13 and cat == dict(lib.ROUTINE_DIGESTS)
+    assert all(n in lib.ROUTINE_DIGESTS
+               for n in ("atan", "asin", "acos", "atan2"))
     assert not any(ln.startswith("skipped ") for ln in manifest)
     assert sum(1 for ln in manifest if ln.startswith("image atan ")) == 5
     for rnd in RND:

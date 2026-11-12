@@ -7,7 +7,7 @@ log1p-f32: images rne rtz rdn rup rmm, digest 38ea27d9
 sin-f32: images rne rtz rdn rup rmm, digest 05eb28b1
 cos-f32: images rne rtz rdn rup rmm, digest 98b93d46
 tan-f32: images rne rtz rdn rup rmm, digest dbfd4a4e
-atan-f32: no image
-asin-f32: no image
-acos-f32: no image
-atan2-f32: no image
+atan-f32: images rne rtz rdn rup rmm, digest d22abd22
+asin-f32: images rne rtz rdn rup rmm, digest 005fc862
+acos-f32: images rne rtz rdn rup rmm, digest 2f8ca421
+atan2-f32: images rne rtz rdn rup rmm, digest a86a60d8

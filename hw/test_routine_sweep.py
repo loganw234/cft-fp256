@@ -12,9 +12,9 @@ python/tests/mathlib_harness.py needs. Skipped by name without any of them. The 
 It builds the tool in a scratch copy of host/ (make routine-sweep positive-run) and its images with the generator, and runs, niced,
 one process at a time:
   build     the tool builds with no warning (CONTROL: without the `#pragma GCC diagnostic` lines around mpfr_tfn.h it warns of
-            unused functions, so the pragma takes a real warning away); `list` names the thirteen, nine with a digest and four
-            `no image`, the digests the generator's manifest gives
-  images    the generator is deterministic (twice into two directories: every file equal); each of the nine's image and bank run
+            unused functions, so the pragma takes a real warning away); `list` names the thirteen, each with a digest and none
+            `no image` (the generator builds all thirteen), the digests the generator's manifest gives
+  images    the generator is deterministic (twice into two directories: every file equal); each of the twelve one-operand routines' (the thirteen but atan2) image and bank run
             through positive-run deposit mathlib.evaluate's bits (and routines.run's) on 200 lanes under rne and 32 under each other
             attribute
   oracle    `routine-sweep oracle` against transcend.compute, bits and flags, for ALL THIRTEEN under all five attributes over the
@@ -22,13 +22,13 @@ one process at a time:
             special classes (zeros, infinities, quiet and signalling NaNs, the subnormal and normal ends, +-1, the neighbours of
             every power of two from 2^-149 to 2^127, exp's and exp2's overflow and underflow edges, exp2's tie at emin - p, log1p's
             and expm1's -1 edges), and atan2 over the nine x of M4X's list against the pools' y
-  agree     for each of the nine and each attribute, two 256-lane slices: the tool passes them, and every unmarked lane's
+  agree     for each of --names (default the nine; atan, asin, acos and atan2 by --names; atan2 at three of its x) and each attribute, two 256-lane slices: the tool passes them, and every unmarked lane's
             mathlib.evaluate answer is the oracle's (so a lane the tool calls right is the fragment's own), and the tool's marks
             are evaluate's
   marks     exp's five marking lanes under each attribute (0, 5, 5, 5, 0 over slices that hold them, none off the list, no guess
             wrong); and at volume, images built with --bound-shift 34 (G' = 6): the tool's marks and wrong guesses over a 2^14
             slice equal Python's count over the same lanes
-  whole     each of the nine under `all` over four slices of 2^slice-bits (16): around 1, in the tiny range, large, negative -
+  whole     each of --names (default the nine) under `all` over four slices of 2^slice-bits (16): around 1, in the tiny range, large, negative -
             E the slice, cases = 5 E, nothing skipped, and L.parse_soak accepting it with cover {E, per_encoding 5}; each single
             attribute over one slice
   fast      CFT_SWEEP_ORACLE_CHECK=1 over the first 2^13 lanes of those slices: no difference between the fast path and
@@ -36,7 +36,7 @@ one process at a time:
   refuse    an empty, reversed, past-2^32, negative or non-numeric range; a missing, a bad attribute; an unknown name, a name with
             no image; a bad x; a digest that is not the images'; a truncated image, a truncated bank, a missing marks file: each
             exit 2 and nothing run
-  sabotage  CFT_SOAK_SABOTAGE=1, =2 and =3 exit 1 and name what they should, on the nine (=3 on images with marks: --bound-shift 34); the same
+  sabotage  CFT_SOAK_SABOTAGE=1, =2 and =3 exit 1 and name what they should, on --names (default the nine) (=3 on images with marks: --bound-shift 34); the same
             slice passes without
   plants    each built by the generator or a patch of the scratch copy, red where it says, its control green: exp table_entry (value
             mismatches), sin inf_flag_dropped (flag mismatches, no value mismatch), log1p pminn_dropped under rtz (flag mismatches),
@@ -45,7 +45,7 @@ one process at a time:
   unchanged (with --baseline-tree DIR, a directory holding the baseline's host/; needs MPFR 4.2) mpfr-check's output for
             CFT_MPFR_PHASES=transcend,trig,radian,table91 CFT_MPFR_FORMATS=fp32 `mpfr-check 24 7` is the baseline's, byte for byte, its
             first (version) line apart. Skipped by name on MPFR 4.1.
-  rate      no assertion: each of the nine under `all` over --rate-lanes (2^18) lanes on the software backend: the `device s`,
+  rate      no assertion: each of --names (default the nine) under `all` over --rate-lanes (2^18) lanes on the software backend: the `device s`,
             `oracle s` line and lanes a second
   legs      the judges this file uses, each leg of each failing alone on doctored input, and green on the real one
 
@@ -78,7 +78,8 @@ SKIPS: list = []
 NICE = X.NICE
 ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
 NINE = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan")
-THIRTEEN = NINE + ("atan", "asin", "acos", "atan2")
+TWELVE = NINE + ("atan", "asin", "acos")           # the one-operand routines; atan2 (two operands) is the thirteenth
+THIRTEEN = TWELVE + ("atan2",)
 # the nine x of M4X's brief (item 8): 1, -1, 1 + ulp, 2^40, the largest normal, the smallest normal, a subnormal, two full significands
 X9 = (0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb)
 MARKS_LINE = re.compile(r"^(\S+) (\S+): (\d+) marked \(rne (\S+), rtz (\S+), rdn (\S+), rup (\S+), rmm (\S+)\), (\d+) off the list, "
@@ -344,7 +345,7 @@ def group_images(tool, tree, work, imgs, manifest):
         filecmp.cmp(os.path.join(d2, f), os.path.join(imgs, f), shallow=False) for f in os.listdir(imgs))
     built, skipped = gen_account(manifest)
     expected_files = 15 * len(built) + 1                     # three files an attribute, five attributes, a built name; and manifest.txt
-    check("images: the generator is deterministic - a second run into another directory writes the same files (15 for each built routine and the manifest: 136 with nine), byte for byte",
+    check("images: the generator is deterministic - a second run into another directory writes the same files (15 for each built routine and the manifest: 196 with thirteen), byte for byte",
           same and len(os.listdir(imgs)) == expected_files, f"{len(os.listdir(imgs))} files, {expected_files} expected, {o[-200:]}")
     rc, o = gen(d2)
     check("images: a DIR that exists is refused (exit 2), nothing written", rc == 2 and "exists" in o, o[-200:])
@@ -354,7 +355,7 @@ def group_images(tool, tree, work, imgs, manifest):
                             r"marks_sha256 [0-9a-f]{64} dag_digest [0-9a-f]{64} commit \S+$", re.M)
     check("images: the generator's account is whole - the names it built (`digest` lines) and the names it skipped (`skipped ... not built at fp32`) are disjoint, once each, "
           "BUILT in the tool's order, and together the thirteen", account_problems(built, skipped) == [], f"{account_problems(built, skipped)} {built} {skipped}")
-    check("images: the manifest has an image line for each (built name, attribute) - 45 with nine - with its three sha256, dag_digest and commit",
+    check("images: the manifest has an image line for each (built name, attribute) - 65 with thirteen - with its three sha256, dag_digest and commit",
           len(image_line.findall(manifest)) == 5 * len(built), f"{len(image_line.findall(manifest))} for {len(built)} built")
     # send-back 1 of parcel M4X2: the RED checks below evaluate the conditions of the checks above on doctored input - one on a doctored COPY of the images directory
     # (work/img-red), the others on doctored lists and on a manifest string held in memory; the digest judge's reds and greens, on doctored tables, follow them.
@@ -371,9 +372,8 @@ def group_images(tool, tree, work, imgs, manifest):
           any("neither built nor skipped" in x for x in account_problems(built[1:], skipped)), "")
     check("images: RED - an image line dropped: the manifest's image lines are not 5 for each built name",
           len(image_line.findall(manifest.replace(image_line.findall(manifest)[0] + "\n", "", 1))) != 5 * len(built), "")
-    check("images: GREEN - while atan is skipped: lists with one more built name (an atan `digest` line, atan taken off the skipped lines) have a whole account "
-          "(when atan is built the lists are the real ones and this repeats the account check)",
-          account_problems(built + ([("atan", "00000000")] if "atan" in skipped else []), [n for n in skipped if n != "atan"]) == [], "")
+    check("images: GREEN - a name moved from built to skipped (the last built, as the generator would report it unbuilt) is still a whole account; this runs for the case on the real lists",
+          len(built) > 0 and account_problems(built[:-1], skipped + [built[-1][0]]) == [], "")
     # parcel M4X2: the generator's `digest` lines against hw/card_stress_lib.py's table of them, which the card driver holds its build step to: a moved fragment
     # fails the gate at its merge and not a night. The judge is a function, so that it is shown red on a doctored table as well as green on the real one.
     mdig = built
@@ -396,7 +396,7 @@ def group_images(tool, tree, work, imgs, manifest):
     rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
     rng = random.Random(11)
     pool = list(har.pools(FP32))
-    for n in NINE:
+    for n in TWELVE:
         for ai, attr in enumerate(ATTRS):
             f = ml.fragment(n, FP32, rnd_of[attr])
             k = 200 if attr == "rne" else 32
@@ -453,30 +453,40 @@ def slice_lanes(lo, n):
 
 
 AGREE_SLICES = (0x3f7fff80, 0x40490f00)
+ATAN2_XS_RUN = (X9[0], X9[3], X9[8])     # the x that agree and whole run atan2 at: 1, 2^40, a full negative significand; the oracle group runs all nine
+
+
+def ops_of(name):
+    """[(op word, wrap)] of a name: <name>-f32 and the lane as it is, or for atan2 one op word a fixed x (ATAN2_XS_RUN) and the lane y paired with that x
+    for mathlib.evaluate, which takes atan2's (y, x)."""
+    if name != "atan2":
+        return [(f"{name}-f32", lambda y: y)]
+    return [(f"atan2-f32-x{x:08x}", lambda y, x=x: (y, x)) for x in ATAN2_XS_RUN]
 
 
 def group_agree(tool, names):
     FP32, ml, routines, sf, T, har = mods()
     rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
     for n in names:
+      for op, wrap in ops_of(n):
         for attr in ATTRS:
             f = ml.fragment(n, FP32, rnd_of[attr])
             for lo in AGREE_SLICES:
                 lanes = slice_lanes(lo, 256)
-                got, why = tool_oracle(tool, f"{n}-f32", attr, lanes)
+                got, why = tool_oracle(tool, op, attr, lanes)
                 bad, py_marked = [], 0
                 for x in lanes:
-                    bits, fw = ml.evaluate(f, x)
+                    bits, fw = ml.evaluate(f, wrap(x))
                     if fw & ml.MARK:
                         py_marked += 1
                     elif got is None or got[x] != (bits, fw):
                         bad.append(x)
-                rc, text, m = tool.run(f"{n}-f32", lo, lo + 256, attr)
-                ok, why2 = judge_run(rc, text, f"{n}-f32", attr, lo, lo + 256, 1)
+                rc, text, m = tool.run(op, lo, lo + 256, attr)
+                ok, why2 = judge_run(rc, text, op, attr, lo, lo + 256, 1)
                 mk = marks_of(text)
-                check(f"agree: {n} {attr} [{lo:#x}, +256): every unmarked lane of mathlib.evaluate is the oracle's in bits and flags",
+                check(f"agree: {op} {attr} [{lo:#x}, +256): every unmarked lane of mathlib.evaluate is the oracle's in bits and flags",
                       not bad and got is not None, f"{[hex(x) for x in bad[:3]]} {why}")
-                check(f"agree: {n} {attr} [{lo:#x}, +256): the tool passes the slice and its marks ({mk and mk[0]}) are evaluate's "
+                check(f"agree: {op} {attr} [{lo:#x}, +256): the tool passes the slice and its marks ({mk and mk[0]}) are evaluate's "
                       f"({py_marked})", ok and mk is not None and mk[0] == py_marked, f"{why2} {mk}")
 
 
@@ -529,10 +539,11 @@ def slices_of(bits):
 def group_whole(tool, names, bits):
     n = 1 << bits
     for name in names:
+      for op, _wrap in ops_of(name):
         for what, lo in slices_of(bits).items():
-            rc, text, m = tool.run(f"{name}-f32", lo, lo + n, "all")
-            ok, why = judge_run(rc, text, f"{name}-f32", "all", lo, lo + n, 5)
-            check(f"whole: {name} all over 2^{bits} lanes {what} [{lo:#x}, +{n:#x}): judged by L.parse_soak", ok, why)
+            rc, text, m = tool.run(op, lo, lo + n, "all")
+            ok, why = judge_run(rc, text, op, "all", lo, lo + n, 5)
+            check(f"whole: {op} all over 2^{bits} lanes {what} [{lo:#x}, +{n:#x}): judged by L.parse_soak", ok, why)
     lo = slices_of(bits)["around 1"]
     for attr in (ATTRS if "exp" in names else ()):      # once, with exp
         rc, text, m = tool.run("exp-f32", lo, lo + n, attr)

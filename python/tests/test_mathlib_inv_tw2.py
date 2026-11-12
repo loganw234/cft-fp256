@@ -1512,9 +1512,9 @@ def test_the_sweep_generator_builds_the_four_inverse_routines_at_fp32(tmp_path):
     judges 'must mark' by a list, so atan2's marks files carry no range lane
     and a range rule in the tool is a later parcel's); each `digest` line equal
     to the manifest's own rule over the five images and banks (the first 32
-    bits of the sha256 of rne to rmm, image then bank); the nine other
-    routines' digests equal to hw/card_stress_lib.py's ROUTINE_DIGESTS row
-    for row, the four inverse routines being names the table lacks."""
+    bits of the sha256 of rne to rmm, image then bank); the thirteen
+    digests equal to hw/card_stress_lib.py's ROUTINE_DIGESTS row
+    for row."""
     import hashlib
     import importlib.util
     import subprocess
@@ -1555,10 +1555,10 @@ def test_the_sweep_generator_builds_the_four_inverse_routines_at_fp32(tmp_path):
         spec.loader.exec_module(lib)
     finally:
         sys.modules.pop("card_stress_lib", None)
-    nine = {d[1]: d[2] for d in digests if d[1] in lib.ROUTINE_DIGESTS}
-    assert len(nine) == 9 and nine == dict(lib.ROUTINE_DIGESTS)
-    assert not any(n in lib.ROUTINE_DIGESTS
-                   for n in ("atan", "asin", "acos", "atan2"))
+    cat = {d[1]: d[2] for d in digests if d[1] in lib.ROUTINE_DIGESTS}
+    assert len(cat) == 13 and cat == dict(lib.ROUTINE_DIGESTS)
+    assert all(n in lib.ROUTINE_DIGESTS
+               for n in ("atan", "asin", "acos", "atan2"))
     assert len(digests) == 13
     # the three new digests, MEASURED at this commit (the entry gives them)
     assert (mine["asin"], mine["acos"], mine["atan2"]) == ("005fc862", "2f8ca421", "a86a60d8")

@@ -2844,7 +2844,7 @@ class Driver:
         makes the five images of each routine, their banks and marks lists, in a NEW directory of this run (never reused, never deleted
         here; it refuses one that exists), and the manifest it writes must carry this checkout's HEAD as its commit and, for every routine of
         hw/card_stress_lib.py's ROUTINE_DIGESTS, a `digest` line equal to the table's: a moved fragment fails the step, naming the routine, both
-        digests and what to update (a manifest digest the table lacks is said, not failed - a routine built before it has an item). The
+        digests and what to update (a manifest digest the table lacks is said, not failed - a routine built before its row is added; the table has all thirteen of routine_sweep.c's RTNS since parcel M4CAT). The
         directory is handed to every routine job (CFT_SWEEP_IMAGES). `mpfr routine-sweep`: with that environment and no CFT_SOAK_ARTIFACT or
         CFT_XRT_TILES, `routine-sweep list` names each routine of the table with five images and the table's digest (the tool's own, computed
         apart from the generator's), and one job on the software backend passes the soak's verdict and the marks' (ROUTINE_ORACLE_JOB) with an

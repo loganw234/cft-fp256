@@ -996,15 +996,17 @@ OP_FORMAT.update({
 # coverage, which is keyed by the item's name, starts from nothing for it: the tool refuses a digest that is not its images' (exit 2).
 #
 # ROUTINE_DIGESTS is the one table of them, in the tool's order: the digest `routine-sweep list` prints and gen_sweep_images.py's `digest` lines
-# give, MEASURED by the lead on amd-arc-box at c99df121 (box/tool-m4x/list.out) and held to the generator by hw/test_routine_sweep.py's
-# `images` leg. A routine with no digest has no item: atan, asin, acos and atan2 join when their fp32 programs are built and a later change
-# adds their digests (and the generator's names). HOW A DIGEST MOVES: a changed fragment (the routine's sources in python/cft_golden/mathlib.py,
+# give, held to the generator by hw/test_routine_sweep.py's `images` leg and to the real tool's `list` by the fixture hw/card_stress_fixtures/
+# rs-list.txt. The thirteen rows are the generator's `digest` lines, read from a run of gen_sweep_images.py at 53ec490b (parcel M4CAT's base) and equal at 25e398c1:
+# a routine with no digest has no item, and every routine of routine_sweep.c's RTNS now has one.
+# HOW A DIGEST MOVES: a changed fragment (the routine's sources in python/cft_golden/mathlib.py,
 # its constants or the compiler's output for it) changes the digest the generator writes; the table is then changed here, with the lead's
 # approval, as python/tests/routine_digests.py is changed; the item it makes is NEW (a new name), its coverage from nothing, and the old
 # item's slices stay in the files that hold them. The build step (hw/card_stress.py, `routine images`) fails by name on a table that disagrees.
 ROUTINE_DIGESTS = {
     "exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb", "log2": "c274c957",
     "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e",
+    "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8",
 }
 # atan2 is swept as every y for one fixed x, nine x (the lead's, plan.md decision 9), in the lead's order: (the x, what it is)
 ATAN2_X = (
@@ -1198,7 +1200,7 @@ class Item:
 
 
 def routine_items(digests: Optional[Dict[str, str]] = None) -> List[Item]:
-    """The routine items of a table of digests (ROUTINE_DIGESTS by default): the nine, in the tool's order; a test passes a table of its own
+    """The routine items of a table of digests (ROUTINE_DIGESTS by default): the thirteen, in the tool's order; a test passes a table of its own
     (atan2 among them), after putting its ops into OP_REACH and OP_FORMAT as the module does for the real ones."""
     return [Item(f"{op}-all", ROUTINE_TOOL, "exhaustive", op, "all", verdict_mode="all", exact=True, per_encoding=len(ROUTINE_ATTRS),
                  space=EXH, level="exhaustive", whole=(len(ROUTINE_ATTRS) * EXH, 0), mpfr=True, claim=routine_claim(name, d, x))
