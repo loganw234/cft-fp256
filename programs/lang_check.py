@@ -4955,17 +4955,23 @@ def four_demand(fn, F, rnd, lane):
 
 
 def four_range_pairs(F, everything=False):
-    """[(lane, label)]: atan2 pairs about the edge of the double word's
-    tiny-quotient range (mathlib_inv_harness._tq_band, the edge
-    atan2_status uses at every format), at every format, fp32 included: y/x
-    of c 2^-e, with c in 1, 3 and 5 and x in 1, 3 and 5 2^7 (the census's),
-    e from where that edge's bottom is passed (lane under it: marked),
-    through the edge (the band: either), to a few past it above (the main
-    path at fp64, fp128 and fp256). At fp32 the image's own range edge is the
-    triple word's, 2^-76 (mathlib.py's _build_atan2_tw, the harness's
-    _tq_band_tw), above the 2^-100 these pairs straddle: the pairs past
-    the double word's edge lie inside the fp32 image's range and are marked
-    there without being demanded, and the fp32 band is not exercised."""
+    """[(lane, label)]: atan2 pairs for the tiny-quotient range, at every
+    format, fp32 included: y/x of c 2^-e for (c, x) in (1, 1), (3, 3) and
+    (5, 5 2^7), so that y/x is a power of two, with e from just under the
+    double word's edge (mathlib_inv_harness._tq_band, the edge atan2_status
+    uses at every format) to well below it, and a few above it. MEASURED, by
+    atan2_status over these pairs at fp32, fp64, fp128 and fp256: the default
+    draw is 9 pairs, 6 "mark" (below the band) and 3 "gated" (above it: exact
+    quotients, which the exact-quotient rule decides and never marks); the
+    draw with `everything` is 18 pairs, 13 "mark" and 5 "gated"; at every
+    format none is "either" (in the band) and none is on the main path. So
+    no pair here is in the band; nor is any lane U1's four_lanes draws for
+    atan2 (MEASURED, all four formats and five attributes, default and
+    everything: statuses None, "gated" and "mark" only). At fp32 the image's
+    own range edge is the triple word's, 2^-76 (mathlib.py's
+    _build_atan2_tw, the harness's _tq_band_tw), above the 2^-100 the pairs
+    are drawn about: pairs between the two lie inside the fp32 image's range,
+    where the image marks, without being demanded."""
     iv, ih = inv()
     lo, _hi = ih._tq_band(F)
     e0 = lo.denominator.bit_length() - lo.numerator.bit_length() + 2

@@ -3777,10 +3777,11 @@ def leg_three(count, rng, everything=False):
 # does for the three. Structured centres of the families
 # (python/tests/mathlib_inv_family.py) are put in the primal, and atan2's
 # tiny-quotient range pairs at every format (a pair below the range's lower
-# edge is marked whatever the test says; one in the band at the edge may go
-# either way, and one above it is the test's; at fp32 the pairs are drawn
-# about the double word's edge, 2^-100, and the image's own edge is the
-# triple word's 2^-76, so the fp32 band is not exercised).
+# edge is marked whatever the test says; the pairs drawn are below it or exact
+# quotients above it that are never marked, and none is in the band at the
+# edge, where the seed's error decides; at fp32 the pairs are drawn about the
+# double word's edge, 2^-100, and the image's own edge is the triple word's
+# 2^-76).
 #
 # NO LANE IS MARKED BY THE TANGENT'S ROUTINE ALONE, as leg T's third control
 # shows for cos. That is a reading of the rules, not a measurement of every
