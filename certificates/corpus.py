@@ -6,6 +6,7 @@ docs/CERTIFICATES.md, "Golden certificates", is its manual.
 
     python certificates/corpus.py check --tool host/cft-segrun[.exe]
                                         [--seed HEX] [--keep DIR]
+                                        [--device ARTIFACT]
     python certificates/corpus.py make  --tool host/cft-segrun[.exe]
                                         [--rewrite-all]
     python certificates/corpus.py make  --keep-version-1
@@ -82,6 +83,27 @@ WHAT `check` HOLDS, for every case certificates/MANIFEST lists:
   7. the case named `example` is docs/CERTIFICATES.md's example
      certificate, and `markstep-fp64` its version-2 example, byte for
      byte.
+
+`check --device ARTIFACT` (the GPU backend's gate, parcel G1C, 2026-11-12)
+is the MANIFEST's conformance test for a device: 5 and 5b run cft-segrun
+with --device ARTIFACT, everything else as above. The tool's certificate is
+held to the committed bytes with the lines that name the implementation
+left out of both sides - backend, device-xclbin, device-version,
+device-caps and device-tiles, and in version 2 also device-platform,
+device-xrt, device-clock and device-serial, which a run on another device
+writes as it finds it - and every other line, boundary, block and raw file
+byte for byte. A case at a stated depth (deepwrap's) runs without
+--scratch-depth where the device's own depth (cft_caps.max_scratch,
+through the libcft beside the tool) is the case's, its run blocks then
+held without that one parameter, which the tool writes only with the
+option; at any other depth the option is kept, and the case must be
+refused by name: cft-segrun's usage refusal of a stated depth beside a
+device, exit 64. A case whose program needs a sequencer feature the device
+does not publish (augsum-fp64's AUGERR on a GPU without AUGADD) must be
+refused by the loader by name, the bit it names clear in the device's own
+seq_features (device_refused). Version 2's remake keeps the variables that
+choose and name the GPU (DEVICE_SELECTION). Section 5c prints the tool's
+device lines and the count line verify/run.sh's `hip` stage reads.
 
 `make` writes the corpus again from the recipes below: every image, bank,
 state and certificate, and the manifest. A version-1 certificate is the
@@ -1451,9 +1473,7 @@ def tool_args(case, runs_io, out, sdir, entries=()):
     writes what the tool wrote before, byte for byte."""
     a = ["--format-version", "1", "--out", out, "--states", sdir]
     a += ["--salt", rp(case.salt[0])] if case.mode == "keyed" else ["--open"]
-    depth = case.runs[0].depth_param()
-    if depth is not None:
-        a += ["--scratch-depth", str(depth)]
+    a += depth_args(case)
     for r, (img, bank, init) in zip(case.runs, runs_io):
         a += ["--run", r.kind]
         if r.kind == "half-step":
@@ -1711,6 +1731,164 @@ def device_exempt(data):
     lines = cert.body_of(data).decode("ascii").split(chr(10))
     return any(ln.startswith("device-platform ") and
                ln != "device-platform none" for ln in lines)
+
+
+# ---- check --device (the GPU backend's gate, parcel G1C, 2026-11-12) -------
+# The MANIFEST's head: an implementation may use the corpus as a conformance
+# test, making each case's runs at the case's depth, and must reproduce
+# every run block and accuracy value. `check --device ARTIFACT` makes every
+# case cft-segrun remakes on that device instead of the software backend
+# (`--device` on the tool's line), and holds it to the committed bytes with
+# the lines that name the implementation left out of both sides: the five
+# identity lines (cft-segrun writes `backend unknown` and `unknown` image
+# lines for a backend that is not software, xrt or remote, segrun.c's
+# header), and in version 2 the four device lines too, which a GPU writes
+# `unknown` where the committed software runs say `none`. Every other line,
+# and every boundary, block and raw file, byte for byte. Without --device
+# nothing here runs and `check` is what it was.
+DEVICE = None
+DEVICE_IDENTITY = ("backend", "device-xclbin", "device-version",
+                   "device-caps", "device-tiles")
+# The variables that choose which GPU hip:N is, and name it: version 2's
+# remake clears every variable the certificate records (cert2's list), and
+# that list has held these since 7ddef7b4 - a remake without them opens
+# another device than the run's. Their `env` lines are measured lines.
+DEVICE_SELECTION = ("CFT_HIP_INFO", "CUDA_VISIBLE_DEVICES",
+                    "HIP_VISIBLE_DEVICES")
+DEVICE_CAPS = []        # the device's (max_scratch, seq_features), read once
+DEV_REMADE = []         # remade on the device and held
+DEV_REFUSED = []        # refused as expected: (case, why)
+DEV_DROPPED = set()     # run without --scratch-depth, at the device's own
+DEV_LINES = {}          # the tool's CFT_HIP_INFO lines: line -> runs
+
+
+def device_depth():
+    """The device's own scratch depth, cft_caps.max_scratch."""
+    return device_caps()[0]
+
+
+def device_caps():
+    """The device's max_scratch and seq_features (cft_caps), read through
+    the libcft beside the tool (the stage builds both from one tree)."""
+    if not DEVICE_CAPS:
+        import ctypes
+
+        class Caps(ctypes.Structure):
+            # cft.h's cft_caps to max_scratch: an output struct, so the
+            # size handshake fills what this mirror holds and no more
+            _fields_ = [("struct_size", ctypes.c_size_t),
+                        ("format_mask", ctypes.c_uint32),
+                        ("tiles", ctypes.c_uint32),
+                        ("abi_version", ctypes.c_uint32),
+                        ("device_version", ctypes.c_uint32),
+                        ("flags_readable", ctypes.c_int),
+                        ("backend", ctypes.c_char * 32),
+                        ("max_deposits", ctypes.c_uint32),
+                        ("max_insns", ctypes.c_uint32),
+                        ("max_consts", ctypes.c_uint32),
+                        ("seq_features", ctypes.c_uint32),
+                        ("max_scratch", ctypes.c_uint32)]
+        name = {"win32": "cft.dll", "cygwin": "cft.dll",
+                "darwin": "libcft.dylib"}.get(sys.platform, "libcft.so")
+        lib = ctypes.CDLL(str(TOOL.parent / name))
+        lib.cft_last_error.restype = ctypes.c_char_p
+        dev, caps = ctypes.c_void_p(), Caps()
+        caps.struct_size = ctypes.sizeof(Caps)
+        st = lib.cft_open(DEVICE.encode("utf-8"), 0, ctypes.byref(dev))
+        if st != 0:
+            sys.exit(f"corpus: --device {DEVICE}: cft_open through "
+                     f"{TOOL.parent / name} refused it: "
+                     f"{lib.cft_last_error().decode('utf-8', 'replace')}")
+        st = lib.cft_get_caps(dev, ctypes.byref(caps))
+        lib.cft_close(dev)
+        if st != 0 or not caps.max_scratch:
+            sys.exit(f"corpus: --device {DEVICE} publishes no scratch depth")
+        DEVICE_CAPS.append((caps.max_scratch, caps.seq_features))
+    return DEVICE_CAPS[0]
+
+
+def depth_args(case):
+    """The tool's device and depth: --scratch-depth at a case's stated
+    depth, as always; with --device, the device first, and the depth
+    option dropped where the device's own depth is the case's (cft-segrun
+    refuses it beside any device but sw: a device's depth is its own) and
+    kept where it is not, which the tool must refuse (device_refused)."""
+    depth = case.runs[0].depth_param()
+    a = [] if DEVICE is None else ["--device", DEVICE]
+    if depth is not None:
+        if DEVICE not in (None, "sw") and depth == device_depth():
+            DEV_DROPPED.add(case.name)
+        else:
+            a += ["--scratch-depth", str(depth)]
+    return a
+
+
+def device_refused(case, rc, err):
+    """None where the case is the device's to make; else, after holding the
+    tool's refusal to the one it must get, True. Two refusals are a device's
+    to give, each by name: a case at a stated depth that is not the device's
+    (cft-segrun's usage refusal of the depth beside a device, exit 64), and a
+    case whose program needs a sequencer feature the device does not publish
+    (the loader's sentence naming the CAPS place and the cft_caps bit, which
+    must be clear in the device's word: program-image, exit 4) - as
+    seq_check --device counts a program refused by name. Anything else a
+    device run says is a failure, as it always was."""
+    if DEVICE in (None, "sw"):
+        return None
+    depth = case.runs[0].depth_param()
+    if depth is not None and depth != device_depth():
+        want = (f"cft-segrun: refused usage: --scratch-depth {depth} beside "
+                f"--device {DEVICE}")
+        if check_that(rc == 64 and want in err, f"{case.name}: refused by name "
+                      f"on {DEVICE}, as it must be - its depth is {depth} and "
+                      f"the device's {device_depth()}: \"{want}\" (exit 64)",
+                      f"rc {rc}: {err.strip()[-300:]}"):
+            DEV_REFUSED.append((case.name, f"its depth {depth}, a stated depth "
+                                f"beside a device (cft-segrun's usage refusal)"))
+        return True
+    m = re.search(r"does not publish it \((CAPS2?\[\d+\]) clear, "
+                  r"cft_caps\.seq_features bit (\d+) - (CFT_SEQ_FEAT_\w+)\)", err)
+    if rc == 4 and m:
+        bit = int(m.group(2))
+        if check_that(not device_caps()[1] & (1 << bit), f"{case.name}: refused "
+                      f"by name on {DEVICE}, as it must be - its program needs "
+                      f"{m.group(3)} ({m.group(1)}), which the device does not "
+                      f"publish (seq_features 0x{device_caps()[1]:x}): the "
+                      f"loader's refusal, exit 4",
+                      f"the device publishes bit {bit}, and refused it: "
+                      f"{err.strip()[-300:]}"):
+            DEV_REFUSED.append((case.name, f"it needs {m.group(3)} "
+                                f"({m.group(1)}), which the device does not "
+                                f"publish (the loader's refusal)"))
+        return True
+    return None
+
+
+def device_seen(err):
+    """The tool's CFT_HIP_INFO lines, kept to be printed once each."""
+    for ln in err.splitlines():
+        if ln.startswith("cft hip: "):
+            DEV_LINES[ln] = DEV_LINES.get(ln, 0) + 1
+
+
+def device_held(data, case, skip):
+    """A certificate's body lines held under --device: all but `skip`'s
+    keys; and where the case ran without its depth option, its run blocks'
+    depth parameter left out of the committed lines, each run's
+    `parameters` count one less (the tool writes the parameter only with
+    the option, segrun.c's put_parameters)."""
+    out, last = [], None
+    for ln in cert.body_of(data).decode("ascii").split("\n")[:-1]:
+        if ln.split(" ")[0] in skip:
+            continue
+        if case.name in DEV_DROPPED and ln.startswith(f"parameter {DEPTH_PARAM} "):
+            if last is not None:
+                out[last] = f"parameters {int(out[last].split(' ')[1]) - 1}"
+            continue
+        if ln.startswith("parameters "):
+            last = len(out)
+        out.append(ln)
+    return out
 
 _COMPILES = {}
 
@@ -2555,9 +2733,13 @@ def hold_case(case, images, build_id, seed, work):
         # the entries as the committed certificate defines them; their
         # values are what the tool must make again
         rc, _, se = run_tool(tool_args(case, io, out, sdir, parsed.accuracy))
-        if check_that(rc == 0, f"{case.name}: cft-segrun makes it on the "
-                      f"software backend ({time.perf_counter() - t1:.1f} s)",
-                      f"rc {rc}: {se.strip()[-300:]}"):
+        device_seen(se)
+        if device_refused(case, rc, se):
+            pass
+        elif check_that(rc == 0, f"{case.name}: cft-segrun makes it on the "
+                        f"{'software backend' if DEVICE is None else 'device ' + DEVICE}"
+                        f" ({time.perf_counter() - t1:.1f} s)",
+                        f"rc {rc}: {se.strip()[-300:]}"):
             mine = out.read_bytes()
             got = cert.parse(mine).identity.build_id
             check_that(got == build_id, f"{case.name}: its build-id line is "
@@ -2568,8 +2750,23 @@ def hold_case(case, images, build_id, seed, work):
                     "from their definitions, but for build-id and the hash "
                     "line" if case.accuracy else "the committed bytes but for "
                     "build-id and the hash line")
-            check_that(mine == want, f"{case.name}: cft-segrun writes {what}",
-                       first_difference(want, mine))
+            if DEVICE is None:
+                held = check_that(mine == want, f"{case.name}: cft-segrun "
+                                  f"writes {what}", first_difference(want, mine))
+            else:
+                w = device_held(want, case, DEVICE_IDENTITY)
+                g = device_held(mine, case, DEVICE_IDENTITY)
+                held = check_that(w == g, f"{case.name}: cft-segrun on "
+                                  f"{DEVICE} writes {what}, and the identity "
+                                  f"lines ({', '.join(DEVICE_IDENTITY)})"
+                                  + (f", run at the device's own depth "
+                                     f"{device_depth()} without --scratch-depth,"
+                                     f" so with no {DEPTH_PARAM} parameter in "
+                                     f"its run blocks" if case.name in
+                                     DEV_DROPPED else "")
+                                  + f" ({len(w)} lines)",
+                                  first_difference("\n".join(w).encode(),
+                                                   "\n".join(g).encode()))
             names = sorted(os.listdir(sdir)) if sdir.is_dir() else []
             want_names = sorted(Path(r.state_path(case, b)).name
                                 for r in case.runs
@@ -2580,6 +2777,8 @@ def hold_case(case, images, build_id, seed, work):
             check_that(same, f"{case.name}: its {len(want_names)} boundary "
                        f"files are the committed ones, byte for byte",
                        f"it wrote {names[:6]}")
+            if DEVICE is not None and held and same:
+                DEV_REMADE.append(case.name)
     # 6. the golden audit
     full = {r.index: {0: rp(r.state_path(case, 0)).read_bytes()}
             for r in case.runs}
@@ -2717,9 +2916,7 @@ def c_writer_args(case, data, out, sdir, work):
                     if ln.split(" ")[0] == key)
     a = ["--out", out, "--states", sdir]
     a += ["--salt", rp(case.salt[0])] if case.mode == "keyed" else ["--open"]
-    depth = case.runs[0].depth_param()
-    if depth is not None:
-        a += ["--scratch-depth", str(depth)]
+    a += depth_args(case)
     for key in ("certificate-id", "issuer", "issuer-key", "supersedes",
                 "initial"):
         a += [f"--{key}", val(key)]
@@ -2790,7 +2987,8 @@ def hold_case2_tool(case, data, work):
         return
     e = dict(os.environ)
     for n in cert2.ENVIRONMENT_NAMES:
-        e.pop(n, None)
+        if DEVICE is None or n not in DEVICE_SELECTION:
+            e.pop(n, None)
     try:
         r = subprocess.run([str(TOOL)] + [str(x) for x in args],
                            capture_output=True, text=True, env=e,
@@ -2798,8 +2996,12 @@ def hold_case2_tool(case, data, work):
         rc, se = r.returncode, r.stderr
     except subprocess.TimeoutExpired:
         rc, se = -1, f"corpus: the tool ran past {TOOL_TIMEOUT} s"
+    device_seen(se)
+    if device_refused(case, rc, se):
+        return
     if not check_that(rc == 0, f"{case.name}: cft-segrun writes it at version "
-                      f"2 on the software backend "
+                      f"2 on the "
+                      f"{'software backend' if DEVICE is None else 'device ' + DEVICE} "
                       f"({time.perf_counter() - t1:.1f} s)",
                       f"rc {rc}: {se.strip()[-400:]}"):
         return
@@ -2811,12 +3013,24 @@ def hold_case2_tool(case, data, work):
         bad(f"{case.name}: the golden reader refuses cft-segrun's: {x}")
         return
     device = device_exempt(data)
-    want, got = held_lines(data, device), held_lines(mine, device)
+    if DEVICE is None:
+        want, got = held_lines(data, device), held_lines(mine, device)
+    else:
+        skip = (set(C_WRITER_MEASURED) | set(C_WRITER_DEVICE)
+                | set(DEVICE_IDENTITY))
+        want = device_held(data, case, skip)
+        got = device_held(mine, case, skip)
     same = want == got
     check_that(same, f"{case.name}: cft-segrun writes every line but its own "
                f"measurements byte for byte ({len(want)} lines; the device "
-               f"lines {'left out: a card' if device else 'held'}"
-               f"{'; its replay-method names its replay image' if any(ln.startswith('replay-method ') for ln in cert.body_of(mine).decode('ascii').split(chr(10))) else ''})",
+               + (f"lines {'left out: a card' if device else 'held'}"
+                  if DEVICE is None else
+                  f"lines and the identity lines left out: {DEVICE}"
+                  + (f"; run at the device's own depth {device_depth()} "
+                     f"without --scratch-depth, so with no {DEPTH_PARAM} "
+                     f"parameter in its run blocks" if case.name in
+                     DEV_DROPPED else ""))
+               + f"{'; its replay-method names its replay image' if any(ln.startswith('replay-method ') for ln in cert.body_of(mine).decode('ascii').split(chr(10))) else ''})",
                first_difference("\n".join(want).encode("ascii"),
                                 "\n".join(got).encode("ascii")))
     names = sorted(os.listdir(sdir)) if sdir.is_dir() else []
@@ -2856,6 +3070,8 @@ def hold_case2_tool(case, data, work):
                    f"{(s.stderr + v.stderr).strip()[-300:]}")
     if same and files_same:
         C_REMADE.append(case.name)
+        if DEVICE is not None:
+            DEV_REMADE.append(case.name)
 
 
 def hold_case2(case, corpus, images, seed, made, work=None):
@@ -2995,14 +3211,42 @@ def check(seed, keep):
     both = [n for n, _d in NOTES]
     card = [n for n, d in NOTES if d]
     if TOOL is not None:
-        check_that(both and sorted(C_REMADE) == sorted(both),
+        # under --device, a case the device must refuse is held to its
+        # refusal (device_refused) and is accounted for by it
+        refused = [n for n, _d in DEV_REFUSED if n in both]
+        check_that(both and sorted(C_REMADE + refused) == sorted(both),
                    f"cft-segrun remade all {len(both)} version-2 cases marked "
                    f"writers both, every line but "
                    f"{', '.join(C_WRITER_MEASURED)} byte for byte, and the "
                    f"four device lines too where the case carries a card's "
                    f"values ({', '.join(card) or 'none'}), its files the "
-                   f"committed ones: {', '.join(both)}",
+                   f"committed ones: {', '.join(both)}"
+                   + ("" if DEVICE is None else
+                      f" - on {DEVICE}, with the identity lines and the four "
+                      f"device lines left out of every case"
+                      + (f", and {', '.join(refused)} refused by name"
+                         if refused else "")),
                    f"remade {sorted(C_REMADE)} of {sorted(both)}")
+    if DEVICE is not None and TOOL is not None:
+        print(f"== 5c. the device: every remake above made on {DEVICE}",
+              flush=True)
+        if DEVICE != "sw" and os.environ.get("CFT_HIP_INFO") == "1":
+            check_that(DEV_LINES, f"the tool named its device "
+                       f"(CFT_HIP_INFO=1) on {sum(DEV_LINES.values())} runs, "
+                       f"{len(DEV_LINES)} distinct line(s), each below")
+        for ln in sorted(DEV_LINES):
+            print(ln, flush=True)
+        dropped = sorted(DEV_DROPPED)
+        print(f"corpus check --device {DEVICE}: {len(DEV_REMADE)} cases remade "
+              f"by cft-segrun on the device and held to the committed bytes "
+              f"but for the identity lines ({', '.join(DEVICE_IDENTITY)}; in "
+              f"version 2 also {', '.join(C_WRITER_DEVICE)})"
+              + (f", {', '.join(dropped)} at the device's own depth "
+                 f"{device_depth()} without --scratch-depth, its {DEPTH_PARAM} "
+                 f"parameter left out" if dropped else "")
+              + f"; {len(DEV_REFUSED)} refused by name as expected"
+              + (" (" + "; ".join(f"{n}: {why}" for n, why in DEV_REFUSED)
+                 + ")" if DEV_REFUSED else ""), flush=True)
     print("== 7. the page's example certificates", flush=True)
     ex = [c for c in corpus.cases if c.name == "example"]
     if check_that(len(ex) == 1, "the corpus has the case `example`"):
@@ -3031,7 +3275,7 @@ def finish(t_all):
 
 
 def main():
-    global TOOL
+    global TOOL, DEVICE
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("what", choices=("check", "make"))
     ap.add_argument("--tool", help="the cft-segrun binary (check: without "
@@ -3051,11 +3295,23 @@ def main():
                     help="make: keep every version-1 case as committed, its "
                     "files untouched, needing no tool, and write version 2's "
                     "again")
+    ap.add_argument("--device", metavar="ARTIFACT",
+                    help="check: cft-segrun makes every case it remakes on "
+                    "this device (its --device: sw, an xclbin, cft://, "
+                    "hip:N), held to the committed bytes but for the lines "
+                    "that name the implementation; a case at a depth the "
+                    "device does not run at must be refused by name "
+                    "(device_refused)")
     args = ap.parse_args()
     if args.tool:
         TOOL = Path(args.tool).resolve()
         if not TOOL.is_file():
             sys.exit(f"corpus: {TOOL} is not built (make -C host cft-segrun)")
+    if args.device is not None:
+        if args.what != "check" or TOOL is None:
+            sys.exit("corpus: --device is check's, beside --tool: it chooses "
+                     "where cft-segrun makes the cases it remakes")
+        DEVICE = args.device
     if args.what == "make":
         if TOOL is None and not args.keep_version_1:
             sys.exit("corpus make: --tool is required (or --keep-version-1)")
