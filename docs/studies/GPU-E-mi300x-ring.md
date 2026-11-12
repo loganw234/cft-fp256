@@ -5,6 +5,15 @@ the sixth of the GPU series. Branch `gpu-e` from `53ec490b`. Its cost model,
 run script and captured outputs are in `studies/gpu-e/`. Nothing outside
 `studies/` and the index changed, and nothing in cft-rebound changed.
 
+*Corrected 2026-11-12 (parcel GPU-E2), from cft-rebound's round 4, which built
+the ring run's CPU half: §6 item 3's format-difference check, a wrong answer
+(its dated line is there), and question 4 with it; the J2/J4 term COUNTED from
+its code at cft-rebound 291c99c in place of this study's ESTIMATE, and every
+figure that moved; the expressible run (17,544 full waves, 1,000,008
+particles); Pan's cap on the step, a known limit; §6 item 4 brought up to
+cft-rebound's test-particle and zonal problem lines. docs/VALIDATION.md's
+GPU-E2 entry lists each with its source.*
+
 > "When time comes to run the MI300X trials, I'd also like to do an IAS15 run,
 > but utilizing as many resources from the MI300X as possible, perhaps
 > something 'simple' but highly parallel like hundreds of thousands of bodies
@@ -22,17 +31,17 @@ file, named), **COMPUTED** (arithmetic on the others, in
 
 ## The answer (the recommendation is mine; the choices are Logan's)
 
-1. **Run a test-particle ring, one wave a system:** each 64-lane wave holds 57 massless ring particles with Saturn (J2, J4) and six moons, each wave with its own adaptive step; 10^6 particles in the annulus 130,000 to 142,000 km (the Encke gap with Pan, the Keeler gap, the A ring's edge, the F ring between Prometheus and Pandora).
-2. **binary128 at epsilon 1e-9 for 10 orbits (5.8 days), binary64 on the same steps beside it, binary256 on a tenth of the waves** (ESTIMATE, generic tier: 1.4 to 3.3 h, 0.4 to 0.9 h and 3.2 to 9.2 h; specialised: 7 to 12 min, 2 to 3 min, 15 to 35 min).
-3. **It fills the device by occupancy** (17,544 waves against 6,080 to 7,296 resident), not by memory (2.5 % of HBM held, at most 3.1 % of its bandwidth). Every lane is live, so the integer issue it reaches is the arithmetic kernel's own, unmeasured on any AMD GPU; 7 lanes of 64 carry Saturn and the moons.
+1. **Run a test-particle ring, one wave a system:** each 64-lane wave holds 57 massless ring particles with Saturn (J2, J4) and six moons, each wave with its own adaptive step; 17,544 full waves, 1,000,008 particles (10^6 is not a multiple of 57, and cft-rebound's ensemble file holds N bodies in every system), in the annulus 130,000 to 142,000 km (the Encke gap with Pan, the Keeler gap, the A ring's edge, the F ring between Prometheus and Pandora).
+2. **binary128 at epsilon 1e-9 for 10 orbits (5.8 days), binary64 on the same steps beside it, binary256 on a tenth of the waves** (ESTIMATE, generic tier: 1.9 to 4.5 h, 0.5 to 1.2 h and 4.5 to 12.9 h; specialised: 9 to 17 min, 2 to 4 min, 21 to 48 min).
+3. **It fills the device by occupancy** (17,544 waves against 6,080 to 7,296 resident), not by memory (2.5 % of HBM held, at most 2.3 % of its bandwidth). Every lane is live, so the integer issue it reaches is the arithmetic kernel's own, unmeasured on any AMD GPU; 7 lanes of 64 carry Saturn and the moons.
 4. **Built first:** a divide and a square root callable inside a kernel (none is: divsqrt.c's run on the host; mine, the sequencer's divfull and sqrtfull on the device's executor), the IAS15 wave kernel, J2 and J4 in libcft's format, and the replay check against cft-rebound's CPU engine. The ladder is the RX 7600 at 3 x 10^4 particles and the 5060 Ti at 10^5.
-5. **Fallback:** 3 x 10^5 particles, 3 orbits, binary128 and binary64 (generic, 9 to 25 min and 2 to 7 min). A self-gravitating ring costs 10^3 times the test-particle ring at 10^5 bodies and 5 x 10^4 times at 10^6 (an orbit at 10^6: 1.4 to 3.4 years generic).
+5. **Fallback:** 3 x 10^5 particles, 3 orbits, binary128 and binary64 (generic, 12 to 34 min and 3 to 9 min). A self-gravitating ring costs 10^3 times the test-particle ring at 10^5 bodies and 3 x 10^4 times at 10^6 (an orbit at 10^6: 1.4 to 3.4 years generic).
 
-The one finding that changes a plan: **divide and square root are 58 % of a
-substep-pass** (COMPUTED, binary256): 74 % of the force, which is 79 % of the
-substep-pass. A specialised FMA, ADD and MUL alone (round 3's first kernels)
-speed the ring by x1.5 to x1.7, not x7 to x30, unless the divide and square
-root ride on them.
+The one finding that changes a plan: **divide and square root are 69 % of a
+substep-pass** (COMPUTED, binary256): 81 % of the force, which is 85 % of the
+substep-pass; J2 and J4 alone are 40 % of the force, with ten divides and a root
+a body. A specialised FMA, ADD and MUL alone (round 3's first kernels) speed
+the ring by x1.4, not x7 to x30, unless the divide and square root ride on them.
 
 ## 0. Sources and what was not done
 
@@ -42,6 +51,9 @@ docs/ENSEMBLE.md, docs/HARDWARE.md, docs/HORIZON.md, docs/VALIDATION.md (the
 ensemble and replay entries), src/ias15_cft.c. In this repository:
 studies/GPU-A-hip.md, docs/BENCHMARKS.md, G1A's tree at `066dde9f` by
 `git show`, and the GPU backend's round-1 plan. The web pages are named where used.
+On 2026-11-12 (GPU-E2), at cft-rebound 291c99c by `git show` only, its HEAD and
+`git status` again the same before and after: src/ias15_zonal.inc whole,
+tools/check_zonal.py's statement of its gates, and src/ias15_cft.c's problem lines.
 
 MEASURED: cft-rebound and its pinned cft-fp256 (`922c2ad`) cloned from this
 desktop's repositories into WSL cft-gpu, `make -j4 build/ias15_cft` (10 s, no
@@ -128,10 +140,29 @@ coordinate, not by kind; the kinds are counted here from src/ias15_cft.c.
 | a step, a system: the step's choice and ratio | 8 MUL, 3 DIV, 1 SQRT (FMA form: 14 MUL more for `fl(dt h_n)`) | the same | :2446-2483, :2975, :2811-2814 |
 | gravity, a test particle and one massive partner | 9 ADD, 9 MUL, 1 SQRT, 1 DIV | the same | REBOUND's test-particle loop |
 | gravity, an active pair, both sides | 12 ADD, 13 MUL, 1 SQRT, 1 DIV | the same | :1516-1535, :1562 |
-| J2 and J4, a body an evaluation | ESTIMATE: 1 DIV, 21 MUL, 6 FMA, 6 ADD | the same | not in cft-rebound |
+| J2 and J4, a body an evaluation | 3 SUB, 14 ADD, 34 MUL, 1 SQRT, 10 DIV (two exact, by 2 and 8); no FMA | the same | cft-rebound 291c99c, src/ias15_zonal.inc :232-325 |
 
 Gravity runs once at a step's start and seven times a pass (:2795, :2863), so
 a step attempt with p passes makes 7p + 1 force evaluations.
+
+**J2 and J4, COUNTED 2026-11-12** by reading cft-rebound's src/ias15_zonal.inc
+at 291c99c (its round 4's P1; nothing built): the geometry (:232-242) is 3 SUB,
+3 MUL, 2 ADD, 1 SQRT, 1 DIV and G*M (1 MUL); `G*m_j` is 1 MUL (:298); J2 is
+4 DIV, 1 MUL and 2 ADD (:301-307) and J4 5 DIV, 4 MUL and 4 ADD (:312-324),
+each followed by `zonal_apply()`'s 12 MUL and 3 ADD (:263-277): 6 multiplies
+for the body's own acceleration and 6 for its reaction on the planet. Every
+call is E(N-1) wide, so **a test particle pays all of it: 3 SUB, 14 ADD, 34 MUL,
+1 SQRT and 10 DIV an evaluation**, 13 of the multiplies the reaction's, made
+and discarded (a test particle gives none, :279). A massive body pays the same
+and 6 SUB more, its reaction subtracted from the planet's (:285, 3 a pass).
+Each evaluation also forms the two constants, 8 MUL of one element (:250-252),
+a call's and not a body's. This equals cft-rebound's lead's count; the reaction's
+6 SUB and the constants' 8 MUL are mine beside it, and the model carries the
+first (`J2J4_REACT`) and not the second. The two exact divides could be
+multiplications by 1/2 and 1/8 with the same bits and flags, since the exact
+result is the same (BELIEVED; cft-rebound keeps them divides, :47). It
+replaces this study's ESTIMATE of 2026-11-11 (1 DIV, 21 MUL, 6 FMA, 6 ADD):
+ten divides where it guessed one, which is most of what moved below.
 
 **The check that can fail, MEASURED:** the counts give the divides and square
 roots a run issues exactly: 99 a pass and 23 an attempt in REBOUND's form, 15
@@ -149,30 +180,37 @@ FMAs at binary64, 128 and 256, a square root 18, 20 and 28):
 
 | format, epsilon, passes | form | ADD | MUL | FMA | DIV | SQRT | FMA-equivalents |
 |---|---|---|---|---|---|---|---|
-| binary64, 1e-9, 3.025 | FMA | 3,890 | 2,728 | 641 | 184 | 157 | 11,636 |
-| binary64, 1e-9, 3.025 | REBOUND's | 4,398 | 3,495 | 133 | 992 | 157 | 23,529 |
-| binary128, 1e-9, 8.010 | FMA | 9,438 | 6,497 | 1,688 | 469 | 401 | 30,042 |
-| binary128, 1e-12, 5.660 | FMA | 6,823 | 4,720 | 1,195 | 335 | 286 | 21,557 |
-| binary256, 1e-9, 19.980 | FMA | 22,761 | 15,546 | 4,202 | 1,151 | 988 | 98,207 |
-| binary256, 1e-16, 11.035 | FMA | 12,805 | 8,783 | 2,323 | 641 | 550 | 54,897 |
-| binary256, 1e-16, 11.035 | REBOUND's | 14,659 | 11,737 | 469 | 3,467 | 550 | 130,140 |
+| binary64, 1e-9, 3.025 | FMA | 4,134 | 3,016 | 508 | 384 | 179 | 15,145 |
+| binary64, 1e-9, 3.025 | REBOUND's | 4,642 | 3,783 | 0 | 1,191 | 179 | 27,038 |
+| binary128, 1e-9, 8.010 | FMA | 10,066 | 7,238 | 1,346 | 982 | 459 | 40,562 |
+| binary128, 1e-12, 5.660 | FMA | 7,269 | 5,248 | 951 | 700 | 327 | 29,045 |
+| binary256, 1e-9, 19.980 | FMA | 24,310 | 17,377 | 3,357 | 2,419 | 1,129 | 137,099 |
+| binary256, 1e-16, 11.035 | FMA | 13,666 | 9,801 | 1,854 | 1,345 | 628 | 76,501 |
+| binary256, 1e-16, 11.035 | REBOUND's | 15,520 | 12,754 | 0 | 4,171 | 628 | 151,744 |
 
-A substep-pass costs 496, 516 and 692 FMA-equivalents in the FMA form
-(binary64, 128, 256) and 1,029, 1,146 and 1,651 in REBOUND's: **REBOUND's form
-costs 2.1 to 2.4 times the FMA form** (COMPUTED). 97 % of the difference at
+(Moved 2026-11-12 with the J2/J4 count, from 11,636, 23,529, 30,042, 21,557,
+98,207, 54,897 and 130,140 FMA-equivalents, row by row; ADD here includes SUB.)
+
+A substep-pass costs 654, 700 and 968 FMA-equivalents in the FMA form
+(binary64, 128, 256) and 1,188, 1,331 and 1,927 in REBOUND's (from 496, 516, 692
+and 1,029, 1,146, 1,651): **REBOUND's form costs 1.8 to 2.0 times the FMA form**
+(COMPUTED; it was 2.1 to 2.4 with the ESTIMATE). 97 % of the difference at
 binary256 is the divides REBOUND writes, 24 a particle a substep in the predictor
 (by small integers) and 12 in the corrector (by the node spacings), which the FMA
 form replaces by multiplications by exact reciprocals rounded once. The FMA form
 differs from REBOUND at round-off (3e-15 relative at binary64, READ
 HARDWARE.md:89-92) and is cft-rebound's own gated form.
 
-**Where the work is** (COMPUTED, binary256, FMA form): the force is 79 % of a
-substep-pass and the divide and square root are 74 % of the force, one of each
-a partner for `1/r^3` (correctly rounded, as REBOUND's bits need). The
-BELIEVED premise is that each op's cost in FMAs carries from the CPU to the GPU,
-since the same C runs and `cft_div` is ~25-30 FMA-class passes by construction
+**Where the work is** (COMPUTED, binary256, FMA form): the force is 85 % of a
+substep-pass and the divide and square root are 81 % of the force, 69 % of the
+substep-pass: one of each a gravity partner for `1/r^3` (correctly rounded, as
+REBOUND's bits need), and J2 and J4's ten divides and one root a body. J2 and J4
+alone are 40 % of the force. (With the ESTIMATE these were 79 %, 74 % and 58 %.)
+The BELIEVED premise is that each op's cost in FMAs carries from the CPU to the
+GPU, since the same C runs and `cft_div` is ~25-30 FMA-class passes by construction
 (READ, BENCHMARKS.md:587-593). So a specialised tier x6.7 to x30 on every op is
-that much faster, but on FMA, ADD and MUL alone it is **x1.54 to x1.67**.
+that much faster, but on FMA, ADD and MUL alone it is **x1.36 to x1.43** (was
+x1.54 to x1.67).
 
 ## 3. The tolerance, and steps per orbit
 
@@ -282,7 +320,7 @@ less at 10^5. Close encounters, which shorten steps, are in none of it.
 ### (a) A test-particle ring: Saturn with J2 and J4, six moons, N massless particles
 
 Three parallel shapes (the moons and Saturn are integrated in every system):
-- **a1, one lane a system** (ENSEMBLE.md's ensemble): a lane carries Saturn, six moons and one particle, so each lane does **5.2 to 5.6 times** a lone particle's work (COMPUTED: eight bodies' corrector, 28 pairs). Each lane has its own step and its own passes; inside a wave the passes diverge, and the lanes that converged ride along masked. MEASURED here on eight members spread from r = 1.0 to 1.7: pc_lane_efficiency 0.986 at binary64 (epsilon 1e-9) and 0.93 at binary128 (epsilon 1e-12); the table below applies 0.93 to binary128 at 1e-9 and to binary256, ASSUMED there (READ VALIDATION.md:655-657: 0.687 to 0.996 on the gate's families). Steps diverge too: every member takes the same steps per own orbit (35.9 at binary64 and 96.3 at binary128 in the runs' second halves, MEASURED), so a member at 1.7 needs 2.2 times fewer steps per unit time than one at 1.0 (COMPUTED); lanes sorted by radius keep a wave's members within a narrow annulus.
+- **a1, one lane a system** (ENSEMBLE.md's ensemble): a lane carries Saturn, six moons and one particle, so each lane does **5.8 to 6.0 times** a lone particle's work (COMPUTED: eight bodies' corrector, 28 pairs, seven bodies' J2 and J4; 5.2 to 5.6 with the ESTIMATE). Each lane has its own step and its own passes; inside a wave the passes diverge, and the lanes that converged ride along masked. MEASURED here on eight members spread from r = 1.0 to 1.7: pc_lane_efficiency 0.986 at binary64 (epsilon 1e-9) and 0.93 at binary128 (epsilon 1e-12); the table below applies 0.93 to binary128 at 1e-9 and to binary256, ASSUMED there (READ VALIDATION.md:655-657: 0.687 to 0.996 on the gate's families). Steps diverge too: every member takes the same steps per own orbit (35.9 at binary64 and 96.3 at binary128 in the runs' second halves, MEASURED), so a member at 1.7 needs 2.2 times fewer steps per unit time than one at 1.0 (COMPUTED); lanes sorted by radius keep a wave's members within a narrow annulus.
 - **a2, one wave a system:** 57 particles share a step with Saturn and the moons in seven lanes; 57/64 of the lanes carry particles. No divergence inside a wave: one step, one pass count, the reductions (the corrector's maxima, the step's minimum) across 64 lanes in registers.
 - **a3, one system:** all N share one step and one exit test. MEASURED here: one system of 8, 16 and 32 particles takes the innermost particle's step (35.9 steps an orbit at r = 1.0 in the second half, as one particle alone) at 3.025 to 3.090 passes, so IAS15's global error estimate (max|tmp| over max|at|) did not add passes at these N. But every particle takes the shortest timescale's step: over the C ring to the F ring, uniform in radius, 0.617 of the steps are useful (COMPUTED), and one particle near Pan sets every particle's step (BELIEVED; not run). The maxima are device-wide reductions, a kernel boundary a pass.
 
@@ -291,17 +329,22 @@ generic and specialised kept apart):
 
 | shape | format, epsilon | N | (i) occupancy, 5 / 6 waves | (ii) live lanes; work a particle | (iii) HBM held | (iii) bandwidth, generic / specialised | generic, an orbit | specialised, an orbit |
 |---|---|---|---|---|---|---|---|---|
-| a3 | binary64, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1 in an annulus (x1.62 from the C ring to the F ring) | 3.6 GB, 1.8 % | 0.18 % / 2.2 % | 2 to 5 min | 9 to 18 s |
-| a3 | binary128, 1e-9 | 10^5 / 3 x 10^5 / 10^6 | 0.26, 0.77, 1.00 / 0.21, 0.64, 1.00 | 1.000; x1 | 2.6 / 3.1 / 4.9 GB | 0.06, 0.19, 0.24 % / 0.8, 2.4, 3.1 % | 3 to 8, 3 to 8, 7 to 18 min | 14 to 31 s, 14 to 31 s, 36 to 67 s |
-| a2 | binary64, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 3.8 GB, 1.8 % | 0.18 % / 2.2 % | 2 to 5 min | 11 to 20 s |
-| a2 | binary128, 1e-9 | 10^5 / 3 x 10^5 / 10^6 | 0.29, 0.87, 1.00 / 0.24, 0.72, 1.00 | 1.000; x1.12 | 2.6 / 3.2 / 5.2 GB | 0.07, 0.21, 0.24 % / 0.9, 2.6, 3.1 % | 3 to 8, 3 to 8, 8 to 20 min | 14 to 31 s, 14 to 31 s, 40 to 75 s |
-| a2 | binary128, 1e-12 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 5.2 GB, 2.5 % | 0.24 % / 3.0 % | 16 to 38 min | 77 s to 2 min |
-| a2 | binary256, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 8.0 GB, 3.9 % | 0.18 % / 2.3 % | 55 min to 2.2 h | 4 to 8 min |
-| a2 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 8.0 GB, 3.9 % | 0.18 % / 2.2 % | 5.1 to 12.3 h | 25 to 46 min |
-| a1 | binary128, 1e-9 | 10^6 | 1.00 / 1.00 | 0.930 (MEASURED at 1e-12, ASSUMED at 1e-9); x5.38 | 22.3 GB, 10.8 % | 0.24 % / 3.1 % | 43 min to 1.7 h | 3 to 6 min |
-| a1 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 0.930 (ASSUMED: binary128's at 1e-12); x5.24 | 42.3 GB, 20.5 % | 0.18 % / 2.2 % | 26 h to 2.6 d | 2.1 to 3.9 h |
+| a3 | binary64, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1 in an annulus (x1.62 from the C ring to the F ring) | 3.6 GB, 1.8 % | 0.14 % / 1.7 % | 3 to 6 min | 12 to 23 s |
+| a3 | binary128, 1e-9 | 10^5 / 3 x 10^5 / 10^6 | 0.26, 0.77, 1.00 / 0.21, 0.64, 1.00 | 1.000; x1 | 2.6 / 3.1 / 4.9 GB | 0.05, 0.14, 0.18 % / 0.6, 1.7, 2.3 % | 4 to 11, 4 to 11, 10 to 24 min | 19 to 42 s, 19 to 42 s, 48 to 90 s |
+| a2 | binary64, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 3.8 GB, 1.8 % | 0.14 % / 1.7 % | 3 to 7 min | 14 to 26 s |
+| a2 | binary128, 1e-9 | 10^5 / 3 x 10^5 / 10^6 | 0.29, 0.87, 1.00 / 0.24, 0.72, 1.00 | 1.000; x1.12 | 2.6 / 3.2 / 5.2 GB | 0.05, 0.16, 0.18 % / 0.7, 2.0, 2.3 % | 4 to 11, 4 to 11, 11 to 27 min | 19 to 42 s, 19 to 42 s, 54 to 101 s |
+| a2 | binary128, 1e-12 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 5.2 GB, 2.5 % | 0.18 % / 2.2 % | 22 to 52 min | 103 s to 3 min |
+| a2 | binary256, 1e-9 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 8.0 GB, 3.9 % | 0.13 % / 1.6 % | 77 min to 3.1 h | 6 to 12 min |
+| a2 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 1.000; x1.12 | 8.0 GB, 3.9 % | 0.13 % / 1.6 % | 7.2 to 17.2 h | 34 to 64 min |
+| a1 | binary128, 1e-9 | 10^6 | 1.00 / 1.00 | 0.930 (MEASURED at 1e-12, ASSUMED at 1e-9); x5.84 | 22.3 GB, 10.8 % | 0.18 % / 2.3 % | 63 min to 2.5 h | 5 to 9 min |
+| a1 | binary256, 1e-16 | 10^6 | 1.00 / 1.00 | 0.930 (ASSUMED: binary128's at 1e-12); x5.78 | 42.3 GB, 20.5 % | 0.13 % / 1.6 % | 40 h to 4.0 d | 3.2 to 5.9 h |
 
 The full table, every shape at every N and setting, is the script's output.
+Moved 2026-11-12 with the J2/J4 count, from the values this table held at
+56006987: a3's and a2's times by x1.30 (binary64), x1.35 (binary128) and x1.40
+(binary256), a1's by x1.47 and x1.54 (it carries seven bodies' J2 and J4), and
+each bandwidth down by the particle's factor (for instance a2, binary128, 1e-9,
+10^6: 8 to 20 min and 40 to 75 s, now 11 to 27 min and 54 to 101 s).
 HBM held includes 2.37 GB of the generic kernel's scratch for 466,944 lanes;
 the largest N HBM holds is 1.6 x 10^8, 8.2 x 10^7 and 4.1 x 10^7 particles
 (binary64, 128, 256; COMPUTED), far past any N a day of device time integrates.
@@ -343,7 +386,8 @@ binary64 without `accurate = 1` (READ, README.md:67-120). **At N = 1,024 one
 system has 5.2 x 10^5 pairs, a lane each fills the device, and it is the
 largest self-gravitating ring cft-rebound can check bit for bit.** At the same
 format and epsilon it costs 10^3 times the test-particle ring (a2) at 10^5 bodies
-and 5 x 10^4 times at 10^6 (COMPUTED from the two tables).
+and 3 x 10^4 times at 10^6 (COMPUTED from the two tables; 5 x 10^4 before the
+J2/J4 count raised the ring's cost and not this table's, which has no J2 or J4).
 
 The three measures (COMPUTED): (i) the pair phase fills the device from N = 1,024
 (8,184 waves); (iii) HBM holds 156 values a body, 2.5 GB at 10^6 in binary128, and
@@ -358,9 +402,10 @@ sets the time at the cap; reassociating it would change REBOUND's bits. Its
 
 ### (c) Hybrids: M moonlets among N particles, one shared step
 
-COMPUTED at binary128, 1e-12: M = 100 moonlets and 10^6 particles cost 2.5 to 6.0 h
-an orbit generic, 12 to 22 min specialised; M = 1,000, 23 h to 2.3 d and 1.8 to
-3.4 h. One wave a system cannot carry them (each wave would replicate M bodies),
+COMPUTED at binary128, 1e-12: M = 100 moonlets and 10^6 particles cost 2.6 to 6.2 h
+an orbit generic, 12 to 23 min specialised (2.5 to 6.0 h and 12 to 22 min before
+the J2/J4 count); M = 1,000, 23 h to 2.3 d and 1.8 to 3.4 h, unmoved to the
+rounding, where the M + 7 pairs a particle outweigh the term. One wave a system cannot carry them (each wave would replicate M bodies),
 so the shape is a3, and every moonlet's encounters set every particle's step
 (BELIEVED). The particles' force is (M + 7) pairs each: the divides and square
 roots again. The measures follow a3's: (i) as a3's at the same N (one lane a
@@ -375,10 +420,17 @@ propeller needs the ring's self-gravity besides, which (b) prices.
 
    **Mine: (i) first.** It is one source - the model's image run by the host's own executor text - already proven against the contract and already in the tree; (ii) is a second implementation that would have to be held to the first. The prototype (item 7) measures (i)'s cost and registers, and (ii) is built only if they bind. Either rides a specialised FMA once round 3 has one (the runner's FMA-class instructions through the fixed path, as GPU-A's part 2 ran ADD, SUB and MUL), **which is what lets round 3 multiply this workload's rate.**
 2. **The IAS15 device port, one wave a system (a2):** the state lane-major in HBM (156 values a body); one kernel a substep for predict, force with J2/J4, and correct, each thread a body; Saturn's and the moons' predicted positions shared through LDS or cross-lane moves; the corrector's maxima (`normalabs` then a maximum, as pc_error does) and PRS23's minimum across the wave; masks for the wave's exit, rejection and end of block, as ENSEMBLE.md's masking does. 1,500 to 2,500 lines of HIP and C from ias15_cft.c's step, the FMA form first; REBOUND's form after, for binary64 against REBOUND. A route with no port exists: cft-rebound's `--engine program` pointed at `hip:N`, once the backend runs programs with index tables (round 2). It keeps the per-call structure HARDWARE.md measured on the card (four fifths of a step not arithmetic) and ENSEMBLE.md's layout, which for a2's 17,544 systems of 64 bodies - massless ones computing every pair, 2,016 a system against 420 - is 199 GB at binary128 and 398 GB at binary256 (COMPUTED from ENSEMBLE.md:143-147): a ladder rung at small E, not the MI300X run.
-3. **J2 and J4 in libcft's format** (~100 lines). cft-rebound evaluates `additional_forces` at binary64 even in a binary256 run, and "a component the routine writes is binary64 from that node on" (READ, README.md:122-128), so the drop-in cannot be the reference above binary64 and REBOUND has none. **Verified against (mine):** (a) the golden model (`python/cft_golden`) evaluating the same operation sequence at sampled nodes, bit for bit; (b) the format-difference check: the same steps at binary128 and binary256 must differ at binary128's round-off, about 1e-34 relative, and a J2/J4 term at binary64 would make them differ at 1e-16 - the check that fails on exactly the defect the README names; (c) at binary64, REBOUNDx's harmonics op for op, if its formula is the one ported (REBOUNDx is not in cft-rebound's pins; not read).
-4. **Verification against cft-rebound's CPU IAS15** (400 to 800 lines of driver). The standalone program has no test particles and no J2; a massless active body gets the same acceleration bits as a test particle, since every extra term is a signed zero added to a non-zero sum (BELIEVED from the code, :1542-1546; not run), so: (a2) a sampled wave is a 64-body system `ias15_cft` runs directly, without J2/J4, at every format; (a3) a sampled particle is replayed with the GPU run's steps (`--dt-file`) and pass counts (`--replay-iters`) in a system of Saturn, the moons and that particle (BELIEVED exact; the replay is MEASURED identical in cft-rebound for runs with no rejected step, READ VALIDATION.md:674-698; the two options together not run). At binary64, REBOUND's form against REBOUND, which is cft-rebound's own gate.
-5. **The ladder** (ESTIMATE, a2, 10 orbits, at GPU-A's MEASURED rates, READ :437-439 and :463-465): the RX 7600 at 3 x 10^4 particles, binary64 10 min, binary128 39 min, binary256 4.3 h generic and 14 min specialised; the RTX 5060 Ti at 10^5, binary64 11 min, binary128 52 min, binary256 7.7 h and 75 min. Then the MI300X. Each rung's records bit for bit against the others' and the CPU's.
-6. **The rounds:** round 1 (G1A's `CFT_HD`, G1B's backend) is the base; item 1 is in no round's plan, and should come before round 3's exp family, since round 3's FMA, ADD, SUB and MUL alone give this workload x1.5 to x1.7 (section 2); round 4's tuning and the MI300X after.
+3. **J2 and J4 in libcft's format.** cft-rebound evaluates `additional_forces` at binary64 even in a binary256 run, and "a component the routine writes is binary64 from that node on" (READ, README.md:122-128), so the drop-in cannot be the reference above binary64 and REBOUND has none. cft-rebound's round 4 has since built the term in the run's format (P1, at 291c99c: src/ias15_zonal.inc, under a problem's `zonal k R J2 J4` line; REBOUNDx's order as recalled, not read, BELIEVED there), so the port's term is that code, counted in section 2. What holds it, and what each check can and cannot see:
+   - **(a) the golden model at sampled nodes,** operation by operation, bits and flags: it sees any operation or rounding that is not the format's, a binary64 narrowing at every format included, because its reference has none. check_zonal.py's gate 1 does this on the `--zonal-selftest` trace at all three formats (READ, cft-rebound's tools/check_zonal.py at 291c99c).
+   - **(b) mpmath against the potential:** minus the gradient of G M [J2 R^2 r^-3 P2(u) + J4 R^4 r^-5 P4(u)], taken at 200 digits, within a rounding bound derived from the term's own dataflow; at binary256 that bound must be 1e-68 of the term or tighter. It sees a wrong formula, sign or missing term, and a narrowing too wherever the bound is tighter than the narrowing's error, as at binary128 and binary256. check_zonal.py's gate 2 (READ).
+   - **(c) the format difference:** the same steps at binary128 and binary256 differ by binary128's round-off. It sees a term narrowed at **one** format only (the gate's negative control rounds to binary64 at binary128 alone, READ; cft-rebound's lead MEASURED 4.0e-18 that way), and it **cannot** see a narrowing both formats share: a term rounded to binary64 in both runs is the same binary64 value in both, and cancels in their difference. check_zonal.py's gate 4 states this scope (READ); cft-rebound's lead MEASURED 3.37e-33 with the README's defect in both runs against 3.40e-33 for the correct build.
+   - **(d) physics,** check_zonal.py's gate 3 on Saturn with Cassini's J2 and J4: energy and momentum against the same orbits without the term, and the apsidal and nodal rates against first-order theory, J4 resolved (READ).
+   - **(e) at binary64, REBOUNDx op for op,** once REBOUNDx is read: cft-rebound's decision 4, open.
+   The README's defect, a term at binary64 in a wide run, is caught by (a) and (b), whose references lack it, and not by (c).
+   *Corrected 2026-11-12: this item's (b), the format-difference check, was called "the check that fails on exactly the defect the README names". It cannot: that defect rounds the term to binary64 in both runs, and a narrowing both runs share cancels in their difference. Found by cft-rebound's lead, MEASURED in its tree (3.37e-33 with the defect, 3.40e-33 without).*
+4. **Verification against cft-rebound's CPU IAS15** (400 to 800 lines of driver). At 291c99c the standalone program reads a problem's `active n` line (test particles, testparticle_type 0) and `zonal k R J2 J4` line (READ, src/ias15_cft.c:1074 and :1087; cft-rebound's round-4 P0, 4b52705, and P1), so a sampled wave runs as it is, test particles and J2/J4 included. (When this item was written, at cft-rebound 7a7a279, the program had neither, and it leaned on a massless active body standing in for a test particle.) So: (a2) a sampled wave is a 64-body system `ias15_cft` runs directly, at every format; (a3) a sampled particle is replayed with the GPU run's steps (`--dt-file`) and pass counts (`--replay-iters`) in a system of Saturn, the moons and that particle (the replay is MEASURED identical in cft-rebound for runs with no rejected step, READ VALIDATION.md:674-698; the two options together were not run here). Rejections, from cft-rebound's lead: only a rejection before a wave's first accepted step leaves state, later ones leave no bit, so a whole wave is rerun only after a first-attempt rejection; its P3, one particle replayed out of its wave, replays rejected attempts (not READ here). The tools a GPU run will be held to were named by cft-rebound's lead on 2026-11-12: tools/make_ring.py, tools/compare_run.py (bits, every column) and tools/extract_particle.py, its P2 to P4, which merge after 291c99c and are not READ here. A run's record does not name `--adaptive-mode`, `--softening`, `--min-dt` or `--no-flag-abort` (cft-rebound's lead), so a GPU engine's record must name any setting it changes from the default itself. At binary64, REBOUND's form against REBOUND, which is cft-rebound's own gate.
+5. **The ladder** (ESTIMATE, a2, 10 orbits, at GPU-A's MEASURED rates, READ :437-439 and :463-465): the RX 7600 at 3 x 10^4 particles, binary64 13 min, binary128 52 min, binary256 6.0 h generic and 20 min specialised; the RTX 5060 Ti at 10^5, binary64 14 min, binary128 70 min, binary256 10.8 h and 105 min (each was 10, 39 min, 4.3 h, 14 min and 11, 52 min, 7.7 h, 75 min before the J2/J4 count). Then the MI300X. Each rung's records bit for bit against the others' and the CPU's.
+6. **The rounds:** round 1 (G1A's `CFT_HD`, G1B's backend) is the base; item 1 is in no round's plan, and should come before round 3's exp family, since round 3's FMA, ADD, SUB and MUL alone give this workload x1.36 to x1.43 (section 2; x1.5 to x1.7 before the J2/J4 count); round 4's tuning and the MI300X after. The run's clock also needs augmentedAddition on the device: the exact-time pair comes from `vaugadd` on the default path every step (cft-rebound's lead, BELIEVED), which G1B refuses as AUGADD, and host/src/augmented.c carries no `CFT_HD` at main 56006987 (MEASURED, `grep -c CFT_HD`: 0). Round 2 brings the sequencer's AUGADD.
 7. **The smallest prototype for the numbers only a run gives** (its registers, scratch and rate): the a2 kernel for Saturn and one particle-wave at binary128, no moons, no J2, against `ias15_cft` on the same 64 bodies: about 800 lines once item 1 exists; runs of minutes on the RX 7600 and the 5060 Ti, reporting VGPRs, scratch, waves a SIMD, particle-steps a second and, under rocprofv3, VALU busy for f_k.
 
 **Where the port lives.** cft-rebound's README settles one option already (READ,
@@ -395,11 +447,12 @@ through the pin. Logan's to decide.
 
 ## 7. Recommendation (mine)
 
-- **Configuration:** workload (a), shape a2, FMA form, Saturn with J2 and J4 and six moons, 10^6 particles in 130,000 to 142,000 km, waves sorted by radius.
-- **Runs:** binary128 at epsilon 1e-9 for 10 orbits at the Encke gap (5.8 days); binary64 on the same steps per wave (the difference is binary64's round-off on every trajectory); binary256 at 1e-9 on 10^5 of the particles (binary128's round-off). Device time (ESTIMATE): generic 83 min to 3.3 h, 22 to 53 min and 3.2 to 9.2 h, **about 5 to 13 device-hours in all**; specialised 7 to 12 min, 2 to 3 min and 15 to 35 min, under an hour.
-- **What it fills:** (i) 17,544 waves for 6,080 to 7,296 resident, every SIMD full for the whole run; (ii) every lane live (one step and one pass count a wave), so the arithmetic kernel's own fraction, unmeasured, with 57 of 64 lanes on particles; (iii) 2.5 % of HBM held and at most 3.1 % of its bandwidth. Memory is not what this workload fills, and no IAS15 shape at these N fills it.
+- **Configuration:** workload (a), shape a2, FMA form, Saturn with J2 and J4 and six moons, 17,544 full waves of 57, 1,000,008 particles, in 130,000 to 142,000 km, waves sorted by radius. (10^6 is not a multiple of 57, and cft-rebound's ensemble file holds N bodies in every system, READ src/ias15_cft.c:1055 and :1102 at 291c99c; cft-rebound's P2 wrote that file, 175 MB in 3 min 36 s, MEASURED by its lead. The cost is the model's 17,544 waves either way.)
+- **Runs:** binary128 at epsilon 1e-9 for 10 orbits at the Encke gap (5.8 days); binary64 on the same steps per wave (the difference is binary64's round-off on every trajectory); binary256 at 1e-9 on 10^5 of the particles (binary128's round-off). Device time (ESTIMATE): generic 112 min to 4.5 h, 29 to 69 min and 4.5 to 12.9 h, **about 7 to 19 device-hours in all**; specialised 9 to 17 min, 2 to 4 min and 21 to 48 min, 32 to 69 min in all. (Before the J2/J4 count: 83 min to 3.3 h, 22 to 53 min and 3.2 to 9.2 h, "about 5 to 13 device-hours"; specialised 7 to 12 min, 2 to 3 min and 15 to 35 min.)
+- **A known limit, from cft-rebound's lead:** Pan caps the step of every wave outside its orbit; those waves step at Pan's rate, about 38 steps an orbit of their innermost particle, about 3 % more steps over the ring (COMPUTED by it), and the far waves' 35.89 steps an orbit holds against this study's 36.2 (the mean of two halves, section 3). Not folded into the model: its times are low by about 3 %, less the 0.9 % by which 36.2 exceeds 35.89.
+- **What it fills:** (i) 17,544 waves for 6,080 to 7,296 resident, every SIMD full for the whole run; (ii) every lane live (one step and one pass count a wave), so the arithmetic kernel's own fraction, unmeasured, with 57 of 64 lanes on particles; (iii) 2.5 % of HBM held and at most 2.3 % of its bandwidth (3.1 % before the J2/J4 count). Memory is not what this workload fills, and no IAS15 shape at these N fills it.
 - **Built first:** section 6's items 1 to 4, and the ladder.
-- **Fallback, if AMD's time is short:** 3 x 10^5 particles, 3 orbits, binary128 and binary64 at 1e-9: generic 9 to 25 min and 2 to 7 min (specialised 41 to 93 s and 11 to 25 s); binary256 on 10^5 particles for one orbit, 19 to 55 min.
+- **Fallback, if AMD's time is short:** 3 x 10^5 particles (5,264 full waves, 300,048 particles), 3 orbits, binary128 and binary64 at 1e-9: generic 12 to 34 min and 3 to 9 min (specialised 56 s to 2 min and 14 to 32 s); binary256 on 10^5 particles for one orbit, 27 to 77 min (before the J2/J4 count: 9 to 25 min, 2 to 7 min, 41 to 93 s, 11 to 25 s and 19 to 55 min).
 
 ## What was not run
 
@@ -410,12 +463,16 @@ particles; the two-format replay of section 6's item 4; divfull and sqrtfull on
 any GPU or inside any kernel. The MI300X's waves a
 SIMD and the integer multiply's rate are BELIEVED from CDNA2's statement and
 LLVM's scheduling model. That each op's CPU cost in FMAs holds on the GPU is BELIEVED.
+Nothing of cft-rebound's round 4 was built or run here (2026-11-12): the J2/J4
+count is by reading, and its other figures here are its lead's. Pan's cap on the
+step (section 7) is not folded into the model, and R = 60,330 km is BELIEVED
+still (cft-rebound's physics gate uses it, READ).
 
 ## Questions for Logan, each with my recommendation
 
 1. **The workload:** a test-particle ring, one wave a system (a2), as the MI300X's IAS15 run? *Yes: it fills the device at 10^6 and shows Pan's wakes and the moons' resonances; a self-gravitating ring or propellers need a tree and shear boundaries that cft-rebound refuses by name.*
-2. **The device divide and square root:** add them to the GPU backend's rounds, before round 3's exp family? *Yes, since they are 58 % of a substep-pass of this workload: the sequencer's divfull and sqrtfull on the device's executor first, a per-element port of divsqrt.c only if the prototype shows their cost or registers bind.*
-3. **The form:** the FMA form for the MI300X run, REBOUND's form ported after for the binary64 gate against REBOUND? *Yes: REBOUND's form costs 2.1 to 2.4 times more.*
-4. **J2 and J4 in libcft's format,** verified by the golden model and the format-difference check? *Yes.*
+2. **The device divide and square root:** add them to the GPU backend's rounds, before round 3's exp family? *Yes, since they are 69 % of a substep-pass of this workload (58 % before the J2/J4 count): the sequencer's divfull and sqrtfull on the device's executor first, a per-element port of divsqrt.c only if the prototype shows their cost or registers bind.*
+3. **The form:** the FMA form for the MI300X run, REBOUND's form ported after for the binary64 gate against REBOUND? *Yes: REBOUND's form costs 1.8 to 2.0 times more (2.1 to 2.4 before the J2/J4 count).*
+4. **J2 and J4 in libcft's format,** as cft-rebound's round 4 built them at 291c99c, held on the GPU as its tools/check_zonal.py holds them on the CPU: the golden model and mpmath for the bits and the formula, which are the checks that see a term narrowed to binary64 at every format, the format difference for a term narrowed at one format only, and the physics beside them? *Yes. (Corrected 2026-11-12: this question named the golden model and the format-difference check as the pair, and the format difference cannot see the narrowing the README names; section 6 item 3.)*
 5. **The formats:** binary128 at 1e-9 with binary64 on the same steps, binary256 on a tenth? *Yes; binary256 at 1e-16 costs 5 to 12 hours an orbit generic and is not needed for a ring.*
 6. **Where the port lives:** cft-rebound, as a third engine? *Yes (section 6).*

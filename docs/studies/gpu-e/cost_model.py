@@ -62,7 +62,13 @@ STEP_SYSTEM = dict(div=3, sqrt=1, mul=8)                     # :2446, :2468, :24
 PASS_SYSTEM = dict(div=1)                                    # pc_error's quotient (:1797)
 PAIR_TP = dict(add=9, mul=9, sqrt=1, div=1)   # one test particle, one massive partner: REBOUND's test-particle loop
 PAIR_ACTIVE = dict(add=12, mul=13, sqrt=1, div=1)            # an active pair, both sides (:1516-1535, :1562)
-J2J4 = dict(div=1, mul=21, fma=6, add=6)      # ESTIMATE: a native J2+J4 term per body per evaluation (not in cft-rebound)
+# J2 and J4 a body an evaluation, COUNTED from cft-rebound's src/ias15_zonal.inc at 291c99c (zonal_geometry
+# :232-242, zonal_accel :298-325, zonal_apply :263-277 twice): 3 SUB (costed as ADD), 14 ADD, 34 MUL (13 of
+# them the reaction's, made for a test particle too and discarded), 1 SQRT, 10 DIV (two exact: by 2 and 8);
+# no FMA, so both forms. (Was an ESTIMATE until 2026-11-12: 1 DIV, 21 MUL, 6 FMA, 6 ADD.)
+J2J4 = dict(add=3 + 14, mul=34, sqrt=1, div=10)
+J2J4_REACT = dict(add=6)  # COUNTED: a massive body's reaction on the planet, 3 SUB a pass (:285), twice
+# (Not modelled: the constants' 8 MUL of width 1 an evaluation, :250-252, a call's and not a body's.)
 STATE_VALUES = 52        # READ cft-rebound docs/ENSEMBLE.md:34-37 - per-lane vectors per coordinate
 TRAFFIC_VALUES = 12 + 46 # READ cft-rebound docs/HARDWARE.md:521-522 - values staged per coordinate per substep
 
@@ -142,7 +148,7 @@ def system_step_ops(form, p, n_tp, n_massive, j2j4=True):
     bodies = n_tp + n_massive
     force = add(PAIR_ACTIVE, PAIR_TP, scale=[n_massive * (n_massive - 1) // 2, n_tp * n_massive])
     if j2j4:
-        force = add(force, J2J4, scale=[1, bodies - 1])
+        force = add(force, J2J4, J2J4_REACT, scale=[1, bodies - 1, n_massive - 1])
     per_pass = add(PRED[form], CORR[form], PASS_SYSTEM, scale=[7 * 3 * bodies, 3 * bodies, 1])
     per_step = add(STEP_COORD[form], DT_LANE[form], STEP_PARTICLE, STEP_SYSTEM, scale=[3 * bodies, 1, bodies, 1])
     return add(per_pass, force, per_step, force, scale=[p, 7 * p, 1, 1])
@@ -181,9 +187,10 @@ def main():
                 ops.get("sqrt", 0), cost(ops, f), sub))
     force = add(PAIR_TP, J2J4, scale=[K + 1, 1])
     sub = (cost(tp_step_ops("fma", 12, K + 1), "fp256") - cost(tp_step_ops("fma", 11, K + 1), "fp256")) / 7
-    print("   fp256 FMA form: the force is %.0f%% of a substep-pass; div and sqrt are %.0f%% of the force"
-          % (100 * cost(force, "fp256") / sub, 100 * cost(dict(div=K + 2, sqrt=K + 1), "fp256") / cost(force, "fp256")))
-    ds = cost(dict(div=K + 2, sqrt=K + 1), "fp256")
+    ds = cost(dict(div=force["div"], sqrt=force["sqrt"]), "fp256")
+    print("   fp256 FMA form: the force is %.0f%% of a substep-pass; div and sqrt are %.0f%% of the force, %.0f%% of"
+          " the substep-pass; J2+J4 is %.0f%% of the force" % (100 * cost(force, "fp256") / sub, 100 * ds / cost(force, "fp256"),
+          100 * ds / sub, 100 * cost(J2J4, "fp256") / cost(force, "fp256")))
     for sp in (SPEC_FP256[0] / GEN_FP256[1], SPEC_FP256[1] / GEN_FP256[0]):
         print("   specialised x%.1f on every op gains x%.1f; on FMA/ADD/MUL only, div and sqrt generic: x%.2f"
               % (sp, sp, sub / ((sub - ds) / sp + ds)))
