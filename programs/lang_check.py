@@ -4973,9 +4973,12 @@ def four_range_pairs(F, everything=False):
     _build_atan2_tw, the harness's _tq_band_tw), above the 2^-100 the pairs
     are drawn about: the exact-quotient pairs between the two lie inside the
     fp32 image's range, whose check runs after the exact-quotient rule, so
-    the image marks them without their being demanded (MEASURED: 65 lanes
-    marked against 50 demanded in U1 at fp32, 3 pairs times 5 attributes;
-    one such pair, 1 2^-96 against 1 under rne, run alone: marked)."""
+    the image marks them without their being demanded (MEASURED, a scratch
+    script over U1's atan2 lanes at fp32 under the five attributes: 65 lanes
+    marked against 50 demanded, and the 15 marked and not demanded are
+    exactly the pairs 1 2^-96 / 1, 3 2^-96 / 3 and 5 2^-96 / 640 under
+    each attribute, all "gated" by atan2_status; no lane demanded is
+    unmarked)."""
     iv, ih = inv()
     lo, _hi = ih._tq_band(F)
     e0 = lo.denominator.bit_length() - lo.numerator.bit_length() + 2
