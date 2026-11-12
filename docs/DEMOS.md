@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 601,676 bytes |
-| sha256 | `cf083c06ca12037dfb4c0507d2085769c656bbba7d6da9575529abb079ba43fb` |
-| module | `bindings/node/cft_node.wasm`, 281,660 bytes, sha256 `7c60edda4da15d1ebd3937bec5f79eba85a85c02d4d2e6973634ffd918094173` |
+| page | `bindings/wasm/demos.html`, 601,743 bytes |
+| sha256 | `1a4d602fe5f305545c81f90de825f07a38b1d3c2b2567accc497342208597746` |
+| module | `bindings/node/cft_node.wasm`, 281,729 bytes, sha256 `daa2a3c4cdf3ed2d7230d77b20f4b2770aac4d85da5838507f04b61b0b60fd72` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-10-31, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the evening before on the recording desktop's clock (about 20:57 on 2026-10-30 there, 03:57 UTC); re-recorded for the module's rebuild of 2026-10-30 (exp2m1(emax + 1) toward zero, issue 1, and the host batch of 2026-10-22; ABI still 0.18, profile 3.1), every chain unchanged. The rebuild before it, at profile 3 (exp2's tie at emin - p), was recorded 2026-10-06 |
+| recorded | 2026-11-12, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, here the same as the recording desktop's (about 15:54 on 2026-11-12 there, 22:54 UTC); re-recorded for the module's rebuild of 2026-11-12 (the GPU backend's G1A and G1B in its sources, and the language's 1.2 and 1.3 in cft.h; ABI still 0.18, profile 3.1), every chain unchanged. The rebuild before it, of 2026-10-30 (exp2m1(emax + 1) toward zero, issue 1), was recorded 2026-10-31 |
 
 ---
 
@@ -517,8 +517,8 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 601,676 bytes, sha256
-`cf083c06ca12037d...`, at ABI 0.18 and profile 3.1 - so read the pair
+with the module since - the committed one is 601,743 bytes, sha256
+`1a4d602fe5f30554...`, at ABI 0.18 and profile 3.1 - so read the pair
 above as the 2026-09-07 measurement and the table at the top of this
 file as what is in the tree.
 

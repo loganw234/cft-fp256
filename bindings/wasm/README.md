@@ -1497,6 +1497,52 @@ The module is 5,357 bytes longer:
     bindings/wasm/conformance.html 1,415,679 bytes  sha256 bee04db86fcbebf2...
     bindings/wasm/demos.html         601,676 bytes  sha256 cf083c06ca12037d...
 
+### Rebuilt at ABI 0.18, 2026-11-12 (profile 3.1) - the GPU backend's G1A and G1B, and the language's 1.2 and 1.3
+
+No ABI change. Since the rebuild of 2026-10-30 the module's sources moved
+in five commits, each merged without a rebuild:
+- `host/include/cft.h`, the language's minor version and its comment:
+  1.2 on 2026-11-02 (M2's sin, cos and tan) and 1.3 on 2026-11-11 (M4's
+  atan, asin, acos and atan2). This library does not evaluate the
+  language;
+- the GPU backend's G1A (2026-11-11): `CFT_HD` in
+  `host/include/cft_config.h`, `bigint.c`, `bigint.h`, `softfloat.c` and
+  `softfloat.h`, and the sequencer's executor moved from `program.c` into
+  `host/src/seq_exec.h`;
+- its G1B, both parts (2026-11-11): `host/src/device.c` and
+  `host/src/backend.h`, for `cft_open("hip:N")`. `backend_hip.cpp` is
+  built only at HIP=1 and is not in the module.
+
+So the committed module was stale from 2026-11-02 until this one.
+
+The order was the 2026-10-30 rebuild's, the recording included:
+1. the five native tools `verify_demos.mjs` runs, built from the same
+   tree with mingw64 gcc 16.1.0 (20 s, 0 warnings);
+2. `build.sh` (69 s);
+3. `verify_demos.mjs --record` (126 s): every chain of the 13 runs is
+   equal to the committed recording. Only the module stamp, the date
+   (2026-11-12 in UTC), the rates and the seconds moved, together with
+   the tools' own time and throughput lines (27 of them, each the same
+   once its numbers are masked). Its one FAIL was the page it had not
+   yet been rebuilt for, by name;
+4. `build_demos.sh` (43 s), then `verify_demos.mjs` in check mode (138
+   s): 48 checks, 0 FAIL;
+5. a second clean build of both (105 s), with `bindings/wasm/build/`
+   removed between: all 164 outputs, both negative-control pages among
+   them, came out byte for byte.
+
+The container was the pinned emsdk 6.0.9 image, already on the desktop
+at its digest, through Docker Desktop. The desktop carried another
+parcel's GPU runs meanwhile, so the times above carry that load.
+
+Still **141 `cftw_*` exports**, the same names, and 149 exports in all.
+The module is 69 bytes longer:
+
+    bindings/node/cft_node.wasm      281,729 bytes  sha256 daa2a3c4cdf3ed2d...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,415,734 bytes  sha256 d91ab7b944b842ba...
+    bindings/wasm/demos.html         601,743 bytes  sha256 1a4d602fe5f30554...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
