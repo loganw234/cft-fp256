@@ -14,6 +14,13 @@ particles); Pan's cap on the step, a known limit; §6 item 4 brought up to
 cft-rebound's test-particle and zonal problem lines. docs/VALIDATION.md's
 GPU-E2 entry lists each with its source.*
 
+**A note of 2026-11-13, the lead's: Logan's answers to questions 2 and 4** (the study's text
+stays as written). Asked that morning among the lead's open questions, question 2 as
+cft-rebound's decision 3, he answered, verbatim: question 2, the device divide and square
+root before round 3's exp family, "Yes with GPU round 2", which puts them in the GPU
+backend's second round; question 4, J2 and J4 held on the GPU as tools/check_zonal.py
+holds them on the CPU, "Yes".
+
 > "When time comes to run the MI300X trials, I'd also like to do an IAS15 run,
 > but utilizing as many resources from the MI300X as possible, perhaps
 > something 'simple' but highly parallel like hundreds of thousands of bodies

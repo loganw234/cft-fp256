@@ -18,6 +18,42 @@ source), **COMPUTED** (arithmetic on the others, inputs given), **ESTIMATE** (a 
 its basis given) or **BELIEVED** (taken on trust, not checked). Nothing here is MEASURED:
 no device was used. "Not run" means not run.
 
+**A note of 2026-11-13, later the same day, the lead's: Logan ran the probe, and answered
+section 7's questions** (the study's text stays as written: its "nothing ran" and "not run"
+describe it when written, and the prototype's files are left as run).
+
+- **The probe's first run.** Logan ran `studies/gpu-f/bn_probe.html` himself, once, at its
+  defaults (480,000 lanes, seed 20261113). Its record, READ from his screenshot of the page,
+  which is kept in the lead's records:
+  - kernel_sha256 `8d6e91b5f8a7e9cd213e49190d47f0d786fb4ab520cd50142e6387c6905cd761`. It
+    equals the digest of the kernel block as committed (COMPUTED by the lead: LF endings,
+    the leading newline kept, 7,944 characters).
+  - The adapter: vendor "nvidia", architecture "lovelace", not a fallback adapter. This is
+    BELIEVED to be this desktop's RTX 4070: Lovelace is its architecture, and no other
+    GPU in the project's records has it. The record does not name the browser, by design.
+  - Compile: 1,045 ms, no errors. That covers the module and its five pipelines, PLANT 0
+    to 4.
+  - The plants: each was seen, on lanes 0 to 47,999. They made 1,849 (bn_add's carry),
+    614 (bn_shl's guard), 6,753 (mul_wide's carry) and 316 (bn_sub's y + borrow) lanes
+    differ.
+  - The run: 480,000 lanes, 0 mismatches, "PASS: 480000 lanes equal the BigInt
+    reference". It took ten dispatches of 48,000 lanes, timed from submit to the read-back
+    mapped: 7, 15, 6, 6, 8, 7, 8, 5, 7 and 9 ms.
+- **What the run shows:** on one GPU in one browser, the WGSL hand port of bigint.c's core
+  equals BigInt on 480,000 generated lanes, and the page can fail: every plant was seen.
+- **What it does not show:** the FMA path, softfloat beyond ISUB, conformance or speed; any other GPU
+  or browser; or the WebAssembly reference of record, which this prototype does not use.
+- **Logan's answers, verbatim,** to section 7's questions:
+  1. Run the probe: "See photo" (the run above).
+  2. What the page is for: "Mostly as a low friction source of external run data, with
+     the most important info being cards which fail for whatever reason, rather than only
+     passing".
+  3. The route: "One source first".
+  4. host/src 32-bit only: "Depending on cost elsewhere in the project".
+  5. Collection: "Issue form".
+  6. Where it lives: "Yes as its own page".
+  7. CI under a software WebGPU: "Not needed yet".
+
 ## The answer
 
 1. **Worth building as an instrument, not as a backend.** A public page that runs libcft's

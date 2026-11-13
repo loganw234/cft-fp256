@@ -27,6 +27,13 @@ note): without them the build failed with OpenCL error -6 in 0.2 ms, log empty (
   5.41e7 for GPU-C's chipStar build on the same card.
 That this route needs libigdfcl1 itself stays BELIEVED: it was present in both runs.
 
+**A note of 2026-11-13, the lead's: Logan's answers to questions 1 and 2** (the study's text stays as
+written). Asked that morning with the lead's leanings, he answered, verbatim: question 1, Apple's
+`-cl-opt-disable` (bit for bit on every corpus here, 3.6 times slower than the failing default), "Accept
+for now"; question 2, a report to Apple, "Note it, dont chase it". So Apple's OpenCL runs with
+`-cl-opt-disable`, and the reduced case is not built. The Mac's working folders, kept for it, were removed
+the same day, after a look; the bisection's last output is kept in the lead's records.
+
 ## 1. The answer
 
 1. **One OpenCL C text and one C host harness run libcft's FMA bit for bit on three devices** (MEASURED):

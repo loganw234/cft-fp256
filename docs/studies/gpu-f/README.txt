@@ -1,5 +1,10 @@
 GPU-F's prototype: bn_probe.html.  NOT RUN.
 
+2026-11-13, later the same day: Logan ran the page once, on one GPU in one
+browser: PASS, with the four plants seen. The record and his answers are in
+GPU-F-webgpu.md's note of that date. The text below describes the files as
+written; the kernel is unchanged, and its digest is the record's.
+
 Written 2026-11-13 by study GPU-F as files only. Nobody has opened the page in a
 browser, and its WGSL has never been compiled. It claims no result.
 Checked: the JavaScript parsed by node --check (nothing executed); the WGSL
