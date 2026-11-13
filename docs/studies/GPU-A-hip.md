@@ -67,6 +67,18 @@ record.
   compiled or run here.
 - GPU-B's build.sh runs devcopy without `--seq`, so it still copies.
 
+**Noted 2026-11-12 (the GPU backend's round 1, parcel G1C): the header
+is extended, 52 lines to 93.** `cudahip/hip/hip_runtime.h` gains the 16
+HIP names libcft's GPU backend (host/src/backend_hip.cpp) uses beside the
+harness's 27: its stream, asynchronous copies, pinned host memory, error
+names, versions and two error codes, each mapped onto CUDA's. It also
+gains `clockRate`, which CUDA 13's `cudaDeviceProp` no longer has
+(GPU-B, section 3b): the header's own field from `CUDART_VERSION` 13000
+on, filled from `cudaDevAttrClockRate`, and CUDA's member before. So
+host/Makefile's `HIP_PLATFORM=cuda` builds the backend with plain nvcc,
+and cft_fma.hip builds again under CUDA 13 with no shim. Built under CUDA
+12.9 and 13.3; 13.0 to 13.2 were not run (docs/VALIDATION.md, G1C).
+
 ## The answer
 
 **One HIP source works on both vendors, bit for bit.** MEASURED, results and
@@ -82,7 +94,7 @@ Each was checked on two corpora:
 
 Every output hashes to the golden model's sha256. Three planted faults go
 red on every device they were run on. The same source also builds with
-plain nvcc and no HIP at all, through a 52-line header of the study's own,
+plain nvcc and no HIP at all, through a 52-line header of the study's own (93 lines since 2026-11-12, above),
 with the same hashes on both NVIDIA cards (section 3).
 
 **What the generic port costs.** The first kernel runs `host/src/softfloat.c`
@@ -261,7 +273,7 @@ same, and its results and hashes are the same on both.
 
 How one source on CUDA survives this:
 - **(a) HIP 7.2.4, frozen,** is what was installed and what works today. It is three .debs, 0.6 MB, header-only on NVIDIA.
-- **(b) A study header of its own, built** (52 lines, `cudahip/hip/hip_runtime.h`, every line written for this study and copied from nothing). Under the name `hip/hip_runtime.h`, so the unchanged source finds it, it maps 27 names onto CUDA's:
+- **(b) A study header of its own, built** (52 lines then, 93 since 2026-11-12, `cudahip/hip/hip_runtime.h`, every line written for this study and copied from nothing). Under the name `hip/hip_runtime.h`, so the unchanged source finds it, it maps 27 names onto CUDA's:
   - three types (`hipError_t`, `hipEvent_t`, `hipFuncAttributes`);
   - 21 functions and constants (errors, devices, the stack limit, malloc, free, memcpy, memset and its two directions, events, function attributes, occupancy);
   - `hipDeviceProp_t` with an empty `gcnArchName` beside CUDA's fields, and its `hipGetDeviceProperties`;
@@ -619,7 +631,7 @@ remote backends:
 ## 11. Questions for Logan
 
 1. **A backend round?** With a specialised fp256 kernel held to libcft's own code on the GPU, a 5060 Ti or RX 7600 runs fp256 FMAs at 1.9 to 3.4 times the quad's resident rate, kernel only, by batch size (the RX 7600's 3.2 to 3.4 holds at 1.5M lanes or fewer, 1.9 at 4M). Is that worth a round, and which first: fp256 FMA/ADD/SUB/MUL, or fp128 too?
-2. **The NVIDIA leg.** HIP's NVIDIA platform is packaged only up to ROCm 7.2.4. For a backend, which: keep HIP 7.2.4 frozen, use the study's 52-line CUDA header (built here, same hashes), build `hipother` from ROCm's sources, or drop NVIDIA?
+2. **The NVIDIA leg.** HIP's NVIDIA platform is packaged only up to ROCm 7.2.4. For a backend, which: keep HIP 7.2.4 frozen, use the study's 52-line CUDA header (93 lines since 2026-11-12; built here, same hashes), build `hipother` from ROCm's sources, or drop NVIDIA?
 3. **Specialised kernels in the contract.** The second kernel is a second implementation. Its agreement is evidence by test (73,780 conformance, 1,000,000 stream and 2.4 x 10^9 differential cases), not a proof. Is "generic as reference inside the gates" enough, or should a specialised kernel need a proof (an exhaustive small-format analogue, say)?
 4. **The MI300X.** Which of section 9's runs (a) to (d) are worth its time, if any? Each needs your word.
 5. **The CPU too?** The first kernel's cost on one CPU core is about 450 ns an fp256 FMA, against mpfr+754's 71 ns. Most of it is the portable bignum's bit-at-a-time helpers. Should `host/src` get faster helpers on every platform, behind the same vectors?

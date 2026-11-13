@@ -303,6 +303,21 @@ authority:
     schedule-bound and keep their own drivers and their own entries in
     docs/VALIDATION.md. They are where "read the path delay, not the
     slack" applies (docs/BRINGUP.md).
+13. **A GPU, through the same API** (`hip` stage, gate budget; `hip-nvcc`
+    and `hip-source`, the full census; since 2026-11-12). The GPU backend
+    (host/src/backend_hip.cpp, docs/HOSTAPI.md) opens a GPU as `hip:N` and
+    runs libcft's own code on it. The stage builds it from this tree in a
+    copy of host/ and holds it to the software handle through the API the
+    card is held to: study GPU-A's corpora by sha256, staged and resident,
+    a bounded vector replay, seq_check's corpora, the certificate corpus's
+    conformance test, device-test and hip-test. Plants first, each red and
+    green without it: flip and drop-flag (the element-wise path), seq-mask
+    (the sequencer), reduce-carry (the reduction tree), and the symbol
+    check's own. A lister that shows a GPU while the runtime sees none is
+    a failure, and each leg's log names its device, every line the same one. On NVIDIA it is built three
+    ways, each held to the same sums: HIP 7.2.4's NVIDIA layer (`hip`),
+    plain nvcc through study GPU-A's header (`hip-nvcc`), and HIP built
+    from ROCm's own sources (`hip-source`).
 
 The `estimates` stage (gate budget) and the `estimates-full` stage (the
 full census only) hold a study's numbers rather than a layer. They re-make
@@ -400,6 +415,9 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | the workload checks (`collatztest` ... `zoomtest`) | 1 to 3 min each | 1 to 3 min each | |
 | `remote` (`make -C host remotetest`) | | 10 to 12 min | the bounded replay is most of it |
 | `wstest` | | 2 min | |
+| `hip` (the GPU backend on this host's GPU, built from the tree in a copy of host/: plants, study GPU-A's corpora staged and resident, a bounded vector replay, seq_check, the certificate corpus, device-test and hip-test; layer 13) | **656 s and 698 s on the RX 7600** (ROCm 10.1, a quiet machine; at 29b8c49d, the second with `--require-all`) | **564 s, 659 s and 540 s on the RTX 5060 Ti** in WSL (HIP 7.2.4 on CUDA 12.9, 12.9 and 13.3; the desktop loaded, 35 to 40 one-second samples in D a run) | MEASURED 2026-11-12, parcel G1C. In the gate budget. Seconds where it is skipped by name: no hipcc or no GPU (CI, amd-arc-box, the Windows desktop). seq_check is the longest leg, 96 to 135 s; the build 16 to 18 s on ROCm and 58 to 92 s for NVIDIA at one architecture; the stage keeps about 150 MB in its run directory |
+| `hip-nvcc` (the same, built by plain nvcc through study GPU-A's header, `HIP_PLATFORM=cuda`) | | **542 s on the RTX 5060 Ti** (CUDA 13.3, the desktop loaded) | MEASURED 2026-11-12 at f6622f9c, `--require-all`. The full census only; skipped by name without nvcc (`HIP_CUDA`) or an NVIDIA GPU |
+| `hip-source` (the same, built by HIP compiled from ROCm's own sources, `HIPSRC_ROOT`, verify/build-hip-nvidia.sh) | | **597 s on the RTX 5060 Ti** (study GPU-B's HIP 7.16 built from source, CUDA 13.3, the desktop loaded) | MEASURED 2026-11-12 at f6622f9c with study GPU-B's prefix, `--require-all`. The full census only; skipped by name without that prefix (the script downloads, so no stage runs it) or an NVIDIA GPU |
 | `embedded` (`make embedded`) | 18 to 19 min | | the vendored-copy check, four loopback profiles built, the published sets replayed through each (1,072,415 cases twice, 271,776 and 195,248 for the two `CFT_TINY` profiles, which compile no transcendental and so replay none of the 3,500 cases profile 3.1 added), the corruption control, and fifteen board compiles through `arduino-cli`. Needs the AVR, ESP32 and RP2040 cores installed; skips the compiles with a note if `arduino-cli` is absent |
 | a board census (`serial_replay.py --port COMn`) | 1 h+ per board | | not a gate and not in the runner: it needs a part plugged in. About 200 to 550 cases a second on an ESP32-S3 depending on format and operation, so the full 1,072,415 is hours. Use `--sets` and `--limit` for anything routine |
 | the fuzz lane (`make -C host fuzz-run`) | 1 min per target at the default; 30 min in the 2026-09-07 campaign | | `FUZZ_SECONDS`; the sanitizers need the `cft-sim` image, MSYS gcc has none |
@@ -444,7 +462,7 @@ is the only thing that skips work. (cft-rebound is the sibling repo with
 a content-addressed gate cache and a warm five-second check; this runner
 does not have one.)
 
-`bash verify/run.sh --list` prints all fifty-three stages with a marker
+`bash verify/run.sh --list` prints all fifty-six stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second
@@ -461,7 +479,7 @@ exists (a path in another repository carries its name,
 `cft-rebound/docs/...`; the record documents and the products of a build
 are exempt, each exemption re-derived from the file that justifies it),
 and the counts the front-door files state - stages, benches, proofs, this
-page's twelve tiers, the index's own totals - are derived, bold or not.
+page's thirteen tiers, the index's own totals - are derived, bold or not.
 The sweep that added this found `README.md`'s at-a-glance table a stage
 short, in bold, where the old patterns could not see it. Every run plants
 a fault for each check in a scratch copy and requires it to be caught by

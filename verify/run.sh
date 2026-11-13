@@ -24,10 +24,18 @@
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal,
 #                                      # the C auditor's gate (audit), two cases of the
 #                                      # estimates study (estimates), the variational
-#                                      # equations (tangent) and the acceptance set
+#                                      # equations (tangent), the acceptance set and,
+#                                      # on a host with a GPU and hipcc, the GPU
+#                                      # backend (hip; skipped by name elsewhere)
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
 #                                      # node, wasm, images, estimates-full,
-#                                      # acceptance-far, acceptance-rev8)
+#                                      # acceptance-far, acceptance-rev8, and
+#                                      # the GPU backend's two other NVIDIA
+#                                      # builds, hip-nvcc and hip-source)
+#   HIP_ROOT=/opt/rocm-7.2.4 HIP_PLATFORM=nvidia HIP_DEVICE=1 bash verify/run.sh --only hip
+#                                      # the GPU backend on the second GPU
+#                                      # nvidia-smi lists, through HIP 7.2.4's
+#                                      # NVIDIA layer (the stage's comment)
 #   Measured durations for every stage, quiet and loaded, are in
 #   docs/VERIFICATION.md - the simulation suites and the formal gate
 #   run for more than an hour each on a busy box.
@@ -151,7 +159,11 @@ BUDGET=""
 # certificate estimates' study (estimates), since 2026-10-01 the
 # language's variational equations (tangent), and since 2026-10-02 the
 # acceptance set (acceptance) and the compiler's routines, split from
-# the language's quick stage (lang-routines). `full` is the census.
+# the language's quick stage (lang-routines); and since 2026-11-12 the
+# GPU backend (hip), which costs nothing where it is skipped by name - a
+# host with no hipcc or no GPU, the box and CI among them - and about ten
+# minutes where it runs (564 s on an RTX 5060 Ti under WSL with the
+# desktop loaded, 2026-11-12). `full` is the census.
 # Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
@@ -162,7 +174,7 @@ BUDGET=""
 # and the two browser replays; on the WSL distro the replay stages take
 # seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance,cardstress
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance,cardstress,hip
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -530,6 +542,16 @@ need() {  # docker|host-cc|xclbinutil ...
                || STAGE_SKIP_REASON="no gfortran on PATH"; fi;;
       images-env) [ -n "${IMAGES:-}" ] \
         || STAGE_SKIP_REASON="no IMAGES=... exported (nothing staged to verify)";;
+      # The GPU backend's two (the `hip` stage, below): its compiler, and a
+      # device its platform's own lister shows (hip_gpu_reason says which).
+      hipcc) [ -x "${HIP_ROOT:-/opt/rocm}/bin/hipcc" ] \
+        || STAGE_SKIP_REASON="no hipcc at ${HIP_ROOT:-/opt/rocm}/bin/hipcc (set HIP_ROOT; HIP_PLATFORM=nvidia for HIP 7.2.4's NVIDIA layer, HIP_ROOT=/opt/rocm-7.2.4)";;
+      gpu) STAGE_SKIP_REASON=$(hip_gpu_reason);;
+      # The full census's two other NVIDIA builds of it (`hip-nvcc`, `hip-source`).
+      nvcc) [ -x "${HIP_CUDA:-/usr/local/cuda}/bin/nvcc" ] \
+        || STAGE_SKIP_REASON="no nvcc at ${HIP_CUDA:-/usr/local/cuda}/bin/nvcc (HIP_CUDA)";;
+      hipsrc) { [ -x "$(hipsrc_root)/bin/hipcc" ] && [ -d "$(hipsrc_root)/include/hip" ]; } \
+        || STAGE_SKIP_REASON="no HIP built from source at $(hipsrc_root) (verify/build-hip-nvidia.sh builds it from pinned sources: a download of about 180 MB, the lead's word)";;
       # Any other name is a command that must be on PATH - rustc,
       # julia, go, dotnet, Rscript, node - or, on Windows, in the
       # mingw64 bin directory HOSTMAKE prepends (pacman's go lives
@@ -1745,6 +1767,518 @@ do_remote() {
 }
 need host-cc python mpmath
 stage remote "the remote backend on loopback: cft-serve started and stopped by PID, remote held against software - refusals, device-test, a bounded replay, one workload chain, the round-trip counts; then the same contract over WebSocket from node" -- do_remote
+
+# ---- the GPU backend (docs/HOSTAPI.md, "The GPU backend") ------------------
+# A GPU held to the contract through the API the card is held to. The GPU
+# backend (host/src/backend_hip.cpp, `make -C host HIP=1`) opens hip:N and
+# runs libcft's own code there, so every result must be the software
+# backend's, bits and flags. Until 2026-11-12 nothing in the repository ran
+# its tests: the card had this runner's stages, the GPU a ledger. The stage
+# builds the backend from this tree on a GPU host and holds it to the
+# software handle, plants first, so that a green means something:
+#   * a COPY of host/ ($RUNDIR/hip-tree), never host/ itself. host/Makefile's
+#     %.o rule follows the headers and not XRTDEF, so a HIP=1 build over
+#     HIP=0 objects (or the reverse) keeps device.o, program.o and divsqrt.o
+#     built the other way; and `make clean` removes every tool (CLAUDE.md).
+#     The copy is the files git tracks in host/, with the working tree's
+#     edits, and the untracked ones git does not ignore; without git, host/
+#     whole, cleaned by its own `make clean` in the copy. Every binary is
+#     named on the make line and its build time printed (`all` builds no
+#     test binary, and they link libcft.a statically);
+#   * the build's own checks: hip-symcheck's line (no symbol of the device
+#     unit is a host object's too), hip-symcheck-plant RED (the check can
+#     fail), and `ldd` of the test binaries and libcft.so naming the GPU
+#     runtime, libamdhip64 or libcudart;
+#   * the device: HIP_DEVICE (default 0) of the platform's own lister, made
+#     the only one the runtime sees - CUDA_VISIBLE_DEVICES, with
+#     CUDA_DEVICE_ORDER=PCI_BUS_ID so that CUDA numbers the GPUs as
+#     nvidia-smi does, or HIP_VISIBLE_DEVICES on ROCm - so every leg opens
+#     hip:0. Every GPU process runs with CFT_HIP_INFO=1; every device line a
+#     leg prints must be the first one's (the lister's bus, one GPU
+#     visible), a leg that prints none is not a result, and the log's last
+#     line is the device's. A lister that shows the GPU while the runtime of
+#     this build sees none is a FAIL naming both facts, never a skip: a
+#     skip comes from the host, before anything is built;
+#   * the plants, in a copy of the build made with HIP_PLANTS=1: flip and
+#     drop-flag on conf-fp64, seq-mask on routines-fp64 against the
+#     software handle's sum, reduce-carry on hip-test's small fp64
+#     reductions - each RED, with its plant named by the device line, and
+#     GREEN without it - and hip-test's plants leg. A plant that does not
+#     turn its check red fails the stage by name, and nothing runs after it;
+#   * study GPU-A's corpora (docs/studies/gpu-a), made here: each through
+#     hip-corpus on sw, on hip:0 and on hip:0 --resident, the three sha256s
+#     equal (sw is the definition: GPU-A's captured sums are printed beside
+#     them as information only, and routines-fp32's is stale since M4F2),
+#     and the routine corpora's equal to the golden model's own output too;
+#     refuse.bin refused by its sentence (AUGADD, CAPS2[11]). Not the 1M
+#     stream, about 95 s of GPU time a run;
+#   * a bounded vector set at every format and attribute - the elementwise,
+#     magnitude, augmented and reduction sets - replayed by cft-selftest on
+#     sw and on hip:0: the same sets and cases, every case matching
+#     (HIP_FULL_REPLAY=1 replays vectors/out whole instead, its character,
+#     formatOf and transcendental sets too: 1,228,415 cases at the runner's counts);
+#   * seq_check, the `seq` stage's command, through --device hip:0: the
+#     programs needing what the GPU does not publish (AUGADD, an index
+#     table) counted refused by name, corpus by corpus;
+#   * the certificate corpus's conformance test (certificates/corpus.py
+#     check --device hip:0, run from this tree so that its history leg has
+#     the repository), every case cft-segrun remakes made on the GPU;
+#   * device-test -n 96 and -b -n 96, its NOT lines counted against the
+#     recorded 12, 17 and 4; hip-test -s small, leg by leg.
+# What it asks of its host: hipcc (HIP_ROOT, default /opt/rocm; the
+# platform HIP_PLATFORM, else that installation's hipconfig, else amd), a
+# GPU the platform's lister shows (nvidia-smi -L, or amd-smi list or
+# rocminfo), a C compiler, and python with mpmath (the corpora and the
+# vectors are made from the golden model). HIP_ARCH is the device's own
+# unless set (nvidia-smi's compute capability, rocminfo's gfx name; a NOTE,
+# and the Makefile's default, where neither answers); HIP_CUDA passes
+# through. Skipped by name where any is missing - CI, amd-arc-box and the
+# Windows desktop have no GPU toolchain - and --require-all fails the skip,
+# which is right for a host that claims to be a full verification host.
+hip_platform() {
+  local p=${HIP_PLATFORM:-} cfg="${HIP_ROOT:-/opt/rocm}/bin/hipconfig"
+  if [ -z "$p" ] && [ -x "$cfg" ]; then
+    p=$("$cfg" --platform 2>/dev/null | tail -n 1 | tr -d '\r[:space:]')
+  fi
+  echo "${p:-amd}"
+}
+hip_list() {  # <platform>: HIP_LISTER, the platform's lister, and HIP_LISTED, the GPUs it shows
+  HIP_LISTER=""; HIP_LISTED=0
+  case "$1" in
+    nvidia|cuda)
+      if command -v nvidia-smi >/dev/null 2>&1; then
+        HIP_LISTER="nvidia-smi -L"
+        HIP_LISTED=$(nvidia-smi -L 2>/dev/null | grep -cE '^GPU [0-9]+:')
+      fi;;
+    *)
+      if command -v amd-smi >/dev/null 2>&1; then
+        HIP_LISTER="amd-smi list"
+        HIP_LISTED=$(amd-smi list 2>/dev/null | grep -cE '^GPU: [0-9]+')
+      elif command -v rocminfo >/dev/null 2>&1; then
+        HIP_LISTER="rocminfo"
+        HIP_LISTED=$(rocminfo 2>/dev/null | grep -cE '^[[:space:]]*Device Type:[[:space:]]*GPU')
+      fi;;
+  esac
+}
+hip_gpu_reason() {  # -> need's skip reason for `gpu`, or nothing when the lister shows HIP_DEVICE
+  local p n=${HIP_DEVICE:-0} s
+  p=$(hip_platform)
+  hip_list "$p"
+  if [ -z "$HIP_LISTER" ]; then
+    if ! command -v nvidia-smi >/dev/null 2>&1 && ! command -v amd-smi >/dev/null 2>&1; then
+      echo "no GPU: neither nvidia-smi nor amd-smi on PATH"
+    elif [ "$p" != amd ]; then
+      echo "no GPU: no nvidia-smi on PATH, the lister for HIP_PLATFORM=$p"
+    else
+      echo "no GPU: neither amd-smi nor rocminfo on PATH, the listers for HIP_PLATFORM=$p"
+    fi
+  elif [ "$HIP_LISTED" -eq 0 ]; then
+    echo "no GPU: $HIP_LISTER lists no device for HIP_PLATFORM=$p"
+  elif [[ $n =~ ^[0-9]{1,9}$ ]] && [ "$((10#$n))" -ge "$HIP_LISTED" ]; then
+    s=s; [ "$HIP_LISTED" -eq 1 ] && s=""
+    echo "no GPU: $HIP_LISTER lists $HIP_LISTED device$s for HIP_PLATFORM=$p, and HIP_DEVICE=$n is past the $HIP_LISTED it lists"
+  fi
+}
+
+# The device part of a CFT_HIP_INFO line - its name, architecture, bus,
+# platform, runtime and what is visible - without this build's own figures,
+# which a plant build's registers change.
+hip_devpart() { sed -n 's/^cft hip: hip:0 = \(.*\); this libcft: .*/\1/p'; }
+# <leg log> <leg>: every GPU process of the leg named the stage's device
+hip_named() {
+  local n m odd
+  n=$(grep -c '^cft hip: ' "$1")
+  if [ "$n" -eq 0 ]; then
+    echo "  FAIL  $2: no CFT_HIP_INFO line - a run whose log does not name its device is not a result"
+    return 1
+  fi
+  m=$(grep '^cft hip: ' "$1" | hip_devpart | grep -cxF -- "$HIP_DEV")
+  if [ "$m" -ne "$n" ]; then
+    odd=$(grep '^cft hip: ' "$1" | grep -vF -- "= $HIP_DEV; this libcft: " | head -n 2)
+    echo "  FAIL  $2: $((n - m)) of its $n device lines name another device than the stage's ($HIP_DEV): $odd"
+    return 1
+  fi
+}
+# <log> <command...>: one run, its command and its whole output in the stage's log
+hip_cmd() {
+  local log=$1 rc; shift
+  echo "\$ $*"
+  "$@" > "$log" 2>&1; rc=$?
+  cat "$log"
+  return $rc
+}
+# <plant> <log> <command...>: one run under a plant (CFT_HIP_PLANT, compiled in by HIP_PLANTS=1)
+hip_plant_run() {
+  local pl=$1 out=$2 rc; shift 2
+  echo "\$ CFT_HIP_PLANT=$pl $*"
+  CFT_HIP_PLANT=$pl "$@" > "$out" 2>&1; rc=$?    # HIP-PLANT-RUN
+  cat "$out"
+  return $rc
+}
+hip_sum() { sha256sum "$1" 2>/dev/null | cut -c1-64; }
+hip_same() { if [ -n "$1" ] && [ "$1" = "$2" ]; then echo "= sw"; else echo "${1:-none}"; fi; }
+# GPU-A's captured output sum for a corpus (docs/studies/gpu-a/captured), or "-"
+hip_captured() {
+  local cap="$ROOT/docs/studies/gpu-a/captured" key="" s=""
+  case "$1" in
+    conf-*) s=$(grep -m1 " $1.bin (" "$cap/expect.sha256" 2>/dev/null | cut -c1-64);;
+    routines-*) key="ref-${1#routines-}.out";;
+    *) key="ref-$1.out";;
+  esac
+  [ -n "$key" ] && s=$(grep -m1 "  $key\$" "$cap/programs.sha256" 2>/dev/null | cut -c1-64)
+  echo "${s:--}"
+}
+
+do_hip() {
+  local plat dev=${HIP_DEVICE:-0} root=${HIP_ROOT:-/opt/rocm} arch=${HIP_ARCH:-} \
+        tree="$RUNDIR/hip-tree" ptree="$RUNDIR/hip-tree-plants" L="$RUNDIR/hip-logs" \
+        C="$RUNDIR/hip-corpora" O="$RUNDIR/hip-out" V="$RUNDIR/hip-vectors" \
+        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap vendor
+  local -a mk bad=()
+  local -A SW=()
+  plat=$(hip_platform)
+  case "$plat" in nvidia|amd|cuda) ;;
+    *) echo "FAIL  HIP_PLATFORM=$plat: the stage builds for nvidia, amd or cuda (plain nvcc)"; return 1;; esac
+  [ "$plat" = amd ] && vendor=amd || vendor=nvidia
+  if ! [[ $dev =~ ^[0-9]{1,9}$ ]]; then
+    echo "FAIL  HIP_DEVICE=$dev is not a device number (a decimal: 0 is the first GPU the platform's lister shows)"
+    return 1
+  fi
+  dev=$((10#$dev))
+  mkdir -p "$L" "$C" "$O" "$V"
+  hip_list "$plat"
+  # The chosen GPU is the only one this stage's processes see: hip:0 inside
+  # is HIP_DEVICE outside.
+  if [ "$vendor" = nvidia ]; then
+    export CUDA_VISIBLE_DEVICES=$dev CUDA_DEVICE_ORDER=PCI_BUS_ID
+    unset HIP_VISIBLE_DEVICES
+    line=$(nvidia-smi --query-gpu=name,pci.bus_id,compute_cap,memory.used,utilization.gpu \
+           --format=csv,noheader -i "$dev" 2>&1)
+    busl=$(printf '%s\n' "$line" | sed -n 's/^[^,]*, *\([0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f]*\.[0-9]\).*/\1/p' | tr 'A-F' 'a-f')
+    [ -z "$arch" ] && arch=$(printf '%s\n' "$line" | sed -n 's/^[^,]*,[^,]*, *\([0-9]*\)\.\([0-9]*\),.*/\1\2/p')
+  else
+    export HIP_VISIBLE_DEVICES=$dev
+    unset CUDA_VISIBLE_DEVICES
+    line=$(amd-smi list 2>/dev/null | awk -v d="$dev" '$1 == "GPU:" { on = ($2 == d) } on && $1 == "BDF:" { print $2; exit }')
+    busl=$(printf '%s\n' "$line" | tr 'A-F' 'a-f')
+    if [ -z "$arch" ] && command -v rocminfo >/dev/null 2>&1; then
+      arch=$(rocminfo 2>/dev/null | sed -n 's/^[[:space:]]*Name:[[:space:]]*\(gfx[0-9a-f]*\)[[:space:]]*$/\1/p' | sed -n "$((dev + 1))p")
+    fi
+  fi
+  b=""
+  if [ "$vendor" = nvidia ]; then
+    b=", HIP_CUDA ${HIP_CUDA:-/usr/local/cuda, as the Makefile defaults it,} = $(readlink -f "${HIP_CUDA:-/usr/local/cuda}")"
+  fi
+  echo "hip: platform $plat, HIP_ROOT $root$b; $HIP_LISTER lists $HIP_LISTED GPU(s), HIP_DEVICE=$dev: ${line:-(no line from the lister)}"
+  if [ "$vendor" = nvidia ]; then b="CUDA_VISIBLE_DEVICES=$dev CUDA_DEVICE_ORDER=PCI_BUS_ID"; else b="HIP_VISIBLE_DEVICES=$dev"; fi
+  echo "hip: every process here sees that GPU alone, as hip:0 - $b"
+  if [ -n "${HIP_ARCH:-}" ]; then
+    echo "hip: HIP_ARCH=$arch, as set"
+  elif [ -n "$arch" ]; then
+    if [ "$vendor" = nvidia ]; then b="the compute capability nvidia-smi gives"; else b="the gfx name rocminfo gives"; fi
+    echo "hip: HIP_ARCH=$arch, the device's own: $b"
+  else
+    echo "NOTE  hip: the device's architecture could not be read, so the build takes host/Makefile's default HIP_ARCH (every architecture it names)"
+  fi
+  mk=(make -j4 HIP=1 "HIP_PLATFORM=$plat" "HIP_ROOT=$root" "PYTHON=$PYBIN")
+  [ -n "$arch" ] && mk+=("HIP_ARCH=$arch")
+  [ -n "${HIP_CUDA:-}" ] && mk+=("HIP_CUDA=$HIP_CUDA")
+
+  # ---- the copy, and the build in it
+  rm -rf "$tree" "$ptree"
+  mkdir -p "$tree"
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    (cd "$ROOT" && git ls-files -z --cached --others --exclude-standard -- host docs/studies/gpu-a/cudahip \
+      | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done \
+      | tar --null -T - -cf -) | tar -xf - -C "$tree" || { echo "FAIL  the copy of host/ into $tree"; return 1; }
+    b=""; [ -n "$DIRTY" ] && b=" (the tree is DIRTY)"
+    echo "hip: the copy, $tree/host: $(find "$tree/host" -type f | wc -l) files - host/ as git tracks it at $COMMIT with the working tree's edits, and the untracked files git does not ignore$b"
+  else
+    # host/'s contents, never a link to it: `make clean` below runs in the copy
+    mkdir -p "$tree/host" "$tree/docs/studies/gpu-a" && cp -a "$ROOT/host/." "$tree/host/" && [ ! -L "$tree/host" ] \
+      && cp -a "$ROOT/docs/studies/gpu-a/cudahip" "$tree/docs/studies/gpu-a/" \
+      && make -C "$tree/host" clean >/dev/null 2>&1 \
+      || { echo "FAIL  the copy of host/ into $tree"; return 1; }
+    echo "hip: the copy, $tree/host: $(find "$tree/host" -type f | wc -l) files - host/ whole (no git here: commit $COMMIT), cleaned by its own make clean in the copy"
+  fi
+  H="$tree/host"; P="$ptree/host"
+  t0=$(date +%s)
+  echo "\$ ${mk[*]} -C $H all device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun"
+  "${mk[@]}" -C "$H" all device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun \
+    > "$L/build.txt" 2>&1 || { tail -n 40 "$L/build.txt"; echo "FAIL  the HIP=1 build"; return 1; }
+  echo "hip: built in $(( $(date +%s) - t0 )) s; warnings: $(grep -ci 'warning' "$L/build.txt")"
+  grep -i 'warning' "$L/build.txt" | head -n 20
+  grep '^hip-symcheck: ' "$L/build.txt"
+  for b in libcft.a libcft.so device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun; do
+    printf '  built  %-14s %s\n' "$b" "$(date -r "$H/$b" '+%F %T' 2>/dev/null || echo MISSING)"
+  done
+
+  # ---- the device, by this build's own runtime: a lister that shows the
+  # GPU while the runtime sees none is a failure naming both
+  hip_cmd "$L/open.txt" env CFT_HIP_INFO=1 "$H/hip-test" hip:0 -l open; rc=$?    # HIP-OPEN-PROBE
+  if grep -qE 'the HIP runtime sees 0 |found no usable GPU' "$L/open.txt"; then
+    echo "FAIL  $HIP_LISTER lists $HIP_LISTED GPU(s) for HIP_PLATFORM=$plat and HIP_DEVICE=$dev among them, but the HIP runtime of this build sees none: $(grep -m1 -E 'the HIP runtime sees 0 |found no usable GPU' "$L/open.txt")"
+    return 1
+  fi
+  [ $rc -eq 0 ] || { echo "FAIL  hip-test hip:0 -l open exited $rc"; return 1; }
+  HIP_INFO=$(grep -m1 '^cft hip: hip:0 = ' "$L/open.txt")
+  HIP_DEV=$(printf '%s\n' "$HIP_INFO" | hip_devpart)
+  [ -n "$HIP_DEV" ] || { echo "FAIL  hip-test printed no CFT_HIP_INFO line it can be named by"; return 1; }
+  busd=$(printf '%s\n' "$HIP_DEV" | sed -n 's/.*, bus [0-9a-f]*:\([0-9a-f]*:[0-9a-f]*\.[0-9]\),.*/\1/p')
+  case "$HIP_DEV" in *"; of 1 visible"*) ;;
+    *) echo "FAIL  the runtime sees more than the one GPU the stage chose: $HIP_INFO"; return 1;; esac
+  if [ -z "$busl" ] || [ "${busl: -7}" != "$busd" ]; then
+    echo "FAIL  the runtime's GPU (bus $busd) is not the one $HIP_LISTER names HIP_DEVICE=$dev (bus ${busl:-unknown}): $HIP_INFO"
+    return 1
+  fi
+  echo "hip: the device - $HIP_INFO"
+
+  # ---- the build's own checks
+  hip_cmd "$L/symplant.txt" "${mk[@]}" -C "$H" hip-symcheck-plant \
+    && grep -q '^hip-symcheck-plant: RED, as it must be' "$L/symplant.txt" \
+    || { echo "FAIL  hip-symcheck-plant did not say RED: the symbol check is not shown to fail"; return 1; }
+  for b in device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun libcft.so; do
+    line=$(ldd "$H/$b" 2>&1 | grep -E 'libamdhip64|libcudart' | head -n 1)
+    if [ -n "$line" ]; then printf '  ldd    %-14s %s\n' "$b" "$(echo $line)"
+    else echo "FAIL  ldd $H/$b names no GPU runtime (libamdhip64 or libcudart): a result from it would not be the GPU's"; rc=1; fi
+  done
+  [ $rc -eq 0 ] || return 1
+
+  # ---- the corpora (GPU-A's generators, the commands G1B used) and the
+  # software handle's sums, the definition every GPU run is held to
+  t0=$(date +%s)
+  hip_cmd "$L/gen-conformance.txt" "$PYBIN" -B "$ROOT/docs/studies/gpu-a/gen_corpus.py" conformance "$C" \
+    || { echo "FAIL  gen_corpus.py conformance"; return 1; }
+  hip_cmd "$L/gen-programs.txt" "$PYBIN" -B "$ROOT/docs/studies/gpu-a/gen_programs.py" "$C" \
+      --formats fp32 fp64 fp128 fp256 --golden \
+    || { echo "FAIL  gen_programs.py"; return 1; }
+  echo "hip: the corpora made in $(( $(date +%s) - t0 )) s"
+  for c in $HIP_CORPORA; do
+    hip_cmd "$L/sw-$c.txt" "$H/hip-corpus" sw "$C/$c.bin" "$O/$c.sw" \
+      || { echo "FAIL  hip-corpus sw $c.bin"; return 1; }
+    SW[$c]=$(hip_sum "$O/$c.sw")
+  done
+
+  # ---- the plants, before anything is believed
+  echo "== plants (HIP_PLANTS=1, a copy of the build: $P)"
+  cp -a "$tree" "$ptree" || { echo "FAIL  the plants' copy"; return 1; }
+  t0=$(date +%s)
+  "${mk[@]}" -C "$P" HIP_PLANTS=1 hip-corpus hip-test > "$L/build-plants.txt" 2>&1 \
+    || { tail -n 40 "$L/build-plants.txt"; echo "FAIL  the HIP_PLANTS=1 build"; return 1; }
+  echo "hip: the plants' build in $(( $(date +%s) - t0 )) s; warnings: $(grep -ci 'warning' "$L/build-plants.txt")"
+  for pl in flip drop-flag; do
+    hip_plant_run "$pl" "$L/plant-$pl.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/conf-fp64.bin" "$O/plant-$pl.out"; rc=$?
+    line=$(grep -m1 "against the corpus's expected values [0-9]* results and [0-9]* flags differ" "$L/plant-$pl.txt")
+    nd=$(printf '%s\n' "$line" | sed -n 's/.*expected values \([0-9]*\) results and \([0-9]*\) flags differ.*/\1/p')
+    nf=$(printf '%s\n' "$line" | sed -n 's/.*expected values \([0-9]*\) results and \([0-9]*\) flags differ.*/\2/p')
+    if [ "$pl" = flip ]; then n=${nd:-0}; f=results; else n=${nf:-0}; f=flags; fi
+    if [ $rc -eq 1 ] && [ "$n" -gt 0 ] && grep -q "^cft hip: .*CFT_HIP_PLANT=$pl\$" "$L/plant-$pl.txt"; then
+      echo "  RED   plant $pl: conf-fp64 on hip:0 exits 1, $n $f differing from the corpus's expected values"
+    else
+      bad+=("plant $pl did not turn its check red: hip-corpus hip:0 conf-fp64 exited $rc with ${n:-no} $f differing$(grep -q "CFT_HIP_PLANT=$pl\$" "$L/plant-$pl.txt" || echo ', and no device line names the plant')")
+    fi
+  done
+  hip_plant_run seq-mask "$L/plant-seq-mask.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/routines-fp64.bin" "$O/plant-seq-mask.out"; rc=$?
+  h=$(hip_sum "$O/plant-seq-mask.out")
+  if [ $rc -eq 0 ] && [ -n "$h" ] && [ "$h" != "${SW[routines-fp64]}" ] \
+     && grep -q '^cft hip: .*CFT_HIP_PLANT=seq-mask$' "$L/plant-seq-mask.txt"; then
+    echo "  RED   plant seq-mask: routines-fp64 on hip:0 gives $h, the software handle $(echo "${SW[routines-fp64]}")"
+  else
+    bad+=("plant seq-mask did not turn its check red: routines-fp64 on hip:0 exited $rc with sha256 ${h:-none}, the software handle's ${SW[routines-fp64]}")
+  fi
+  hip_plant_run reduce-carry "$L/plant-reduce-carry.txt" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l reduce -s small -f fp64; rc=$?
+  line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$L/plant-reduce-carry.txt")
+  n=$(printf '%s\n' "$line" | sed -n 's/^[0-9]* checks, \([0-9]*\) failed.*/\1/p')
+  if [ $rc -eq 1 ] && [ "${n:-0}" -gt 0 ] && grep -q '^cft hip: .*CFT_HIP_PLANT=reduce-carry$' "$L/plant-reduce-carry.txt"; then
+    echo "  RED   plant reduce-carry: hip-test's small fp64 reductions, $line"
+  else
+    bad+=("plant reduce-carry did not turn its check red: hip-test -l reduce -s small -f fp64 exited $rc (${line:-no summary})")
+  fi
+  # the same checks on the plants' build with no plant: GREEN, so the red was the plant's
+  hip_cmd "$L/plant-none-conf.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/conf-fp64.bin" "$O/plant-none.out" \
+    && grep -q "expected values 0 results and 0 flags differ" "$L/plant-none-conf.txt" \
+    || bad+=("the plants' build with no plant is not green on conf-fp64, so its reds prove nothing")
+  hip_cmd "$L/plant-none-routines.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/routines-fp64.bin" "$O/plant-none-routines.out" \
+    && [ "$(hip_sum "$O/plant-none-routines.out")" = "${SW[routines-fp64]}" ] \
+    || bad+=("the plants' build with no plant does not give the software handle's routines-fp64")
+  hip_cmd "$L/plant-none-reduce.txt" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l reduce -s small -f fp64 \
+    || bad+=("the plants' build with no plant is not green on hip-test's small fp64 reductions")
+  hip_cmd "$L/plant-leg.txt" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l plants \
+    || bad+=("hip-test's plants leg: a malformed CFT_HIP_PLANT, CFT_HIP_CHUNK, CFT_HIP_PAGE or CFT_HIP_INFO is not refused by name")
+  for f in "$L"/plant-*.txt; do hip_named "$f" "plants, $(basename "$f" .txt)" || bad+=("$(basename "$f" .txt): its device is not the stage's"); done
+  if [ ${#bad[@]} -gt 0 ]; then
+    printf 'FAIL  %s\n' "${bad[@]}"
+    echo "FAIL  the plants: a check a plant cannot turn red proves nothing, so no leg runs after them"
+    return 1
+  fi
+  echo "hip: every plant RED, and GREEN without it"
+
+  # ---- b. the corpora: sw, hip:0 and hip:0 --resident, the same sha256
+  echo "== corpora (docs/studies/gpu-a): sw, hip:0, hip:0 --resident; GPU-A's captured sum beside, as information"
+  echo "   (each sha256 of the output in full; \"= sw\" where it is the software handle's, compared whole)"
+  printf '%-15s %-64s %-7s %-7s %-7s %s\n' corpus "sw" "hip:0" resident golden "GPU-A captured"
+  : > "$L/corpora.txt"
+  for c in $HIP_CORPORA; do
+    { echo "\$ CFT_HIP_INFO=1 $H/hip-corpus hip:0 $C/$c.bin $O/$c.hip"
+      CFT_HIP_INFO=1 "$H/hip-corpus" hip:0 "$C/$c.bin" "$O/$c.hip" 2>&1; } > "$L/hip-$c.txt"; r=$?
+    { echo "\$ CFT_HIP_INFO=1 $H/hip-corpus hip:0 $C/$c.bin $O/$c.res --resident"
+      CFT_HIP_INFO=1 "$H/hip-corpus" hip:0 "$C/$c.bin" "$O/$c.res" --resident 2>&1; } > "$L/res-$c.txt"; rc=$?
+    cat "$L/hip-$c.txt" "$L/res-$c.txt" >> "$L/corpora.txt"
+    h=$(hip_sum "$O/$c.hip"); s=$(hip_sum "$O/$c.res")
+    g="-"; [ -f "$C/$c.golden" ] && g=$(hip_sum "$C/$c.golden")
+    cap=$(hip_captured "$c")
+    printf '%-15s %-64s %-7s %-7s %-7s %s\n' "$c" "${SW[$c]}" "$(hip_same "$h" "${SW[$c]}")" \
+      "$(hip_same "$s" "${SW[$c]}")" "$( [ "$g" = - ] && echo - || hip_same "$g" "${SW[$c]}")" \
+      "$( [ "$cap" = "${SW[$c]}" ] && echo "= sw" || echo "$cap (not sw's)")"
+    if [ $r -ne 0 ] || [ $rc -ne 0 ] || [ "$h" != "${SW[$c]}" ] || [ "$s" != "${SW[$c]}" ] \
+       || { [ "$g" != "-" ] && [ "$g" != "${SW[$c]}" ]; }; then
+      bad+=("$c: hip:0 exited $r and --resident $rc; sha256 sw ${SW[$c]}, hip:0 ${h:-none}, resident ${s:-none}$([ "$g" != "-" ] && echo ", golden $g")")
+    fi
+  done
+  cat "$L/corpora.txt"
+  hip_cmd "$L/refuse.txt" env CFT_HIP_INFO=1 "$H/hip-corpus" hip:0 "$C/refuse.bin" "$O/refuse.hip"; rc=$?
+  if [ $rc -eq 1 ] && grep -q '^refused by libcft: .*AUGADD.*CAPS2\[11\]' "$L/refuse.txt"; then
+    echo "  ok    refuse.bin: refused by name on hip:0 (AUGADD, CAPS2[11])"
+  else
+    bad+=("refuse.bin: not refused by its sentence on hip:0 (exit $rc)")
+  fi
+  hip_named "$L/corpora.txt" corpora || bad+=("the corpora: a run did not name the stage's device")
+  hip_named "$L/refuse.txt" refuse || bad+=("refuse.bin: its run did not name the stage's device")
+  [ ${#bad[@]} -eq 0 ] && echo "hip: $(echo $HIP_CORPORA | wc -w) corpora, each the software handle's sha256 on hip:0 and on hip:0 --resident"
+
+  # ---- c. the vectors: the same sets and cases on sw and on hip:0
+  echo "== vectors (cft-selftest, sw and hip:0)"
+  if [ "${HIP_FULL_REPLAY:-0}" = 1 ]; then
+    ensure_vectors || return 1
+    V="$ROOT/vectors/out"
+  else
+    # every format and attribute: the elementwise sets (every opcode), the
+    # magnitude forms, the augmented and the reduction sets. Not the
+    # character, formatOf and transcendental sets, whose directed pools are
+    # fixed and large (MEASURED 2026-11-12: with them a bounded set was
+    # 291,298 cases, 151 s on sw alone in cft-gpu, past 120 s on the GPU;
+    # the fp256 transcendental sets about a minute each to generate) - they
+    # are HIP_FULL_REPLAY's
+    hip_cmd "$L/gen-vectors.txt" "$PYBIN" -B "$ROOT/vectors/gen_vectors.py" --out "$V" \
+        --formats fp32 fp64 fp128 fp256 --rounding rne rtz rdn rup rmm \
+        --directed 120 --random 160 --simple 24 --transcend 0 --minmaxmag 1 \
+        --augmented 1 --reduce 1 --character 0 --formatof 0 \
+      || { echo "FAIL  gen_vectors.py"; return 1; }
+  fi
+  (cd "$H" && hip_cmd "$L/vectors-sw.txt" ./cft-selftest "$V"); r=$?
+  (cd "$H" && hip_cmd "$L/vectors-hip.txt" env CFT_HIP_INFO=1 ./cft-selftest "$V" hip:0); rc=$?
+  s=$(grep -E '^[0-9]+ sets?, [0-9]+ cases, all matching' "$L/vectors-sw.txt" | cut -d'(' -f1)
+  h=$(grep -E '^[0-9]+ sets?, [0-9]+ cases, all matching' "$L/vectors-hip.txt" | cut -d'(' -f1)
+  n=$(grep -E '^[0-9]+ cases checked' "$L/vectors-sw.txt"); f=$(grep -E '^[0-9]+ cases checked' "$L/vectors-hip.txt")
+  if [ $r -eq 0 ] && [ $rc -eq 0 ] && [ -n "$s" ] && [ "$s" = "$h" ] && [ -n "$n" ] && [ "$n" = "$f" ]; then
+    echo "  ok    vectors: sw and hip:0 alike - ${h}; $f"
+  else
+    bad+=("vectors: sw exited $r (${s:-no sets line}; ${n:-no count}), hip:0 exited $rc (${h:-no sets line}; ${f:-no count})")
+  fi
+  hip_named "$L/vectors-hip.txt" vectors || bad+=("vectors: the replay did not name the stage's device")
+
+  # ---- d. seq_check, the `seq` stage's command, through the device
+  echo "== seq_check --device hip:0"
+  t0=$(date +%s)
+  (cd "$ROOT" && hip_cmd "$L/seq.txt" env CFT_HIP_INFO=1 CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/seq_check.py \
+     --trials 250 --formats fp32 fp64 fp128 fp256 --device hip:0); rc=$?
+  if [ $rc -eq 0 ] && grep -q '^device hip:0: backend hip,' "$L/seq.txt" && ! grep -q 'MISMATCH' "$L/seq.txt"; then
+    echo "  ok    seq_check through hip:0, $(( $(date +%s) - t0 )) s; what the device does not publish, refused by name, corpus by corpus:"
+    grep -E 'programs NOT COMPARED - each needs a bit the device does not publish|^  it does not publish' "$L/seq.txt" \
+      | sed 's/^ */        /'
+  else
+    bad+=("seq_check --device hip:0: exit $rc, $(grep -c MISMATCH "$L/seq.txt") MISMATCH line(s)$(grep -q '^device hip:0: backend hip,' "$L/seq.txt" || echo ', and no device line of its own')")
+  fi
+  hip_named "$L/seq.txt" seq_check || bad+=("seq_check: it did not name the stage's device")
+
+  # ---- e. the certificate corpus's conformance test through the device
+  echo "== certificates/corpus.py check --device hip:0"
+  t0=$(date +%s)
+  (cd "$ROOT" && hip_cmd "$L/corpus.txt" env CFT_HIP_INFO=1 "$PYBIN" -B certificates/corpus.py check \
+     --tool "$H/cft-segrun" --device hip:0); rc=$?
+  line=$(grep -m1 '^corpus check --device hip:0: ' "$L/corpus.txt")
+  if [ $rc -eq 0 ] && [ -n "$line" ]; then
+    echo "  ok    $line ($(( $(date +%s) - t0 )) s)"
+  else
+    bad+=("corpus.py check --device hip:0: exit $rc - $(grep -m1 '^corpus check: ' "$L/corpus.txt")")
+  fi
+  hip_named "$L/corpus.txt" "the certificate corpus" || bad+=("the certificate corpus: a run did not name the stage's device")
+
+  # ---- f. device-test, both legs
+  echo "== device-test hip:0 -n 96, then -b -n 96"
+  for b in "" -b; do
+    (cd "$H" && hip_cmd "$L/devtest$b.txt" env CFT_HIP_INFO=1 ./device-test hip:0 $b -n 96); rc=$?
+    line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$L/devtest$b.txt")
+    # the lines that name one absence each, not the summary line that counts them
+    n=$(grep -v '^not on this device' "$L/devtest$b.txt" | grep -c ': NOT COMPARED')
+    f=$(grep -v '^not on this device' "$L/devtest$b.txt" | grep -c ': NOT TESTED')
+    s=$(grep -v '^not on this device' "$L/devtest$b.txt" | grep -c ': NOT RUN')
+    if [ $rc -eq 0 ] && [ -n "$line" ]; then
+      echo "  ok    device-test hip:0 ${b:+$b }-n 96: $line; NOT COMPARED $n, NOT TESTED $f, NOT RUN $s lines ($(grep -m1 '^not on this device' "$L/devtest$b.txt"))"
+      [ -z "$b" ] && { [ "$n" = 12 ] && [ "$f" = 17 ] && [ "$s" = 4 ] \
+        || echo "NOTE  device-test hip:0 -n 96: NOT COMPARED $n, NOT TESTED $f, NOT RUN $s, where G1B recorded 12, 17 and 4"; }
+    else
+      bad+=("device-test hip:0 ${b:+$b }-n 96: exit $rc (${line:-no summary})")
+    fi
+    hip_named "$L/devtest$b.txt" "device-test${b:+ $b}" || bad+=("device-test${b:+ $b}: it did not name the stage's device")
+  done
+
+  # ---- g. hip-test, leg by leg, the small reductions (the large ones are
+  # recorded runs, not the stage's)
+  echo "== hip-test hip:0 -s small, leg by leg (the open leg ran as the device's probe, above)"
+  for n in alias two buffers reduce:fp32 reduce:fp64 reduce:fp128 reduce:fp256 \
+           seg:fp32 seg:fp64 seg:fp128 seg:fp256 compose:fp32 compose:fp64 compose:fp128 compose:fp256; do
+    f=${n#*:}; [ "$f" = "$n" ] && f=""
+    t0=$(date +%s)
+    { echo "\$ CFT_HIP_INFO=1 $H/hip-test hip:0 -l ${n%%:*} -s small${f:+ -f $f}"
+      CFT_HIP_INFO=1 "$H/hip-test" hip:0 -l "${n%%:*}" -s small ${f:+-f $f} 2>&1; } > "$L/hiptest-${n/:/-}.txt"; rc=$?
+    line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$L/hiptest-${n/:/-}.txt")
+    if [ $rc -eq 0 ]; then
+      echo "  ok    hip-test -l ${n%%:*}${f:+ -f $f}: $line ($(( $(date +%s) - t0 )) s)"
+      grep ': NOT RUN' "$L/hiptest-${n/:/-}.txt" | sed 's/^ */        /'
+    else
+      cat "$L/hiptest-${n/:/-}.txt"
+      bad+=("hip-test hip:0 -l ${n%%:*} -s small${f:+ -f $f}: exit $rc (${line:-no summary})")
+    fi
+    hip_named "$L/hiptest-${n/:/-}.txt" "hip-test ${n}" || bad+=("hip-test $n: it did not name the stage's device")
+  done
+
+  if [ ${#bad[@]} -gt 0 ]; then
+    printf 'FAIL  %s\n' "${bad[@]}"
+    echo "device: $HIP_INFO"
+    return 1
+  fi
+  echo "hip: every leg green on the device below"
+  echo "device: $HIP_INFO"
+}
+HIP_CORPORA="conf-fp32 conf-fp64 conf-fp128 conf-fp256 routines-fp32 routines-fp64 routines-fp128 routines-fp256 fuzz-fp32 fuzz-fp64 fuzz-fp128 fuzz-fp256 systems bench"
+need hipcc gpu host-cc python mpmath
+stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (flip, drop-flag, seq-mask, reduce-carry red and green without them), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check, the certificate corpus's conformance test, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without hipcc or a GPU" -- do_hip
+
+# The same stage on the two other ways to build the backend for NVIDIA
+# (plan decision 3; Logan, 2026-11-10: "install CUDA 13 and make the recipe
+# a stage"), each in the full census alone: they need a toolchain the gate's
+# hosts do not have. `hip-nvcc` is plain nvcc and no HIP at all,
+# host/Makefile's HIP_PLATFORM=cuda, through study GPU-A's header extended
+# for the backend (docs/studies/gpu-a/cudahip); HIP_CUDA chooses the CUDA.
+# `hip-source` is HIP built from ROCm's own sources for NVIDIA, the study
+# GPU-B's recipe, which verify/build-hip-nvidia.sh makes from pinned tags
+# into HIPSRC_ROOT (default verify/_hip-nvidia-prefix; it downloads, so it
+# is run by hand, never by a stage), under CUDA 13 (HIPSRC_CUDA, default
+# /usr/local/cuda-13.3: the recipe needs no patch there). Each is skipped by
+# name without its toolchain, as `images` is without IMAGES, or without an
+# NVIDIA GPU. Both hold the GPU to everything `hip` does: the same legs, the
+# same plants, the same sums.
+do_hip_nvcc() { HIP_PLATFORM=cuda do_hip; }
+HIP_PLATFORM=cuda need nvcc gpu host-cc python mpmath
+stage hip-nvcc "the GPU backend built by plain nvcc with no HIP (HIP_PLATFORM=cuda through study GPU-A's header) on this host's NVIDIA GPU, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without nvcc or an NVIDIA GPU" -- do_hip_nvcc
+
+hipsrc_root() { echo "${HIPSRC_ROOT:-$ROOT/verify/_hip-nvidia-prefix}"; }
+do_hip_source() {
+  HIP_ROOT=$(hipsrc_root) HIP_PLATFORM=nvidia HIP_CUDA=${HIPSRC_CUDA:-/usr/local/cuda-13.3} do_hip
+}
+HIP_ROOT=$(hipsrc_root) HIP_PLATFORM=nvidia need hipsrc gpu host-cc python mpmath
+stage hip-source "the GPU backend built by HIP compiled from ROCm's own sources for NVIDIA (HIPSRC_ROOT, made by verify/build-hip-nvidia.sh from pinned tags) under CUDA 13, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without that prefix or an NVIDIA GPU" -- do_hip_source
 
 # ---- report --------------------------------------------------------
 {

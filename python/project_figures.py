@@ -1174,7 +1174,8 @@ STAGE_GROUPS = (
     ("languages and surfaces", ("bindings", "cpp", "lang-cpp", "lang-rust", "lang-julia", "lang-go", "lang-csharp",
                                  "lang-r", "lang-fortran", "node", "wasm")),
     ("real workloads", ("photograph", "workloads", "demos")),
-    ("hardware and remote", ("soak-quick", "cardstress", "images", "remote")),
+    ("hardware and remote", ("soak-quick", "cardstress", "images", "remote", "hip", "hip-nvcc",
+                             "hip-source")),
 )
 
 

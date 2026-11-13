@@ -151,6 +151,20 @@ ifeq ($(HIP_PLATFORM),nvidia)
   # The shared CUDA runtime, so that `ldd` names it in every binary
   HIPLIBS    := -L$(HIP_CUDA)/lib64 -Wl,-rpath,$(HIP_CUDA)/lib64 \
                 -lcudart -lstdc++ -lpthread -ldl -lrt
+else ifeq ($(HIP_PLATFORM),cuda)
+  # Plain nvcc and no HIP at all (the GPU backend's round 1, parcel G1C,
+  # 2026-11-12): study GPU-A's header, docs/studies/gpu-a/cudahip, maps the
+  # HIP names backend_hip.cpp uses onto CUDA's, and `<hip/hip_runtime.h>`
+  # finds it first. HIP_HEADER is its directory. The rest is the nvidia
+  # line's: -x cu, -gencode, nvcc's host warnings, the shared CUDA runtime.
+  HIP_ARCH   ?= 89 120
+  HIP_HEADER ?= ../docs/studies/gpu-a/cudahip
+  HIP_FLAGS  := -x cu -I$(HIP_HEADER) -Xptxas -v \
+                $(foreach a,$(HIP_ARCH),-gencode arch=compute_$(a),code=sm_$(a))
+  HIP_WARN   := -Xcompiler -Wall,-Wextra,-Wno-unused-function
+  HIP_PICF   := -Xcompiler -fPIC,-fvisibility=hidden
+  HIPLIBS    := -L$(HIP_CUDA)/lib64 -Wl,-rpath,$(HIP_CUDA)/lib64 \
+                -lcudart -lstdc++ -lpthread -ldl -lrt
 else
   HIP_ARCH   ?= gfx1102
   HIP_FLAGS  := -Rpass-analysis=kernel-resource-usage \
@@ -160,7 +174,17 @@ else
   HIPLIBS    := -L$(HIP_ROOT)/lib -Wl,-rpath,$(HIP_ROOT)/lib -lamdhip64 \
                 -lstdc++
 endif
+ifeq ($(HIP_PLATFORM),cuda)
+HIP_CC = $(HIP_CUDA)/bin/nvcc
+else ifeq ($(HIP_PLATFORM),nvidia)
+# CUDA_PATH: hipcc's NVIDIA mode compiles against $CUDA_PATH (default
+# /usr/local/cuda), so without it HIP_CUDA chose the link's runtime alone -
+# with HIP_CUDA=/usr/local/cuda-13.3 the unit took 12.9's headers and the
+# link failed on cudaGetDeviceProperties_v2 (MEASURED, 2026-11-12)
+HIP_CC = HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) CUDA_PATH=$(HIP_CUDA) $(HIP_ROOT)/bin/hipcc
+else
 HIP_CC = HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc
+endif
 # HIP_ARCH for backend_hip.cpp's sentences, as one token ("89_120")
 HIP_EMPTY :=
 HIP_SPACE := $(HIP_EMPTY) $(HIP_EMPTY)
@@ -172,6 +196,8 @@ HIP_ARCHDEF = -DCFT_HIP_ARCH_TOKENS=$(subst $(HIP_SPACE),_,$(strip $(HIP_ARCH)))
 #
 #   make HIP=1 all api-test device-test hip-test hip-corpus     on ROCm
 #   make HIP=1 HIP_PLATFORM=nvidia HIP_ROOT=/opt/rocm-7.2.4 ...  on NVIDIA
+#   make HIP=1 HIP_PLATFORM=cuda HIP_CUDA=/usr/local/cuda-13.3 ...
+#                                     NVIDIA with plain nvcc, no HIP
 #   make HIP=1 HIP_PLANTS=1 ...                                  the plants
 #
 # It implements the XRT backend's seam (src/backend.h, which renames the

@@ -2404,6 +2404,24 @@ only by `HIP_PLANTS=1` and chosen by `CFT_HIP_PLANT` - among them
 `CFT_HIP_UPLOAD=fail-fill` failing an upload on purpose - each of which
 turns one of those red.
 
+**The gate (2026-11-12, parcel G1C).** `verify/run.sh`'s stage `hip`, in
+the gate budget, builds this backend from the tree in a copy of host/
+(`HIP=1`, the device's own `HIP_ARCH`) on a host with hipcc and a GPU, and
+runs those checks as one stage: the plants first (flip, drop-flag, seq-mask
+and reduce-carry, each red and green without it), study GPU-A's corpora on
+`sw`, on the GPU and on the GPU resident with one sha256, a bounded vector
+replay, `seq_check.py --device hip:0`, the certificate corpus's conformance
+test (`certificates/corpus.py check --device hip:0`), device-test and
+hip-test. `bash verify/run.sh --only hip` runs it; `HIP_ROOT`,
+`HIP_PLATFORM`, `HIP_DEVICE` and `HIP_CUDA` choose; without hipcc or a GPU
+it is skipped by name. On NVIDIA two stages of the full census build it the
+two other ways: `hip-nvcc`, plain nvcc and no HIP (`HIP_PLATFORM=cuda`,
+through study GPU-A's header), and `hip-source`, HIP built from ROCm's own
+sources (`HIPSRC_ROOT`, made by verify/build-hip-nvidia.sh). Every GPU
+process of the stage runs with `CFT_HIP_INFO=1`, every device line must be
+the first one's, and the stage log's last line is the device that ran
+(docs/VERIFICATION.md).
+
 ## The device's on-chip capacities, published (2026-09-07)
 
 Item 3 of docs/studies/OPT-D-contract.md, and the defect its section
