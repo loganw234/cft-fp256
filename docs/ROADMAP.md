@@ -7233,6 +7233,64 @@ atmosphere model and the Sun and Moon.
 binary128 and binary256, with its software backend's digests in
 `studies/debris-d/images.tsv`.
 
+### Noted 2026-11-13: a WebGPU page, from study GPU-F (no dates)
+
+**Logan's answers.** On 2026-11-13 he answered study GPU-F's seven questions
+(docs/studies/GPU-F-webgpu.md, section 7 and its dated note). Verbatim:
+- what the page is for: "Mostly as a low friction source of external run
+  data, with the most important info being cards which fail for whatever
+  reason, rather than only passing";
+- the route: "One source first";
+- host/src 32-bit only: "Depending on cost elsewhere in the project";
+- collection: "Issue form";
+- where it lives: "Yes as its own page";
+- CI under a software WebGPU: "Not needed yet".
+
+To the lead the same day: "Go ahead and install both, and add the note to
+the roadmap". Both means clspv and Tint.
+
+**How to read this.** As the lists above: no date, no parcel, nothing
+reordered. It is taken up as it becomes convenient.
+
+**What is settled** (the study and its dated note):
+- **The probe ran once in a browser on 2026-11-13** (Logan's run):
+  studies/gpu-f/bn_probe.html, a WGSL hand port of bigint.c's core.
+  - It equalled JavaScript's BigInt on 480,000 lanes.
+  - Its four planted faults were each seen.
+  - It ran on an NVIDIA Lovelace adapter.
+  So on one GPU, a browser's WGSL gave exact 32-bit integer arithmetic for
+  this code.
+- **WGSL has no 64-bit integer at run time.** libcft's device-code files
+  hold `uint64_t` on 18 lines (the study's section 1).
+
+**The order, as Logan answered it:**
+1. **One source first:** the study's route (b').
+   - GPU-D's OpenCL C text goes through clspv to SPIR-V, then through Tint
+     to WGSL.
+   - Its 64-bit lines are rewritten by counted edits in GPU-D's discipline,
+     so the page runs libcft's own arithmetic.
+   - A go/no-go comes first. The tools are installed at Logan's word of
+     2026-11-13.
+2. **On a go, the page, as its own page** beside conformance.html and
+   demos.html, with its own scope line:
+   - nothing runs until Run is pressed;
+   - planted faults first, then the conformance FMA cases;
+   - then a stream checked against the page's own WebAssembly module,
+     which is the reference of record;
+   - each verdict named;
+   - its record shown, and never sent.
+3. **Collection by a GitHub issue form,** the record pasted in by the
+   visitor, with no service.
+   - A PASS is counted as a claim.
+   - A GPU that fails, for whatever reason, is the report that matters
+     most. The lead's reading: the form makes a FAIL, a BLIND, a REFUSED or
+     a lost device the easiest thing to file, with the record's case lines.
+4. **On a no-go:** a hand port of the FMA path, the study's route (a),
+   labelled a second implementation and held by the page's own gates.
+5. **host/src 32-bit only** (the study's (d1)): depending on its cost
+   elsewhere in the project.
+6. **CI for the page under a software WebGPU:** not needed yet.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
