@@ -526,6 +526,90 @@ engine's own rate, and four tiles are 3.6 to 3.8 times one. What is
 left in the segmented rows is the tile's per-segment flush, about a
 hundred cycles a segment.
 
+## The GPU backend, measured (2026-11-12)
+
+libcft's GPU backend (`cft_open("hip:N")`, docs/HOSTAPI.md "The GPU
+backend") runs libcft's own code on a GPU, the generic tier: one thread
+an element, through the softfloat the software backend runs. These are
+its rates through the library, by the tree's own tool, beside the quad's,
+one core's and MPFR's. They are measured and stated, not promised, and
+no stage gates them. Parcel G1C; docs/VALIDATION.md has the runs.
+
+Provenance:
+- **the RX 7600 machine**: AMD Radeon RX 7600 (gfx1102, 16 compute
+  units, 8 GB), ROCm 10.1 and HIP 7.16; its CPU an Intel Core i5-6600K
+  (4 cores). Quiet: load average about 1, no other GPU process;
+- **this desktop's RTX 5060 Ti** (sm_120, 36 SMs, 16 GB) in the WSL
+  distro, HIP 7.2.4's NVIDIA layer on CUDA 12.9, **with the desktop
+  loaded** by other work at the time (a WebAssembly build in Docker and
+  other sessions' Python), so its figures are a floor, not a ceiling;
+- the binaries: `make -C host HIP=1` at HIP_ARCH 120 and gfx1102, from
+  the tree's host/ as at 0a4735d2 (G1C changes none of it);
+- the command: `CFT_HIP_INFO=1 cft-bench hip:0 -f FMT -n 4194304 -t 1
+  --csv`, and the same with `--resident`. The tool times every opcode of
+  the format (each at least 1 s) and checks the result against the same
+  call on host pointers; the `fma` line is quoted. fp256 three runs each
+  way, the median and the range; fp32, fp64 and fp128 one run each way,
+  so no range is claimed for them.
+
+`fma`, n = 4,194,304 a call, M elements/s:
+
+| device | fp256 staged | fp256 resident | fp32 staged / resident | fp64 staged / resident | fp128 staged / resident |
+|---|---|---|---|---|---|
+| RX 7600 (quiet) | **27.88** (27.80 to 28.04) | **146.4** (143.1 to 147.0) | 183.5 / 493.2 | 105.5 / 393.9 | 55.6 / 275.1 |
+| RTX 5060 Ti (the desktop loaded) | **23.76** (23.04 to 25.79) | **217.5** (214.2 to 219.6) | 197.5 / 893.1 | 95.1 / 990.5 | 45.6 / 511.7 |
+
+fp256 is the median of three runs each way, the range in brackets; the
+other formats are one run each way, and no range is claimed for them.
+G1B2's uncommitted probe of 2026-11-11 gave 27.2 and 132.1 M/s on the
+RX 7600 and 16.4 and 66.5 on the 5060 Ti under heavier load; that was
+another tool and another load.
+
+**Beside the quad: the same operation, format and count.** fp256 `fma`
+at n = 1,048,576, staged against staged (`cft_run` with host pointers:
+three operands in and the result out over PCIe on every call) and
+resident against resident (operands in `cft_alloc`'d buffers, published
+once). The GPU one run each way; the quad's figures recorded, not
+measured again ("The card, measured" above, 2026-09-08, and the resident
+table of 2026-09-16, the images of ed752dd):
+
+| fp256 `fma`, n = 1,048,576 | staged | resident |
+|---|---|---|
+| U50 quad, four tiles (2026-09-08; resident 2026-09-16) | 25.9 M/s | 427 M/s |
+| U50, one tile | 20.0 M/s | 107 M/s |
+| RX 7600, one run each way | 27.26 M/s | 136.8 M/s |
+| RTX 5060 Ti, one run each way, the desktop loaded | 27.21 M/s | 214.9 M/s |
+
+**One core and MPFR on the GPU host's CPU.** On the RX 7600 machine's
+i5-6600K, one core (`taskset -c 2`), MPFR 4.2.1 and GMP 6.3.0 as the
+machine has them (not the pinned oracle of verify/build-mpfr-oracle.sh),
+`cft-bench-peers -f fp256` (4,096 elements a pass, every element
+bit-identical across the three): fp256 `fma`, libcft's software backend
+491.0 ns (2.04 M/s), MPFR 84.1 ns (11.89 M/s), MPFR+754 102.8 ns (9.73
+M/s). `cft-bench -n 1048576 -t 1 -f fp256` on the same core: 728.5 ns
+(1.37 M/s). This page's desktop i5-12400F figures ("Against the peers",
+2026-09-01, the pinned MPFR 4.2.2): 448.3, 65.0 and 71.0 ns.
+
+On this desktop's i5-12400F in the WSL distro, one core, the desktop
+loaded, MPFR 4.2.1 as the distro has it: libcft 370.3 ns (2.70 M/s), MPFR
+70.7 ns (14.15 M/s), MPFR+754 94.8 ns (10.54 M/s); `cft-bench -n 1048576`
+483.3 ns (2.07 M/s).
+
+**Read across, at this one operation, format and count.** Staged, both
+GPUs are level with the quad's four tiles and above one tile (27.3 and
+27.2 M/s against 25.9 and 20.0): on all three it is `cft_run`'s round
+trip over the bus that sets the staged rate, not the arithmetic.
+Resident, both are below the quad's four tiles (136.8 and 214.9 M/s
+against 427: about a third and a half of it) and above one tile (1.3 and
+2.0 times its 107). Against one core of the same machine's CPU, the RX
+7600 resident at n = 4M is about 72 times libcft's software backend on
+its i5-6600K (146.4 against 2.04 M/s) and about 12 times MPFR there
+(11.89 M/s); the 5060 Ti's is about 80 times the software backend on
+this desktop's core and about 15 times MPFR on it (217.5 against 2.70
+and 14.15 M/s). One operation at one format: nothing here says how the
+other formats, division or square root compare, and the one-run
+formats are one run each.
+
 ## Workloads designed for the contract
 
 The tables above adapt other libraries' benchmarks to this one. The five
