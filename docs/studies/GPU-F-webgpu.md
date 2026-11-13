@@ -9,10 +9,9 @@ files only. Nothing outside `studies/` and the index changed.
 > data from just a browser." (Logan)
 
 **This is a paper study.** Nothing ran on a GPU, no browser tab was opened, no WebGPU
-runtime was started, and nothing was installed or downloaded. The web was read only, each
+runtime was started, nothing was installed or downloaded, and the web was read only, each
 page named with its URL. The prototype has never been opened in a browser and its WGSL
-has never been compiled. Nothing was collected from anyone, and no endpoint, form or page
-was created or published.
+never compiled. Nothing was collected, and no endpoint, form or page was created.
 
 Every figure is marked: **READ** (a page or a file, named), **COUNTED** (in a named
 source), **COMPUTED** (arithmetic on the others, inputs given), **ESTIMATE** (a judgment,
@@ -25,8 +24,9 @@ no device was used. "Not run" means not run.
    integer arithmetic on a visitor's GPU through WebGPU, and names every lane that differs
    from the page's own WebAssembly module, would gather what none of our machines can: how
    browsers' WGSL compilers and the drivers under them treat this integer code on GPUs we
-   do not own. GPU-D's Apple fault, an optimiser that broke integer code, is the kind of
-   finding it would catch.
+   do not own. GPU-D's Apple fault (refusals at default options, wrong values in a scratch
+   variant, right results with optimisation off, the cause not pinned) is the kind it
+   would catch.
 2. **Route.** WGSL has no 64-bit integer. The two compile roads read (clspv, then Tint or
    naga) stop at libcft's 64-bit intermediates (READ; not run). The order: first this
    study's probe; then a go/no-go of clspv and Tint on GPU-D's OpenCL C text with the
@@ -48,9 +48,8 @@ no device was used. "Not run" means not run.
 
 **Sources** (READ, 2026-11-13):
 - WGSL, W3C Candidate Recommendation Draft of 6 November 2026, <https://www.w3.org/TR/WGSL/>.
-  The text WebFetch returned ends in §12.4, so the built-in functions and the
-  address-space table are READ from the editor's draft source,
-  <https://raw.githubusercontent.com/gpuweb/gpuweb/main/wgsl/index.bs>.
+  Its returned text ends in §12.4, so the built-ins and the address-space table are READ
+  from the editor's draft source, <https://raw.githubusercontent.com/gpuweb/gpuweb/main/wgsl/index.bs>.
 - WebGPU, W3C Candidate Recommendation Draft of 15 September 2026,
   <https://www.w3.org/TR/webgpu/>. Its returned text ends in §10, so device loss and the
   Feature Index are READ from <https://raw.githubusercontent.com/gpuweb/gpuweb/main/spec/index.bs>.
@@ -59,9 +58,10 @@ no device was used. "Not run" means not run.
 **1. Integer types.** *libcft* (COUNTED, `grep -c uint64_t`): 32-bit limbs with 64-bit
 intermediates. The three files the GPU backend compiles as device code (READ,
 docs/HOSTAPI.md, "The GPU backend") hold `uint64_t` on 18 lines (10 in bigint.c, 6 in
-softfloat.c, 2 in seq_exec.h) and `int64_t` on none. An FMA kernel needs bigint.c's 10
-alone (in extract, add, sub and mul: lines 95-230); softfloat.c's 6 are IMUL (:641) and the
-reciprocal-square-root seed (:685-691).
+softfloat.c, 2 in seq_exec.h) and `int64_t` on none. An FMA exercises bigint.c's 10 alone
+(in extract, add, sub and mul: lines 95-230); softfloat.c's 6 are IMUL (:641) and the
+reciprocal-square-root seed (:685-691), which a kernel entered through cft_sf_compute, as
+GPU-A's and GPU-D's are, compiles too.
 *WGSL:* i32 and u32 at run time, wrapping modulo 2^32 (§6.2.3). AbstractInt is 64-bit but
 exists only while a shader is created. None of the extensions §3.8.5 names gives a 64-bit
 integer; the one 64-bit feature is atomic minimum and maximum on `atomic<vec2<u32>>`
@@ -74,10 +74,12 @@ docs.rs, wgpu-types 30.0.2).
 
 **2. A 32x32 to 64 product, or a multiply-high.** *libcft:* bigint.c's schoolbook step
 `t + ai*bj + carry` in 64 bits (:230) and extract's 64-bit funnel (:102).
-*WGSL:* no built-in returns a high half or a wide product, and none adds with carry. The
-integer built-ins are abs, clamp, countLeadingZeros, countOneBits, countTrailingZeros, dot,
-dot4I8Packed, dot4U8Packed, extractBits, firstLeadingBit, firstTrailingBit, insertBits,
-max, min, reverseBits, sign and bitcast (READ, the editor's draft).
+*WGSL:* no built-in read returns a high half or a wide product, and none adds with carry.
+The numeric built-ins on integers are abs, clamp, countLeadingZeros, countOneBits,
+countTrailingZeros, dot, dot4I8Packed, dot4U8Packed, extractBits, firstLeadingBit,
+firstTrailingBit, insertBits, max, min, reverseBits, sign and bitcast; the pack, atomic and
+subgroup built-ins add none (READ, the editor's draft, all but its last 28,791 characters,
+where the subgroup functions end; the rest BELIEVED to be the grammar).
 **Cost:** the product by 16-bit halves is 22 operations, 4 of them multiplies, and the
 schoolbook step 30 (COUNTED, the prototype's `mul_wide` and `bn_mul`), where a GPU does the
 step in about 3 instructions (BELIEVED: both vendors' ISAs have a 32x32+64 multiply-add).
@@ -127,11 +129,12 @@ calls `cft_bn_shr(&kept, &kept, 1)` (softfloat.c:253); a pointer is chosen by a 
 at sf_fma's `bm` (:386-392) and in five `cft_bn_copy(out, c ? x : y)` (:535, :550, :557,
 :559, :978).
 *WGSL:* without the language extension unrestricted_pointer_parameters a pointer parameter
-points into function or private space, at a whole variable (§4.1.2, §11.4); two pointer
-arguments with one root identifier, either written, are a shader-creation error
-(§11.4.1.2); a pointer cannot sit in an array or a structure, though a `let` may hold one
-(§6.2). There is no `select` or comparison of pointers (BELIEVED: both are defined on
-scalars and vectors in the sections read).
+points into function or private space (§4.1.2, §11.4), and at a whole variable (BELIEVED:
+the same table row names that rule, as read); two pointer arguments with one root
+identifier, either written, are a shader-creation error (§11.4.1.2); a pointer cannot sit
+in an array or a structure (§6.2.10), though a `let` may hold one (§6.2.1's example).
+There is no `select` or comparison of pointers (BELIEVED: both are defined on scalars and
+vectors in the sections read).
 **Cost:** a temporary at the aliased call, and the six pointer choices as copies or
 branches.
 
@@ -231,14 +234,15 @@ So the road exists for 32-bit code and stops at libcft's 64-bit lines: GPU-D's t
 declare Int64 and Tint refuse it (BELIEVED from the pages above; not run).
 
 **(b')** takes the same road with counted edits in the copy, in GPU-D's discipline:
-bigint.c's 10 64-bit lines through two helpers, the aliased call through a temporary, the
-six pointer choices as branches, O4 kept, and a lane that reads u32 words in place of
-bytes. Then clspv and Tint might accept the text: not built and not run, since neither
+bigint.c's 10 64-bit lines through two helpers, IMUL's product as a u32 multiply (the low
+half it keeps is the same), seed_rsqrt_entry in 32-bit pieces, the aliased call through a
+temporary, the six pointer choices as branches, O4 kept, and a lane that reads u32 words
+in place of bytes. Then clspv and Tint might accept the text: not built and not run, since neither
 tool is installed here and both build from source (clspv on LLVM: BELIEVED a large build).
 *One source:* yes, in GPU-D's sense, though the 64-bit edits, like O4, are not syntax only,
 and two compilers stand between the text and the GPU; the gates hold the bits. *Size*
-(ESTIMATE): 25 to 40 counted edits on GPU-D's `oclcopy.py` (its 19 and about 17 new: the
-10 lines, the aliased call, the six choices); clspv and Tint pinned at fixed commits in a
+(ESTIMATE): 25 to 40 counted edits on GPU-D's `oclcopy.py` (its 19 and about 19 new:
+the 10 lines, IMUL, the seed, the aliased call, the six choices); clspv and Tint pinned in a
 container, as `bindings/wasm/build.sh` pins emsdk by tag and digest (READ), 1 to 2 days;
 then the go/no-go: does Tint accept clspv's SPIR-V of this text? *Gates:* G1 to G3. G4 is
 not needed for the arithmetic, because a change in `host/src` flows through the edits or
@@ -258,16 +262,15 @@ refuse.
 
 **(d) Anything else.**
 - **(d1) host/src made 32-bit only:** two primitives in bigint.h, a 32x32 to 64 product
-  and an add with carry, native on C targets and by halves for WGSL, in the manner of
-  CFT_HD. It takes the 64-bit edits out of (b') and simplifies (c), but it changes the
-  reference itself: the full gate and a check of the CPU rate (question 4).
+  and an add with carry, native on C targets and by halves for WGSL in the manner of
+  CFT_HD, with the 16 lines of bigint.c and softfloat.c written through them. It takes the
+  64-bit edits out of (b') and simplifies (c), but it changes the reference itself.
 - **(d2) Other languages with a WGSL target** (Slang; rust-gpu then naga; IREE through
   SPIR-V and Tint): each needs the arithmetic rewritten in that language, a second
   implementation. Slang's 64-bit integers on its WGSL target were not read: its 64-bit
   page has no WGSL row (READ, shader-slang's docs/64bit-type-support.md on GitHub).
-- **(d3) WebGL 2:** not a route; it has no compute shaders (BELIEVED).
-- **(d4) The CPU path that exists:** the WebAssembly module in the published pages, which
-  stays the reference of record.
+- **(d3) WebGL 2** is not a route: it has no compute shaders (BELIEVED). **(d4) The CPU
+  path that exists,** the published pages' WebAssembly module, stays the reference of record.
 
 ## 3. The page
 
@@ -311,12 +314,12 @@ probe of section 5):
   133 times inside Windows' 2 s (READ, item 10's Microsoft page), and at a tenth of the low
   figure 0.45 s (COMPUTED).
 - *A visit.* The 73,780 FMA cases of the conformance sets (READ, GPU-A §1) take 3.2 ms of
-  GPU time at 23.2 M a second, and weigh 4,569,560 B packed, 6,092,748 B as base64
-  (COMPUTED); the page's existing sample, 4,015 cases over all opcodes (READ,
-  `bindings/wasm/README.md`), is the light alternative. A 2^24-lane stream takes 0.24 to
-  0.72 s of GPU time on an RX 7600-class card and 7.2 s at a tenth of the low figure, and
-  four workers check it in 2.1 to 2.3 s (COMPUTED). In a minute four workers check 4.4 to
-  4.8 x 10^8 lanes (COMPUTED); a device slower than the workers sets the count instead.
+  GPU time at 23.2 M a second, and weigh 4,569,560 B packed as four values and two bytes a
+  case, 6,092,748 B as base64 (COMPUTED); the light alternative is the page's existing
+  sample, 4,015 cases over all opcodes (READ, `bindings/wasm/README.md`). A 2^24-lane
+  stream takes 0.24 to 0.72 s of GPU time on an RX 7600-class card and 7.2 s at a tenth of
+  the low figure, and four workers check it in 2.1 to 2.3 s (COMPUTED). In a minute four
+  workers check 4.4 to 4.8 x 10^8 lanes (COMPUTED); a slower device sets the count instead.
 
 **What it would not be:** a benchmark (Chrome quantizes timestamp queries at 100 µs unless
 a developer flag is set: section 4), a backend, or a proof: its agreement is evidence by
@@ -457,7 +460,7 @@ that runs it needs a scope line of its own (question 6).
 
 1. **Run the probe?** One press of Run in a browser, its record filed in the ledger.
    *Mine:* yes, this desktop's Chrome first, then Safari on the M2 Pro, because Apple's
-   compiler is where GPU-D's integer fault lived.
+   OpenCL stack is where GPU-D's fault showed.
 2. **What the page is for:** an instrument for mismatch reports, or also a public tally of
    PASS claims? *Mine:* mismatch reports, with PASS counted as claims and labelled so.
 3. **The route:** (b') first, clspv and Tint on GPU-D's text with counted edits, or
@@ -488,10 +491,8 @@ was lost repeatedly; GPU-D §4 itself (its ledger instead).
 
 ## 9. Record
 
-The ledger is `Data/runs/2026-11-10-gpu-a/ledger/GPU-F.md`, in the records, which are not
-committed: every source read and everything run, with times from `date`. What ran: grep,
-git, PowerShell reading file versions and two registry values, three Python scripts in
-scratch (the kernel's digest, section 3's figures, the runner script's extraction), and
-the desktop's node with `--version` and `--check` at the lead's word. Nothing was
-installed or downloaded. Removal: delete `studies/gpu-f/` and this file; nothing else
-exists.
+The ledger, `Data/runs/2026-11-10-gpu-a/ledger/GPU-F.md` (the records, not committed),
+holds every source read and everything run, timed by `date`: grep, git, PowerShell reading
+file versions and two registry values, three Python scripts in scratch (the digest, the
+figures, the script's extraction), and node `--version` and `--check` at the lead's word.
+Nothing was installed or downloaded. Removal: delete `studies/gpu-f/` and this file.
