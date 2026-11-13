@@ -1,0 +1,520 @@
+<!doctype html>
+<!-- Copyright 2026 Logan W.
+     SPDX-License-Identifier: Apache-2.0
+
+     Study GPU-F's prototype, bn_probe.html. NOT RUN: written 2026-11-13 as a file only.
+     Nobody has opened it in a browser and its WGSL has never been compiled, so it
+     claims no result. Checked: the JavaScript parsed by node --check (nothing
+     executed); the WGSL checked by reading only, no compiler here. README.txt beside
+     it says how it would run and what it would show.
+
+     What it is: a hand port of the core of libcft's host/src/bigint.c (add, sub, mul,
+     shl, shr, cmp, and softfloat.c's ISUB built from them) to WGSL. That makes it a
+     SECOND IMPLEMENTATION, not libcft's code. It would run one case a lane on the
+     visitor's GPU through WebGPU and compare every lane, word for word, with a reference.
+
+     Which reference is which:
+       - here the only reference is JavaScript's BigInt, exact by the language's own
+         definition: a second witness, independent of libcft;
+       - the reference of record for a conformance page is the existing WebAssembly
+         module, libcft's software backend, held to python/cft_golden by the
+         conformance vectors. It is not used here: the module exports libcft's
+         operations, not its bigint core.
+
+     Nothing runs before the Run button is pressed, and nothing is sent anywhere. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bn probe</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1b1b1b; --bg: #fbfbf8; --red: #b3261e; --ok: #1e6b34; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e6e1; --bg: #161616; --red: #ff8a80; --ok: #81c995; }
+  }
+  body { font: 15px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg);
+         max-width: 60rem; margin: 1.5rem auto; padding: 0 1rem; }
+  pre, textarea { font: 12px/1.35 ui-monospace, monospace; }
+  textarea { width: 100%; height: 18rem; box-sizing: border-box; }
+  .red { color: var(--red); } .ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<h1>bn probe: libcft's bigint core on this browser's GPU</h1>
+<p>A prototype of study GPU-F, not yet run by anyone. It runs a hand port of libcft's
+bigint core in WGSL (a second implementation) and compares every lane with JavaScript's
+exact BigInt. Four planted faults run first; each must be seen, or the page calls itself
+blind.</p>
+<p>
+  <label>lanes <select id="lanes"><option>48000</option><option selected>480000</option>
+  <option>1920000</option></select></label>
+  <label>seed <input id="seed" value="20261113" size="10"></label>
+  <button id="run">Run</button>
+</p>
+<pre id="log"></pre>
+<h2>Record (shown here only; nothing is sent)</h2>
+<textarea id="record" readonly></textarea>
+
+<script type="text/plain" id="kernel">
+// bn_probe's kernel: host/src/bigint.c's core ported by hand to WGSL, a SECOND
+// IMPLEMENTATION held only by its comparison with an exact reference. NOT RUN.
+//
+// Each function keeps bigint.c's name (bn_ for cft_bn_), loop order and n
+// convention: a value has n significant limbs, little-endian u32. Where C has a
+// uint64_t intermediate, the port carries a u32 pair (mul_wide) or a carry bit
+// found by comparison, because WGSL has no 64-bit integer (GPU-F, item 1).
+// Three more WGSL rules shape it (GPU-F, item 1, with their sections):
+//   - two pointer arguments with one root, one of them written, are a
+//     shader-creation error, so bigint.c's "r may alias a" is not available:
+//     every call below passes distinct variables (and bn_copy, unable to compare
+//     pointers, need not test r == a);
+//   - there is no recursion;
+//   - a runtime shift count is taken modulo 32, so x >> 32u is x, not 0. C's
+//     guards on `bits` stay, and plant 2 removes one to show the cost.
+// PLANT is an override constant, so planted and unplanted pipelines come from
+// one text with one digest:
+//   1  bn_add drops the carry out of adding the incoming carry
+//   2  bn_shl loses its bits != 0 guard (lo >> 32u is lo in WGSL)
+//   3  mul_wide drops the middle column's carry into the high word
+//   4  bn_sub forms y + borrow in 32 bits, which wraps at y = 0xffffffff
+
+override PLANT: u32 = 0u;
+const LIMBS: i32 = 16;              // 512 bits: a 256 x 256 product fits
+
+struct Bn {
+  n: i32,
+  v: array<u32, 16>,
+}
+
+// A lane is 18 words in (op, k, a[8], b[8]) and 18 out: the result's 16 limbs
+// (0 above n, as cft_bn_store writes them), n, and aux | refused << 8.
+@group(0) @binding(0) var<storage, read> cases: array<u32>;
+@group(0) @binding(1) var<storage, read_write> results: array<u32>;
+
+// (lo, hi) = a * b exactly, by 16-bit halves. Each partial product is below
+// 2^32, mid is below 3 * 2^16, and hi is below 2^32 because a * b < 2^64.
+fn mul_wide(a: u32, b: u32) -> vec2<u32> {
+  let a0 = a & 0xffffu;
+  let a1 = a >> 16u;
+  let b0 = b & 0xffffu;
+  let b1 = b >> 16u;
+  let p00 = a0 * b0;
+  let p01 = a0 * b1;
+  let p10 = a1 * b0;
+  let p11 = a1 * b1;
+  let mid = (p00 >> 16u) + (p01 & 0xffffu) + (p10 & 0xffffu);
+  let lo = (mid << 16u) | (p00 & 0xffffu);
+  var hi = p11 + (p01 >> 16u) + (p10 >> 16u);
+  if (PLANT != 3u) { hi = hi + (mid >> 16u); }
+  return vec2<u32>(lo, hi);
+}
+
+fn bn_norm(r: ptr<function, Bn>) {
+  loop {
+    if ((*r).n == 0 || (*r).v[(*r).n - 1] != 0u) { break; }
+    (*r).n = (*r).n - 1;
+  }
+}
+
+fn bn_copy(r: ptr<function, Bn>, a: ptr<function, Bn>) {
+  for (var i = 0; i < (*a).n; i++) { (*r).v[i] = (*a).v[i]; }
+  (*r).n = (*a).n;
+}
+
+fn bn_setbit(r: ptr<function, Bn>, i: i32) {
+  let limb = i >> 5u;
+  if (i < 0 || limb >= LIMBS) { return; }
+  for (var j = (*r).n; j <= limb; j++) { (*r).v[j] = 0u; }
+  if (limb >= (*r).n) { (*r).n = limb + 1; }
+  (*r).v[limb] = (*r).v[limb] | (1u << u32(i & 31));
+}
+
+fn bn_mask(r: ptr<function, Bn>, nbits: i32) {
+  let limb = nbits >> 5u;
+  let bits = u32(nbits & 31);
+  if (nbits <= 0) { (*r).n = 0; return; }
+  if (limb >= (*r).n) { return; }
+  if (bits != 0u) {
+    (*r).v[limb] = (*r).v[limb] & ((1u << bits) - 1u);
+    (*r).n = limb + 1;
+  } else {
+    (*r).n = limb;
+  }
+  bn_norm(r);
+}
+
+fn bn_cmp(a: ptr<function, Bn>, b: ptr<function, Bn>) -> i32 {
+  if ((*a).n != (*b).n) { return select(1i, -1i, (*a).n < (*b).n); }
+  for (var i = (*a).n - 1; i >= 0; i--) {
+    if ((*a).v[i] != (*b).v[i]) { return select(1i, -1i, (*a).v[i] < (*b).v[i]); }
+  }
+  return 0i;
+}
+
+fn bn_shl(r: ptr<function, Bn>, a: ptr<function, Bn>, k: i32) -> u32 {
+  if (k < 0) { return 1u; }
+  if ((*a).n == 0) { (*r).n = 0; return 0u; }
+  let limbs = k >> 5u;
+  let bits = u32(k & 31);
+  let an = (*a).n;
+  let rn = an + limbs + 1;
+  if (rn > LIMBS) { return 1u; }
+  for (var i = rn - 1; i >= 0; i--) {
+    let ih = i - limbs;
+    let il = i - limbs - 1;
+    var hi = 0u;
+    var lo = 0u;
+    if (ih >= 0 && ih < an) { hi = (*a).v[ih]; }
+    if (il >= 0 && il < an) { lo = (*a).v[il]; }
+    if (bits != 0u || PLANT == 2u) {
+      (*r).v[i] = (hi << bits) | (lo >> (32u - bits));
+    } else {
+      (*r).v[i] = hi;
+    }
+  }
+  (*r).n = rn;
+  bn_norm(r);
+  return 0u;
+}
+
+fn bn_shr(r: ptr<function, Bn>, a: ptr<function, Bn>, k: i32) {
+  let limbs = k >> 5u;
+  let bits = u32(k & 31);
+  let an = (*a).n;
+  if (k < 0 || limbs >= an) { (*r).n = 0; return; }
+  let rn = an - limbs;
+  for (var i = 0; i < rn; i++) {
+    let lo = (*a).v[i + limbs];
+    var hi = 0u;
+    if (i + limbs + 1 < an) { hi = (*a).v[i + limbs + 1]; }
+    if (bits != 0u) {
+      (*r).v[i] = (lo >> bits) | (hi << (32u - bits));
+    } else {
+      (*r).v[i] = lo;
+    }
+  }
+  (*r).n = rn;
+  bn_norm(r);
+}
+
+// C: s = carry + a + b in 64 bits. Here two u32 sums and their carries, of
+// which at most one is set, since x + y + carry < 2^33.
+fn bn_add(r: ptr<function, Bn>, a: ptr<function, Bn>, b: ptr<function, Bn>) -> u32 {
+  var n = max((*a).n, (*b).n);
+  var carry = 0u;
+  for (var i = 0; i < n; i++) {
+    var x = 0u;
+    var y = 0u;
+    if (i < (*a).n) { x = (*a).v[i]; }
+    if (i < (*b).n) { y = (*b).v[i]; }
+    let s1 = x + y;
+    let s2 = s1 + carry;
+    var c2 = u32(s2 < s1);
+    if (PLANT == 1u) { c2 = 0u; }
+    (*r).v[i] = s2;
+    carry = u32(s1 < x) + c2;
+  }
+  if (carry != 0u) {
+    if (n >= LIMBS) { return 1u; }
+    (*r).v[n] = carry;
+    n = n + 1;
+  }
+  (*r).n = n;
+  bn_norm(r);
+  return 0u;
+}
+
+// C (a >= b): y = b + borrow in 64 bits, then borrow = x < y. In 32 bits y can
+// wrap, so the borrow out is x < b, or x == b with a borrow in.
+fn bn_sub(r: ptr<function, Bn>, a: ptr<function, Bn>, b: ptr<function, Bn>) {
+  let n = (*a).n;
+  var borrow = 0u;
+  for (var i = 0; i < n; i++) {
+    let x = (*a).v[i];
+    var y = 0u;
+    if (i < (*b).n) { y = (*b).v[i]; }
+    var bout = u32(x < y) | (u32(x == y) & borrow);
+    if (PLANT == 4u) { bout = u32(x < y + borrow); }
+    (*r).v[i] = x - y - borrow;
+    borrow = bout;
+  }
+  (*r).n = n;
+  bn_norm(r);
+}
+
+// C: cur = t + ai * bj + carry in 64 bits. cur < 2^64, so its high word,
+// p.y plus the two carries, cannot wrap.
+fn bn_mul(r: ptr<function, Bn>, a: ptr<function, Bn>, b: ptr<function, Bn>) -> u32 {
+  if ((*a).n == 0 || (*b).n == 0) { (*r).n = 0; return 0u; }
+  if ((*a).n + (*b).n > LIMBS) { return 1u; }
+  var t: Bn;
+  t.n = (*a).n + (*b).n;
+  for (var i = 0; i < t.n; i++) { t.v[i] = 0u; }
+  for (var i = 0; i < (*a).n; i++) {
+    var carry = 0u;
+    let ai = (*a).v[i];
+    for (var j = 0; j < (*b).n; j++) {
+      let p = mul_wide(ai, (*b).v[j]);
+      let s1 = p.x + t.v[i + j];
+      let s2 = s1 + carry;
+      t.v[i + j] = s2;
+      carry = p.y + u32(s1 < p.x) + u32(s2 < s1);
+    }
+    t.v[i + (*b).n] = carry;
+  }
+  bn_norm(&t);
+  bn_copy(r, &t);
+  return 0u;
+}
+
+fn load8(base: u32) -> Bn {
+  var r: Bn;
+  for (var i = 0u; i < 8u; i++) { r.v[i] = cases[base + i]; }
+  r.n = 8;
+  bn_norm(&r);
+  return r;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let lane = gid.x;
+  if (lane >= arrayLength(&cases) / 18u) { return; }
+  let base = lane * 18u;
+  let op = cases[base];
+  let k = i32(cases[base + 1u] & 255u);
+  var a = load8(base + 2u);
+  var b = load8(base + 10u);
+  var r: Bn;
+  var aux = 0u;
+  var refused = 0u;
+  switch op {
+    case 0u: { refused = bn_mul(&r, &a, &b); }
+    case 1u: { refused = bn_add(&r, &a, &b); }
+    case 2u: {
+      // softfloat.c's ISUB at a 256-bit width: borrow, subtract, wrap
+      var t: Bn;
+      bn_copy(&t, &a);
+      bn_setbit(&t, 256);
+      bn_sub(&r, &t, &b);
+      bn_mask(&r, 256);
+    }
+    case 3u: { refused = bn_shl(&r, &a, k); }
+    case 4u: { bn_shr(&r, &a, k); }
+    case 5u: { aux = u32(bn_cmp(&a, &b) + 1); }
+    default: { refused = 2u; }
+  }
+  for (var i = 0; i < LIMBS; i++) {
+    results[base + u32(i)] = select(0u, r.v[i], i < r.n);
+  }
+  results[base + 16u] = u32(r.n);
+  results[base + 17u] = aux | (refused << 8u);
+}
+</script>
+
+<script>
+"use strict";
+// bn_probe's runner. NOT RUN (the head of this file says what that means).
+const WORDS = 18, CHUNK = 48000, OPS = ["mul", "add", "isub", "shl", "shr", "cmp"];
+const SPECIAL = [0, 1, 0x7fffffff, 0x80000000, 0xfffffffe, 0xffffffff, 0xffff, 0xffff0000];
+const KEDGE = [0, 1, 15, 16, 31, 32, 33, 63, 64, 95, 96, 127, 128, 223, 224, 255];
+const PLANTS = [[1, "bn_add drops a carry"], [2, "bn_shl loses its guard"],
+                [3, "mul_wide drops a carry"], [4, "bn_sub's y + borrow wraps"]];
+const $ = (id) => document.getElementById(id);
+function log(s, cls) {
+  const e = document.createElement("span");
+  if (cls) e.className = cls;
+  e.textContent = s + "\n";
+  $("log").appendChild(e);
+}
+
+// The generator: integer only, so lane i under seed s is the same case on
+// every machine, and a mismatch named by its lane can be made again anywhere.
+function mix32(x) {
+  x ^= x >>> 16; x = Math.imul(x, 0x7feb352d);
+  x ^= x >>> 15; x = Math.imul(x, 0x846ca68b);
+  x ^= x >>> 16; return x >>> 0;
+}
+function word(s, i, w) {
+  return mix32((Math.imul(i, 0x9e3779b1) ^ Math.imul(w + 1, 0x85ebca77) ^ s) >>> 0);
+}
+// op = i mod 6 and family = floor(i / 6) mod 8: every 48 lanes hold each op
+// under each family once.
+function makeCase(s, i, out, at) {
+  const op = i % 6, fam = Math.floor(i / 6) % 8, r = (w) => word(s, i, w);
+  const a = [], b = [];
+  let k = r(16) & 255;
+  for (let j = 0; j < 8; j++) { a.push(r(j)); b.push(r(8 + j)); }
+  if (fam === 1) {              // carry and borrow chains
+    for (let j = 0; j < 8; j++) { a[j] = 0xffffffff; b[j] = (r(18 + j) & 1) ? 0xffffffff : 0; }
+    b[0] = r(17) & 3;
+  } else if (fam === 2) {       // short operands, n from 8 down to 0
+    const na = r(17) % 9, nb = r(18) % 9;
+    for (let j = na; j < 8; j++) a[j] = 0;
+    for (let j = nb; j < 8; j++) b[j] = 0;
+  } else if (fam === 3) {       // equal operands
+    for (let j = 0; j < 8; j++) b[j] = a[j];
+  } else if (fam === 4) {       // one bit each
+    const p = r(17) & 255, q = r(18) & 255;
+    for (let j = 0; j < 8; j++) { a[j] = 0; b[j] = 0; }
+    a[p >>> 5] = (1 << (p & 31)) >>> 0;
+    b[q >>> 5] = (1 << (q & 31)) >>> 0;
+  } else if (fam === 5) {       // limbs from a set of edges
+    for (let j = 0; j < 8; j++) { a[j] = SPECIAL[r(j) & 7]; b[j] = SPECIAL[r(8 + j) & 7]; }
+  } else if (fam === 6) {       // shift counts at the limb edges
+    k = KEDGE[r(17) & 15];
+  } else if (fam === 7) {       // complements: a carry through every limb of a + b
+    for (let j = 0; j < 8; j++) b[j] = (~a[j]) >>> 0;
+    b[0] = (b[0] + (r(17) & 1)) >>> 0;
+  }
+  out[at] = op;
+  out[at + 1] = k;
+  for (let j = 0; j < 8; j++) { out[at + 2 + j] = a[j]; out[at + 10 + j] = b[j]; }
+}
+
+// The second witness: what the six operations mean, computed by BigInt.
+const M256 = (1n << 256n) - 1n;
+function big(w, at) {
+  let x = 0n;
+  for (let j = 7; j >= 0; j--) x = (x << 32n) | BigInt(w[at + j]);
+  return x;
+}
+function expected(cs, at) {
+  const op = cs[at], k = BigInt(cs[at + 1] & 255), a = big(cs, at + 2), b = big(cs, at + 10);
+  let r = 0n, aux = 0;
+  if (op === 0) r = a * b;
+  else if (op === 1) r = a + b;
+  else if (op === 2) r = (a - b) & M256;
+  else if (op === 3) r = a << k;
+  else if (op === 4) r = a >> k;
+  else aux = a < b ? 0 : (a === b ? 1 : 2);
+  const w = new Uint32Array(WORDS);
+  for (let j = 0; j < 16; j++) {
+    w[j] = Number((r >> BigInt(32 * j)) & 0xffffffffn);
+    if (w[j] !== 0) w[16] = j + 1;
+  }
+  w[17] = aux;
+  return w;
+}
+function hex(w, at, n) {
+  let s = "";
+  for (let j = n - 1; j >= 0; j--) s += w[at + j].toString(16).padStart(8, "0");
+  return "0x" + s;
+}
+async function sha256hex(text) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(d), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+// One dispatch of `count` lanes from lane `first`. Calls sink for each lane
+// that differs from the reference; returns the wall time from submit to map.
+async function runChunk(dev, pipe, seed, first, count, sink) {
+  const cs = new Uint32Array(count * WORDS);
+  for (let i = 0; i < count; i++) makeCase(seed, first + i, cs, i * WORDS);
+  const bytes = cs.byteLength, U = GPUBufferUsage;
+  const inBuf = dev.createBuffer({ size: bytes, usage: U.STORAGE | U.COPY_DST });
+  const outBuf = dev.createBuffer({ size: bytes, usage: U.STORAGE | U.COPY_SRC });
+  const readBuf = dev.createBuffer({ size: bytes, usage: U.MAP_READ | U.COPY_DST });
+  dev.queue.writeBuffer(inBuf, 0, cs);
+  const bind = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
+    { binding: 0, resource: { buffer: inBuf } }, { binding: 1, resource: { buffer: outBuf } }] });
+  const enc = dev.createCommandEncoder();
+  const pass = enc.beginComputePass();
+  pass.setPipeline(pipe);
+  pass.setBindGroup(0, bind);
+  pass.dispatchWorkgroups(Math.ceil(count / 64));
+  pass.end();
+  enc.copyBufferToBuffer(outBuf, 0, readBuf, 0, bytes);
+  const t0 = performance.now();
+  dev.queue.submit([enc.finish()]);
+  await readBuf.mapAsync(GPUMapMode.READ);
+  const ms = performance.now() - t0;
+  const got = new Uint32Array(readBuf.getMappedRange().slice(0));
+  readBuf.unmap();
+  inBuf.destroy(); outBuf.destroy(); readBuf.destroy();
+  for (let i = 0; i < count; i++) {
+    const want = expected(cs, i * WORDS);
+    for (let j = 0; j < WORDS; j++) {
+      if (got[i * WORDS + j] !== want[j]) { sink(first + i, cs, i * WORDS, want, got); break; }
+    }
+  }
+  return ms;
+}
+
+async function run() {
+  $("run").disabled = true;
+  const seed = Number($("seed").value) >>> 0, lanes = Number($("lanes").value);
+  const rec = {
+    schema: "cft-fp256 GPU-F bn_probe record 0: a prototype's, shown here, sent nowhere",
+    kernel_sha256: "", plant_rule: "PLANT 1-4 each on lanes 0-47999, each must differ",
+    generator: { seed, lanes, rule: "word = mix32 of (lane, word, seed); op = lane mod 6; "
+      + "family = floor(lane / 6) mod 8" },
+    adapter: null, compile: null, plants: [], run: null, verdict: "" };
+  try {
+    if (!navigator.gpu) { rec.verdict = "REFUSED: this browser has no navigator.gpu"; return; }
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) { rec.verdict = "REFUSED: requestAdapter() gave no adapter"; return; }
+    const info = adapter.info || {};
+    // What the browser chose to report, and only these three: device and
+    // description are left out of the record by design.
+    rec.adapter = { vendor: info.vendor || "", architecture: info.architecture || "",
+      isFallbackAdapter: Boolean(info.isFallbackAdapter) };
+    const dev = await adapter.requestDevice();      // default limits; none asked above them
+    let lost = null;
+    dev.lost.then((l) => { lost = l; log("device lost: " + l.reason + " " + l.message, "red"); });
+    const code = $("kernel").textContent;
+    rec.kernel_sha256 = await sha256hex(code);
+    const t0 = performance.now();
+    const mod = dev.createShaderModule({ code });
+    const ci = await mod.getCompilationInfo();
+    const errs = ci.messages.filter((m) => m.type === "error")
+      .map((m) => m.lineNum + ":" + m.linePos + " " + m.message);
+    rec.compile = { ms: null, errors: errs };
+    if (errs.length) { rec.verdict = "REFUSED: the kernel did not compile"; return; }
+    const pipes = [];
+    for (let p = 0; p <= 4; p++) {
+      pipes.push(await dev.createComputePipelineAsync({ layout: "auto",
+        compute: { module: mod, entryPoint: "main", constants: { PLANT: p } } }));
+    }
+    rec.compile.ms = Math.round(performance.now() - t0);
+    // Plants first: a check never seen to fail proves nothing.
+    for (const [p, what] of PLANTS) {
+      let seen = 0;
+      await runChunk(dev, pipes[p], seed, 0, CHUNK, () => { seen++; });
+      if (lost) throw new Error("device lost (" + lost.reason + ")");
+      rec.plants.push({ plant: p, what, lanes: CHUNK, mismatches: seen, seen: seen > 0 });
+      log("plant " + p + " (" + what + "): " + seen + " lanes differ"
+        + (seen > 0 ? ", seen as required" : ", NOT SEEN"), seen > 0 ? "ok" : "red");
+    }
+    const res = { lanes: 0, mismatches: 0, by_op: {}, first: [], ms_by_dispatch: [] };
+    for (let first = 0; first < lanes; first += CHUNK) {
+      const n = Math.min(CHUNK, lanes - first);
+      const ms = await runChunk(dev, pipes[0], seed, first, n, (lane, cs, at, want, got) => {
+        const op = OPS[cs[at]] || String(cs[at]), g = (lane - first) * WORDS;
+        res.mismatches++;
+        res.by_op[op] = (res.by_op[op] || 0) + 1;
+        if (res.first.length < 8) res.first.push({ lane, op, k: cs[at + 1],
+          a: hex(cs, at + 2, 8), b: hex(cs, at + 10, 8),
+          want: hex(want, 0, 16) + " n " + want[16] + " aux " + want[17],
+          got: hex(got, g, 16) + " n " + got[g + 16] + " aux " + got[g + 17] });
+      });
+      if (lost) throw new Error("device lost (" + lost.reason + ")");
+      res.lanes += n;
+      res.ms_by_dispatch.push(Math.round(ms));
+    }
+    rec.run = res;
+    const blind = rec.plants.filter((p) => !p.seen).map((p) => p.plant);
+    rec.verdict = blind.length ? "BLIND: plant " + blind.join(", ") + " not seen"
+      : res.mismatches ? "FAIL: " + res.mismatches + " of " + res.lanes + " lanes differ"
+      : "PASS: " + res.lanes + " lanes equal the BigInt reference";
+  } catch (e) {
+    // Never retried: each device loss may be a GPU reset (GPU-F, item 1).
+    rec.verdict = "REFUSED: " + (e && e.message ? e.message : String(e));
+  } finally {
+    log(rec.verdict, rec.verdict.startsWith("PASS") ? "ok" : "red");
+    $("record").value = JSON.stringify(rec, null, 1);
+  }
+}
+$("run").addEventListener("click", run);
+</script>
+</body>
+</html>
