@@ -1816,7 +1816,7 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
 #     magnitude, augmented and reduction sets - replayed by cft-selftest on
 #     sw and on hip:0: the same sets and cases, every case matching
 #     (HIP_FULL_REPLAY=1 replays vectors/out whole instead, its character,
-#     formatOf and transcendental sets too, 1,072,415 cases);
+#     formatOf and transcendental sets too: 1,228,415 cases at the runner's counts);
 #   * seq_check, the `seq` stage's command, through --device hip:0: the
 #     programs needing what the GPU does not publish (AUGADD, an index
 #     table) counted refused by name, corpus by corpus;
@@ -1995,7 +1995,8 @@ do_hip() {
     echo "hip: the copy, $tree/host: $(find "$tree/host" -type f | wc -l) files - host/ as git tracks it at $COMMIT with the working tree's edits, and the untracked files git does not ignore$b"
   else
     # host/'s contents, never a link to it: `make clean` below runs in the copy
-    mkdir -p "$tree/host" "$tree/docs/studies/gpu-a" && cp -a "$ROOT/host/." "$tree/host/" && [ ! -L "$tree/host" ] \n      && cp -a "$ROOT/docs/studies/gpu-a/cudahip" "$tree/docs/studies/gpu-a/" \
+    mkdir -p "$tree/host" "$tree/docs/studies/gpu-a" && cp -a "$ROOT/host/." "$tree/host/" && [ ! -L "$tree/host" ] \
+      && cp -a "$ROOT/docs/studies/gpu-a/cudahip" "$tree/docs/studies/gpu-a/" \
       && make -C "$tree/host" clean >/dev/null 2>&1 \
       || { echo "FAIL  the copy of host/ into $tree"; return 1; }
     echo "hip: the copy, $tree/host: $(find "$tree/host" -type f | wc -l) files - host/ whole (no git here: commit $COMMIT), cleaned by its own make clean in the copy"
@@ -2252,7 +2253,7 @@ do_hip() {
 }
 HIP_CORPORA="conf-fp32 conf-fp64 conf-fp128 conf-fp256 routines-fp32 routines-fp64 routines-fp128 routines-fp256 fuzz-fp32 fuzz-fp64 fuzz-fp128 fuzz-fp256 systems bench"
 need hipcc gpu host-cc python mpmath
-stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (flip, drop-flag, seq-mask, reduce-carry red and green without them), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check, the certificate corpus's conformance test, device-test and hip-test, every run naming its device; skipped by name without hipcc or a GPU" -- do_hip
+stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (flip, drop-flag, seq-mask, reduce-carry red and green without them), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check, the certificate corpus's conformance test, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without hipcc or a GPU" -- do_hip
 
 # The same stage on the two other ways to build the backend for NVIDIA
 # (plan decision 3; Logan, 2026-11-10: "install CUDA 13 and make the recipe
@@ -2270,14 +2271,14 @@ stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ 
 # same plants, the same sums.
 do_hip_nvcc() { HIP_PLATFORM=cuda do_hip; }
 HIP_PLATFORM=cuda need nvcc gpu host-cc python mpmath
-stage hip-nvcc "the GPU backend built by plain nvcc with no HIP (HIP_PLATFORM=cuda through study GPU-A's header) on this host's NVIDIA GPU, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, every run naming its device; skipped by name without nvcc or an NVIDIA GPU" -- do_hip_nvcc
+stage hip-nvcc "the GPU backend built by plain nvcc with no HIP (HIP_PLATFORM=cuda through study GPU-A's header) on this host's NVIDIA GPU, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without nvcc or an NVIDIA GPU" -- do_hip_nvcc
 
 hipsrc_root() { echo "${HIPSRC_ROOT:-$ROOT/verify/_hip-nvidia-prefix}"; }
 do_hip_source() {
   HIP_ROOT=$(hipsrc_root) HIP_PLATFORM=nvidia HIP_CUDA=${HIPSRC_CUDA:-/usr/local/cuda-13.3} do_hip
 }
 HIP_ROOT=$(hipsrc_root) HIP_PLATFORM=nvidia need hipsrc gpu host-cc python mpmath
-stage hip-source "the GPU backend built by HIP compiled from ROCm's own sources for NVIDIA (HIPSRC_ROOT, made by verify/build-hip-nvidia.sh from pinned tags) under CUDA 13, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, every run naming its device; skipped by name without that prefix or an NVIDIA GPU" -- do_hip_source
+stage hip-source "the GPU backend built by HIP compiled from ROCm's own sources for NVIDIA (HIPSRC_ROOT, made by verify/build-hip-nvidia.sh from pinned tags) under CUDA 13, held as the hip stage holds it: plants first, the same corpora, sums, vectors, seq_check, certificate corpus, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without that prefix or an NVIDIA GPU" -- do_hip_source
 
 # ---- report --------------------------------------------------------
 {

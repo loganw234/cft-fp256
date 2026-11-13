@@ -314,7 +314,7 @@ authority:
     green without it: flip and drop-flag (the element-wise path), seq-mask
     (the sequencer), reduce-carry (the reduction tree), and the symbol
     check's own. A lister that shows a GPU while the runtime sees none is
-    a failure, and every run names its device. On NVIDIA it is built three
+    a failure, and each leg's log names its device, every line the same one. On NVIDIA it is built three
     ways, each held to the same sums: HIP 7.2.4's NVIDIA layer (`hip`),
     plain nvcc through study GPU-A's header (`hip-nvcc`), and HIP built
     from ROCm's own sources (`hip-source`).
