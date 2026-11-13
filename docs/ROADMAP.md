@@ -7105,6 +7105,69 @@ so it can run beside the card's work. A backend, if the study says
 yes, would be its own round, with the conformance corpus as its
 acceptance.
 
+### Noted 2026-11-12: certificates for runs on the GPU backend (no dates)
+
+Logan's word reached the lead through the cft-debris session on
+2026-11-12, verbatim: "Certificate support can be built for but not
+implemented in order to still have gpu capability at the moment. You can
+send a feature request to cft-fp256 regarding the certificate update to
+bring support up to the gpu backend". To the lead the same day: "Yes,
+add it to the roadmap".
+
+**How to read this.** As the lists above: no date, no parcel, nothing
+reordered. It is taken up as it becomes convenient. Each figure is READ
+at the merge of G1C, the GPU backend's gates, unless it is marked
+otherwise.
+
+**The request.** A run on a `hip:N` handle, certified, and audited on
+the software backend. Its first use would be cft-debris's propagator:
+cft programs run around the clock on a consumer GPU, each day cut into
+segments whose streams stay fixed, each day certified on the GPU and
+audited on a CPU. Until certificates reach `hip:N`, cft-debris designs
+for them and implements none, so that the GPU route is not held back.
+
+**What exists already.**
+- `cft-segrun` writes certificates on `hip:N`: its `--device` takes
+  `cft_open`'s artifact. G1C's gate runs the certificate corpus's
+  conformance test through it on both GPUs: 324 checks, 0 failed, and 17
+  golden certificates of versions 1 and 2 remade on the GPU and held
+  equal to the committed ones (docs/VALIDATION.md, G1C's entry).
+- Version 2's per-lane flags and marks come from the GPU's own
+  executor: the backend publishes `CFT_SEQ_FEAT_LANE_FLAGS` and
+  `CFT_SEQ_FEAT_FLAG_CONTROL`, and its `seq_features` 0x75f1f lacks only
+  `INDEXED` and `AUGADD` (docs/HOSTAPI.md, "The GPU backend").
+- The backend's seven environment variables are on the writer's list
+  (docs/CERTIFICATES.md, "The environment").
+
+**What it would need.**
+1. **An identity a GPU run can state.** A GPU loads no device image, so
+   `cft_get_image_id` is refused on `hip:N`, and version 2's four device
+   lines (platform, xrt, clock and serial) are written `unknown` by every
+   backend but software (host/tools/cert_write.h). What determines a GPU
+   run's bits is this library (`cft_build_id()`), the device and its
+   compiler. The backend's `CFT_HIP_INFO` line names the device, its bus,
+   the runtime and the driver, but no certificate records it. The first
+   question is whether that fits version 2's lines or needs a version 3.
+2. **The scratch depth, stated.** `hip:N` fixes it at the software
+   executor's 256 slots. A certificate written there states none:
+   device-caps is `unknown`, and `cft-segrun` writes its scratch-depth
+   parameter only with `--scratch-depth`, which it refuses beside any
+   device but sw. An audit on sw at its default 256 matches by
+   coincidence, not by statement.
+3. **An audit of a GPU-written certificate:** `cft-audit` re-running
+   it on the software backend. No such certificate has been audited yet.
+4. **Round 2's classes,** for the cases that need them: augmentedAddition
+   (refused on `hip:N` by name) and depths other than 256.
+5. **`cft-segrun`'s usage text,** which names only sw, an xclbin and
+   `cft://` (host/tools/segrun.c).
+
+**Verification, from what exists:**
+- the golden certificate corpus written through `hip:N`;
+- `cft-audit` re-running those certificates on sw;
+- one compiled system that cft-debris offers when the work is planned,
+  at binary128 and binary256, segmented as its days will be, with its
+  software backend's digests.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
