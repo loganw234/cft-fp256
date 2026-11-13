@@ -7168,6 +7168,71 @@ for them and implements none, so that the GPU route is not held back.
   at binary128 and binary256, segmented as its days will be, with its
   software backend's digests.
 
+### Noted 2026-11-13: cft-debris's requests from its round DEBRIS-D (no dates)
+
+cft-debris, Logan's space-debris propagator project, sent nine requests
+on 2026-11-12, verified in its round DEBRIS-D (its
+studies/DEBRIS-D-architecture.md; its verifier reproduced the
+measurements on an archive of this repository at 0aa997a3). Logan, to
+the lead on 2026-11-13: "Yes, add to roadmap as well".
+
+**How to read this.** As the lists above: no date, no parcel, nothing
+reordered. The figures are cft-debris's, MEASURED there unless marked;
+where each request would land is the lead's reading.
+
+**Their use:** a propagator written as cft programs (cftc, version 1),
+run around the clock at binary128 and binary256 through `hip:N` on a
+consumer GPU. Its force model is spherical-harmonic gravity, an
+atmosphere model and the Sun and Moon.
+
+**The requests:**
+1. **A larger constant bank, or index tables, on `hip:N`.** cftc refuses
+   a degree-20 gravity field as `bank-capacity`, 1,762 parameters against
+   512 slots, and degree 8 at binary256, 516 against 512. Index tables
+   are the GPU round 2's. The 512 slots are the software executor's
+   capacity, which `hip:N` publishes as its own, so a larger bank is a
+   change to the executor's contract, beyond the GPU rounds.
+2. **A scratch depth above 256 on `hip:N`.** Degree 8 needs 273 slots,
+   refused as `scratch-capacity` at binary64 and binary128. Degree 7 is
+   the largest field within `hip:N`'s limits in their generator's form.
+   The card's 2,048 is the GPU round 2's.
+3. **cftc on very large systems.** Degree 20, its 1,754 coefficients as
+   lane parameters on `sw:4096`, did not finish compiling in 290 s
+   (282.9 CPU-s). This is the compiler's.
+4. **pow as a routine, or powr and pown.** cftc refuses pow as
+   `transcendental`. The JB2008 atmosphere model makes about 225 pow
+   calls an evaluation (READ by cft-debris), and NRLMSISE-00 needs pow
+   too. This is the math library's.
+5. **A `hip` target in cftc,** so that an image's features and depth are
+   held at compile time to `hip:N`'s `seq_features` 0x75f1f and its 256
+   slots. Today they are compared by hand. This is the compiler's.
+6. **Program rates at binary128, and below a million lanes.** Their
+   ladder carries an ESTIMATE factor of up to 3 for their instruction mix
+   and their batches of 28,000 to 68,000 objects. GPU-A's part 2 lists
+   binary128 rates as not run. This is a small measurement.
+7. **The specialised tier for programs,** GPU-A's fixed path. It is the
+   largest lever in their ladder at binary256. This is the GPU round 3's.
+8. **A divide and a square root callable inside a kernel,** only if an
+   IAS15 kernel is wanted, since their version 1 has no adaptive step.
+   This is study GPU-E's section 6, item 1, in no round's plan.
+9. **Certificates for forcing that changes between segments, and for
+   accuracy values through a square root,** such as a distance. These
+   join "certificates for runs on the GPU backend", above.
+
+**For the routine work's marking** (cft-debris's figures):
+- exp marked 0 lanes in 196,608 evaluations on propagator arguments, a
+  95 % bound of 1.5e-5;
+- inputs of the form c·2^-p marked 5, 510 and 532 lanes of 1,024 at
+  binary64, binary128 and binary256: half the lanes at the two wide
+  formats;
+- sin and cos have no rate there yet: their test gave every lane the
+  same argument.
+
+**Their test case,** for when the certificate work is planned:
+`studies/debris-d/systems/j2dragrot-rk4.cftl` in cft-debris, at
+binary128 and binary256, with its software backend's digests in
+`studies/debris-d/images.tsv`.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
