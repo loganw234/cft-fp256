@@ -2,7 +2,7 @@
 
 Study GPU-F, written 2026-11-13 by a study author (Opus 5.5) at Logan's word, the seventh
 of the GPU series. Branch `gpu-f` from `0aa997a3`. Its prototype is in `studies/gpu-f/`, as
-files only. Nothing outside `studies/` and the index changed.
+files only. Nothing changed outside `studies/`, the index and VERIFICATION.md's count.
 
 > "As a study, dispatch an agent to look into webgpu approaches which might be possible
 > here. It could provide a public and easily accessible way to collect independent run
@@ -27,11 +27,11 @@ no device was used. "Not run" means not run.
    do not own. GPU-D's Apple fault (refusals at default options, wrong values in a scratch
    variant, right results with optimisation off, the cause not pinned) is the kind it
    would catch.
-2. **Route.** WGSL has no 64-bit integer. The two compile roads read (clspv, then Tint or
-   naga) stop at libcft's 64-bit intermediates (READ; not run). The order: first this
-   study's probe; then a go/no-go of clspv and Tint on GPU-D's OpenCL C text with the
-   64-bit lines rewritten by counted edits, which keeps one source; a hand port of the FMA
-   path, a second implementation, only if that fails.
+2. **Route.** WGSL has no 64-bit integer at run time, and the two compile roads read
+   (clspv, then Tint or naga) stop at libcft's 64-bit intermediates (READ; not run). The
+   order: this study's probe first; then a go/no-go of clspv and Tint on GPU-D's OpenCL C
+   text with the 64-bit lines rewritten by counted edits, which keeps one source; a hand
+   port of the FMA path, a second implementation, only if that fails.
 3. **Held** in the page itself by three gates: the conformance vectors' FMA cases; a
    counter-generated stream against the page's WebAssembly module, the reference of
    record; and planted faults that must be seen before any PASS.
@@ -216,8 +216,9 @@ and pages.yml only (READ, `ls .github/workflows`): question 7.
 
 **(b) C to SPIR-V to WGSL.** What exists (READ):
 - clspv compiles OpenCL C to Vulkan SPIR-V. It uses the Int64 capability when long or
-  ulong appear, documents no option that lowers them, and adds VariablePointers where it
-  needs them (<https://github.com/google/clspv>, docs/OpenCLCOnVulkan.md).
+  ulong appear, and adds VariablePointers where it needs them; the page read documents no
+  option that lowers 64-bit integers (<https://github.com/google/clspv>,
+  docs/OpenCLCOnVulkan.md).
 - Tint's SPIR-V reader validates for Vulkan 1.1, rejects features WGSL cannot express and
   assumes no VariablePointers (Dawn's docs/tint/spirv-reader-overview.md and
   spirv-ptr-ref.md, at <https://dawn.googlesource.com/dawn/>).
@@ -494,5 +495,5 @@ was lost repeatedly; GPU-D §4 itself (its ledger instead).
 The ledger, `Data/runs/2026-11-10-gpu-a/ledger/GPU-F.md` (the records, not committed),
 holds every source read and everything run, timed by `date`: grep, git, PowerShell reading
 file versions and two registry values, three Python scripts in scratch (the digest, the
-figures, the script's extraction), and node `--version` and `--check` at the lead's word.
-Nothing was installed or downloaded. Removal: delete `studies/gpu-f/` and this file.
+figures, the script's extraction), node `--check` at the lead's word and `--version` once.
+Nothing was installed or downloaded. Removal: `studies/gpu-f/`, this file, its index row.
