@@ -7191,7 +7191,11 @@ atmosphere model and the Sun and Moon.
    512 slots, and degree 8 at binary256, 516 against 512. Index tables
    are the GPU round 2's. The 512 slots are the software executor's
    capacity, which `hip:N` publishes as its own, so a larger bank is a
-   change to the executor's contract, beyond the GPU rounds.
+   change to the executor's contract, beyond the GPU rounds. Logan,
+   2026-11-16, on the GPU round 2's plan: "Keep 512 for now, plan for
+   expansion in the future". So round 2 keeps 512, and the larger bank
+   stays here as a planned item: a change to every backend's executor
+   contract, to be planned as its own work.
 2. **A scratch depth above 256 on `hip:N`.** Degree 8 needs 273 slots,
    refused as `scratch-capacity` at binary64 and binary128. Degree 7 is
    the largest field within `hip:N`'s limits in their generator's form.
