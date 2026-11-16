@@ -46,7 +46,7 @@ lines and add 125 of its 2,478 (COUNTED, diff).
 | W3 | extract's 64-bit funnel as two 32-bit shifts, guarded at offset 0 | 2 | yes: Int64 |
 | W4 | seed_recip_entry's `1uL << 28` as `1u << 28` | 1 | no: the literal folds; kept for the tool's scan |
 | W5 | seed_rsqrt_entry in 32-bit pieces (the lead's change to my plan) | 1 | no: dead after inlining (the lane passes CFT_SF_FMA); kept for one source and the seeds a later page will want |
-| W6 | the kernel's `long n` as `uint2` (8 bytes, as GPU-D's harness binds its cl_long), the bound n < 2^27, `long i` as uint | 3 | yes: Int64 |
+| W6 | the kernel's `long n` as `uint2` (8 bytes, as GPU-D's harness binds its cl_long), the bound n <= 2^27, `long i` as uint | 3 | yes: Int64 |
 | W7 | fix (B): `reqd_work_group_size(64, 1, 1)` | 1 | yes: Tint's internal error |
 | W8 | cft_fmt_desc's `name` pointer and the table's four strings out | 2 | yes: clspv crashes |
 | W9 | the shim's int64_t and uint64_t left undefined | 1 | no: a check, so a leftover 64-bit type fails to compile |
@@ -96,7 +96,7 @@ left out where W9 would turn the 64-bit code into a compile error, through the s
 | W10, at --int8=false | Shader | rc 0, 16,258 lines; each char in a 32-bit element (READ from that WGSL: flags indexed by lane) |
 | W10, int8 allowed | Shader Int8 | "SPIR-V capability 'Int8' is not supported" |
 | W11 | rc 255: "error: pointer-to-void is only supported with int8 support and opaque pointers" | not reached |
-| the option --int8=false | Shader Int8: `OpUConvert %uchar` of a shifted word, compared with uchar constants 0 to 4 and 16, ten times (BELIEVED: the optimiser narrowing a switch on the rnd byte) | refuses Int8 |
+| the option --int8=false | Shader Int8: `OpUConvert %uchar` of a shifted word, 13 times, and 50 compares with uchar constants 0 to 4 and 16, in the final text (MEASURED by the verifier; the "ten times" first written here was a draft's count) (BELIEVED: the optimiser narrowing the rnd byte's tests; the final SPIR-V has no OpSwitch) | refuses Int8 |
 | the option --inline-entry-points | Shader | "SPIR-V failed validation ... OpFunctionCall Argument ... type does not match ... parameter type" |
 | the option --pod-ubo | Shader | rc 0 (the draft's WGSL then holds n, fmt and esz as `var<immediate>`) |
 

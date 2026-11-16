@@ -24,7 +24,7 @@ touches an edited line stops the build here. The kinds:
   W5  seed_rsqrt_entry in 32-bit pieces: 2^44 / m2 by long division in 16-bit steps,
       the squares through cft_g_mul. --seedcheck holds it to the 64-bit original.
   W6  the kernel's `long n` as uint2 (8 bytes, as GPU-D's harness binds a cl_long),
-      with the bound n < 2^27 (every index then fits in 32 bits), and `long i` as uint.
+      with the bound n <= 2^27 (every index then fits in 32 bits), and `long i` as uint.
   W7  the work-group size, fix (B): reqd_work_group_size(64, 1, 1), so clspv emits
       LocalSize in place of its spec-constant WorkgroupSize, which Tint fails on.
   W8  cft_fmt_desc's `name` pointer out (it and the table's four strings): clspv stopped
