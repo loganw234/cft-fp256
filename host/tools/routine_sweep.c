@@ -11,6 +11,7 @@
  *   routine-sweep <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>
  *   routine-sweep oracle <op> <rne|rtz|rdn|rup|rmm>      hex lanes on stdin, "lane result flags" a line each out; no device, no image
  *   routine-sweep list                                   the thirteen, each with its images found or `no image`
+ *   routine-sweep rule atan2-f32-x<8 hex digits>         hex y lanes on stdin, "lane none|must|band" a line each out: atan2's rule's class of each (below)
  *
  * op is <name>-f32 for exp, exp2, expm1, log, log2, log1p, sin, cos, tan, atan, asin and acos, and atan2-f32-x<8 hex digits> for
  * atan2 with x fixed and y swept (r0 the lanes' y, r1 the fixed x). Any op may end -d<8 hex digits>, the first 32 bits of the
@@ -34,6 +35,14 @@
  *              replay decides a marked lane;
  *   a lane on the image's .marks list that is not marked is a flag mismatch, named; a mark not on the list is counted as "off
  *   the list", named, and fails nothing - the first sweeps are what find them.
+ *
+ * THE RULE, for an atan2 op: the lanes the routine marks as a RANGE, whatever a list holds. A lane is classed from y and the fixed x by exact
+ * arithmetic (rule_setup_x below, which cites the constants' sources) as must mark (x's sign bit clear, |y| < x, t = |y / x| under lo), band (lo <=
+ * t < hi, where the seed decides, so a mark there is neither required nor forbidden) or neither. A marked lane in the rule is counted in the rule,
+ * not off the list; "off the list" is then a mark neither listed nor in the rule; an UNMARKED must-mark lane is a flag mismatch, as one on the list
+ * is, and fails the slice. After the marks line comes
+ *     <op> <mode>: R in the rule (must mark P, band B), Q must-mark lanes not marked
+ * and a MARK line in the rule ends " (in the rule: must mark)" or " (in the rule: band)". No other op prints these.
  * Each call is held as mathlib_harness.check_r24 holds one: the OR of the bytes' [4:0] is flags_out; STATUS[6] is set exactly
  * when a byte's bit 7 is; no byte has [6:5]; every count is 1; STATUS has no other bit. A failure is a flag mismatch, named by
  * the call's range.
