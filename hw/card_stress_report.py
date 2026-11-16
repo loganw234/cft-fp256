@@ -203,7 +203,10 @@ def _routine(sviews: List[Dict[str, Any]], bad_ids: Any) -> List[Dict[str, Any]]
     """The routine items' marks (parcel M4X2), over the completed (pass or fail) slices of each: the marks by attribute, those off the list, the guesses
     wrong, the lanes the tool NAMED that were off the list or wrong (every such lane of every slice: a slice names at most 16 marks of any kind, so
     `not_named` counts the marks no MARK line named), and the seconds the tool's timing line gave for the device and for the oracle. Read from the records'
-    counts (marked, off_list, guesses_wrong) and extra (marks, times) as the driver wrote them; a record without them adds its slice and nothing else."""
+    counts (marked, off_list, guesses_wrong) and extra (marks, times) as the driver wrote them; a record without them adds its slice and nothing else.
+    An atan2 item also has the tiny-quotient rule's counts (rule_must, rule_band, must_unmarked), which only a record made with the rule holds: `rule_slices`
+    counts those, `before_rule` the item's other slices (a record without the key is "before the rule", and its off-list count holds the rule's lanes; it is
+    never read as zero in the rule), and a named lane in the rule keeps which part."""
     acc: Dict[str, Dict[str, Any]] = {}
     for v in sviews:
         r = v["r"]
@@ -212,11 +215,20 @@ def _routine(sviews: List[Dict[str, Any]], bad_ids: Any) -> List[Dict[str, Any]]
         if not item or v["status"] not in ("pass", "fail") or id(r) in bad_ids or _group_of(item, sw) != "routine":
             continue
         a = acc.setdefault(item, {"item": item, "claim": ITEM_CLAIM.get(item), "slices": 0, "marked": 0, "by_attr": {k: 0 for k in ROUTINE_ATTRS},
-                                  "off_list": 0, "guesses_wrong": 0, "named": [], "named_other": 0, "not_named": 0, "device_s": 0.0, "oracle_s": 0.0})
+                                  "off_list": 0, "guesses_wrong": 0, "named": [], "named_other": 0, "not_named": 0, "device_s": 0.0, "oracle_s": 0.0,
+                                  "has_rule": item.startswith("atan2-f32-"), "rule_slices": 0, "before_rule": 0, "rule_must": 0, "rule_band": 0,
+                                  "must_unmarked": 0})
         a["slices"] += 1
         counts = v["counts"] or {}
         for k in ("marked", "off_list", "guesses_wrong"):
             a[k] += _int(counts.get(k)) or 0
+        if a["has_rule"]:
+            if all(_int(counts.get(k)) is not None for k in ("rule_must", "rule_band", "must_unmarked")):
+                a["rule_slices"] += 1
+                for k in ("rule_must", "rule_band", "must_unmarked"):
+                    a[k] += _int(counts.get(k)) or 0
+            else:
+                a["before_rule"] += 1
         extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
         mk = extra.get("marks") if isinstance(extra.get("marks"), dict) else {}
         for k, n in (mk.get("by_attr") or {}).items():
@@ -226,7 +238,8 @@ def _routine(sviews: List[Dict[str, Any]], bad_ids: Any) -> List[Dict[str, Any]]
         for n in mk.get("named") or []:
             if isinstance(n, dict) and (n.get("off_list") or n.get("wrong")):
                 a["named"].append({"attr": n.get("attr"), "lane": n.get("lane"), "guess": n.get("guess"), "wrong": bool(n.get("wrong")),
-                                   "off_list": bool(n.get("off_list")), "slice": [sw.get("lo"), sw.get("hi")]})
+                                   "off_list": bool(n.get("off_list")), "rule": n.get("rule") if n.get("rule") in ("must mark", "band") else None,
+                                   "slice": [sw.get("lo"), sw.get("hi")]})
             else:
                 a["named_other"] += 1
         tm = extra.get("times") if isinstance(extra.get("times"), dict) else {}
@@ -1925,9 +1938,13 @@ def _routine_text(rows: Any) -> List[str]:
         L.append(f"      {a['slices']} slice(s); marked {a['marked']} ({by}); off the list "
                  f"{a['off_list']}; guesses wrong {a['guesses_wrong']}; marks no MARK line named {a['not_named']}; device {a['device_s']:.3f} s, "
                  f"oracle {a['oracle_s']:.3f} s")
+        if a.get("has_rule"):
+            L.append(f"      the tiny-quotient rule: {a['rule_slices']} slice(s) made with it, in the rule {a['rule_must'] + a['rule_band']} (must mark "
+                     f"{a['rule_must']}, band {a['rule_band']}), must-mark lanes not marked {a['must_unmarked']}; {a['before_rule']} slice(s) made before "
+                     f"it, whose off-the-list marks include the rule's lanes (their off the list above is not the rule's remainder)")
         for n in a["named"][:ROUTINE_NAMED_SHOWN]:
             L.append(f"      {n['attr']} a=0x{int(n['lane']):08x} guess=0x{int(n['guess']):08x} {'WRONG' if n['wrong'] else 'right'}"
-                     f"{' (off the list)' if n['off_list'] else ''}")
+                     f"{' (off the list)' if n['off_list'] else ''}{' (in the rule: ' + n['rule'] + ')' if n.get('rule') else ''}")
         if len(a["named"]) > ROUTINE_NAMED_SHOWN:
             L.append(f"      ... and {len(a['named']) - ROUTINE_NAMED_SHOWN} more named lanes (--json has all)")
     return L

@@ -494,12 +494,25 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
 #     fprintf(stderr, "%s %s: device %.3f s, oracle %.3f s, %lu lanes a call\n", ...)
 # A lane is MARKED when the program's own bank says its result is a guess (CFT_LANE_MARKED); off the list is a marked lane the images' marks
 # list does not name; WRONG is a guess that is not MPFR's answer. Neither fails a slice: the tool exits 0 for them and so does the driver.
+# For an atan2 op the tool also holds the tiny-quotient rule (a marked lane in the rule's must-mark range or band is counted there, and "off the list" is then
+# a mark neither listed nor in the rule; a must-mark lane left unmarked is a flag mismatch), and prints, straight after the marks line, the rule line
+#     printf("%s %s: %llu in the rule (must mark %llu, band %llu), %llu must-mark lanes not marked\n", ...)
+# and gives a MARK line in the rule the suffix " (in the rule: must mark)" or " (in the rule: band)" where an off-list one has " (off the list)". A log
+# made before the rule has neither the line nor the suffixes, and parse_routine_marks reads it as it always did: its atan2 "off the list" counts the
+# rule's lanes, which no later reading can tell apart, so the record keeps no rule counts for it (an absent key means "before the rule", never zero).
 # ---------------------------------------------------------------------------
 ROUTINE_SHOW = 16
 ROUTINE_MARKS_LINE = re.compile(r"^(\S+) (\S+): (\d+) marked \(rne (\d+|-), rtz (\d+|-), rdn (\d+|-), rup (\d+|-), rmm (\d+|-)\), "
                                 r"(\d+) off the list, (\d+) guesses wrong$", M)
-ROUTINE_MARK_LINE = re.compile(r"^  MARK (rne|rtz|rdn|rup|rmm) a=0x([0-9a-f]{8}) guess=0x([0-9a-f]{8}) (right|WRONG)( \(off the list\))?$", M)
+ROUTINE_MARK_LINE = re.compile(r"^  MARK (rne|rtz|rdn|rup|rmm) a=0x([0-9a-f]{8}) guess=0x([0-9a-f]{8}) (right|WRONG)"
+                               r"( \(off the list\)| \(in the rule: (must mark|band)\))?$", M)
+ROUTINE_RULE_LINE = re.compile(r"^(\S+) (\S+): (\d+) in the rule \(must mark (\d+), band (\d+)\), (\d+) must-mark lanes not marked$", M)
 ROUTINE_TIMING_LINE = re.compile(r"^(\S+) (\S+): device (\d+\.\d{3}) s, oracle (\d+\.\d{3}) s, (\d+) lanes a call$", M)
+
+
+def routine_has_rule(op: str) -> bool:
+    """Whether the tool holds a tiny-quotient rule for the op: atan2's op word (atan2-f32-x<8 hex>[-d<8 hex>]) and no other."""
+    return op.startswith("atan2-f32-")
 
 
 def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]:
@@ -508,8 +521,13 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
     five numbers, under one attribute that one and four `-`; the total their sum; off the list and wrong each at most the total; the MARK
     lines exactly min(total, 16), each of an attribute that ran; and, when the total is 16 or less (so that every mark is shown), the WRONG
     lines the wrong count, the '(off the list)' lines the off-list count, and each attribute's MARK lines its count.
-    Returns {'by_attr': {attribute: count or None}, 'marked', 'off_list', 'wrong', 'named': [{'attr', 'lane', 'guess', 'wrong', 'off_list'}],
-    'not_named': marks with no MARK line, 'times': {'device_s', 'oracle_s', 'lanes_a_call'} or None}."""
+    For an atan2 op the rule line may follow (a log made before the rule has none, and is read as before): then the op and mode on it are the job's,
+    the lanes in the rule (must mark and band) and those off the list together at most the total marked, and the MARK lines' suffixes agree with it
+    (with every mark shown, exactly; else at most); a rule line for an op that has no rule, or a MARK line with the rule's suffix and no rule line, is
+    refused.
+    Returns {'by_attr': {attribute: count or None}, 'marked', 'off_list', 'wrong', 'named': [{'attr', 'lane', 'guess', 'wrong', 'off_list', 'rule'}],
+    'not_named': marks with no MARK line, 'rule': None (no rule line) or {'must', 'band', 'must_unmarked'}, 'times': {'device_s', 'oracle_s',
+    'lanes_a_call'} or None}; a named lane's 'rule' is None, 'must mark' or 'band'."""
     m = _one(ROUTINE_MARKS_LINE, text, "routine marks line")
     if m.group(1) != op or m.group(2) != verdict_mode:
         raise VerdictError(f"routine marks: the line is for '{m.group(1)} {m.group(2)}', the job was '{op} {verdict_mode}'")
@@ -530,13 +548,36 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
     if wrong > total:
         raise VerdictError(f"routine marks: {wrong} guesses wrong of {total} marked")
     named = [{"attr": x.group(1), "lane": int(x.group(2), 16), "guess": int(x.group(3), 16), "wrong": x.group(4) == "WRONG",
-              "off_list": x.group(5) is not None} for x in ROUTINE_MARK_LINE.finditer(text)]
+              "off_list": x.group(5) == " (off the list)", "rule": x.group(6)} for x in ROUTINE_MARK_LINE.finditer(text)]
     if len(named) != min(total, ROUTINE_SHOW):
         raise VerdictError(f"routine marks: {len(named)} MARK lines where {total} marked show min({total}, {ROUTINE_SHOW}) = "
                            f"{min(total, ROUTINE_SHOW)}")
     for n in named:
         if by_attr[n["attr"]] is None:
             raise VerdictError(f"routine marks: a MARK line of {n['attr']}, which this job did not run")
+    rl = _maybe_one(ROUTINE_RULE_LINE, text, "routine rule line")
+    rule = None
+    if rl is not None:
+        if not routine_has_rule(op):
+            raise VerdictError(f"routine marks: a rule line for '{op}', which has no tiny-quotient rule")
+        if rl.group(1) != op or rl.group(2) != verdict_mode:
+            raise VerdictError(f"routine marks: the rule line is for '{rl.group(1)} {rl.group(2)}', the job was '{op} {verdict_mode}'")
+        in_must, in_band, must_unmarked = int(rl.group(4)), int(rl.group(5)), int(rl.group(6))
+        if int(rl.group(3)) != in_must + in_band:
+            raise VerdictError(f"routine marks: {rl.group(3)} in the rule but must mark {in_must} and band {in_band} sum to {in_must + in_band}")
+        if in_must + in_band + off > total:
+            raise VerdictError(f"routine marks: {in_must + in_band} in the rule and {off} off the list, together more than the {total} marked")
+        rule = {"must": in_must, "band": in_band, "must_unmarked": must_unmarked}
+    elif any(n["rule"] for n in named):
+        raise VerdictError("routine marks: a MARK line in the rule and no rule line")
+    if rule is not None:
+        shown = {"must mark": 0, "band": 0}
+        for n in named:
+            if n["rule"]:
+                shown[n["rule"]] += 1
+        for key, label in (("must mark", "must"), ("band", "band")):
+            if shown[key] > rule[label] or (total <= ROUTINE_SHOW and shown[key] != rule[label]):
+                raise VerdictError(f"routine marks: {shown[key]} MARK lines in the rule's {key} where the rule line says {rule[label]}")
     if total <= ROUTINE_SHOW:
         if sum(n["wrong"] for n in named) != wrong:
             raise VerdictError(f"routine marks: {sum(n['wrong'] for n in named)} WRONG MARK lines where the line says {wrong} guesses wrong")
@@ -557,18 +598,27 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
         if t.group(1) != op or t.group(2) != verdict_mode:
             raise VerdictError(f"routine timing: the line is for '{t.group(1)} {t.group(2)}', the job was '{op} {verdict_mode}'")
         times = {"device_s": float(t.group(3)), "oracle_s": float(t.group(4)), "lanes_a_call": int(t.group(5))}
-    return {"by_attr": by_attr, "marked": total, "off_list": off, "wrong": wrong, "named": named, "not_named": total - len(named), "times": times}
+    return {"by_attr": by_attr, "marked": total, "off_list": off, "wrong": wrong, "named": named, "not_named": total - len(named), "rule": rule,
+            "times": times}
 
 
 def parse_routine(text: str, rc: Optional[int], op: str, verdict_mode: str, artifact: Optional[str], expected_cases: Optional[int],
                   cover: Optional[Dict[str, int]] = None, cpu: bool = False) -> Verdict:
     """A routine-sweep slice: parse_soak (unedited: the verdict, the backend, the cover rule, the exit status) and then parse_routine_marks,
     which the log must also pass (else VerdictError, so a parse_error). The default tool only (no pass-size line: chunk=None). The verdict's
-    counts gain marked, off_list and guesses_wrong; its extra gains `marks` (by attribute, the named lanes, how many marks are not named)
-    and `times` (device s, oracle s, lanes a call) when the tool printed its timing line. An off-list mark and a wrong guess leave it ok."""
+    counts gain marked, off_list and guesses_wrong, and, when the log has the rule line (atan2 only), rule_must, rule_band and must_unmarked (a
+    log made before the rule gives no such key, which means "before the rule" and not zero); its extra gains `marks` (by attribute, the named lanes,
+    how many marks are not named) and `times` (device s, oracle s, lanes a call) when the tool printed its timing line. An off-list mark and a wrong
+    guess leave it ok; a must-mark lane left unmarked is a flag mismatch of the tool's, so the verdict is the soak's, failing, and the rule line's
+    count may not be more than the verdict's flag mismatches."""
     v = parse_soak(text, rc, op, verdict_mode, artifact, expected_cases, cover, cpu=cpu, chunk=None)
     r = parse_routine_marks(text, op, verdict_mode)
     v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])
+    if r["rule"] is not None:
+        if r["rule"]["must_unmarked"] > v.counts.get("flag_mismatches", 0):
+            raise VerdictError(f"routine marks: {r['rule']['must_unmarked']} must-mark lanes not marked, each a flag mismatch, and the verdict line "
+                               f"has {v.counts.get('flag_mismatches', 0)} flag mismatches")
+        v.counts.update(rule_must=r["rule"]["must"], rule_band=r["rule"]["band"], must_unmarked=r["rule"]["must_unmarked"])
     v.extra["marks"] = {"by_attr": r["by_attr"], "named": r["named"], "not_named": r["not_named"]}
     if r["times"] is not None:
         v.extra["times"] = r["times"]

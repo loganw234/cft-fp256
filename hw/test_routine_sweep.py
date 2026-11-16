@@ -42,6 +42,15 @@ one process at a time:
             mismatches), sin inf_flag_dropped (flag mismatches, no value mismatch), log1p pminn_dropped under rtz (flag mismatches),
             exp mark_silenced under rtz (flag mismatches by the .marks list and no value mismatch), raw_tfn given the wrong attribute
             (value mismatches), the tool stopping one lane early (parse_soak's cover rule refuses it)
+  rule      atan2's tiny-quotient rule in the tool (`routine-sweep rule <op>`, and a sweep's judge): its classes (must mark, band, none) equal
+            mathlib_inv_harness's (_tq_shape with _tq_band_tw: t < lo, lo <= t < hi) on lanes at both band edges of each of the nine x
+            and four more (3, 0x3fffffff, a small normal x, a subnormal one), both signs of y, exact quotients among them, each x
+            held to have must, band and out lanes in its set (or none at all where x has no rule); a sweep over a slice of must, band and
+            out lanes is green, its rule line equal to the classes' counts; images built with --plant range_off and --plant range_low
+            fail over a slice of must-mark lanes by the rule's name (CONTROL: the plain images pass the same slice), and a tool whose
+            rule is doctored (no must-mark range; an edge moved) is red where the plants are green or the classes differ; with
+            --baseline-tree DIR (a directory holding the baseline's host/), exp, log1p and tan slices give stdout byte for byte the
+            baseline binary's
   unchanged (with --baseline-tree DIR, a directory holding the baseline's host/; needs MPFR 4.2) mpfr-check's output for
             CFT_MPFR_PHASES=transcend,trig,radian,table91 CFT_MPFR_FORMATS=fp32 `mpfr-check 24 7` is the baseline's, byte for byte, its
             first (version) line apart. Skipped by name on MPFR 4.1.
@@ -745,6 +754,197 @@ def group_plants(tool, tree, work, imgs):
           judge_run(rc, text, "exp-f32", "all", 0x3f000000, 0x3f000400, 5)[0], f"{c}")
 
 
+RULE_X = X9 + (0x40400000, 0x3fffffff, 0x1f800000, 0x00000f00)     # the nine x, 3, a full significand just under 2, 2^-62, a subnormal
+RULE_SIGN = 0x80000000
+
+
+def rule_class_py(har, FP32, y, x):
+    """The harness's class of the lane (y, x): 'must', 'band' or 'none' (_tq_shape's shape is None, or t at or past hi)."""
+    t = har._tq_shape(FP32, (y, x))
+    if t is None:
+        return "none"
+    lo, hi = har._tq_band_tw(FP32)
+    return "must" if t < lo else ("band" if t < hi else "none")
+
+
+def rule_edges_py(har, FP32, x):
+    """(first |y| with t >= lo, first |y| with t >= hi) for x with the shape, by bisection on _tq_shape (monotone in |y|), or None."""
+    if har._tq_shape(FP32, (1, x)) is None:
+        return None
+    lo, hi = har._tq_band_tw(FP32)
+
+    def first(edge):
+        a, b = 1, x                                           # at |y| = x t is 1, past both edges
+        while a < b:
+            m = (a + b) // 2
+            t = har._tq_shape(FP32, (m, x))
+            if t is None or t >= edge:
+                b = m
+            else:
+                a = m + 1
+        return a
+    return first(lo), first(hi)
+
+
+def rule_lanes(har, FP32, x, rng):
+    """The lanes for x: both band edges and their neighbours, the ends of the shape, exact quotients (y = x 2^-k, where an encoding), the specials, random lanes
+    in the must, band and out parts; each in both signs."""
+    base = {0, 1, 2, 3, 0x007fffff, 0x00800000, 0x00800001, 0x3f800000, 0x7f7fffff, 0x7f800000, 0x7fc00000, 0x7fc00001, x - 1, x, x + 1}
+    ed = rule_edges_py(har, FP32, x)
+    if ed:
+        for e in ed:
+            base |= {e - 2, e - 1, e, e + 1, e + 2}
+        for _ in range(40):
+            for a, b in ((1, ed[0]), (ed[0], ed[1]), (ed[1], x)):      # must, band, out
+                if a < b:
+                    base.add(rng.randrange(a, b))
+    if x >= 0x00800000 and x < 0x7f800000:
+        for k in range(1, 254):
+            if x - k * 0x800000 >= 0x00800000:
+                base.add(x - k * 0x800000)                   # y = x 2^-k (x's significand, exact quotient 2^-k)
+    out = set()
+    for y in base:
+        if 0 <= y < 0x80000000:
+            out |= {y, y | RULE_SIGN}
+    return sorted(out)
+
+
+def group_rule(tool, tree, work, imgs, base_dir):
+    FP32, ml, routines, sf, T, har = mods()
+    import random
+    rng = random.Random(20261116)
+    seen = {"must": 0, "band": 0, "none": 0}
+    total = 0
+    bad: list = []
+    xs_with_all = []
+    for x in RULE_X:
+        op = f"atan2-f32-x{x:08x}"
+        lanes = rule_lanes(har, FP32, x, rng)
+        rc, out, err = tool.raw("rule", op, stdin="".join(f"{y:08x}\n" for y in lanes))
+        rows = [ln.split() for ln in out.splitlines()]
+        if rc != 0 or len(rows) != len(lanes):
+            check(f"rule: `routine-sweep rule {op}` answers every lane", False, f"rc {rc}, {len(rows)} lines for {len(lanes)}: {err[-200:]}")
+            continue
+        got = {int(a, 16): c for a, c in rows}
+        mine = {y: rule_class_py(har, FP32, y, x) for y in lanes}
+        bad += [(hex(x), hex(y), got[y], mine[y]) for y in lanes if got[y] != mine[y]]
+        cl = {c: sum(1 for y in lanes if mine[y] == c) for c in seen}
+        for c in seen:
+            seen[c] += cl[c]
+        total += len(lanes)
+        ed_ = rule_edges_py(har, FP32, x)
+        # the harness's own edges say which parts x has (a small x has no |y| as small as the rule's range): the set holds each part x has and none it has not
+        xs_with_all.append((x, (cl["must"] > 0) == bool(ed_ and ed_[0] > 1) and (cl["band"] > 0) == bool(ed_ and ed_[1] > ed_[0]) and cl["none"] > 0))
+    check(f"rule: the tool's classes equal the harness's (_tq_shape, _tq_band_tw) on {total} lanes of {len(RULE_X)} x, both signs of y, both band edges and their "
+          f"neighbours, exact quotients and random lanes among them", total > 0 and not bad, f"{bad[:4]} ({len(bad)} differ)")
+    check("rule: the lanes are not all of one class - each x has in its set must lanes where the harness's edges give any, band lanes where they give any, and "
+          f"lanes of neither (a negative x has none in the rule, a small x no must lane); set sizes over the {len(RULE_X)} x: {seen}",
+          all(ok for _, ok in xs_with_all) and all(seen[c] > 0 for c in seen), f"{[(hex(x), ok) for x, ok in xs_with_all if not ok]} {seen}")
+    # the edges the harness has, as first encodings, against the tool's own report of them
+    x = 0x3f800000
+    ed = rule_edges_py(har, FP32, x)
+    rc, out, err = tool.raw("rule", f"atan2-f32-x{x:08x}", stdin="")
+    check("rule: x = 1: the tool's edges (stderr of `rule`) are the harness's first encodings at lo and hi",
+          rc == 0 and f"must mark |y| in [1, 0x{ed[0]:08x}), band [0x{ed[0]:08x}, 0x{ed[1]:08x})" in err, f"{ed} {err}")
+    check("rule: a name with no rule is refused, exit 2: exp-f32 (a one-operand routine), atan2 with no x", tool.raw("rule", "exp-f32")[0] == 2
+          and tool.raw("rule", "atan2-f32")[0] == 2, "")
+    # a sweep over must, band and out lanes of x = 1
+    lo, hi = ed[0] - 2048, ed[1] + 1024
+    op = f"atan2-f32-x{x:08x}"
+    rc, text, m = tool.run(op, lo, hi, "all")
+    ok, why = judge_run(rc, text, op, "all", lo, hi, 5)
+    mk = marks_of(text)
+    rl = re.search(r"^(\S+) all: (\d+) in the rule \(must mark (\d+), band (\d+)\), (\d+) must-mark lanes not marked$", text, re.M)
+    n_must, n_band = 2048, ed[1] - ed[0]
+    check("rule: x = 1 over 2048 must-mark lanes, the whole band and 1024 out lanes: the verdict passes (exit 0), every mark is in the rule (0 off the list), "
+          "the rule line's must mark is 5 x 2048 (every must lane marked under each attribute), its band count is between 1 and 5 x the band, and "
+          "no must-mark lane is unmarked", ok and mk is not None and mk[2] == 0 and rl is not None and int(rl.group(3)) == 5 * n_must
+          and 0 < int(rl.group(4)) < 5 * n_band and int(rl.group(5)) == 0 and mk[0] == int(rl.group(2)), f"{why} {mk} {rl and rl.group(0)}")
+    # the marks inside the slice are the golden fragment's, on a sample of each part
+    f = {a: ml.fragment("atan2", FP32, {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}[a]) for a in ("rne", "rtz")}
+    smp = [rng.randrange(lo, ed[0]) for _ in range(12)] + [rng.randrange(ed[0], ed[1]) for _ in range(12)] + [rng.randrange(ed[1], hi) for _ in range(12)]
+    cls_of = {y: rule_class_py(har, FP32, y, x) for y in smp}
+    okm = True
+    for a, fr in f.items():
+        for y in smp:
+            mk_ = bool(ml.evaluate(fr, (y, x))[1] & ml.MARK)
+            if cls_of[y] == "must" and not mk_ or cls_of[y] == "none" and mk_:
+                okm = False
+    check("rule: golden fragment (mathlib.evaluate) on 36 lanes of the slice under rne and rtz: every must-mark lane marked, no out lane marked (the band's either)",
+          okm and {"must", "band", "none"} <= set(cls_of.values()), f"{[(hex(y), c) for y, c in cls_of.items()][:6]}")
+    # negative x and a subnormal x: no rule, the rule line is all zeros
+    rc, text, m = tool.run("atan2-f32-xbf800000", 0x19000000, 0x19000040, "rne")
+    rl = re.search(r"in the rule \(must mark (\d+), band (\d+)\), (\d+) must-mark lanes not marked$", text, re.M)
+    check("rule: x = -1 (the sign bit set): the rule line is 0, 0 and 0, and the slice passes",
+          judge_run(rc, text, "atan2-f32-xbf800000", "rne", 0x19000000, 0x19000040, 1)[0] and rl is not None and rl.groups() == ("0", "0", "0"), text[-200:])
+    # the plants: images built with each fail over a must-mark slice, by the rule's name; the plain images pass the same slice
+    slice_lo, slice_hi = 0x19000000, 0x19002000                    # 2^-77, below the single word's edge 2^-76 and above the double word's 2^-100
+    pln = {}
+    for plant in ("range_off", "range_low"):
+        d = os.path.join(work, "pl-" + plant)
+        rc, o = gen(d, "--names", "atan2", "--plant", plant)
+        check(f"rule: the generator builds atan2 with --plant {plant}", rc == 0, o[-200:])
+        if rc != 0:
+            continue
+        dg = re.search(r"^digest atan2 (\S+)$", open(os.path.join(d, "manifest.txt")).read(), re.M)
+        pln[plant] = (d, dg.group(1))
+        pop = f"atan2-f32-x3f800000-d{dg.group(1)}"
+        rc, text, m = Sweep(tool.path, d).run(pop, slice_lo, slice_hi, "all")
+        rl = re.search(r"in the rule \(must mark (\d+), band (\d+)\), (\d+) must-mark lanes not marked$", text, re.M)
+        check(f"rule: atan2 --plant {plant} over {slice_hi - slice_lo} must-mark lanes (x = 1, y near 2^-77) exits 1, names the rule in its FLAGS lines, and "
+              f"counts {5 * (slice_hi - slice_lo)} must-mark lanes not marked, all of them flag mismatches",
+              rc == 1 and m is not None and counts(m)[2] == 5 * (slice_hi - slice_lo) and counts(m)[1] == 0
+              and rl is not None and int(rl.group(3)) == 5 * (slice_hi - slice_lo) and "(in the rule's must-mark range, and not marked)" in text,
+              f"rc {rc} {m and m.group(0)} {rl and rl.group(0)}")
+    rc, text, m = tool.run(op, slice_lo, slice_hi, "all")
+    rl = re.search(r"in the rule \(must mark (\d+), band (\d+)\), (\d+) must-mark lanes not marked$", text, re.M)
+    check("rule: ... CONTROL, the plain images over the same slice pass, every lane marked and in the rule's must mark",
+          judge_run(rc, text, op, "all", slice_lo, slice_hi, 5)[0] and rl is not None and rl.groups() == (str(5 * (slice_hi - slice_lo)), "0", "0"), text[-200:])
+    # a tool with a doctored rule: no must-mark range (the plants then pass, the classes are not the harness's), and an edge moved
+    exe = plant_tool(tree, work, "rule_nomust", [("tools/routine_sweep.c", "        *yb_lo = first_t_at_least(x, RULE_EPS_DEN - RULE_EPS_NUM, RULE_EPS_DEN);\n",
+                                                 "        *yb_lo = 1;\n")])
+    if exe and "range_off" in pln:
+        pop = f"atan2-f32-x3f800000-d{pln['range_off'][1]}"
+        rc, text, m = Sweep(exe, pln["range_off"][0]).run(pop, slice_lo, slice_hi, "all")
+        check("rule: a tool whose rule has no must-mark range (the first band lane is |y| = 1) passes the range_off images over the must-mark slice: it is the rule "
+              "that makes the plant red", rc == 0 and m is not None and counts(m)[2] == 0, f"rc {rc} {m and m.group(0)}")
+    exe = plant_tool(tree, work, "rule_edge", [("tools/routine_sweep.c", "#define RULE_EPS_NUM 28u ", "#define RULE_EPS_NUM 29u ")])
+    if exe:
+        got2, _ = tool_rule(Sweep(exe, imgs), "atan2-f32-x3f800000", [ed[0] - 1, ed[0], ed[1] - 1, ed[1]])
+        mine2 = [rule_class_py(har, FP32, y, 0x3f800000) for y in (ed[0] - 1, ed[0], ed[1] - 1, ed[1])]
+        check("rule: a tool whose INV_EPS_T is 29/10000 for 28/10000 gives other classes than the harness's at the band edges (the comparison is red on it)",
+              got2 is not None and got2 != mine2, f"{got2} {mine2}")
+    # every other op's stdout is the baseline binary's, byte for byte
+    if not base_dir:
+        skip("rule: other ops' stdout byte for byte", "needs --baseline-tree DIR (git archive REV host | tar -x -C DIR)")
+        return
+    bt = X.copy_tree(base_dir, os.path.join(work, "base-tree"))
+    for exe_ in ("routine-sweep", "routine-sweep.exe"):
+        if os.path.isfile(os.path.join(bt, "host", exe_)):
+            os.remove(os.path.join(bt, "host", exe_))
+    log, rc = build_tool(bt, "the baseline")
+    bexe = os.path.join(bt, "host", "routine-sweep")
+    if rc != 0 or not os.path.exists(bexe):
+        check("rule: the baseline's routine-sweep builds", False, log[-300:])
+        return
+    for op_, lo_, hi_, mode_ in (("exp-f32", 0x33fffffb, 0x34000004, "all"), ("exp-f32", 0x3f000000, 0x3f001000, "rtz"),
+                                 ("log1p-f32", 0x35400000, 0x35400010, "all"), ("log1p-f32", 0xb53ffff0, 0xb5400010, "rne"),
+                                 ("tan-f32", 0x3f000000, 0x3f000400, "all"), ("sin-f32", 0x7f800000, 0x7f800003, "all")):
+        r1 = tool.raw(op_, lo_, hi_, mode_)
+        r2 = Sweep(bexe, imgs).raw(op_, lo_, hi_, mode_)
+        check(f"rule: {op_} [{lo_:#x}, {hi_:#x}) {mode_}: this tool's stdout and exit status are the baseline's, byte for byte ({len(r1[1])} bytes)",
+              r1[0] == r2[0] and r1[1] == r2[1] and len(r1[1]) > 100, f"rc {r1[0]} {r2[0]}: {r1[1][-150:]!r} vs {r2[1][-150:]!r}")
+
+
+def tool_rule(tool, op, lanes):
+    """routine-sweep rule: ([class of each lane], '') or (None, message)."""
+    rc, out, err = tool.raw("rule", op, stdin="".join(f"{y:08x}\n" for y in lanes))
+    rows = [ln.split() for ln in out.splitlines()]
+    if rc != 0 or len(rows) != len(lanes):
+        return None, f"rc {rc}: {err[-200:]}"
+    return [c for _, c in rows], ""
+
+
 def group_unchanged(tree, base_dir, work):
     probe = subprocess.run(["sh", "-c", "printf '#include <mpfr.h>\\n#if MPFR_VERSION < MPFR_VERSION_NUM(4,2,0)\\n#error old\\n#endif\\n' "
                                         "| cc -E -x c - >/dev/null 2>&1"])
@@ -902,6 +1102,7 @@ def main() -> int:
                                      ("refuse", lambda: group_refuse(tool, work, imgs)),
                                      ("sabotage", lambda: group_sabotage(tool, work, names)),
                                      ("plants", lambda: group_plants(tool, tree, work, imgs)),
+                                     ("rule", lambda: group_rule(tool, tree, work, imgs, base)),
                                      ("unchanged", lambda: group_unchanged(ROOT, base, work)),
                                      ("rate", lambda: group_rate(tool, names, rate_lanes)),
                                      ("legs", lambda: group_legs(tool, imgs, work))):
