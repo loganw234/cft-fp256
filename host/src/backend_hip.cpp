@@ -145,6 +145,8 @@
  *   fresh-early    an upload's pages marked FRESH before its copy, the
  *                  order verifier-V8 found in the XRT backend (KL-464);
  *                  only an upload that fails (CFT_HIP_UPLOAD) shows it
+ *   (round 2's G2A: its plants here)
+ *   (round 2's G2B: its plants here)
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
@@ -231,7 +233,9 @@ enum : unsigned {
     PL_FLIP = 1u << 0, PL_RMM_AS_RNE = 1u << 1, PL_DROP_FLAG = 1u << 2,
     PL_REDUCE_CARRY = 1u << 3, PL_REDUCE_FLAGS = 1u << 4,
     PL_SEQ_MASK = 1u << 5, PL_SEQ_DEPOSIT = 1u << 6, PL_FAIL_LAUNCH = 1u << 7,
-    PL_STALE_PUBLISH = 1u << 8, PL_NO_READBACK = 1u << 9, PL_FRESH_EARLY = 1u << 10
+    PL_STALE_PUBLISH = 1u << 8, PL_NO_READBACK = 1u << 9, PL_FRESH_EARLY = 1u << 10,
+    /* round 2's G2A: its plants here, bits 11 to 15 */
+    /* round 2's G2B: its plants here, bits 16 to 20 */
 };
 #endif
 
@@ -1555,6 +1559,8 @@ const struct {
     {"stale-publish", PL_STALE_PUBLISH},
     {"no-readback", PL_NO_READBACK},
     {"fresh-early", PL_FRESH_EARLY},
+    /* round 2's G2A: its plants here */
+    /* round 2's G2B: its plants here */
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not
@@ -1823,7 +1829,9 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
      * too), and without the two this backend does not carry. */
     cft_sw_seq_caps(seq);
     seq->features |= CFT_SEQ_FEAT_SCALAR | CFT_FEAT_REDUCE_SEG;
-    seq->features &= ~(uint32_t)(CFT_SEQ_FEAT_INDEXED | CFT_SEQ_FEAT_AUGADD);
+    seq->features &= ~(uint32_t)CFT_SEQ_FEAT_INDEXED;   /* round 2's G2B deletes this statement */
+    /* round 2 publishes the two one parcel at a time: each deletes its own line */
+    seq->features &= ~(uint32_t)CFT_SEQ_FEAT_AUGADD;    /* round 2's G2A deletes this statement */
     *out = D;
     return CFT_OK;
 }

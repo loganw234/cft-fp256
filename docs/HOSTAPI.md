@@ -2281,18 +2281,23 @@ flag by flag.
 `tiles` 1, `device_version` 0, flags readable, backend `"hip"`, and the
 software executor's capacities with its features less two -
 `seq_features` 0x75f1f, the software handle's 0x7ff1f without
-`CFT_SEQ_FEAT_INDEXED` and `CFT_SEQ_FEAT_AUGADD`. **What it refuses, by
-name**: an index table (device.c, on the clear bit, and `cft_run_ex` with
-a table likewise), augmentedAddition's two control codes (the loader, on
-the clear bit; `augmented.c` does not compile for an NVIDIA device as it
-is, so the unit is built without it), any non-zero scratch depth,
-explicit 256 included (`cft_open_ex`: a GPU has no image to fix its
-depth, so the backend fixes it at the software executor's 256 slots, and
-the depth argument is a software handle's to choose - the sentence says
-so; `scratch_depth` 0 opens it), and `cft_get_image_id` - a GPU loads no
-device image, and what determines its bits is this library
-(`cft_build_id()`) and the device's compiler. Augmented addition, the
-tables and the card's 2,048-slot depth are round 2's.
+`CFT_SEQ_FEAT_INDEXED` and `CFT_SEQ_FEAT_AUGADD`.
+
+**What it refuses, by name:**
+- an index table (device.c, on the clear bit, and `cft_run_ex` with a
+  table likewise);
+- any non-zero scratch depth, explicit 256 included (`cft_open_ex`: a GPU
+  has no image to fix its depth, so the backend fixes it at the software
+  executor's 256 slots, and the depth argument is a software handle's to
+  choose - the sentence says so; `scratch_depth` 0 opens it);
+- `cft_get_image_id`: a GPU loads no device image, and what determines its
+  bits is this library (`cft_build_id()`) and the device's compiler;
+- augmentedAddition's two control codes (the loader, on the clear bit;
+  `augmented.c` does not compile for an NVIDIA device as it is, so the unit
+  is built without it).
+
+Augmented addition, the tables and the card's 2,048-slot depth are round
+2's.
 
 **Staging.** An operand that is not a resident buffer's - and every
 operand of the part before buffers - is STAGED: copied into the handle's

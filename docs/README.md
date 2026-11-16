@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Fifty-nine files, 101,483 lines. Flat in one directory they look like one
+Fifty-nine files, 101,488 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **29,530 lines you consult while working** — the three under *Start here*,
+- **29,535 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,978 lines of tool manual**, one per shipped program;
 - **4,366 lines of operations**, read when you are about to do something to
@@ -55,7 +55,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,960 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,965 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 2,349 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the nine of them that also run on the tile: M1's six and M2's sin, cos and tan. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 656 | Programs as files: the assembler, the program library, the runner. |

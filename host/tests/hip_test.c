@@ -231,14 +231,19 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
     cft_status st;
     size_t i;
     int f;
-    const uint32_t want_feat = (CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
-                                CFT_SEQ_FEAT_BANK_PTR | CFT_SEQ_FEAT_KX9 |
-                                CFT_ALU_EXT_IMUL | CFT_SEQ_FEAT_SCRATCH |
-                                CFT_SEQ_FEAT_SCRATCH_IO |
-                                CFT_SEQ_FEAT_SCRATCH_STRICT | CFT_SEQ_FEAT_SCALAR |
-                                CFT_FEAT_REDUCE_SEG | CFT_SEQ_FEAT_LANE_MASK |
-                                CFT_SEQ_FEAT_SCRATCH_STEP | CFT_SEQ_FEAT_LANE_FLAGS |
-                                CFT_SEQ_FEAT_FLAG_CONTROL);
+    /* The software handle's features, named one by one; hip:N publishes
+     * them less `lacks`, which the check below builds one line a bit, so
+     * that each of round 2's parcels deletes its own line. */
+    const uint32_t sw_feat = (CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
+                              CFT_SEQ_FEAT_BANK_PTR | CFT_SEQ_FEAT_KX9 |
+                              CFT_ALU_EXT_IMUL | CFT_SEQ_FEAT_SCRATCH |
+                              CFT_SEQ_FEAT_SCRATCH_IO |
+                              CFT_SEQ_FEAT_SCRATCH_STRICT | CFT_SEQ_FEAT_SCALAR |
+                              CFT_FEAT_REDUCE_SEG | CFT_SEQ_FEAT_INDEXED |
+                              CFT_SEQ_FEAT_LANE_MASK | CFT_SEQ_FEAT_AUGADD |
+                              CFT_SEQ_FEAT_SCRATCH_STEP | CFT_SEQ_FEAT_LANE_FLAGS |
+                              CFT_SEQ_FEAT_FLAG_CONTROL);
+    uint32_t lacks = 0, want_feat;
     const int before = failures;
 
     printf("open\n");
@@ -266,12 +271,15 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
     CHECK(c.tiles == 1 && c.device_version == 0 && c.flags_readable == 1,
           "tiles %u, version %u, flags readable %d - wanted 1, 0, 1",
           (unsigned)c.tiles, (unsigned)c.device_version, c.flags_readable);
+    lacks |= CFT_SEQ_FEAT_INDEXED;   /* round 2's G2B deletes this line */
+    /* round 2 publishes the two one parcel at a time: each deletes its own line */
+    lacks |= CFT_SEQ_FEAT_AUGADD;    /* round 2's G2A deletes this line */
+    want_feat = sw_feat & ~lacks;
     CHECK(c.seq_features == want_feat &&
-          c.seq_features == (s.seq_features &
-                             ~(uint32_t)(CFT_SEQ_FEAT_INDEXED | CFT_SEQ_FEAT_AUGADD)),
-          "seq_features 0x%x: wanted 0x%x, the software handle's 0x%x less INDEXED "
-          "and AUGADD", (unsigned)c.seq_features, (unsigned)want_feat,
-          (unsigned)s.seq_features);
+          c.seq_features == (s.seq_features & ~lacks),
+          "seq_features 0x%x: wanted 0x%x, the software handle's 0x%x less 0x%x",
+          (unsigned)c.seq_features, (unsigned)want_feat, (unsigned)s.seq_features,
+          (unsigned)lacks);
     CHECK(c.max_deposits == s.max_deposits && c.max_insns == s.max_insns &&
           c.max_consts == s.max_consts && c.max_scratch == s.max_scratch,
           "capacities %u/%u/%u/%u, the software handle's %u/%u/%u/%u",
