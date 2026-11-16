@@ -5,19 +5,22 @@
  *
  *     hip-test hip:N [-l LEGS] [-f FORMAT] [-s small|large|all]
  *
- * LEGS is a comma list of open, reduce, seg, compose, alias, two, buffers
- * and plants (default: all of them); -f keeps one format; -s chooses the
- * reduction sizes (default all). The legs:
+ * LEGS is a comma list of the legs below (default: all of them); -f
+ * keeps one format; -s chooses the reduction sizes (default all). The
+ * legs:
  *
  *   open      cft_open's grammar for "hip:N" (each malformed spelling
  *             refused by name, with the grammar in the sentence), index
  *             1, a device past the count, an xclbin; the capability word
  *             (formats 15, groups 0x7F, tiles 1, version 0, flags
  *             readable, backend "hip", buffers_resident 1, the software
- *             handle's four capacities and its features less
- *             CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_AUGADD); the image
- *             identity refused by name; a scratch depth refused, 2,048
- *             and 256 alike.
+ *             handle's four capacities and its features less the bits
+ *             below); the image identity refused by name. What hip:N
+ *             lacks, one item a parcel of round 2:
+ *               CFT_SEQ_FEAT_INDEXED, and a scratch depth refused,
+ *               2,048 and 256 alike (round 2's G2B rewrites this item);
+ *
+ *               CFT_SEQ_FEAT_AUGADD (round 2's G2A rewrites this item).
  *   reduce    cft_reduce SUM and MAXALL against the software handle - the
  *             definition - bits and flags, at every n from 1 to 130 and
  *             every power of two with its neighbours up to 2^18 (-s), at
@@ -55,6 +58,8 @@
  *             CFT_HIP_PAGE and CFT_HIP_INFO malformed and refused by name;
  *             fail-launch's poisoned handle. In a default build: NOT RUN,
  *             named.
+ *   (round 2's G2A: its legs here)
+ *   (round 2's G2B: its legs here)
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
