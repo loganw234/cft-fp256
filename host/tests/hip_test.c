@@ -1171,10 +1171,17 @@ static void leg_plants(const char *artifact, cft_device *sw)
     printf("  plants: %d failed\n", failures - before);
 }
 
+/* round 2's G2A: its leg functions here */
+
+/* round 2's G2B: its leg functions here */
+
 int main(int argc, char **argv)
 {
     const char *artifact = NULL,
-               *legs = "open,reduce,seg,compose,alias,two,buffers,plants";
+               *legs = "open,reduce,seg,compose,alias,two,buffers,plants"
+                       /* round 2's G2A: its legs here, each a line ",name" */
+                       /* round 2's G2B: its legs here, each a line ",name" */
+                       ;
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
     cft_status st;
@@ -1204,7 +1211,10 @@ int main(int argc, char **argv)
             artifact = argv[i];
         } else {
             fprintf(stderr, "usage: %s hip:N [-l open,reduce,seg,compose,alias,two,"
-                    "buffers,plants] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
+                    "buffers,plants"
+                    /* round 2's G2A: its legs here, each a line ",name" */
+                    /* round 2's G2B: its legs here, each a line ",name" */
+                    "] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
         }
@@ -1259,6 +1269,8 @@ int main(int argc, char **argv)
         leg_buffers(artifact, hw, sw);
     if (strstr(legs, "plants"))
         leg_plants(artifact, sw);
+    /* round 2's G2A: its legs' dispatch here */
+    /* round 2's G2B: its legs' dispatch here */
     cft_close(hw);
     cft_close(sw);
     if (shown > 60)

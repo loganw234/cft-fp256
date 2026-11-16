@@ -49,15 +49,22 @@
  *
  * Every format and opcode group the software backend carries (the same
  * code runs), tiles 1, flags readable, and the software executor's four
- * capacities with its features less two, which round 1 does not carry
- * and refuses by name through the loader and device.c: index tables
- * (CFT_SEQ_FEAT_INDEXED) and augmentedAddition (CFT_SEQ_FEAT_AUGADD -
- * augmented.c does not compile for an NVIDIA device as it is, so this
- * unit is CFT_NO_AUGMENTED). A program's scratch is the software
- * handle's 256 slots, and cft_open_ex refuses any non-zero depth for a
- * GPU by name, 256 included (device.c). No device image:
- * cft_get_image_id is refused by name. Resident buffers: yes
- * (CFT_HIP_BUFFERS_RESIDENT 1, backend.h; below).
+ * capacities with its features less the two below, which round 1 does
+ * not carry and refuses by name through the loader and device.c (one
+ * item a feature: round 2's G2B rewrites the first, G2A the second):
+ *
+ *   index tables (CFT_SEQ_FEAT_INDEXED);
+ *
+ *   augmentedAddition (CFT_SEQ_FEAT_AUGADD): augmented.c does not
+ *   compile for an NVIDIA device as it is, so this unit is
+ *   CFT_NO_AUGMENTED.
+ *
+ * A program's scratch is the software handle's 256 slots, and
+ * cft_open_ex refuses any non-zero depth for a GPU by name, 256
+ * included (device.c; round 2's G2B rewrites this sentence).
+ *
+ * No device image: cft_get_image_id is refused by name. Resident
+ * buffers: yes (CFT_HIP_BUFFERS_RESIDENT 1, backend.h; below).
  *
  * ---------------------------------------------------------------
  * Staging, chunks, and the time a launch may take
