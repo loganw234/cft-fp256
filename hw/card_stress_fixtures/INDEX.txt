@@ -174,3 +174,19 @@ rs-exp-d-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exp-f32-d043b
 rs-exp-d-wrong.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exp-f32-d00000000 0x33fffffb 0x34000004 all [0 s]
 rs-exp-rtz.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exp-f32-d043b3bb5 0x33fffffb 0x34000004 rtz [0 s]
 rs-exp-s34-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES34 host/routine-sweep exp-f32 0x3f000000 0x3f001000 all [2 s]
+# rs-atan2-*: parcel M4RR (2026-11-16), host/tools/routine_sweep.c with atan2's tiny-quotient rule, each file the tool's stderr and then its stdout (the order of the
+# rs-* above), made in WSL (Ubuntu 22.04, gcc 11.4, the system's MPFR 4.1.0 and GMP 6.2.1) from a clean extraction of the parcel's commit 1013f263 (git archive HEAD),
+# built with make -C host routine-sweep (XRT=0), the software backend, no card. The images are host/tools/gen_sweep_images.py's from the same tree, in three
+# directories: $IMAGES the plain ones (digest a86a60d8), $IMAGESOFF made with --names atan2 --plant range_off (digest 65890db4), $IMAGESLOW with --plant range_low
+# (digest 27d159e2). rs-atan2-rule-all: x = 1 over [0x197f4000, 0x19806000), 73,728 encodings that hold 2,176 must-mark lanes, the 70,531 of the band and 1,021 past it,
+# all five attributes: 286,760 marked, all in the rule (10,880 must mark, 275,880 band), 0 off the list. rs-atan2-rule-rtz: x = 0x3fb504f3 (a full significand), 4,096
+# encodings from 0x19b48000 under rtz, 818 must mark and 3,278 band, all marked. rs-atan2-plain-must: the plain images over 1,024 must-mark lanes (x = 1, y near 2^-77):
+# every lane marked and in the rule. rs-atan2-range-off and rs-atan2-range-low: the same slice and command word, the digest of the planted images, exit 1 - 5,120
+# must-mark lanes not marked, each a flag mismatch, none marked (range_low marks below 2^-100 only). rs-atan2-xneg: x = -1 (the sign bit set), 64 encodings under
+# rne, the rule line all zeros. These are the only logs of this tool with the rule line and the MARK suffixes; the rs-* above are from before it (exp's, which has no rule).
+rs-atan2-rule-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-x3f800000-da86a60d8 0x197f4000 0x19806000 all [15 s]
+rs-atan2-rule-rtz.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-x3fb504f3-da86a60d8 0x19b48000 0x19b49000 rtz [0 s]
+rs-atan2-plain-must.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-x3f800000-da86a60d8 0x19000000 0x19000400 all [2 s]
+rs-atan2-range-off.txt	1	env CFT_SWEEP_IMAGES=$IMAGESOFF host/routine-sweep atan2-f32-x3f800000-d65890db4 0x19000000 0x19000400 all [0 s]
+rs-atan2-range-low.txt	1	env CFT_SWEEP_IMAGES=$IMAGESLOW host/routine-sweep atan2-f32-x3f800000-d27d159e2 0x19000000 0x19000400 all [1 s]
+rs-atan2-xneg.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-xbf800000-da86a60d8 0x19000000 0x19000040 rne [0 s]

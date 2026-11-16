@@ -810,8 +810,9 @@ def rule_lanes(har, FP32, x, rng):
 
 
 def group_rule(tool, tree, work, imgs, base_dir):
-    FP32, ml, routines, sf, T, har = mods()
+    FP32, ml, routines, sf, T, _har = mods()
     import random
+    import mathlib_inv_harness as har           # _tq_shape and _tq_band_tw
     rng = random.Random(20261116)
     seen = {"must": 0, "band": 0, "none": 0}
     total = 0
