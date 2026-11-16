@@ -1954,7 +1954,7 @@ def group_routine_rule():
     jr = json.loads(json.dumps(S["sweep"]["routine"], allow_nan=False))      # --json writes the summary, which this is part of
     check(len(jr) == 1 and (jr[0]["rule_must"], jr[0]["rule_band"], jr[0]["must_unmarked"], jr[0]["rule_slices"], jr[0]["before_rule"]) == (90, 10, 2, 2, 1)
           and any(n["rule"] == "must mark" for n in jr[0]["named"]) and any(n["rule"] is None for n in jr[0]["named"]),
-          "routine rule: and the JSON carries the rule's counts, the slices before it and each named lane's part of the rule", jr[0])
+          "routine rule: and the JSON carries the rule's counts, the slices before it and each named lane's part of the rule", jr[:1])
     recs2, _ = build_routine_run()
     T2 = R.render(R.summarize(recs2, rev=None))
     check("the tiny-quotient rule" not in T2, "routine rule: an exp item (no rule) prints no rule line, as before")

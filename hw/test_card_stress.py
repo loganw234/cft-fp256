@@ -6832,18 +6832,18 @@ def routine_parser_checks(src: str = HERE) -> list:
           and len(mk(v)["named"]) == 16 and all(n["rule"] == "must mark" and not n["off_list"] for n in mk(v)["named"]) and mk(v)["not_named"] == 286744, why or str(v))
         v, why = parse_ok(lambda: whole("rs-atan2-rule-rtz.txt"))
         c("routine rule log (x = 0x3fb504f3 under rtz, 4,096 encodings): 4,096 marked, 818 must mark and 3,278 band, 0 off the list, the four other attributes '-'",
-          v is not None and v.ok and v.counts["marked"] == 4096 and (v.counts["rule_must"], v.counts["rule_band"], v.counts["off_list"]) == (818, 3278, 0)
+          v is not None and v.ok and v.counts["marked"] == 4096 and (v.counts.get("rule_must"), v.counts.get("rule_band"), v.counts["off_list"]) == (818, 3278, 0)
           and mk(v)["by_attr"] == {"rne": None, "rtz": 4096, "rdn": None, "rup": None, "rmm": None}, why or str(v))
         v, why = parse_ok(lambda: whole("rs-atan2-plain-must.txt"))
         c("routine rule log (the plain images over 1,024 must-mark lanes): 5,120 marked, all must mark, the slice passes",
-          v is not None and v.ok and (v.counts["marked"], v.counts["rule_must"], v.counts["rule_band"], v.counts["must_unmarked"]) == (5120, 5120, 0, 0), why or str(v))
+          v is not None and v.ok and (v.counts["marked"], v.counts.get("rule_must"), v.counts.get("rule_band"), v.counts.get("must_unmarked")) == (5120, 5120, 0, 0), why or str(v))
         for nm_ in ("rs-atan2-range-off.txt", "rs-atan2-range-low.txt"):
             v, why = parse_ok(lambda nm_=nm_: whole(nm_))
             c(f"routine rule log ({nm_[3:-4]}, exit 1): a FAILING verdict (ok False) of 5,120 flag mismatches, 0 marked, 0 in the rule and 5,120 must-mark lanes not marked",
-              v is not None and not v.ok and v.counts["flag_mismatches"] == 5120 and v.counts["marked"] == 0 and (v.counts["rule_must"], v.counts["must_unmarked"]) == (0, 5120), why or str(v))
+              v is not None and not v.ok and v.counts["flag_mismatches"] == 5120 and v.counts["marked"] == 0 and (v.counts.get("rule_must"), v.counts.get("must_unmarked")) == (0, 5120), why or str(v))
         v, why = parse_ok(lambda: whole("rs-atan2-xneg.txt"))
         c("routine rule log (x = -1, the sign bit set): no mark, the rule line 0, 0 and 0 (read, so the keys are present and zero)",
-          v is not None and v.ok and v.counts["marked"] == 0 and (v.counts["rule_must"], v.counts["rule_band"], v.counts["must_unmarked"]) == (0, 0, 0), why or str(v))
+          v is not None and v.ok and v.counts["marked"] == 0 and (v.counts.get("rule_must"), v.counts.get("rule_band"), v.counts.get("must_unmarked")) == (0, 0, 0), why or str(v))
         # a record before the rule: the same log with no rule line, its in-the-rule marks '(off the list)' and the line counting them off the list
         ra = fixture("rs-atan2-rule-all.txt")
         old_ = (ra.replace(rl_of("rs-atan2-rule-all.txt") + "\n", "").replace(" (in the rule: must mark)", " (off the list)")
@@ -9762,7 +9762,7 @@ def plants(env: Env) -> None:
          lambda env, src: routine_parser_checks(src), ["routine marks damage: the MARK lines of another attribute"]),
         ("M4X2: the routine slice's parser does not read the marks",
          [("card_stress_lib.py", "    r = parse_routine_marks(text, op, verdict_mode)\n    v.counts.update(",
-           '    r = {"by_attr": {}, "marked": 0, "off_list": 0, "wrong": 0, "named": [], "not_named": 0, "times": None}\n    v.counts.update(')],
+           '    r = {"by_attr": {}, "marked": 0, "off_list": 0, "wrong": 0, "named": [], "not_named": 0, "rule": None, "times": None}\n    v.counts.update(')],
          lambda env, src: routine_parser_checks(src), ["routine slice damage: a damaged marks line"]),
         ("M4X2: an off-list mark or a wrong guess fails the slice",
          [("card_stress_lib.py", '    v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])\n',
