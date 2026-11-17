@@ -2427,7 +2427,7 @@ host loop brought a's and b's DIRTY pages home and wrote r and e on the
 host every call. r or e may share a's or b's window exactly, since each
 lane reads both inputs before it writes either output: a third case of
 "two roles, one copy". There is no threshold and no host fallback: a
-call is a launch, 110 to 126 microseconds at n = 1 on the RTX 5060 Ti and
+call is a launch, 109 to 126 microseconds at n = 1 on the RTX 5060 Ti and
 200 to 234 on the RX 7600 against under one on the host (measured; fp64
 and fp256, staged and resident), so a small call is slower on the GPU
 than the host loop it replaced; the GPU's call overtook the host's
