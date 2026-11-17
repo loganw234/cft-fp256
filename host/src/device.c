@@ -702,21 +702,32 @@ CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out)
             return CFT_ERR_INVALID_ARGUMENT;
         }
 #ifdef CFT_ENABLE_HIP
-        /* A GPU has no image to fix its depth: the GPU backend does, at
-         * the software executor's 256 slots, and refuses every non-zero
-         * depth, 256 included - so its sentence says that, and the card's
-         * below stays the card's. */
+        /* A GPU has no image to fix its depth, so it is opened at the
+         * caller's, as a software handle is: the GPU backend runs the
+         * program the loader held to the handle's max_scratch, at that
+         * depth (backend_hip.cpp), so the assignment below IS the open.
+         * Up to CFT_HIP_SCRATCH_MAX (backend.h), the card's 2,048; past
+         * it, refused by name. The card's sentence below stays the
+         * card's, and 0 is the software executor's 256, as before. */
         if (args->artifact && strncmp(args->artifact, "hip:", 4) == 0) {
-            cft_set_error("cft_open_ex: scratch_depth %lu is a SOFTWARE "
-                          "handle's depth, and %s names a GPU, whose depth "
-                          "the GPU backend fixes at the software executor's "
-                          "256 slots, with no image to choose another "
-                          "(cft_caps.max_scratch) - any non-zero depth is "
-                          "refused for it, 256 included; open it with "
-                          "scratch_depth 0 and read the depth it has",
-                          (unsigned long)depth, args->artifact);
-            return CFT_ERR_UNSUPPORTED;
-        }
+            if (depth > CFT_HIP_SCRATCH_MAX) {
+                cft_set_error("cft_open_ex: scratch_depth %lu is past the "
+                              "%lu slots a lane the GPU backend honours for "
+                              "%s: a GPU's scratch is device memory, %lu "
+                              "bytes a slot a lane, so a depth of D costs D "
+                              "x %lu bytes a lane of a program that indexes, "
+                              "and %lu is the card's depth, which this cap "
+                              "follows; a software handle - cft_open_ex with "
+                              "no artifact - takes up to %lu",
+                              (unsigned long)depth,
+                              (unsigned long)CFT_HIP_SCRATCH_MAX,
+                              args->artifact, (unsigned long)sizeof(cft_bn),
+                              (unsigned long)sizeof(cft_bn),
+                              (unsigned long)CFT_HIP_SCRATCH_MAX,
+                              (unsigned long)CFT_OPEN_SCRATCH_MAX);
+                return CFT_ERR_UNSUPPORTED;
+            }
+        } else
 #endif
         if (args->artifact) {
             cft_set_error("cft_open_ex: scratch_depth %lu is a SOFTWARE "

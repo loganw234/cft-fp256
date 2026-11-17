@@ -63,6 +63,17 @@
  * build whose create declines every buffer, which device.c then keeps
  * as host memory, as the buffer seam below allows. */
 #  define CFT_HIP_BUFFERS_RESIDENT 1
+/* The deepest scratch cft_open_ex opens a GPU at (scratch_depth; 0 is
+ * the software executor's 256, as before). It is the card's depth,
+ * 2,048, the deepest any image has been built at. Past it the reason is
+ * the cost: a GPU's scratch is device memory, `reach` slots of
+ * sizeof(cft_bn) = 260 bytes a lane in the handle's pool
+ * (backend_hip.cpp), the whole depth for a program that indexes - so a
+ * depth of D costs D x 260 bytes a lane, and the pool's cap, not the
+ * thread's frame, sets how many lanes a launch carries (504 at 2,048
+ * under its 256 MiB, against 4,032 at 256). device.c refuses a deeper
+ * one by name. */
+#  define CFT_HIP_SCRATCH_MAX 2048u
 #endif
 
 #ifdef __cplusplus

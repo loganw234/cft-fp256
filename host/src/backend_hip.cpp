@@ -49,11 +49,15 @@
  *
  * Every format and opcode group the software backend carries (the same
  * code runs), tiles 1, flags readable, and the software executor's four
- * capacities with its features less the two below, which round 1 does
- * not carry and refuses by name through the loader and device.c (one
- * item a feature: round 2's G2B rewrites the first, G2A the second):
+ * capacities with all its features (seq_features 0x7ff1f, the software
+ * handle's own). Round 1 did not carry the two below and refused them
+ * by name; round 2 added them, one item a parcel:
  *
- *   index tables (CFT_SEQ_FEAT_INDEXED);
+ *   index tables (CFT_SEQ_FEAT_INDEXED): carried since round 2's G2B,
+ *   so no longer among them - a program's four tables, and cft_run_ex's
+ *   (device.c composes those as a program), run on the device: each
+ *   SOURCE whole in device memory, each table cut with its chunk's lanes
+ *   (prog_impl, below);
  *
  *   augmentedAddition (CFT_SEQ_FEAT_AUGADD) is no longer one of them
  *   (round 2's G2A): this unit includes augmented.c's lane functions
@@ -62,9 +66,12 @@
  *   cft_augmented_add, _sub and _mul run here too, on a seam entry of
  *   their own (cfth_augmented: k_aug, a thread an element).
  *
- * A program's scratch is the software handle's 256 slots, and
- * cft_open_ex refuses any non-zero depth for a GPU by name, 256
- * included (device.c; round 2's G2B rewrites this sentence).
+ * A program's scratch is its handle's depth: the software executor's 256
+ * slots, or the power of two cft_open_ex opened the GPU at, up to
+ * CFT_HIP_SCRATCH_MAX, the card's 2,048 (backend.h; deeper is refused by
+ * name in device.c). The slots are device memory, `reach` of them a lane
+ * in the handle's pool, so a deeper depth costs lanes a launch, not the
+ * thread's frame (round 2's G2B).
  *
  * No device image: cft_get_image_id is refused by name. Resident
  * buffers: yes (CFT_HIP_BUFFERS_RESIDENT 1, backend.h; below).
@@ -163,6 +170,14 @@
  *   seq-aug        the executor's AUGERR computed as AUGADD: its lane
  *                  call, wrapped in this unit, delivers r as e
  *   (round 2's G2B: its plants here)
+ *   idx-chunk      an index table's window not advanced per chunk: every
+ *                  chunk reads the table's first entries (R16's trap)
+ *   idx-none       CFT_IDX_NONE read as index 0 (a staged table chunk's
+ *                  sentinels rewritten to 0 on their way up)
+ *   src-trunc      a staged indexed source uploaded at min(n, its length)
+ *                  elements, the rest of its device copy left 0xA5
+ *   depth-clamp    the kernel's copy of a program deeper than 256 slots
+ *                  at 256 (its scratch_depth and log2)
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
@@ -294,6 +309,8 @@ enum : unsigned {
     PL_AUG_FLIP = 1u << 11, PL_AUG_FLAGS = 1u << 12, PL_AUG_SWAP = 1u << 13,
     PL_SEQ_AUG = 1u << 14,
     /* round 2's G2B: its plants here, bits 16 to 20 */
+    PL_IDX_CHUNK = 1u << 16, PL_IDX_NONE = 1u << 17, PL_SRC_TRUNC = 1u << 18,
+    PL_DEPTH_CLAMP = 1u << 19,
 };
 #endif
 
@@ -568,6 +585,9 @@ struct Dev {
     size_t stage = 0;
     cft_bn *pool = nullptr;       /* device, `pool_bytes` */
     size_t pool_bytes = 0, pool_cap = 0;
+    uint8_t *src = nullptr;       /* device, `src_bytes`: a program's staged
+                                   * indexed sources, whole (prog_impl) */
+    size_t src_bytes = 0;
     size_t free_at_open = 0, total = 0;
     size_t prog_chunk = PROG_CHUNK_START;
     hipFuncAttributes fa_run, fa_level, fa_seq, fa_aug;
@@ -1476,9 +1496,87 @@ int reduce_range(Dev &D, const char *who, const cft_fmt_desc &f, int op, int rnd
 
 /* ==== the sequencer ===================================================== */
 
+#ifdef CFT_HIP_PLANTS
+/* A plant build's instrument (no plant needs to be set): the last program
+ * run's shape - its lanes, the budget that cut them, and what each launch
+ * carried - for cfth_plant_prog_probe, which a bench reads after the run.
+ * A default build has none of it. */
+struct ProgProbe {
+    uint64_t n, esz, reach, lane_pool, pool_cap, stage, head, lane_in, lane_out,
+        kmax, chunk0, launches, max_launch, min_launch, src_bytes, free_at_open;
+};
+ProgProbe g_probe;
+#endif
+
+/* One staged indexed source, WHOLE, into the handle's source buffer: a
+ * piece the stage's size at a time through the pinned block, each piece
+ * finished before the next, so the block is free again when the head goes
+ * into it. Before any launch of the call, so a failure is the call's,
+ * named, and does not poison the handle (up_pages' rule). `keep` is the
+ * bytes to copy: all of them, but for the src-trunc plant. */
+int up_source(Dev &D, const char *who, uint8_t *dst, const uint8_t *src, size_t bytes,
+              size_t keep)
+{
+    for (size_t x = 0; x < keep;) {
+        const size_t m = keep - x < D.stage ? keep - x : D.stage;
+        std::memcpy(D.host, src + x, m);
+        hipError_t e = hipMemcpyAsync(dst + x, D.host, m, hipMemcpyHostToDevice, D.stream);
+        if (e == hipSuccess)
+            e = hipStreamSynchronize(D.stream);
+        if (e != hipSuccess) {
+            (void)hipGetLastError();
+            set_err(fmt_str("%s: uploading an indexed source to %s failed: %s (%s) - "
+                            "before any launch of this call, so nothing ran", who,
+                            D.label.c_str(), hipGetErrorString(e), hipGetErrorName(e)));
+            return CFT_ERR_INTERNAL;
+        }
+        x += m;
+    }
+    if (keep < bytes) {                   /* the src-trunc plant's 0xA5 */
+        hipError_t e = hipMemsetAsync(dst + keep, 0xA5, bytes - keep, D.stream);
+        if (e == hipSuccess)
+            e = hipStreamSynchronize(D.stream);
+        if (e != hipSuccess)
+            return fail_device(D, who, "the src-trunc plant's fill", e);
+    }
+    return CFT_OK;
+}
+
+/* A staged table's window into the stage at `o` (256-aligned, so the
+ * entries are aligned); the idx-none plant rewrites its sentinels. */
+void put_tab(Dev &D, size_t o, const uint32_t *t, size_t entries)
+{
+    std::memcpy(D.host + o, t, entries * 4u);
+#ifdef CFT_HIP_PLANTS
+    if (D.plant & PL_IDX_NONE) {
+        uint32_t *w = (uint32_t *)(D.host + o);
+        for (size_t e = 0; e < entries; e++)
+            if (w[e] == CFT_IDX_NONE)
+                w[e] = 0;
+    }
+#endif
+}
+
 /* R[0..5] are a, b, c, the deposits, scratch-in and scratch-out as
- * bind_call decided them; the mask, the counts, the lane bytes, the bank
- * and the instructions are staged always. */
+ * bind_call decided them, and R[6..9] the four index tables; the mask,
+ * the counts, the lane bytes, the bank and the instructions are staged
+ * always.
+ *
+ * An index table (R16, ABI 0.14) makes its stream - or the scratch block
+ * - a SOURCE the table indexes: idx_*_src elements (scratch_in_bytes, the
+ * pool, for the block), any of which any lane may read. So the lanes are
+ * cut into chunks as before and the sources are NOT: a staged source goes
+ * up whole, once a call, into the handle's source buffer (D.src, grown
+ * on demand as the pool is, and freed at close), and a resident one is
+ * read in place at its whole window (bind_call uploaded what was stale).
+ * A chunk's kernel gets each source whole and ITS window of each table -
+ * entries [first, first + k) of a stream's, [first * nsi, (first + k) *
+ * nsi) of the block's - because seq_lanes_in indexes a table by the lane
+ * (seq_exec.h), and a table cut any other way is the trap R16 names: a
+ * plausible neighbour's element, read with no assertion to catch it. A
+ * table rides the stage with its chunk, four bytes an entry, or is read
+ * at its bound window. A source the device cannot hold is refused by
+ * name, with its bytes, before anything runs; never cut short. */
 int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
               const void *a, const void *b, const void *c, void *deposits,
               uint32_t *counts, size_t n, const Role *R, uint32_t *flags, uint32_t *bus)
@@ -1499,11 +1597,25 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
                         (unsigned)prog.max_deposits, fmt, (unsigned)max_deposits));
         return CFT_ERR_INTERNAL;
     }
-    if (io->idx_a || io->idx_b || io->idx_c || io->idx_scratch_in) {
-        set_err("cft_program_run_ex: an index table reached the GPU backend, which "
-                "does not publish CFT_SEQ_FEAT_INDEXED and is refused one by name "
-                "in device.c first - a defect in libcft, not in the call");
-        return CFT_ERR_INTERNAL;
+    /* The tables' shapes were held by program.c before this call
+     * (seq_check_round2: a table on a NULL stream, a zero source length, a
+     * scratch table with no pool, every index at or past its source - each
+     * refused by name), so what reaches here is well formed: a defence,
+     * not a check the run relies on. */
+    {
+        const void *const strm[3] = {a, b, c};
+        const uint32_t *const tab[3] = {io->idx_a, io->idx_b, io->idx_c};
+        const size_t srcn[3] = {io->idx_a_src, io->idx_b_src, io->idx_c_src};
+        bool bad = io->idx_scratch_in && (!io->scratch_in || !io->n_scratch_in ||
+                                          !io->idx_scratch_src);
+        for (int r = 0; r < 3; r++)
+            bad = bad || (tab[r] && (!strm[r] || !srcn[r]));
+        if (bad) {
+            set_err("cft_program_run_ex: an index table reached the GPU backend with "
+                    "no source to read, which program.c refuses by name first - a "
+                    "defect in libcft, not in the call");
+            return CFT_ERR_INTERNAL;
+        }
     }
     if (!a) {
         set_err("cft_program_run_ex: stream a is NULL");
@@ -1521,6 +1633,10 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     const size_t nso = io->scratch_out ? io->n_scratch_out : 0;
     const uint8_t *mask = io->lane_mask;
     uint8_t *lflags = io->lane_flags;
+    /* the four tables, or none: a stream with one is its whole source */
+    const bool ia = io->idx_a != nullptr, ib = b && io->idx_b, ic = c && io->idx_c;
+    const bool isi = nsi && io->idx_scratch_in;
+    const size_t ntab = (ia ? 1 : 0) + (ib ? 1 : 0) + (ic ? 1 : 0) + (isi ? 1 : 0);
     const size_t nk = prog.n_consts;
     std::vector<cft_bn> bank;
     const cft_bn *kon = prog.consts;
@@ -1555,9 +1671,14 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     const uint32_t reach = prog.scratch_active
                                ? seq_scratch_reach(&prog, prog.scratch_depth) : 0;
     const size_t lane_pool = (size_t)reach * sizeof(cft_bn);
-    const size_t lane_in = esz * (1 + (b ? 1 : 0) + (c ? 1 : 0) + nsi) + (mask ? 1 : 0);
+    /* a lane's staged bytes: an element of each dense stream and of its
+     * scratch block, four bytes an entry of each table in their place */
+    const size_t lane_in = esz * ((ia ? 0 : 1) + (b && !ib ? 1 : 0) + (c && !ic ? 1 : 0) +
+                                  (isi ? 0 : nsi)) +
+                           4 * ((ia ? 1 : 0) + (ib ? 1 : 0) + (ic ? 1 : 0) +
+                                (isi ? nsi : 0)) + (mask ? 1 : 0);
     const size_t lane_out = esz * (md + nso) + (counts ? 4 : 0) + (lflags ? 1 : 0);
-    const size_t slack = 10 * 256 + sizeof(hacc);
+    const size_t slack = (10 + ntab) * 256 + sizeof(hacc);
     if (D.stage <= head + slack + 8 * (lane_in + lane_out) ||
         (lane_pool && D.pool_cap / lane_pool < 8)) {
         set_err(fmt_str("%s: eight lanes of this program need %zu bytes of staging "
@@ -1579,6 +1700,76 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     if (chunk > kmax)
         chunk = kmax;
 
+    /* The indexed sources, whole, once a call (this section's head says
+     * why): a resident one where bind_call left it, a staged one into
+     * D.src through the stage - before the head goes into the stage. */
+    const uint8_t *srcp[4] = {nullptr, nullptr, nullptr, nullptr};  /* a, b, c, pool */
+#ifdef CFT_HIP_PLANTS
+    size_t src_up = 0;
+#endif
+    if (ntab) {
+        const bool tab[4] = {ia, ib, ic, isi};
+        const void *const hsrc[4] = {a, b, c, io->scratch_in};
+        const size_t sb[4] = {io->idx_a_src * esz, io->idx_b_src * esz,
+                              io->idx_c_src * esz, io->scratch_in_bytes};
+        const int role[4] = {0, 1, 2, 4};
+        size_t off[4] = {0, 0, 0, 0}, stg[4] = {0, 0, 0, 0}, total = 0;
+        for (int s = 0; s < 4; s++) {
+            if (!tab[s] || R[role[s]].resident)
+                continue;
+            off[s] = total;
+            stg[s] = sb[s];
+            total = al(total + sb[s]);
+        }
+        if (total > D.src_bytes) {
+            if (D.src) {
+                (void)hipFree(D.src);
+                D.src = nullptr;
+                D.src_bytes = 0;
+            }
+            const hipError_t e = hipMalloc((void **)&D.src, total);
+            if (e != hipSuccess) {
+                D.src = nullptr;
+                if (e != hipErrorOutOfMemory)
+                    return fail_device(D, who, "hipMalloc of the indexed sources", e);
+                (void)hipGetLastError();
+                set_err(fmt_str("%s: this run's staged indexed sources need %zu bytes of "
+                                "device memory on %s - each source whole, since an index "
+                                "reaches anywhere in it: a %zu, b %zu, c %zu and the "
+                                "scratch pool %zu bytes - and hipMalloc refused them: %s. "
+                                "The device had %zu of %zu bytes free at open, beside this "
+                                "handle's %zu-byte stage and %zu-byte scratch pool; a "
+                                "resident source (cft_alloc) is read in place, and a "
+                                "shorter source or a free device would answer", who, total,
+                                D.label.c_str(), stg[0], stg[1], stg[2], stg[3],
+                                hipGetErrorString(e), D.free_at_open, D.total, D.stage,
+                                D.pool_bytes));
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+            D.src_bytes = total;
+        }
+        for (int s = 0; s < 4; s++) {
+            if (!tab[s])
+                continue;
+            if (R[role[s]].resident) {
+                srcp[s] = R[role[s]].dp;
+                continue;
+            }
+            size_t keep = sb[s];
+#ifdef CFT_HIP_PLANTS
+            if ((D.plant & PL_SRC_TRUNC) && s < 3 && n * esz < keep)
+                keep = n * esz;
+#endif
+            if ((st = up_source(D, who, D.src + off[s], (const uint8_t *)hsrc[s], sb[s],
+                                keep)) != CFT_OK)
+                return st;
+            srcp[s] = D.src + off[s];
+#ifdef CFT_HIP_PLANTS
+            src_up += keep;
+#endif
+        }
+    }
+
     std::memcpy(D.host + o_ins, prog.insns, (size_t)prog.n_insns * 8u);
     if (nk)
         std::memcpy(D.host + o_kon, kon, nk * sizeof(cft_bn));
@@ -1592,20 +1783,41 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     P.consts = nullptr;            /* the executor reads konst, not this */
     P.image = nullptr;
     P.image_bytes = 0;
+#ifdef CFT_HIP_PLANTS
+    if ((D.plant & PL_DEPTH_CLAMP) && P.scratch_depth > 256u) {
+        P.scratch_depth = 256u;    /* the kernel's copy only: the host's */
+        P.scratch_log2 = 8;        /* program, and the reach, as they were */
+    }
+    const size_t chunk0 = chunk;
+    uint64_t pr_launches = 0, pr_max = 0, pr_min = 0;
+#endif
 
-    /* which of the six are resident (bind_call): the stage carries the rest */
+    /* which of the ten are resident (bind_call): the stage carries the rest */
     const bool ra = R[0].resident, rb = b && R[1].resident, rc = c && R[2].resident;
     const bool rd = md && R[3].resident, rsi = nsi && R[4].resident;
     const bool rso = nso && R[5].resident;
+    const bool ria = ia && R[6].resident, rib = ib && R[7].resident;
+    const bool ric = ic && R[8].resident, risi = isi && R[9].resident;
     uint32_t fl = 0, rep = 0;
     for (size_t first = 0; first < n;) {
         const size_t k = n - first < chunk ? n - first : chunk;
+        /* this chunk's window of each table: entries from lane `first`
+         * (idx-chunk plants R16's trap, every chunk the first window) */
+        size_t tf = first;
+#ifdef CFT_HIP_PLANTS
+        if (D.plant & PL_IDX_CHUNK)
+            tf = 0;
+#endif
         size_t o = head;
-        const size_t o_a = o;  if (!ra) o = al(o + k * esz);
-        const size_t o_b = o;  if (b && !rb) o = al(o + k * esz);
-        const size_t o_c = o;  if (c && !rc) o = al(o + k * esz);
+        const size_t o_a = o;  if (!ia && !ra) o = al(o + k * esz);
+        const size_t o_b = o;  if (b && !ib && !rb) o = al(o + k * esz);
+        const size_t o_c = o;  if (c && !ic && !rc) o = al(o + k * esz);
         const size_t o_m = o;  if (mask) o = al(o + (k + 7) / 8);
-        const size_t o_si = o; if (nsi && !rsi) o = al(o + k * nsi * esz);
+        const size_t o_si = o; if (nsi && !isi && !rsi) o = al(o + k * nsi * esz);
+        const size_t o_ia = o; if (ia && !ria) o = al(o + k * 4);
+        const size_t o_ib = o; if (ib && !rib) o = al(o + k * 4);
+        const size_t o_ic = o; if (ic && !ric) o = al(o + k * 4);
+        const size_t o_isi = o; if (isi && !risi) o = al(o + k * nsi * 4);
         const size_t o_acc = o; o = al(o + sizeof(hacc));
         const size_t o_dep = o; if (md && !rd) o = al(o + k * md * esz);
         const size_t o_cnt = o; if (counts) o = al(o + k * 4);
@@ -1614,15 +1826,20 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         const size_t end = o;
         bool up_out = mask != nullptr;
 
-        if (!ra) std::memcpy(D.host + o_a, (const uint8_t *)a + first * esz, k * esz);
-        if (b && !rb)
+        if (!ia && !ra)
+            std::memcpy(D.host + o_a, (const uint8_t *)a + first * esz, k * esz);
+        if (b && !ib && !rb)
             std::memcpy(D.host + o_b, (const uint8_t *)b + first * esz, k * esz);
-        if (c && !rc)
+        if (c && !ic && !rc)
             std::memcpy(D.host + o_c, (const uint8_t *)c + first * esz, k * esz);
         if (mask) std::memcpy(D.host + o_m, mask + first / 8, (k + 7) / 8);
-        if (nsi && !rsi)
+        if (nsi && !isi && !rsi)
             std::memcpy(D.host + o_si, (const uint8_t *)io->scratch_in + first * nsi * esz,
                         k * nsi * esz);
+        if (ia && !ria) put_tab(D, o_ia, io->idx_a + tf, k);
+        if (ib && !rib) put_tab(D, o_ib, io->idx_b + tf, k);
+        if (ic && !ric) put_tab(D, o_ic, io->idx_c + tf, k);
+        if (isi && !risi) put_tab(D, o_isi, io->idx_scratch_in + tf * nsi, k * nsi);
         acc_init(D, o_acc);
         if (mask) {
             /* OUTPUTS UNDER A MASK GO UP FIRST: the executor leaves a masked
@@ -1671,12 +1888,26 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         cft_run_args A;
         std::memset(&A, 0, sizeof A);
         A.struct_size = sizeof A;
-        A.a = ra ? R[0].dp + first * esz : D.dev + o_a;
-        A.b = b ? (rb ? R[1].dp + first * esz : D.dev + o_b) : nullptr;
-        A.c = c ? (rc ? R[2].dp + first * esz : D.dev + o_c) : nullptr;
+        /* a stream with a table is its source, WHOLE - never a chunk of it */
+        A.a = ia ? srcp[0] : ra ? R[0].dp + first * esz : D.dev + o_a;
+        A.b = b ? (ib ? srcp[1] : rb ? R[1].dp + first * esz : D.dev + o_b) : nullptr;
+        A.c = c ? (ic ? srcp[2] : rc ? R[2].dp + first * esz : D.dev + o_c) : nullptr;
         A.n = k;
-        A.scratch_in = nsi ? (rsi ? R[4].dp + first * nsi * esz : D.dev + o_si) : nullptr;
-        A.scratch_in_bytes = k * nsi * esz;
+        A.scratch_in = nsi ? (isi ? srcp[3] : rsi ? R[4].dp + first * nsi * esz
+                                                  : D.dev + o_si) : nullptr;
+        A.scratch_in_bytes = isi ? io->scratch_in_bytes : k * nsi * esz;
+        A.idx_a = !ia ? nullptr : ria ? (const uint32_t *)R[6].dp + tf
+                                      : (const uint32_t *)(D.dev + o_ia);
+        A.idx_b = !ib ? nullptr : rib ? (const uint32_t *)R[7].dp + tf
+                                      : (const uint32_t *)(D.dev + o_ib);
+        A.idx_c = !ic ? nullptr : ric ? (const uint32_t *)R[8].dp + tf
+                                      : (const uint32_t *)(D.dev + o_ic);
+        A.idx_scratch_in = !isi ? nullptr : risi ? (const uint32_t *)R[9].dp + tf * nsi
+                                                 : (const uint32_t *)(D.dev + o_isi);
+        A.idx_a_src = ia ? io->idx_a_src : 0;
+        A.idx_b_src = ib ? io->idx_b_src : 0;
+        A.idx_c_src = ic ? io->idx_c_src : 0;
+        A.idx_scratch_src = isi ? io->idx_scratch_src : 0;
         A.scratch_out = nso ? (rso ? R[5].dp + first * nso * esz : D.dev + o_so) : nullptr;
         A.scratch_out_bytes = k * nso * esz;
         A.deposits = md ? (rd ? R[3].dp + first * md * esz : D.dev + o_dep) : nullptr;
@@ -1709,6 +1940,13 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         }
         fl |= h.flags;
         rep |= h.status;
+#ifdef CFT_HIP_PLANTS
+        pr_launches++;
+        if (k > pr_max)
+            pr_max = k;
+        if (!pr_min || k < pr_min)
+            pr_min = k;
+#endif
         if (md && !rd)
             std::memcpy((uint8_t *)deposits + first * md * esz, D.host + o_dep,
                         k * md * esz);
@@ -1736,6 +1974,11 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     /* STATUS's three reports, all of them (backend.h) */
     *bus = rep & (CFT_STATUS_DEPOSIT_OVERFLOW | CFT_STATUS_SCRATCH_RANGE |
                   CFT_STATUS_MARKED);
+#ifdef CFT_HIP_PLANTS
+    g_probe = ProgProbe{n, esz, reach, lane_pool, D.pool_cap, D.stage, head, lane_in,
+                        lane_out, kmax, chunk0, pr_launches, pr_max, pr_min, src_up,
+                        D.free_at_open};
+#endif
     return CFT_OK;
 }
 
@@ -1763,6 +2006,10 @@ const struct {
     {"aug-swap", PL_AUG_SWAP},
     {"seq-aug", PL_SEQ_AUG},
     /* round 2's G2B: its plants here */
+    {"idx-chunk", PL_IDX_CHUNK},
+    {"idx-none", PL_IDX_NONE},
+    {"src-trunc", PL_SRC_TRUNC},
+    {"depth-clamp", PL_DEPTH_CLAMP},
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not
@@ -1838,6 +2085,8 @@ void close_dev(Dev *D) noexcept
         (void)hipStreamSynchronize(D->stream);
     if (D->pool)
         (void)hipFree(D->pool);
+    if (D->src)
+        (void)hipFree(D->src);
     if (D->dev)
         (void)hipFree(D->dev);
     if (D->host)
@@ -2031,11 +2280,11 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
     /* The software executor's capacities, because it is the software
      * executor that runs; with the two bits device.c's software handle
      * adds (a scalar operand, the segmented reduction - both run here
-     * too), and without the two this backend does not carry. */
+     * too). Since round 2 that is every feature the software handle
+     * publishes: index tables (G2B) and augmentedAddition (G2A) run here
+     * as well. */
     cft_sw_seq_caps(seq);
     seq->features |= CFT_SEQ_FEAT_SCALAR | CFT_FEAT_REDUCE_SEG;
-    seq->features &= ~(uint32_t)CFT_SEQ_FEAT_INDEXED;   /* round 2's G2B deletes this statement */
-    /* round 2 publishes the two one parcel at a time: each deletes its own line */
     *out = D;
     return CFT_OK;
 }
@@ -2565,22 +2814,50 @@ extern "C" int cfth_program_run(void *hw, int fmt, const void *image, size_t ima
         const size_t nsi = io && io->scratch_in ? io->n_scratch_in : 0;
         const size_t nso = io && io->scratch_out ? io->n_scratch_out : 0;
         const bool masked = io && io->lane_mask;
-        Role R[6];
-        role_from(R[0], bind, CFT_ROLE_A, a ? n * esz : 0, false, false, false);
-        role_from(R[1], bind, CFT_ROLE_B, b ? n * esz : 0, false, false, false);
-        role_from(R[2], bind, CFT_ROLE_C, c ? n * esz : 0, false, false, false);
+        /* R16: a stream with an index table is the SOURCE the table reads,
+         * idx_*_src elements whole - the window device.c registers and
+         * brings home - and the scratch-in block with one is the pool,
+         * scratch_in_bytes; each table is n entries (n * nsi for the
+         * block's) of four bytes, read by every lane: an input */
+        const bool ta = io && io->idx_a, tb = io && io->idx_b, tc = io && io->idx_c;
+        const bool tsi = nsi && io->idx_scratch_in;
+        {
+            const size_t src[4] = {ta ? io->idx_a_src : 0, tb ? io->idx_b_src : 0,
+                                   tc ? io->idx_c_src : 0, tsi ? io->idx_scratch_src : 0};
+            for (int s = 0; s < 4; s++)
+                if (src[s] > ((size_t)-1) / esz) {
+                    set_err(fmt_str("cft_program_run_ex: an indexed source of %zu "
+                                    "elements of %zu bytes is more than this process "
+                                    "can address", src[s], esz));
+                    return (int)CFT_ERR_INVALID_ARGUMENT;
+                }
+        }
+        Role R[10];
+        role_from(R[0], bind, CFT_ROLE_A, a ? (ta ? io->idx_a_src : n) * esz : 0, false,
+                  false, false);
+        role_from(R[1], bind, CFT_ROLE_B, b ? (tb ? io->idx_b_src : n) * esz : 0, false,
+                  false, false);
+        role_from(R[2], bind, CFT_ROLE_C, c ? (tc ? io->idx_c_src : n) * esz : 0, false,
+                  false, false);
         /* the deposits are zero-filled before a lane reads its inputs, so
          * no input may share them; scratch-out is written after a lane's
          * last deposit, from its own slots, so an identical input window
-         * may (an integrator's state carried in place) */
+         * may (an integrator's state carried in place) - but not a pool a
+         * table gathers from, whose slots any lane may read: that one is
+         * staged, the mirror's bytes before the run */
         role_from(R[3], bind, CFT_ROLE_D, n * md * esz, true, masked, false);
-        role_from(R[4], bind, CFT_ROLE_SI, n * nsi * esz, false, false, false);
-        role_from(R[5], bind, CFT_ROLE_SO, n * nso * esz, true, masked, true);
-        if ((st = bind_call(D, "cft_program_run_ex", R, 6)) != CFT_OK)
+        role_from(R[4], bind, CFT_ROLE_SI, tsi ? io->scratch_in_bytes : n * nsi * esz,
+                  false, false, false);
+        role_from(R[5], bind, CFT_ROLE_SO, n * nso * esz, true, masked, !tsi);
+        role_from(R[6], bind, CFT_ROLE_IA, ta ? n * 4 : 0, false, false, false);
+        role_from(R[7], bind, CFT_ROLE_IB, tb ? n * 4 : 0, false, false, false);
+        role_from(R[8], bind, CFT_ROLE_IC, tc ? n * 4 : 0, false, false, false);
+        role_from(R[9], bind, CFT_ROLE_ISI, tsi ? n * nsi * 4 : 0, false, false, false);
+        if ((st = bind_call(D, "cft_program_run_ex", R, 10)) != CFT_OK)
             return st;
         st = prog_impl(D, fmt, io, max_deposits, a, b, c, deposits, counts, n, R, &fl,
                        &rep);
-        call_end(D, st, R, 6);
+        call_end(D, st, R, 10);
         if (st == CFT_OK) {
             if (flags) *flags = fl;
             if (bus) *bus = rep;
@@ -2588,3 +2865,27 @@ extern "C" int cfth_program_run(void *hw, int fmt, const void *image, size_t ima
         return st;
     });
 }
+
+#ifdef CFT_HIP_PLANTS
+/* A plant build's instrument, read by a bench after a program run (no
+ * plant needs to be set): the last run's n, element bytes, reach, a lane's
+ * pool bytes, the pool's cap, the stage, the head, a lane's staged bytes
+ * in and out, kmax, the first chunk, the launches, the largest and the
+ * smallest launch in lanes, the staged source bytes uploaded, and the
+ * device's free bytes at open - up to `nout` of them, in that order.
+ * Returns how many it wrote. Not in backend.h: nothing in libcft calls
+ * it, and a default build defines no such symbol. */
+extern "C" int cfth_plant_prog_probe(uint64_t *out, int nout)
+{
+    const uint64_t v[] = {g_probe.n, g_probe.esz, g_probe.reach, g_probe.lane_pool,
+                          g_probe.pool_cap, g_probe.stage, g_probe.head, g_probe.lane_in,
+                          g_probe.lane_out, g_probe.kmax, g_probe.chunk0,
+                          g_probe.launches, g_probe.max_launch, g_probe.min_launch,
+                          g_probe.src_bytes, g_probe.free_at_open};
+    const int m = (int)(sizeof v / sizeof v[0]);
+    int i;
+    for (i = 0; i < m && i < nout && out; i++)
+        out[i] = v[i];
+    return i;
+}
+#endif

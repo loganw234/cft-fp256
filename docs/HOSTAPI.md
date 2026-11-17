@@ -2280,22 +2280,19 @@ flag by flag.
 
 **What it publishes**: every format (mask 15) and the seven opcode groups,
 `tiles` 1, `device_version` 0, flags readable, backend `"hip"`, and the
-software executor's capacities with its features less one -
-`seq_features` 0x7df1f, the software handle's 0x7ff1f without
-`CFT_SEQ_FEAT_INDEXED`.
+software executor's capacities with all its features -
+`seq_features` 0x7ff1f, the software handle's own (since round 2:
+`CFT_SEQ_FEAT_AUGADD` by G2A, `CFT_SEQ_FEAT_INDEXED` by G2B).
 
 **What it refuses, by name:**
-- an index table (device.c, on the clear bit, and `cft_run_ex` with a
-  table likewise);
-- any non-zero scratch depth, explicit 256 included (`cft_open_ex`: a GPU
-  has no image to fix its depth, so the backend fixes it at the software
-  executor's 256 slots, and the depth argument is a software handle's to
-  choose - the sentence says so; `scratch_depth` 0 opens it);
+- a scratch depth past 2,048 (`cft_open_ex`, `CFT_ERR_UNSUPPORTED`; the
+  sentence gives the cost, 260 bytes a slot a lane of device memory, the
+  card's depth the cap follows, and a software handle, which takes 32,768);
 - `cft_get_image_id`: a GPU loads no device image, and what determines its
   bits is this library (`cft_build_id()`) and the device's compiler.
 
-Augmented addition, the tables and the card's 2,048-slot depth are round
-2's.
+Augmented addition, the index tables and the card's 2,048-slot depth came
+with round 2 (parcels G2A and G2B, 2026-11-17).
 
 **Staging.** An operand that is not a resident buffer's - and every
 operand of the part before buffers - is STAGED: copied into the handle's
@@ -2312,6 +2309,50 @@ come back as the caller left them. A scalar operand is read once a call,
 as on a tile: a `d` that aliases it does not feed a later element the
 value an earlier one wrote, where the software loop re-reads element 0
 (both measured by hip-test).
+
+**Index tables (round 2, G2B).** A program's four tables (`idx_a`, `idx_b`,
+`idx_c`, `idx_scratch_in`) run on the device through the executor's own
+`seq_lanes_in`, and so does `cft_run_ex` with a table, which device.c
+composes as a three-instruction program. The lanes are cut into chunks as
+above and the SOURCES are not: a stream with a table is its whole source,
+`idx_*_src` elements (the scratch pool, `scratch_in_bytes`), any element of
+which a lane may read. A staged source goes up whole, once a call, through
+the stage into a device buffer of the handle's own, grown on demand and
+freed at close (so a handle keeps the largest sources a call has needed); a
+resident one (`cft_alloc`) is read in place at its whole window. Each
+chunk's kernel gets the whole source and its own window of each table -
+entries from lane `first`, `first * n_scratch_in` for the block's - riding
+the stage at four bytes an entry, or read at a bound table's window. A
+source the device cannot hold is `CFT_ERR_OUT_OF_MEMORY` naming each
+source's bytes, before anything runs; never cut short. A gathered pool that
+is also the run's scratch-out is staged: any lane may read any slot of it.
+A gather (`DEPOSIT r0` with a table, 2^20 lanes into a source of 2^20) ran
+1.9 (fp256) to 2.8 (fp64) times as fast as gathering on the host and running
+the dense block, staged, and 8.7 to 10 times resident, on the RX 7600;
+1.7 to 2.0 and 10 to 11.5 times on the RTX 5060 Ti (docs/VALIDATION.md,
+G2B's entry).
+
+**Scratch depth.** `cft_open_ex` opens a GPU at a power of two up to 2,048
+(`CFT_HIP_SCRATCH_MAX`, backend.h, the card's depth); 0, and 256, are the
+software executor's 256 as before, and deeper is refused (above). The depth
+is the handle's `max_scratch`, which the loader holds each program to and a
+non-strict STX or LDX reduces by - a software handle opened at the same
+depth is the reference. It costs device memory, not the thread's frame: a
+lane's scratch is `reach` slots of 260 bytes in the handle's pool (at most
+min(free / 8, 256 MiB)), `reach` the whole depth for a program that indexes
+and its highest static slot + 1 otherwise, so a launch carries at most
+pool / (reach x 260) lanes: 4,032 at 256 and 504 at 2,048 when it indexes.
+Measured on a fresh handle (a plant build's probe), a launch carries 2,048
+lanes at 256 and with 273 static slots at 512 - the first chunk, which
+doubles only while twice it fits - 1,008 at 1,024 and 504 at 2,048; a
+64-iteration STX/LDX program then runs, at fp64, 755,644 lanes a second at
+256 and 91,088 at 2,048 on the RX 7600 (65,536 lanes a call), and
+86,249 and 2,822 on the RTX 5060 Ti (8,192) - there the cause of the
+steeper fall, read from the times and not yet isolated by a measurement,
+is believed to be the clear of a lane's whole reach (seq_exec.h's
+memset). That cliff - 504 lanes a
+launch at 2,048 - is a known limit for round 4's tuning; `POOL_MAX` is
+unchanged.
 
 **Buffers, and the authority rule.** `buffers_resident` is 1 (the
 round's second part, G1B2). A `cft_alloc`'d buffer gets ONE device

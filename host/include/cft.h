@@ -529,9 +529,11 @@ CFT_API void       cft_close(cft_device *dev);
  *   scratch_depth   0: the backend's own. A tile's is its image's
  *                   (CAPS2[3:0]), a remote handle's its server's, and
  *                   the software backend's 256. Otherwise, on the
- *                   SOFTWARE backend only, the scratch slots a lane: a
+ *                   SOFTWARE backend, the scratch slots a lane: a
  *                   power of two in 1..32768, the deepest a tile can
- *                   publish (CAPS2[3:0] is a four-bit log2).
+ *                   publish (CAPS2[3:0] is a four-bit log2); on a GPU
+ *                   (hip:N, a HIP=1 build) likewise, up to the card's
+ *                   2,048; an xclbin or a cft:// artifact is refused one.
  *
  * The depth is part of what a program MEANS, not only how much it may
  * hold (docs/SEQUENCER.md, revision 7): a non-strict STX or LDX reduces
@@ -570,7 +572,7 @@ typedef struct cft_open_args {
     size_t      struct_size;     /* in: sizeof(cft_open_args) */
     const char *artifact;        /* as cft_open's: NULL, a path, cft:// */
     int         index;           /* as cft_open's */
-    uint32_t    scratch_depth;   /* 0, or a software handle's depth */
+    uint32_t    scratch_depth;   /* 0, or a software or GPU handle's depth */
 } cft_open_args;
 
 CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out);
