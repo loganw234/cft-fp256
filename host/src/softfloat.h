@@ -254,6 +254,14 @@ CFT_HD void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out);
 CFT_HD int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
                      const cft_bn *xb, cft_bn *vr, cft_bn *ve,
                      uint32_t *acc);
+#ifdef CFT_AUG_LANES_ONLY
+/* augmentedMultiplication's lane, likewise: defined only where augmented.c
+ * is compiled for a GPU's unit, whose kernel calls it (augmented.c says
+ * why a host build has none). */
+CFT_HD int cft_aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa,
+                     const cft_bn *xb, cft_bn *vr, cft_bn *ve,
+                     uint32_t *acc);
+#endif
 
 /* ---------------------------------------------------------------
  * The status word's one seam (ABI 0.7)

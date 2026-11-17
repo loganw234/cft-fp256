@@ -5,6 +5,14 @@
     python3 host/tests/augmented_check.py                # standard sweep
     python3 host/tests/augmented_check.py --formats fp64
     python3 host/tests/augmented_check.py --trials 400   # longer randoms
+    CFT_LIB=host/libcft.so python3 host/tests/augmented_check.py --device hip:0
+                                     # the same sweep through a device
+
+--device ARTIFACT opens the library's cft_open(ARTIFACT) in place of the
+software handle (cft_open(NULL)), so every comparison below holds that
+device's calls to the model - a GPU's (hip:N), whose calls compute on the
+device, or any other artifact the library opens. Without it the run is
+the software handle's, as it always was.
 
 Same discipline as clause5_check.py: python/cft_golden/augmented.py
 defines every bit and flag, and this replays host/src/augmented.c
@@ -82,9 +90,10 @@ def bind(lib):
         fn.restype = i
 
 
-def open_dev(lib):
+def open_dev(lib, artifact=None):
     dev = ctypes.c_void_p()
-    st = lib.cft_open(None, 0, ctypes.byref(dev))
+    st = lib.cft_open(artifact.encode() if artifact else None, 0,
+                      ctypes.byref(dev))
     if st != 0:
         raise SystemExit(f"cft_open failed: {st}")
     return dev
@@ -340,12 +349,17 @@ def main():
     ap.add_argument("--formats", default="fp32,fp64,fp128,fp256")
     ap.add_argument("--trials", type=int, default=24,
                     help="random pairs added to each format's pool")
+    ap.add_argument("--device", metavar="ARTIFACT",
+                    help="cft_open this artifact (hip:N, ...) in place of "
+                         "the software handle")
     args = ap.parse_args()
     formats = [s.strip() for s in args.formats.split(",") if s.strip()]
 
     lib = load_library()
     bind(lib)
-    dev = open_dev(lib)
+    dev = open_dev(lib, args.device)
+    if args.device:
+        print(f"augmented_check: device {args.device}")
     try:
         for name in formats:
             fmt = FORMATS[name]

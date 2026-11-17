@@ -2378,9 +2378,11 @@ CFT_API cft_status cft_scaled_prod_diff(cft_device *dev, cft_format fmt,
  * test that did not aim at that case, which is why the vector sets aim
  * at it at every binade edge.
  *
- * HOST operations, like the clause-5 set and the transcendentals: no
- * cft_run pass is issued, no bus word is produced, `dev` is context,
- * `n` is arbitrary and the flag word is the OR across the batch. r and
+ * HOST operations, like the clause-5 set and the transcendentals, but
+ * on a GPU (hip:N), which computes them on the device by the same code
+ * with the same bits (docs/HOSTAPI.md, the GPU backend): no cft_run
+ * pass is issued, no bus word is produced, `dev` is context, `n` is
+ * arbitrary and the flag word is the OR across the batch. r and
  * e must not overlap each other - passing the same pointer for both is
  * CFT_ERR_INVALID_ARGUMENT, and any other overlap is undefined - while
  * either MAY alias a or b, since each element is read before either

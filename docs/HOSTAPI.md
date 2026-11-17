@@ -2263,7 +2263,8 @@ sentence saying `HIP=1` builds it.
 
 **What runs on the GPU is this library.** `backend_hip.cpp` is one device
 translation unit that includes the tree's own `bigint.c`, `softfloat.c`
-and `seq_exec.h` (G1A made them compile for a GPU as they are): an
+and `seq_exec.h` (G1A made them compile for a GPU as they are), and since
+round 2 `augmented.c`'s lane functions (G2A, below): an
 element is `cft_sf_compute`, as the software loop runs it; a reduction is
 softfloat.c's tree run one level a launch - neighbours paired, a trailing
 odd element carried up unchanged, the result `cft_reduce`'s bit for bit
@@ -2279,20 +2280,22 @@ flag by flag.
 
 **What it publishes**: every format (mask 15) and the seven opcode groups,
 `tiles` 1, `device_version` 0, flags readable, backend `"hip"`, and the
-software executor's capacities with its features less two -
-`seq_features` 0x75f1f, the software handle's 0x7ff1f without
-`CFT_SEQ_FEAT_INDEXED` and `CFT_SEQ_FEAT_AUGADD`. **What it refuses, by
-name**: an index table (device.c, on the clear bit, and `cft_run_ex` with
-a table likewise), augmentedAddition's two control codes (the loader, on
-the clear bit; `augmented.c` does not compile for an NVIDIA device as it
-is, so the unit is built without it), any non-zero scratch depth,
-explicit 256 included (`cft_open_ex`: a GPU has no image to fix its
-depth, so the backend fixes it at the software executor's 256 slots, and
-the depth argument is a software handle's to choose - the sentence says
-so; `scratch_depth` 0 opens it), and `cft_get_image_id` - a GPU loads no
-device image, and what determines its bits is this library
-(`cft_build_id()`) and the device's compiler. Augmented addition, the
-tables and the card's 2,048-slot depth are round 2's.
+software executor's capacities with its features less one -
+`seq_features` 0x7df1f, the software handle's 0x7ff1f without
+`CFT_SEQ_FEAT_INDEXED`.
+
+**What it refuses, by name:**
+- an index table (device.c, on the clear bit, and `cft_run_ex` with a
+  table likewise);
+- any non-zero scratch depth, explicit 256 included (`cft_open_ex`: a GPU
+  has no image to fix its depth, so the backend fixes it at the software
+  executor's 256 slots, and the depth argument is a software handle's to
+  choose - the sentence says so; `scratch_depth` 0 opens it);
+- `cft_get_image_id`: a GPU loads no device image, and what determines its
+  bits is this library (`cft_build_id()`) and the device's compiler.
+
+Augmented addition, the tables and the card's 2,048-slot depth are round
+2's.
 
 **Staging.** An operand that is not a resident buffer's - and every
 operand of the part before buffers - is STAGED: copied into the handle's
@@ -2360,6 +2363,38 @@ mirror in turn as plain host pointers are. No lane reads what another
 writes, so no answer depends on the order lanes run in. A buffer the
 device has no memory for is staged too, with the allocation's failure in
 `staged_why`.
+
+**The API's augmented calls (round 2, G2A).** On a GPU handle
+`cft_augmented_add`, `_sub` and `_mul` compute on the device. augmented.c
+validates the call as it always has - the handle, the format, n = 0 (the
+flag word cleared, nothing run), the NULLs, `r == e` refused - and then,
+where the handle is a GPU's, hands it to device.c, which brings a and b
+home if a run left them on the device, binds the four windows (a as
+`CFT_ROLE_A`, b as `CFT_ROLE_B`, r as `CFT_ROLE_D`, and e in
+`CFT_ROLE_C`'s slot, which the call has no third input for) and calls
+the backend's one entry no card has, `cfth_augmented`. Its kernel runs
+augmented.c's own lane functions, a thread an element: `cft_aug_add_lane`,
+the same after b's sign bit is flipped on its encoding for a subtraction
+(as `cft_augmented_sub` flips it), `cft_aug_mul_lane` - the bits and the
+flags the software handle's, element by element. A software or remote
+handle keeps the host loop, and so does a card's (an `XRT=1` build
+compiles none of this). Both outputs are the call's outputs under the
+authority rule above: in a resident buffer their pages are DIRTY after a
+good call and LOST after one that fails once a launch may have started,
+and a call whose four windows are all resident moves no page - where the
+host loop brought a's and b's DIRTY pages home and wrote r and e on the
+host every call. r or e may share a's or b's window exactly, since each
+lane reads both inputs before it writes either output: a third case of
+"two roles, one copy". There is no threshold and no host fallback: a
+call is a launch, 110 to 126 microseconds at n = 1 on the RTX 5060 Ti and
+200 to 234 on the RX 7600 against under one on the host (measured; fp64
+and fp256, staged and resident), so a small call is slower on the GPU
+than the host loop it replaced; the GPU's call overtook the host's
+between n = 256 and n = 1,024 in all eight of those cases (docs/
+VALIDATION.md, G2A's entry). hip-test's `aug` leg, `augmented_check.py --device hip:N` and the
+augmented vector sets replayed by `cft-selftest` hold the calls to the
+software handle; the executor's AUGADD and AUGERR are held by
+`seq_check.py --device hip:N` and the leg's directed program.
 
 **Failure.** A device allocation refused before anything ran is
 `CFT_ERR_OUT_OF_MEMORY`, named, and the handle stays usable; so is a

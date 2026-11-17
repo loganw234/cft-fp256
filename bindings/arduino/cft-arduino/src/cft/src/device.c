@@ -798,6 +798,46 @@ void *cft_device_backend(const struct cft_device *dev)
     return dev->hw;
 }
 
+#ifdef CFT_ENABLE_HIP
+/* backend.h's cft_device_augmented: the API's augmented calls on a GPU,
+ * in the shape of cft_run's device branch - the inputs brought home where
+ * a run left them on the device (so the authority rule costs time, never
+ * bits), the four windows bound, the backend's call, the flags through
+ * the one seam. A GPU is a device backend's handle that open named "hip":
+ * in a HIP=1 build every one is, since HIP=1 with XRT=1 is refused, and
+ * an XRT=1 build, the card's, compiles none of this, so a card's handle
+ * takes augmented.c's host loop as it always has. n * esz cannot
+ * overflow: augmented.c refused such an n before calling. */
+int cft_device_augmented(struct cft_device *dev, int op, int fmt,
+                         const void *a, const void *b, void *r, void *e,
+                         size_t n, uint32_t *flags_out, int *st)
+{
+    const size_t bytes = n * cft_format_size((cft_format)fmt);
+    uint32_t fl = 0;
+    cft_bindings bd;
+    cft_status s;
+    if (!dev || dev->backend != CFT_BACKEND_XRT || !dev->backend_name ||
+        strcmp(dev->backend_name, "hip") != 0)
+        return 0;
+    s = buf_sync_in(dev, a, bytes);
+    if (s == CFT_OK)
+        s = buf_sync_in(dev, b, bytes);
+    if (s == CFT_OK) {
+        bind_clear(&bd);
+        bind_role(dev, &bd, CFT_ROLE_A, a, bytes);
+        bind_role(dev, &bd, CFT_ROLE_B, b, bytes);
+        bind_role(dev, &bd, CFT_ROLE_D, r, bytes);
+        bind_role(dev, &bd, CFT_ROLE_C, e, bytes);  /* no third input: e's slot */
+        backend_call();
+        s = (cft_status)cfth_augmented(dev->hw, op, fmt, a, b, r, e, n, &bd, &fl);
+        if (s == CFT_OK)
+            cft_flags_emit(dev, fl, flags_out);
+    }
+    *st = (int)s;
+    return 1;
+}
+#endif
+
 /* ==== the remote block's dispatcher (backend.h) =======================
  * Which device backend a program run belongs to is decided here, where
  * the backend kind lives, so that program.c names neither of them. */

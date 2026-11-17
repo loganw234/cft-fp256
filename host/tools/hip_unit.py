@@ -20,14 +20,16 @@ each is fixed in this script, written, read back and compared byte for
 byte, so a file in DIR that is not exactly this script's is refused by
 name - by `check`, and by every build that writes one.
 
-unit - one translation unit of the tree's bigint.c, softfloat.c and
-seq_exec.h, as the GPU backend's kernels will be one (no relocatable
-device code, nothing linked across units). BLOCK_LANES is 1, a thread a
-lane. CFT_NO_AUGMENTED, because augmented.c does not compile for an
-NVIDIA device as it is (docs/VALIDATION.md, G1A). Two kernels, never
-launched, reach the arithmetic and the executor's per-lane functions:
-a device compiler generates no code for a static function nothing
-calls, and a check that compiled none would pass whatever it held.
+unit - one translation unit of the tree's bigint.c, softfloat.c,
+augmented.c and seq_exec.h, as the GPU backend's kernels are one (no
+relocatable device code, nothing linked across units). BLOCK_LANES is 1, a
+thread a lane. CFT_AUG_LANES_ONLY, as in backend_hip.cpp: augmented.c's
+lane functions alone, its entry points being libcft's own (the GPU
+backend's round 2; until then the unit was CFT_NO_AUGMENTED). Three
+kernels, never launched, reach the arithmetic, the executor's per-lane
+functions and augmented.c's lanes: a device compiler generates no code
+for a static function nothing calls, and a check that compiled none
+would pass whatever it held.
 
 gpua - in place of devcopy.py's devsrc/: src/bigint.c, src/softfloat.c,
 src/seqcore.c (BLOCK_LANES 1, and CFT_SEQ_ALU as the runner's hook
@@ -65,9 +67,10 @@ def unit_text():
     # functions call (nvcc has its own built in)
     return (STAMP.format(kind="unit") +
             "#include <hip/hip_runtime.h>\n"
-            "#define CFT_NO_AUGMENTED 1\n"
-            "#define BLOCK_LANES 1\n" +
-            tree("src/bigint.c") + tree("src/softfloat.c") + tree("src/seq_exec.h") + """
+            "#define BLOCK_LANES 1\n"
+            "#define CFT_AUG_LANES_ONLY 1\n" +
+            tree("src/bigint.c") + tree("src/softfloat.c") + tree("src/augmented.c") +
+            tree("src/seq_exec.h") + """
 /* The elementwise path: lane i of a batch through cft_sf_compute, as
  * device.c's software loop runs one element. */
 __global__ void cft_hip_unit_alu(cft_fmt_desc f, int op, int rnd, const cft_bn *a,
@@ -101,6 +104,24 @@ __global__ void cft_hip_unit_seq(cft_program P, cft_fmt_desc f, const cft_bn *ko
     if (rc == CFT_OK)
         seq_lanes_out(&P, &A, &B, i, 1, esz);
     acc[i] = fl | st << 8 | (uint32_t)rc << 16;
+}
+
+/* The API's augmented calls for lane i, as the GPU backend's k_aug runs
+ * them: augmented.c's own lane accessors and lane functions. */
+__global__ void cft_hip_unit_aug(cft_fmt_desc f, int mul, const uint8_t *a,
+                                 const uint8_t *b, uint8_t *r, uint8_t *e,
+                                 uint32_t *fl, int *rc, size_t n)
+{
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    cft_bn xa, xb, vr, ve;
+    if (i >= n)
+        return;
+    lane_load(&f, a, i, &xa);
+    lane_load(&f, b, i, &xb);
+    rc[i] = mul ? cft_aug_mul_lane(&f, &xa, &xb, &vr, &ve, &fl[i])
+                : cft_aug_add_lane(&f, &xa, &xb, &vr, &ve, &fl[i]);
+    lane_store(&f, r, i, &vr);
+    lane_store(&f, e, i, &ve);
 }
 """)
 

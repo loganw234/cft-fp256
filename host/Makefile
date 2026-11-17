@@ -121,7 +121,8 @@ endif
 #
 # One translation unit for the device, as the backend's kernels will be:
 # tools/hip_unit.py writes gen/hip/cft_hip_unit.hip, which includes the
-# tree's own bigint.c, softfloat.c and seq_exec.h (CFT_HD, cft_config.h),
+# tree's own bigint.c, softfloat.c, augmented.c's lane functions and
+# seq_exec.h (CFT_HD, cft_config.h),
 # and hipcc compiles it for HIP_ARCH - compute capabilities on nvidia
 # (default 89 120, the RTX 4070 and the RTX 5060 Ti), gfx targets on amd
 # (default gfx1102, the RX 7600). Compiled, not linked or launched; the
@@ -205,10 +206,10 @@ HIP_ARCHDEF = -DCFT_HIP_ARCH_TOKENS=$(subst $(HIP_SPACE),_,$(strip $(HIP_ARCH)))
 # defined with CFT_ENABLE_HIP and device.c's device branches serve both;
 # a library therefore holds a card or a GPU, never both, and HIP=1 with
 # XRT=1 is refused. backend_hip.cpp is ONE device translation unit with
-# no relocatable device code: it includes the tree's bigint.c, softfloat.c
-# and seq_exec.h itself, so it is not in SRC (print-src, the WebAssembly
-# module's sources) and its rules are its own, below. Every link line
-# ends in $(XRTLIBS), so the GPU runtime's libraries ride in it.
+# no relocatable device code: it includes the tree's bigint.c, softfloat.c,
+# augmented.c and seq_exec.h itself, so it is not in SRC (print-src, the
+# WebAssembly module's sources) and its rules are its own, below. Every
+# link line ends in $(XRTLIBS), so the GPU runtime's libraries ride in it.
 #
 # HIP_PLANTS=1 compiles the backend's plants in (CFT_HIP_PLANTS, chosen
 # at run time by CFT_HIP_PLANT; backend_hip.cpp lists them). Build it in
@@ -234,7 +235,7 @@ hip-unit:
 	HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc $(HIP_FLAGS) \
 		-O2 -std=c++17 -c gen/hip/cft_hip_unit.hip -o gen/hip/cft_hip_unit-$(HIP_PLATFORM).o \
 		> gen/hip/resource-$(HIP_PLATFORM).log 2>&1 || { cat gen/hip/resource-$(HIP_PLATFORM).log; exit 1; }
-	@echo "hip-unit: bigint.c, softfloat.c and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
+	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
 else
 hip-unit:
 	@echo "hip-unit: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
@@ -447,7 +448,10 @@ $(SHLIB): $(PICOBJ)
 # and libcft.a and the shared library wait for it, so every HIP=1 build
 # runs it. hip-symcheck-plant compiles the unit with the rename removed
 # (-DCFT_HIP_PLANT_COLLIDE) and requires the same check to FAIL on
-# cft_sf_formats: a check that cannot fail is not one.
+# cft_sf_formats: a check that cannot fail is not one. Its second unit
+# includes augmented.c without the guard that keeps its entry points out
+# (-DCFT_HIP_PLANT_AUG_HOST; they are C names augmented.o defines) and
+# requires the check to FAIL on cft_augmented_add.
 .PHONY: hip-flags-force hip-symcheck hip-symcheck-plant clean-hip
 hip-flags-force:
 HIP_LOG = gen/hip/backend_hip-$(HIP_PLATFORM)
@@ -477,13 +481,13 @@ gen/hip/backend-flags: hip-flags-force
 	@echo '$(HIP_PLATFORM) $(HIP_ROOT) $(HIP_ARCH) $(CFLAGS) $(XRTDEF) $(HIP_PLANTDEF)' > $@.new
 	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
 
-src/backend_hip.o: src/backend_hip.cpp src/bigint.c src/softfloat.c gen/hip/backend-flags
+src/backend_hip.o: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_ARCHDEF) $(HIP_PLANTDEF) -c $< -o $@ > $(HIP_LOG).log 2>&1 \
 		|| { cat $(HIP_LOG).log; exit 1; }
 	@grep -i 'warning' $(HIP_LOG).log || true
 
-src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c gen/hip/backend-flags
+src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_ARCHDEF) $(HIP_PLANTDEF) $(HIP_PICF) $(SHDEF) -c $< -o $@ \
 		> $(HIP_LOG)-pic.log 2>&1 || { cat $(HIP_LOG)-pic.log; exit 1; }
@@ -499,7 +503,7 @@ libcft.a: | gen/hip/symcheck.ok
 $(SHLIB): | gen/hip/symcheck-pic.ok
 hip-symcheck: gen/hip/symcheck.ok gen/hip/symcheck-pic.ok
 
-hip-symcheck-plant: src/backend_hip.cpp gen/hip/backend-flags $(HIP_OTHER_OBJ)
+hip-symcheck-plant: src/backend_hip.cpp src/augmented.c gen/hip/backend-flags $(HIP_OTHER_OBJ)
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(INC) $(XRTDEF) $(HIP_ARCHDEF) \
 		-DCFT_HIP_PLANT_COLLIDE -c $< -o gen/hip/symplant.o > gen/hip/symplant.log 2>&1 \
 		|| { cat gen/hip/symplant.log; exit 1; }
@@ -511,6 +515,17 @@ hip-symcheck-plant: src/backend_hip.cpp gen/hip/backend-flags $(HIP_OTHER_OBJ)
 	  echo "hip-symcheck-plant: the check failed, but not on cft_sf_formats"; exit 1; }; \
 	echo "hip-symcheck-plant: RED, as it must be - the unit without the rename defines" \
 	     "$$(tr '\n' ' ' < gen/hip/symplant-both.txt)beside the host objects"
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(INC) $(XRTDEF) $(HIP_ARCHDEF) \
+		-DCFT_HIP_PLANT_AUG_HOST -c $< -o gen/hip/symplant-aug.o \
+		> gen/hip/symplant-aug.log 2>&1 || { cat gen/hip/symplant-aug.log; exit 1; }
+	@if ( $(call hip_symcheck,gen/hip/symplant-aug.o,$(HIP_OTHER_OBJ),symplantaug) ); then \
+	  echo "hip-symcheck-plant: the check PASSED a unit with augmented.c's entry points in it - it cannot fail"; \
+	  exit 1; \
+	fi; \
+	grep -qx cft_augmented_add gen/hip/symplantaug-both.txt || { \
+	  echo "hip-symcheck-plant: the check failed, but not on cft_augmented_add"; exit 1; }; \
+	echo "hip-symcheck-plant: RED, as it must be - the unit with augmented.c's entry points defines" \
+	     "$$(tr '\n' ' ' < gen/hip/symplantaug-both.txt)beside the host objects"
 else
 hip-symcheck hip-symcheck-plant:
 	@echo "$@: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1

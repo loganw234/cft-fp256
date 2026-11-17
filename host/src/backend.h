@@ -466,6 +466,30 @@ int  cftx_program_run(void *hw, int fmt, const void *image,
 struct cft_device;
 void *cft_device_backend(const struct cft_device *dev);
 
+#ifdef CFT_ENABLE_HIP
+/* The API's augmented calls on a GPU (cft_augmented_add, _sub and _mul;
+ * augmented.c): the one seam entry of the GPU backend that has no cftx_
+ * name, because no card implements it - a card's handle computes them on
+ * the host, as every handle did before the GPU backend's round 2. `op` is
+ * one of the three below; a, b, r and e are n elements each; flags is the
+ * OR of the elements' flags.
+ *
+ * cft_device_augmented is device.c's half, since device.c owns the handle
+ * and the buffer registry: 0 for a handle that is not a GPU (the software
+ * and remote ones), whose call stays on the host; otherwise 1, with the
+ * call's status in *st, once it has brought a and b home where a run left
+ * them on the device, bound the four windows - a in CFT_ROLE_A, b in
+ * CFT_ROLE_B, r in CFT_ROLE_D and e in CFT_ROLE_C's slot, which the call
+ * has no third input for - run the call and emitted its flags. */
+enum { CFT_AUG_ADD = 0, CFT_AUG_SUB = 1, CFT_AUG_MUL = 2 };
+int cfth_augmented(void *hw, int op, int fmt, const void *a, const void *b,
+                   void *r, void *e, size_t n, const cft_bindings *bind,
+                   uint32_t *flags);
+int cft_device_augmented(struct cft_device *dev, int op, int fmt,
+                         const void *a, const void *b, void *r, void *e,
+                         size_t n, uint32_t *flags_out, int *st);
+#endif
+
 /* The same seam again, for the capacities rather than the handle.
  *
  * device.c owns struct cft_device and fills these at open - from the

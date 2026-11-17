@@ -5,19 +5,23 @@
  *
  *     hip-test hip:N [-l LEGS] [-f FORMAT] [-s small|large|all]
  *
- * LEGS is a comma list of open, reduce, seg, compose, alias, two, buffers
- * and plants (default: all of them); -f keeps one format; -s chooses the
- * reduction sizes (default all). The legs:
+ * LEGS is a comma list of the legs below (default: all of them); -f
+ * keeps one format; -s chooses the reduction sizes (default all). The
+ * legs:
  *
  *   open      cft_open's grammar for "hip:N" (each malformed spelling
  *             refused by name, with the grammar in the sentence), index
  *             1, a device past the count, an xclbin; the capability word
  *             (formats 15, groups 0x7F, tiles 1, version 0, flags
  *             readable, backend "hip", buffers_resident 1, the software
- *             handle's four capacities and its features less
- *             CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_AUGADD); the image
- *             identity refused by name; a scratch depth refused, 2,048
- *             and 256 alike.
+ *             handle's four capacities and its features less the bits
+ *             below); the image identity refused by name. What hip:N
+ *             lacks, one item a parcel of round 2:
+ *               CFT_SEQ_FEAT_INDEXED, and a scratch depth refused,
+ *               2,048 and 256 alike (round 2's G2B rewrites this item);
+ *
+ *               CFT_SEQ_FEAT_AUGADD no longer: published since round 2's
+ *               G2A, and held by the aug leg below.
  *   reduce    cft_reduce SUM and MAXALL against the software handle - the
  *             definition - bits and flags, at every n from 1 to 130 and
  *             every power of two with its neighbours up to 2^18 (-s), at
@@ -55,6 +59,23 @@
  *             CFT_HIP_PAGE and CFT_HIP_INFO malformed and refused by name;
  *             fail-launch's poisoned handle. In a default build: NOT RUN,
  *             named.
+ *   (round 2's G2A: its legs here)
+ *   aug       augmentedAddition: cft_augmented_add, _sub and _mul against
+ *             the software handle, r, e and the flags of every call, at
+ *             every format, over every pair of a pool of each class 9.5
+ *             has a rule for (signed zeros, subnormals, the largest
+ *             finite, infinities, quiet and signalling NaNs, ties where
+ *             roundTiesTowardZero and roundTiesToEven part, the overflow
+ *             threshold and one ulp past it, a product residual the
+ *             format cannot hold): one call a pair, then the pairs in one
+ *             call and 300 in another (a plant build's CFT_HIP_CHUNK
+ *             cuts them); r or e over a or b; r == e, NULLs, bad formats
+ *             and n = 0 refused or answered as the software handle; the
+ *             same in cft_alloc buffers, outputs left on the device until
+ *             read back, a second call binding all four with no page
+ *             moved; a program of AUGADD and AUGERR with rd = ra and a
+ *             quiet region. With plants: a failed call's outputs LOST.
+ *   (round 2's G2B: its legs here)
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
@@ -231,14 +252,19 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
     cft_status st;
     size_t i;
     int f;
-    const uint32_t want_feat = (CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
-                                CFT_SEQ_FEAT_BANK_PTR | CFT_SEQ_FEAT_KX9 |
-                                CFT_ALU_EXT_IMUL | CFT_SEQ_FEAT_SCRATCH |
-                                CFT_SEQ_FEAT_SCRATCH_IO |
-                                CFT_SEQ_FEAT_SCRATCH_STRICT | CFT_SEQ_FEAT_SCALAR |
-                                CFT_FEAT_REDUCE_SEG | CFT_SEQ_FEAT_LANE_MASK |
-                                CFT_SEQ_FEAT_SCRATCH_STEP | CFT_SEQ_FEAT_LANE_FLAGS |
-                                CFT_SEQ_FEAT_FLAG_CONTROL);
+    /* The software handle's features, named one by one; hip:N publishes
+     * them less `lacks`, which the check below builds one line a bit, so
+     * that each of round 2's parcels deletes its own line. */
+    const uint32_t sw_feat = (CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
+                              CFT_SEQ_FEAT_BANK_PTR | CFT_SEQ_FEAT_KX9 |
+                              CFT_ALU_EXT_IMUL | CFT_SEQ_FEAT_SCRATCH |
+                              CFT_SEQ_FEAT_SCRATCH_IO |
+                              CFT_SEQ_FEAT_SCRATCH_STRICT | CFT_SEQ_FEAT_SCALAR |
+                              CFT_FEAT_REDUCE_SEG | CFT_SEQ_FEAT_INDEXED |
+                              CFT_SEQ_FEAT_LANE_MASK | CFT_SEQ_FEAT_AUGADD |
+                              CFT_SEQ_FEAT_SCRATCH_STEP | CFT_SEQ_FEAT_LANE_FLAGS |
+                              CFT_SEQ_FEAT_FLAG_CONTROL);
+    uint32_t lacks = 0, want_feat;
     const int before = failures;
 
     printf("open\n");
@@ -266,12 +292,14 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
     CHECK(c.tiles == 1 && c.device_version == 0 && c.flags_readable == 1,
           "tiles %u, version %u, flags readable %d - wanted 1, 0, 1",
           (unsigned)c.tiles, (unsigned)c.device_version, c.flags_readable);
+    lacks |= CFT_SEQ_FEAT_INDEXED;   /* round 2's G2B deletes this line */
+    /* round 2 publishes the two one parcel at a time: each deletes its own line */
+    want_feat = sw_feat & ~lacks;
     CHECK(c.seq_features == want_feat &&
-          c.seq_features == (s.seq_features &
-                             ~(uint32_t)(CFT_SEQ_FEAT_INDEXED | CFT_SEQ_FEAT_AUGADD)),
-          "seq_features 0x%x: wanted 0x%x, the software handle's 0x%x less INDEXED "
-          "and AUGADD", (unsigned)c.seq_features, (unsigned)want_feat,
-          (unsigned)s.seq_features);
+          c.seq_features == (s.seq_features & ~lacks),
+          "seq_features 0x%x: wanted 0x%x, the software handle's 0x%x less 0x%x",
+          (unsigned)c.seq_features, (unsigned)want_feat, (unsigned)s.seq_features,
+          (unsigned)lacks);
     CHECK(c.max_deposits == s.max_deposits && c.max_insns == s.max_insns &&
           c.max_consts == s.max_consts && c.max_scratch == s.max_scratch,
           "capacities %u/%u/%u/%u, the software handle's %u/%u/%u/%u",
@@ -1163,10 +1191,450 @@ static void leg_plants(const char *artifact, cft_device *sw)
     printf("  plants: %d failed\n", failures - before);
 }
 
+/* round 2's G2A: its leg functions here */
+
+/* ---- augmentedAddition: the API's three calls and the executor's pair ---- */
+
+static const char *const AUGN[3] = {"cft_augmented_add", "cft_augmented_sub",
+                                    "cft_augmented_mul"};
+
+static cft_status aug_call(cft_device *d, int op, int fmt, const void *a, const void *b,
+                           void *r, void *e, size_t n, uint32_t *fl)
+{
+    return op == 0   ? cft_augmented_add(d, (cft_format)fmt, a, b, r, e, n, fl)
+           : op == 1 ? cft_augmented_sub(d, (cft_format)fmt, a, b, r, e, n, fl)
+                     : cft_augmented_mul(d, (cft_format)fmt, a, b, r, e, n, fl);
+}
+
+/* An exact encoding: m 0 a zero trailing significand, 1 its lowest bit, 2
+ * every bit, 3 its top bit alone (1.5 in the binade), 4 random, 5 a quiet
+ * NaN's, 6 a signalling NaN's. */
+static void aug_put(unsigned char *e, int fmt, int sign, unsigned long exp, int m)
+{
+    const int mw = (int)cft_format_size((cft_format)fmt) * 8 - 1 - EXPW[fmt];
+    int b;
+    elem(e, fmt, sign, exp, m == 4 ? 1 : m == 5 ? 2 : m == 6 ? 3 : 0);
+    if (m == 1)
+        e[0] |= 1u;
+    else if (m == 3)
+        e[(mw - 1) / 8] |= (unsigned char)(1u << ((mw - 1) % 8));
+    else if (m == 2)
+        for (b = 0; b < mw; b++)
+            e[b / 8] |= (unsigned char)(1u << (b % 8));
+}
+
+enum { AUG_P = 32, AUG_N = AUG_P * AUG_P };
+
+/* The leg's operands at one format: every class 9.5 has a rule for, and
+ * the pairs its words name - (1 + u) + u/2 and (1 + u) * 3 are ties where
+ * roundTiesTowardZero and roundTiesToEven part, the largest finite plus
+ * half its ulp is the overflow threshold (no flag) and plus its ulp one
+ * past it, the smallest subnormal squared is a residual the format cannot
+ * hold - each with its negation where the sign matters. */
+static void aug_pool(unsigned char *p, int fmt)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const unsigned long mw = (unsigned long)esz * 8 - 1 - (unsigned long)EXPW[fmt];
+    const unsigned long bias = (1ul << (EXPW[fmt] - 1)) - 1, top = (1ul << EXPW[fmt]) - 1;
+    const struct { int s; unsigned long x; int m; } v[AUG_P] = {
+        {0, 0, 0}, {1, 0, 0},                           /* zeros */
+        {0, bias, 0}, {1, bias, 0},                     /* 1, -1 */
+        {0, bias, 1}, {1, bias, 1},                     /* 1 + u, -(1 + u) */
+        {0, bias - mw - 1, 0}, {1, bias - mw - 1, 0},   /* u/2, -u/2 */
+        {0, bias + 1, 3}, {1, bias + 1, 3},             /* 3, -3 */
+        {0, top - 1, 2}, {1, top - 1, 2},               /* the largest finite */
+        {0, top - 2 - mw, 0}, {1, top - 2 - mw, 0},     /* half its ulp */
+        {0, top - 1 - mw, 0}, {1, top - 1 - mw, 0},     /* its ulp */
+        {0, 0, 1}, {1, 0, 1},                           /* the smallest subnormal */
+        {0, 0, 2}, {0, 1, 0},                           /* the largest subnormal, the
+                                                         * smallest normal */
+        {0, top, 0}, {1, top, 0},                       /* infinities */
+        {0, top, 5}, {1, top, 6},                       /* a quiet NaN, a signalling one */
+        {0, bias - 3, 4}, {1, bias + 5, 4}, {0, 0, 4},  /* random: finite, finite,
+                                                         * subnormal */
+        {0, bias + 1, 0}, {0, bias - 1, 0},             /* 2, 0.5 */
+        {1, bias - mw + 2, 4}, {0, bias - 40, 4}, {1, bias + 40, 4}};
+    int i;
+    for (i = 0; i < AUG_P; i++)
+        aug_put(p + (size_t)i * esz, fmt, v[i].s, v[i].x, v[i].m);
+}
+
+static unsigned char aug_rh[AUG_N * 32], aug_eh[AUG_N * 32], aug_rs[AUG_N * 32],
+    aug_es[AUG_N * 32], aug_t[AUG_N * 32];
+
+/* The GPU's call held to the software handle's, which wrote aug_rs and
+ * aug_es: both statuses CFT_OK, then r, e and the flag word; a FAIL line
+ * names the first element that differs. */
+static void aug_held(int op, int fmt, size_t n, const char *what, cft_status sh,
+                     cft_status ss, const unsigned char *rh, const unsigned char *eh,
+                     uint32_t fh, uint32_t fs)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    char x1[70], x2[70], x3[70], x4[70];
+    size_t i = 0;
+    if (sh != CFT_OK || ss != CFT_OK) {
+        CHECK(0, "%s %s n=%lu %s: GPU %s (%s), software %s", AUGN[op],
+              cft_format_name((cft_format)fmt), (unsigned long)n, what, cft_strerror(sh),
+              cft_last_error(), cft_strerror(ss));
+        return;
+    }
+    while (i < n && same(rh + i * esz, aug_rs + i * esz, esz) &&
+           same(eh + i * esz, aug_es + i * esz, esz))
+        i++;
+    if (i == n && fh == fs) {
+        checks++;
+        return;
+    }
+    if (i == n)
+        i = 0;                          /* the flags alone differ */
+    hex(x1, rh + i * esz, esz);
+    hex(x2, eh + i * esz, esz);
+    hex(x3, aug_rs + i * esz, esz);
+    hex(x4, aug_es + i * esz, esz);
+    CHECK(0, "%s %s n=%lu %s: element %lu: GPU r %s e %s flags 0x%02x, software r %s "
+          "e %s flags 0x%02x", AUGN[op], cft_format_name((cft_format)fmt), (unsigned long)n,
+          what, (unsigned long)i, x1, x2, (unsigned)fh, x3, x4, (unsigned)fs);
+}
+
+/* One call on each handle. The GPU's outputs and flag word start as one
+ * pattern and the software's as another, so nothing unwritten can pass. */
+static void aug_case(cft_device *hw, cft_device *sw, int op, int fmt,
+                     const unsigned char *a, const unsigned char *b, size_t n,
+                     const char *what)
+{
+    const size_t bytes = n * cft_format_size((cft_format)fmt);
+    uint32_t fh = 0xA5A5u, fs = 0x5A5Au;
+    cft_status sh, ss;
+    memset(aug_rh, 0x3C, bytes);
+    memset(aug_eh, 0xC3, bytes);
+    memset(aug_rs, 0x69, bytes);
+    memset(aug_es, 0x96, bytes);
+    ss = aug_call(sw, op, fmt, a, b, aug_rs, aug_es, n, &fs);
+    sh = aug_call(hw, op, fmt, a, b, aug_rh, aug_eh, n, &fh);
+    aug_held(op, fmt, n, what, sh, ss, aug_rh, aug_eh, fh, fs);
+}
+
+static const char *const AUGW[4] = {"r over a", "r over b", "e over a", "e over b"};
+
+/* r or e over a or b (`which` indexes AUGW) on the GPU, held to the
+ * software handle's UNALIASED pair: both outputs and the flags. */
+static void aug_alias(cft_device *hw, cft_device *sw, int op, int fmt,
+                      const unsigned char *a, const unsigned char *b, size_t n, int which)
+{
+    const size_t bytes = n * cft_format_size((cft_format)fmt);
+    uint32_t fh = 0xA5A5u, fs = 0x5A5Au;
+    unsigned char *r = which < 2 ? aug_t : aug_rh, *e = which < 2 ? aug_eh : aug_t;
+    cft_status sh, ss;
+    memcpy(aug_t, (which & 1) ? b : a, bytes);
+    memset(aug_rh, 0x3C, bytes);
+    memset(aug_eh, 0xC3, bytes);
+    ss = aug_call(sw, op, fmt, a, b, aug_rs, aug_es, n, &fs);
+    sh = aug_call(hw, op, fmt, (which & 1) ? a : aug_t, (which & 1) ? aug_t : b, r, e, n,
+                  &fh);
+    aug_held(op, fmt, n, AUGW[which], sh, ss, r, e, fh, fs);
+}
+
+/* A call both handles must refuse with CFT_ERR_INVALID_ARGUMENT (`any`
+ * 0), or refuse alike (`any` 1: a format, whose status is the build's). */
+static void aug_refused(cft_device *hw, cft_device *sw, int op, int fmt, const void *a,
+                        const void *b, void *r, void *e, size_t n, int any, const char *what)
+{
+    uint32_t fh = 0, fs = 0;
+    const cft_status sh = aug_call(hw, op, fmt, a, b, r, e, n, &fh);
+    const cft_status ss = aug_call(sw, op, fmt, a, b, r, e, n, &fs);
+    CHECK(sh == ss && (any ? sh != CFT_OK : sh == CFT_ERR_INVALID_ARGUMENT),
+          "%s at format %d, %s: GPU %s, software %s", AUGN[op], fmt, what,
+          cft_strerror(sh), cft_strerror(ss));
+}
+
+/* a, b, r and e in cft_alloc buffers: each call held to the software
+ * handle; its outputs left on the device (the authority marks say so)
+ * until read back; the second call binding all four without a page
+ * moving; then r or e over a or b in the buffers, still resident. */
+static void aug_resident(cft_device *hw, cft_device *sw, int fmt,
+                         const unsigned char *xa, const unsigned char *xb, size_t n)
+{
+    const size_t bytes = n * cft_format_size((cft_format)fmt);
+    struct rb A, B, R, E;
+    struct rb *all[4];
+    cft_buffer_info i0[4], i1[4];
+    uint32_t fh = 0, fs = 0;
+    cft_status sh, ss;
+    int op, k, w, still = 1;
+    A.b = B.b = R.b = E.b = NULL;
+    all[0] = &A;
+    all[1] = &B;
+    all[2] = &R;
+    all[3] = &E;
+    CHECK(rb_alloc(hw, &A, bytes) && rb_alloc(hw, &B, bytes) && rb_alloc(hw, &R, bytes) &&
+          rb_alloc(hw, &E, bytes), "cft_alloc: %s", cft_last_error());
+    if (!A.b || !B.b || !R.b || !E.b)
+        goto out;
+    for (op = 0; op < 3; op++) {
+        CHECK(rb_put(&A, xa, bytes) && rb_put(&B, xb, bytes), "publishing a and b: %s",
+              cft_last_error());
+        ss = aug_call(sw, op, fmt, xa, xb, aug_rs, aug_es, n, &fs);
+        sh = aug_call(hw, op, fmt, A.p, B.p, R.p, E.p, n, &fh);
+        i0[2] = rb_info(&R);
+        i0[3] = rb_info(&E);
+        CHECK(i0[2].device_authority == 1 && i0[3].device_authority == 1,
+              "%s %s resident: r and e are not left on the device (authority %d, %d)",
+              AUGN[op], cft_format_name((cft_format)fmt), i0[2].device_authority,
+              i0[3].device_authority);
+        CHECK(cft_buffer_from_device(R.b) == CFT_OK && cft_buffer_from_device(E.b) == CFT_OK &&
+              rb_info(&R).device_authority == 0 && rb_info(&E).device_authority == 0,
+              "%s %s resident: the read-back: %s", AUGN[op],
+              cft_format_name((cft_format)fmt), cft_last_error());
+        aug_held(op, fmt, n, "resident", sh, ss, R.p, E.p, fh, fs);
+        /* the second call: nothing published, nothing written on the host */
+        for (k = 0; k < 4; k++)
+            i0[k] = rb_info(all[k]);
+        sh = aug_call(hw, op, fmt, A.p, B.p, R.p, E.p, n, &fh);
+        for (k = 0; k < 4; k++)
+            i1[k] = rb_info(all[k]);
+        for (k = 0; k < 4; k++)
+            still &= i1[k].resident_binds == i0[k].resident_binds + 1 &&
+                     i1[k].staged_binds == i0[k].staged_binds;
+        CHECK(still, "%s %s: the second resident call moved pages (a %llu/%llu, r %llu/%llu "
+              "binds resident/staged after it; \"%s\")", AUGN[op],
+              cft_format_name((cft_format)fmt), (unsigned long long)i1[0].resident_binds,
+              (unsigned long long)i1[0].staged_binds, (unsigned long long)i1[2].resident_binds,
+              (unsigned long long)i1[2].staged_binds, i1[2].staged_why);
+        CHECK(cft_buffer_from_device(R.b) == CFT_OK && cft_buffer_from_device(E.b) == CFT_OK,
+              "the second read-back: %s", cft_last_error());
+        aug_held(op, fmt, n, "resident, the second call", sh, ss, R.p, E.p, fh, fs);
+    }
+    for (w = 0; w < 4; w++) {
+        struct rb *in = (w & 1) ? &B : &A;
+        op = w % 3;
+        CHECK(rb_put(&A, xa, bytes) && rb_put(&B, xb, bytes), "publishing a and b: %s",
+              cft_last_error());
+        ss = aug_call(sw, op, fmt, xa, xb, aug_rs, aug_es, n, &fs);
+        i0[0] = rb_info(in);
+        sh = aug_call(hw, op, fmt, A.p, B.p, w < 2 ? in->p : R.p, w < 2 ? E.p : in->p, n,
+                      &fh);
+        i1[0] = rb_info(in);
+        for (k = 0; k < 4; k++)
+            CHECK(cft_buffer_from_device(all[k]->b) == CFT_OK, "a read-back: %s",
+                  cft_last_error());
+        aug_held(op, fmt, n, w == 0 ? "resident, r over a" : w == 1 ? "resident, r over b"
+                 : w == 2 ? "resident, e over a" : "resident, e over b", sh, ss,
+                 w < 2 ? in->p : R.p, w < 2 ? E.p : in->p, fh, fs);
+        CHECK(i1[0].resident_binds > i0[0].resident_binds && !strstr(i1[0].staged_why,
+              "overlaps"), "%s %s resident, %s: the shared window was staged (\"%s\")",
+              AUGN[op], cft_format_name((cft_format)fmt), AUGW[w], i1[0].staged_why);
+    }
+    printf("  %s: resident, each call held, r and e left on the device until read "
+           "back, the second call bound all four with no page moved (%s), and r or e "
+           "over a or b stayed resident\n", cft_format_name((cft_format)fmt),
+           still ? "held" : "NOT held");
+out:
+    rb_free(&A);
+    rb_free(&B);
+    rb_free(&R);
+    rb_free(&E);
+}
+
+/* AUGERR r3, r0, r1; AUGADD r0, r0, r1 (rd = ra); QUIET; AUGADD r4, r2,
+ * r2; AUGERR r1, r1, r2 (rd = ra, in the region); ENDQUIET; DEPOSIT r0,
+ * r3, r4 and r1; HALT - revision 8's pair at format fmt (device_test.c's
+ * try_load_rev8 encodes the first two the same way). */
+static size_t aug_image(unsigned char *img, int fmt)
+{
+    const uint32_t hdr[8] = {0x50544643u, 1, 11, 0, 4, (uint32_t)fmt, 0, 0};
+    const uint64_t C = 1ull << 31;
+    const uint64_t w[11] = {C | 11u | (3u << 8) | (0u << 12) | (1u << 16),
+                            C | 10u | (0u << 8) | (0u << 12) | (1u << 16),
+                            C | 12u,
+                            C | 10u | (4u << 8) | (2u << 12) | (2u << 16),
+                            C | 11u | (1u << 8) | (1u << 12) | (2u << 16),
+                            C | 13u,
+                            C | 3u | (0u << 12), C | 3u | (3u << 12),
+                            C | 3u | (4u << 12), C | 3u | (1u << 12),
+                            C};
+    int j, k;
+    for (j = 0; j < 8; j++)
+        for (k = 0; k < 4; k++)
+            img[4 * j + k] = (unsigned char)(hdr[j] >> (8 * k));
+    for (j = 0; j < 11; j++)
+        for (k = 0; k < 8; k++)
+            img[32 + 8 * j + k] = (unsigned char)(w[j] >> (8 * k));
+    return 32 + 11 * 8;
+}
+
+/* The executor's AUGADD and AUGERR through cft_program_run_ex on both
+ * handles: every deposit, the run's flags and every lane's flag byte. */
+static void aug_program(cft_device *hw, cft_device *sw, int fmt, const unsigned char *xa,
+                        const unsigned char *xb, const unsigned char *xc, size_t n)
+{
+    static unsigned char dh[4 * AUG_N * 32], ds[4 * AUG_N * 32], lh[AUG_N], ls[AUG_N];
+    unsigned char img[32 + 11 * 8];
+    const size_t dbytes = 4 * n * cft_format_size((cft_format)fmt);
+    const size_t bytes = aug_image(img, fmt);
+    cft_program *ph = NULL, *ps = NULL;
+    uint32_t fh = 0xA5A5u, fs = 0x5A5Au;
+    cft_run_args R;
+    cft_status sh, ss;
+    CHECK(cft_program_load(hw, img, bytes, &ph) == CFT_OK &&
+          cft_program_load(sw, img, bytes, &ps) == CFT_OK,
+          "loading the AUGADD/AUGERR program at %s: %s", cft_format_name((cft_format)fmt),
+          cft_last_error());
+    if (ph && ps) {
+        memset(dh, 0x3C, dbytes);
+        memset(ds, 0x69, dbytes);
+        memset(lh, 0xEE, n);
+        memset(ls, 0x11, n);
+        memset(&R, 0, sizeof R);
+        R.struct_size = sizeof R;
+        R.a = xa;
+        R.b = xb;
+        R.c = xc;
+        R.n = n;
+        R.deposits = dh;
+        R.flags_out = &fh;
+        R.lane_flags = lh;
+        R.lane_flags_bytes = n;
+        sh = cft_program_run_ex(ph, &R);
+        R.deposits = ds;
+        R.flags_out = &fs;
+        R.lane_flags = ls;
+        ss = cft_program_run_ex(ps, &R);
+        CHECK(sh == CFT_OK && ss == CFT_OK && same(dh, ds, dbytes) && fh == fs &&
+              same(lh, ls, n), "the AUGADD/AUGERR program at %s, %lu lanes: GPU %s, "
+              "software %s; deposits %s, flags 0x%x and 0x%x, lane flags %s",
+              cft_format_name((cft_format)fmt), (unsigned long)n, cft_strerror(sh),
+              cft_strerror(ss), same(dh, ds, dbytes) ? "equal" : "DIFFER", (unsigned)fh,
+              (unsigned)fs, same(lh, ls, n) ? "equal" : "DIFFER");
+    }
+    cft_program_free(ph);
+    cft_program_free(ps);
+}
+
+/* A failed call's resident outputs (a HIP_PLANTS=1 build's fail-launch):
+ * LOST, refused on reading back, its inputs untouched. */
+static void aug_lost(const char *artifact, int fmt, const unsigned char *xa,
+                     const unsigned char *xb, size_t n)
+{
+    const size_t bytes = n * cft_format_size((cft_format)fmt);
+    cft_device *h = NULL;
+    struct rb A, B, R, E;
+    cft_buffer_info ir, ie, ia;
+    uint32_t fl = 0;
+    cft_status st;
+    A.b = B.b = R.b = E.b = NULL;
+    put_env("CFT_HIP_PLANT", "fail-launch");
+    st = cft_open(artifact, 0, &h);
+    put_env("CFT_HIP_PLANT", NULL);
+    CHECK(st == CFT_OK, "open with fail-launch: %s", cft_last_error());
+    if (h && rb_alloc(h, &A, bytes) && rb_alloc(h, &B, bytes) && rb_alloc(h, &R, bytes) &&
+        rb_alloc(h, &E, bytes)) {
+        CHECK(rb_put(&A, xa, bytes) && rb_put(&B, xb, bytes), "publishing");
+        st = cft_augmented_add(h, (cft_format)fmt, A.p, B.p, R.p, E.p, n, &fl);
+        CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "fail-launch"),
+              "the failed augmented call: %s, \"%s\"", cft_strerror(st), cft_last_error());
+        printf("  a failed augmented call: %s - %s\n", cft_strerror(st), cft_last_error());
+        ir = rb_info(&R);
+        ie = rb_info(&E);
+        ia = rb_info(&A);
+        CHECK(!strncmp(ir.staged_why, "LOST:", 5) && !strncmp(ie.staged_why, "LOST:", 5) &&
+              ir.device_authority == 0 && strncmp(ia.staged_why, "LOST:", 5),
+              "after the failed call: r's why \"%s\", e's \"%s\", a's \"%s\"",
+              ir.staged_why, ie.staged_why, ia.staged_why);
+        printf("  its outputs: r %s; e %s\n", ir.staged_why, ie.staged_why);
+        st = cft_buffer_from_device(E.b);
+        CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "failed on the device"),
+              "reading a LOST e back: %s, \"%s\"", cft_strerror(st), cft_last_error());
+    }
+    rb_free(&A);
+    rb_free(&B);
+    rb_free(&R);
+    rb_free(&E);
+    cft_close(h);
+}
+
+static void leg_aug(const char *artifact, cft_device *hw, cft_device *sw, int only_fmt)
+{
+    static unsigned char pool[AUG_P * 32], xa[AUG_N * 32], xb[AUG_N * 32], xc[AUG_N * 32];
+    const int before = failures;
+    const int checks0 = checks;
+    cft_device *h = NULL;
+    clock_t t0 = clock();
+    int f, op, w, plant_build;
+
+    printf("aug\n");
+    for (f = 0; f < 4; f++) {
+        const size_t esz = cft_format_size((cft_format)f);
+        const int checks1 = checks;
+        uint32_t fl;
+        size_t i;
+        if (only_fmt >= 0 && f != only_fmt)
+            continue;
+        aug_pool(pool, f);
+        for (i = 0; i < (size_t)AUG_N; i++) {
+            memcpy(xa + i * esz, pool + (i / AUG_P) * esz, esz);
+            memcpy(xb + i * esz, pool + (i % AUG_P) * esz, esz);
+            memcpy(xc + i * esz, pool + ((i * 7 + 3) % AUG_P) * esz, esz);
+        }
+        for (op = 0; op < 3; op++) {
+            /* one call a pair: the flags of exactly one element */
+            for (i = 0; i < (size_t)AUG_N; i++)
+                aug_case(hw, sw, op, f, xa + i * esz, xb + i * esz, 1, "one pair");
+            /* every pair in one call, and 300 from pair 37: the flags' OR */
+            aug_case(hw, sw, op, f, xa, xb, AUG_N, "every pair in one call");
+            aug_case(hw, sw, op, f, xa + 37 * esz, xb + 37 * esz, 300, "300 pairs");
+            for (w = 0; w < 4; w++)
+                aug_alias(hw, sw, op, f, xa, xb, AUG_N, w);
+            /* refused before any device: r == e, a NULL, a format */
+            aug_refused(hw, sw, op, f, xa, xb, aug_rh, aug_rh, 1, 0, "r == e");
+            aug_refused(hw, sw, op, f, NULL, xb, aug_rh, aug_eh, 1, 0, "a NULL");
+            aug_refused(hw, sw, op, f, xa, NULL, aug_rh, aug_eh, 1, 0, "b NULL");
+            aug_refused(hw, sw, op, f, xa, xb, NULL, aug_eh, 1, 0, "r NULL");
+            aug_refused(hw, sw, op, f, xa, xb, aug_rh, NULL, 1, 0, "e NULL");
+            aug_refused(hw, sw, op, -1, xa, xb, aug_rh, aug_eh, 1, 1, "format -1");
+            aug_refused(hw, sw, op, 4, xa, xb, aug_rh, aug_eh, 1, 1, "format 4");
+            aug_refused(hw, sw, op, 99, xa, xb, aug_rh, aug_eh, 1, 1, "format 99");
+            fl = 0xDEADu;
+            CHECK(aug_call(hw, op, f, xa, xb, aug_rh, aug_eh, 0, &fl) == CFT_OK && fl == 0,
+                  "%s %s n = 0: not CFT_OK with the flag word cleared (0x%x)", AUGN[op],
+                  cft_format_name((cft_format)f), (unsigned)fl);
+        }
+        CHECK(cft_augmented_add(NULL, (cft_format)f, xa, xb, aug_rh, aug_eh, 1, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT, "a NULL device was not refused");
+        printf("  %s: %d pairs x 3 calls, one call a pair, then all %d in one call and 300 "
+               "in another; r and e over a or b; r == e, NULLs, bad formats and n = 0: %d "
+               "checks\n", cft_format_name((cft_format)f), AUG_N, AUG_N, checks - checks1);
+        aug_resident(hw, sw, f, xa, xb, AUG_N);
+        aug_program(hw, sw, f, xa, xb, xc, AUG_N);
+    }
+    put_env("CFT_HIP_PLANT", "bogus");
+    plant_build = cft_open(artifact, 0, &h) != CFT_OK;
+    put_env("CFT_HIP_PLANT", NULL);
+    cft_close(h);
+    if (!plant_build) {
+        nrun("  a failed augmented call's outputs LOST", "this libcft is a default build, "
+             "which has no CFT_HIP_PLANT=fail-launch; build with HIP_PLANTS=1");
+    } else {
+        f = only_fmt >= 0 ? only_fmt : CFT_FP64;
+        aug_pool(pool, f);
+        aug_lost(artifact, f, pool, pool + 8 * cft_format_size((cft_format)f), 16);
+    }
+    printf("  aug: %d checks, the three calls and the program held to the software "
+           "handle (r, e and the flags of every call), %s, %.1f s, %d failed\n",
+           checks - checks0,
+           only_fmt >= 0 ? cft_format_name((cft_format)only_fmt) : "every format",
+           (double)(clock() - t0) / CLOCKS_PER_SEC, failures - before);
+}
+
+/* round 2's G2B: its leg functions here */
+
 int main(int argc, char **argv)
 {
     const char *artifact = NULL,
-               *legs = "open,reduce,seg,compose,alias,two,buffers,plants";
+               *legs = "open,reduce,seg,compose,alias,two,buffers,plants"
+                       /* round 2's G2A: its legs here, each a line ",name" */
+                       ",aug"
+                       /* round 2's G2B: its legs here, each a line ",name" */
+                       ;
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
     cft_status st;
@@ -1196,7 +1664,11 @@ int main(int argc, char **argv)
             artifact = argv[i];
         } else {
             fprintf(stderr, "usage: %s hip:N [-l open,reduce,seg,compose,alias,two,"
-                    "buffers,plants] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
+                    "buffers,plants"
+                    /* round 2's G2A: its legs here, each a line ",name" */
+                    ",aug"
+                    /* round 2's G2B: its legs here, each a line ",name" */
+                    "] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
         }
@@ -1251,6 +1723,10 @@ int main(int argc, char **argv)
         leg_buffers(artifact, hw, sw);
     if (strstr(legs, "plants"))
         leg_plants(artifact, sw);
+    /* round 2's G2A: its legs' dispatch here */
+    if (strstr(legs, "aug"))
+        leg_aug(artifact, hw, sw, only_fmt);
+    /* round 2's G2B: its legs' dispatch here */
     cft_close(hw);
     cft_close(sw);
     if (shown > 60)

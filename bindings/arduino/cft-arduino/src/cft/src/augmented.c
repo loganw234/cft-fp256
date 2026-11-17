@@ -17,6 +17,12 @@
  * is exact integer arithmetic through the library's ONE round_pack,
  * extended with that sixth direction (CFT_SF_RTTZ).
  *
+ * A GPU is the one device that runs them, because it runs this library's
+ * own C: on a hip:N handle the entry points hand their arrays to device.c,
+ * and the GPU backend's kernel (backend_hip.cpp, k_aug) computes the lane
+ * functions below, one thread an element - the same integer arithmetic,
+ * not a device pass. Every other handle computes them on the host.
+ *
  * THE ONE PLACE THIS IS NOT A TRANSLITERATION OF THE MODEL
  *
  * The model forms the exact sum by shifting both operands to a common
@@ -81,13 +87,13 @@
 
 /* ---- lane accessors and classification (clause5.c's, restated) ---- */
 
-static void lane_load(const cft_fmt_desc *f, const uint8_t *buf, size_t i,
+CFT_HD static void lane_load(const cft_fmt_desc *f, const uint8_t *buf, size_t i,
                       cft_bn *v)
 {
     cft_bn_load(v, buf + i * (size_t)(f->width / 8), f->width / 8);
 }
 
-static void lane_store(const cft_fmt_desc *f, uint8_t *buf, size_t i,
+CFT_HD static void lane_store(const cft_fmt_desc *f, uint8_t *buf, size_t i,
                        const cft_bn *v)
 {
     cft_bn_store(v, buf + i * (size_t)(f->width / 8), f->width / 8);
@@ -106,7 +112,7 @@ typedef struct {
     uint32_t ef;
 } lane_cls;
 
-static void cls_of(const cft_fmt_desc *f, const cft_bn *x, lane_cls *c)
+CFT_HD static void cls_of(const cft_fmt_desc *f, const cft_bn *x, lane_cls *c)
 {
     cft_bn frac;
     c->sign = cft_bn_bit(x, f->width - 1);
@@ -132,7 +138,7 @@ static void cls_of(const cft_fmt_desc *f, const cft_bn *x, lane_cls *c)
 
 /* The significand-and-exponent view of a finite non-zero lane: the
  * value is (-1)^sign * m * 2^e with m the integer significand. */
-static void bn_sig_exp(const cft_fmt_desc *f, const cft_bn *x,
+CFT_HD static void bn_sig_exp(const cft_fmt_desc *f, const cft_bn *x,
                        const lane_cls *c, cft_bn *m, int *e)
 {
     cft_bn_copy(m, x);
@@ -154,7 +160,7 @@ static void bn_sig_exp(const cft_fmt_desc *f, const cft_bn *x,
  * this file's banner is wrong - so it returns an error rather than a
  * plausible number).
  */
-static int aug_pair(const cft_fmt_desc *f, int sign_t, const cft_bn *t,
+CFT_HD static int aug_pair(const cft_fmt_desc *f, int sign_t, const cft_bn *t,
                     int e0, int is_mul, cft_bn *vr, cft_bn *ve,
                     uint32_t *acc)
 {
@@ -235,7 +241,7 @@ static int aug_pair(const cft_fmt_desc *f, int sign_t, const cft_bn *t,
 
 /* ---- one lane ----------------------------------------------------- */
 
-static int aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD static int aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
                         const cft_bn *xb, cft_bn *vr, cft_bn *ve,
                         uint32_t *acc)
 {
@@ -329,14 +335,14 @@ static int aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
  * program executor computes THIS function - the one definition, ported
  * from augmented.py - rather than a second copy of it. Flags are OR-ed
  * into *acc; 0, or 1 on a broken invariant, as aug_add_lane returns. */
-int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
                      const cft_bn *xb, cft_bn *vr, cft_bn *ve,
                      uint32_t *acc)
 {
     return aug_add_lane(f, xa, xb, vr, ve, acc);
 }
 
-static int aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa,
+CFT_HD static int aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa,
                         const cft_bn *xb, cft_bn *vr, cft_bn *ve,
                         uint32_t *acc)
 {
@@ -379,6 +385,25 @@ static int aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa,
         return 1;
     return aug_pair(f, sp, &mp, ea + eb, 1, vr, ve, acc);
 }
+
+/* CFT_AUG_LANES_ONLY: this file's LANE functions alone, for a GPU's
+ * translation unit (backend_hip.cpp, and host/tools/hip_unit.py's check),
+ * which includes this file and defines the macro first. The entry points
+ * below are then left out: they are C names libcft's own augmented.o
+ * defines (host/Makefile's hip-symcheck holds the unit to that), and they
+ * reach the host's buffers, which a kernel never does. And the product's
+ * lane is given a name the unit's kernel calls, beside cft_aug_add_lane;
+ * a host build has no such function, so augmented.o is what it was. */
+#ifdef CFT_AUG_LANES_ONLY
+/* augmentedMultiplication for ONE lane, as cft_aug_add_lane is the sum's:
+ * the GPU backend's k_aug computes THIS function. */
+CFT_HD int cft_aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa,
+                            const cft_bn *xb, cft_bn *vr, cft_bn *ve,
+                            uint32_t *acc)
+{
+    return aug_mul_lane(f, xa, xb, vr, ve, acc);
+}
+#else  /* the entry points, for the host */
 
 /* ---- the entry points --------------------------------------------- */
 
@@ -427,6 +452,17 @@ static cft_status aug_batch(cft_device *dev, cft_format fmt, int is_mul,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+#ifdef CFT_ENABLE_HIP
+    /* A GPU handle computes on its device: device.c binds the four windows
+     * and the GPU backend runs the lane functions above. Any other handle
+     * goes on below, on the host. */
+    {
+        int gst;
+        if (cft_device_augmented(dev, is_mul ? CFT_AUG_MUL : CFT_AUG_ADD, (int)fmt,
+                                 a, b, r, e, n, flags_out, &gst))
+            return (cft_status)gst;
+    }
+#endif
     /* on the host: softfloat.h's cft_host_io, and e's own announcement */
     st = (cft_status)cft_host_io(dev, a, b, NULL, n * esz, r, n * esz);
     if (st == CFT_OK)
@@ -487,6 +523,15 @@ CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+#ifdef CFT_ENABLE_HIP
+    /* a GPU handle, as in aug_batch; the kernel negates b as below */
+    {
+        int gst;
+        if (cft_device_augmented(dev, CFT_AUG_SUB, (int)fmt, a, b, r, e, n,
+                                 flags_out, &gst))
+            return (cft_status)gst;
+    }
+#endif
     /* on the host: softfloat.h's cft_host_io, and e's own announcement */
     st = (cft_status)cft_host_io(dev, a, b, NULL, n * esz, r, n * esz);
     if (st == CFT_OK)
@@ -519,6 +564,7 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
     cft_clear_error();
     return aug_batch(dev, fmt, 1, a, b, r, e, n, flags_out);
 }
+#endif /* CFT_AUG_LANES_ONLY */
 
 #else  /* CFT_NO_AUGMENTED */
 

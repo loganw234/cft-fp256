@@ -1812,7 +1812,10 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
 #     equal (sw is the definition: GPU-A's captured sums are printed beside
 #     them as information only, and routines-fp32's is stale since M4F2),
 #     and the routine corpora's equal to the golden model's own output too;
-#     refuse.bin refused by its sentence (AUGADD, CAPS2[11]). Not the 1M
+#     an image no device holds (n_consts 513: program.c's check, before any
+#     device's own), made here from refuse.bin's case, refused by its
+#     sentence on sw and on hip:0, whatever features the device publishes.
+#     Not the 1M
 #     stream, about 95 s of GPU time a run;
 #   * a bounded vector set at every format and attribute - the elementwise,
 #     magnitude, augmented and reduction sets - replayed by cft-selftest on
@@ -1820,8 +1823,8 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
 #     (HIP_FULL_REPLAY=1 replays vectors/out whole instead, its character,
 #     formatOf and transcendental sets too: 1,228,415 cases at the runner's counts);
 #   * seq_check, the `seq` stage's command, through --device hip:0: the
-#     programs needing what the GPU does not publish (AUGADD, an index
-#     table) counted refused by name, corpus by corpus;
+#     programs needing a bit the device does not publish, if any, counted
+#     refused by name, corpus by corpus;
 #   * the certificate corpus's conformance test (certificates/corpus.py
 #     check --device hip:0, run from this tree so that its history leg has
 #     the repository), every case cft-segrun remakes made on the GPU;
@@ -2138,14 +2141,40 @@ do_hip() {
     fi
   done
   cat "$L/corpora.txt"
-  hip_cmd "$L/refuse.txt" env CFT_HIP_INFO=1 "$H/hip-corpus" hip:0 "$C/refuse.bin" "$O/refuse.hip"; rc=$?
-  if [ $rc -eq 1 ] && grep -q '^refused by libcft: .*AUGADD.*CAPS2\[11\]' "$L/refuse.txt"; then
-    echo "  ok    refuse.bin: refused by name on hip:0 (AUGADD, CAPS2[11])"
-  else
-    bad+=("refuse.bin: not refused by its sentence on hip:0 (exit $rc)")
-  fi
+  # The refusal leg: an image no device holds - n_consts 513, past the 512 an
+  # instruction addresses (program.c's check, before any device's own) - made
+  # from refuse.bin's case with its image replaced (a BANK_EXT header and one
+  # HALT, by the golden model's own encoder), refused by its sentence on sw
+  # and on hip:0. Round 2 publishes AUGADD, so refuse.bin itself no longer is.
+  hip_cmd "$L/bank513-make.txt" "$PYBIN" -B - "$C/refuse.bin" "$C/bank513.bin" "$ROOT/python" <<'PY' \
+    || bad+=("bank513.bin: not made from refuse.bin")
+import struct, sys
+src, dst, py = sys.argv[1:4]
+sys.path.insert(0, py)
+from cft_golden import seq
+d = open(src, "rb").read()
+assert d[:8] == b"CFTSEQA1", "refuse.bin: not a hip-corpus case"
+w = list(struct.unpack_from("<10I", d, 8))
+rest = d[48 + w[9] + w[2]:]
+img = struct.pack("<8I", seq.MAGIC, seq.VERSION, 1, 513, 1, seq.PREC_CODE["fp64"], 1, 0)
+img += struct.pack("<Q", seq.halt())
+name = b"fp64 bank513"
+w[2], w[9] = len(img), len(name)
+out = b"CFTSEQA1" + struct.pack("<10I", *w) + name + img + rest
+open(dst, "wb").write(out)
+print("bank513.bin: %d bytes; its image a BANK_EXT header with n_consts 513 and one HALT" % len(out))
+PY
+  for dv in sw hip; do
+    rdev=$dv; [ $dv = hip ] && rdev=hip:0
+    hip_cmd "$L/refuse-$dv.txt" env CFT_HIP_INFO=1 "$H/hip-corpus" "$rdev" "$C/bank513.bin" "$O/bank513.$dv"; rc=$?
+    if [ $rc -eq 1 ] && grep -q '^refused by libcft: .*n_consts.*at most 512' "$L/refuse-$dv.txt"; then
+      echo "  ok    bank513.bin: refused by name on $rdev (n_consts 513, at most 512)"
+    else
+      bad+=("bank513.bin: not refused by its sentence on $rdev (exit $rc)")
+    fi
+  done
   hip_named "$L/corpora.txt" corpora || bad+=("the corpora: a run did not name the stage's device")
-  hip_named "$L/refuse.txt" refuse || bad+=("refuse.bin: its run did not name the stage's device")
+  hip_named "$L/refuse-hip.txt" refuse || bad+=("bank513.bin: its run on hip:0 did not name the stage's device")
   [ ${#bad[@]} -eq 0 ] && echo "hip: $(echo $HIP_CORPORA | wc -w) corpora, each the software handle's sha256 on hip:0 and on hip:0 --resident"
 
   # ---- c. the vectors: the same sets and cases on sw and on hip:0
