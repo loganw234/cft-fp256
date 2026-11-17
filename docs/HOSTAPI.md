@@ -2498,6 +2498,56 @@ process of the stage runs with `CFT_HIP_INFO=1`, every device line must be
 the first one's, and the stage log's last line is the device that ran
 (docs/VERIFICATION.md).
 
+**The divide and the square root (round 2, G2C).** `cft_div` and
+`cft_sqrt` on a GPU handle take divsqrt.c's routes as on any device, and
+by default the PROGRAM route: per 4,096-element chunk the host classifies
+and centres every element, one program of 43 to 59 instructions runs the
+Newton core on the GPU, and the host finishes every element from three
+deposits. `CFT_DIVSQRT_SEQ=0` forces the chunk route (about 25 to 30
+elementwise runs a call) and `CFT_DIVSQRT_FULL=1` the WHOLE-OPERATION
+images, divfull and sqrtfull (`host/src/divfull_images.h`, generated from
+`python/cft_golden/divfull.py`), which put the prep, the core and the
+rounding in the instruction stream - 210 to 216 instructions for the
+divide and 186 to 195 for the root, 42 and 49 bank words, two deposits a
+lane (the result and its flag word), nothing per element on the host.
+All eight images load on hip:N (its loader answers `CFT_OK` for each: the
+GPU's executor carries `BANK_PTR`, `REGS32`, `WIDE_CONST` and `KX9`) and
+run there with the software handle's bits and flags, lane for lane, at
+every format and attribute; a signalling NaN in either operand comes back
+quiet with INVALID in its flag word. The ladder is unchanged - the whole
+operation first when asked, the program route on `CFT_ERR_UNSUPPORTED`,
+then the chunk route - so a refused image falls through to the same bits:
+only the plant build's probe of the last program run says which route ran
+(its head: 12,800 bytes for a whole divide, 14,336 or 14,592 for a whole
+root, 2,304 and 3,072 for the program route's, and no run at all for the
+chunk route), and hip-test's `divsqrt` leg reads it (its plants:
+`bank-mode`, `full-flag`, and `full-refuse`, which the bits cannot see).
+
+**Which route is faster, and the default.** Measured through the API with
+host arrays, the two routes alternated in one process (docs/VALIDATION.md,
+G2C's entry): from n = 4,096 up the whole operation is 1.7 to 2.6 times as
+fast on both GPUs, at every format, divide and root (RTX 5060 Ti, fp64
+divide: 1.12 against 0.48 ms at 4,096, 302 against 129 ms at 2^20); but a
+call is at least one launch, and at n = 1 one lane's latency - at fp64
+212 interpreted instructions against the program route's 45, and a launch
+of one thread runs the whole divide in 0.25 ms on the 5060 Ti - makes it
+slower: 0.39 against 0.23 ms on the 5060 Ti and 1.05 against 0.69 on the
+RX 7600, beyond the series' spreads up to n = 256 in every case and 512 or
+1,024 in some, crossing over between 512 and 3,072. So the default is
+unchanged: the whole operation was to become hip:N's default only if it
+was faster in all sixteen cases (two GPUs, four formats, the divide and
+the root) by a rule fixed before the measurement, at n = 4,096 and above
+and slower at no smaller n, and it is slower at small n in all sixteen.
+`CFT_DIVSQRT_FULL=1` still asks for it. With a, b and d in `cft_alloc`
+buffers neither route keeps d on the device: `cft_div` brings them home
+first (`cft_host_io`) and writes d on the host; the whole operation's
+runs then bind a and b at their device copies, the program route's never
+bind them. A whole run's own rate, the image run by `cft_program_run_bank`
+with a, b and its deposits resident: 5.0e7 divides a second at fp64,
+3.2e7 at fp128 and 1.4e7 at fp256 on the 5060 Ti, 2.6e7, 1.7e7 and 8.5e6
+on the RX 7600 - about six times the staged call's rate at fp64, the
+4,096-element chunk holding each staged run to one launch of 4,096 lanes.
+
 ## The device's on-chip capacities, published (2026-09-07)
 
 Item 3 of docs/studies/OPT-D-contract.md, and the defect its section

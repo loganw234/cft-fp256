@@ -107,6 +107,30 @@
  *             degree-8 field), refused on a 256-slot handle; slot 256 on
  *             the default handle and slot 2,047 on a 256-slot one refused;
  *             and a 2,048-slot handle beside the default, both run.
+ *   (round 2's G2C: its legs here)
+ *   divsqrt   the divide and the square root: (a) the whole-operation
+ *             images (divfull_images.h, divsqrt.c's CFT_DIVSQRT_FULL=1
+ *             route) loaded on hip:N - the loader's answer printed for each
+ *             of the eight, a refusal with its sentence a failure - and run
+ *             with divsqrt.c's bank at every attribute on hip:N and on the
+ *             software handle, n 1, 577 and 5,000, over every pair of a
+ *             pool of the classes a divide has a rule for (the root's lanes
+ *             its classes): both deposits of every lane, the counts, the
+ *             run's flags and STATUS, byte for byte, and at fp64 a
+ *             signalling NaN in each position quieted with INVALID in
+ *             deposit 1; (b) the same with a, b and the deposits in
+ *             cft_alloc buffers, left on the device, a second run binding
+ *             them with no page moved, and with plants a failed run's
+ *             deposits LOST; (c) cft_div and cft_sqrt through the API, each
+ *             of the three routes forced here (CFT_DIVSQRT_SEQ=0, both
+ *             unset, CFT_DIVSQRT_FULL=1), at every format and attribute, n
+ *             1 (a call a case), 577 and 5,000, d over a and over b, n = 0,
+ *             NULLs and bad formats, against the software handle's default
+ *             route; and in a plant build the ROUTE PROOF: a marker program
+ *             before each call, then the plant build's probe of the last
+ *             program run says which route ran (its head), a check the
+ *             bits cannot make: a refused image falls through to an equal
+ *             answer.
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
@@ -121,6 +145,9 @@
 #include <time.h>
 
 #include "cft.h"
+/* round 2's G2C: the whole-operation images (static const arrays, read by
+ * the divsqrt leg alone), as divsqrt.c loads them */
+#include "../src/divfull_images.h"
 
 static int failures, checks, not_run;
 static int shown;                       /* FAIL lines printed */
@@ -2647,6 +2674,670 @@ static void leg_depth(const char *artifact, cft_device *hw, cft_device *sw, int 
     printf("  depth: %d failed\n", failures - before);
 }
 
+/* round 2's G2C: its leg functions here */
+
+/* ---- the divide and the square root (round 2's G2C) ------------------------ */
+
+/* The plant build's instrument (backend_hip.cpp's cfth_plant_prog_probe): the
+ * last program run's n, esz, reach, lane pool, ... head (6) ... launches
+ * (11). Weak, so that a default build, which defines no such symbol, links
+ * and finds it NULL; NULL by definition where no GPU build exists. */
+#if defined(__GNUC__) && !defined(_WIN32)
+extern int cfth_plant_prog_probe(uint64_t *out, int nout) __attribute__((weak));
+#define DS_PROBE_FN cfth_plant_prog_probe
+#else
+#define DS_PROBE_FN NULL
+#endif
+
+enum { DS_P = 24, DS_ALL = DS_P * DS_P + 1, DS_BIG = 5000, DS_NDIV1 = 68 };
+static const char *const DSN[2] = {"cft_div", "cft_sqrt"};
+static const char *const DSI[2] = {"divfull", "sqrtfull"};
+static const char *const DSR[3] = {"the chunk route", "the program route",
+                                   "the whole-operation route"};
+static unsigned char ds_pl[DS_P * 32], ds_xa[DS_BIG * 32], ds_xb[DS_BIG * 32],
+    ds_dh[2 * DS_BIG * 32], ds_ds[2 * DS_BIG * 32], ds_t[DS_BIG * 32], ds_g[DS_BIG * 32],
+    ds_bk[CFT_SQRTFULL_NCONSTS * 32], ds_r1[2][DS_NDIV1 * 32], ds_rb[2][2][DS_BIG * 32];
+static uint32_t ds_ch[DS_BIG], ds_cs[DS_BIG], ds_r1f[2][DS_NDIV1], ds_rbf[2][2];
+
+/* the image of the divide (op 0) or the square root (op 1) at fmt, and its
+ * bank built exactly as divsqrt.c's full_via_program builds it - the fixed
+ * words, then the five mode words with a little-endian 1 in the attribute's
+ * slot; returns the bank's bytes */
+static const cft_divfull_entry *ds_entry(int op, int fmt)
+{
+    return op ? &cft_sqrtfull_images[fmt] : &cft_divfull_images[fmt];
+}
+
+static size_t ds_bank(int op, int fmt, int rnd)
+{
+    const cft_divfull_entry *e = ds_entry(op, fmt);
+    const size_t esz = cft_format_size((cft_format)fmt);
+    memcpy(ds_bk, e->bank, e->n_fixed * esz);
+    memset(ds_bk + e->n_fixed * esz, 0, CFT_DIVFULL_NMODES * esz);
+    ds_bk[(e->n_fixed + (size_t)rnd) * esz] = 1;
+    return e->n_consts * esz;
+}
+
+/* The leg's operands at one format (aug_put's encodings): 1 and 3 (lane 0's
+ * inexact 1/3), signed zeros and infinities, quiet and signalling NaNs of
+ * both signs, -1, 1 + u, 2 and 0.5, the smallest and largest subnormals and
+ * a random negative one, the smallest normal and its odd neighbour (halved,
+ * an exact tie below the normal range, as the smallest subnormal halved is),
+ * the largest finite of both signs (over 0.5: past the overflow threshold),
+ * and three random finite values - every class a divide has a rule for in
+ * each position, and as the root's operands its classes: negative finites,
+ * -0, both infinities, both NaNs, odd and even exponents, subnormals. */
+static void ds_lanes(int fmt)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const unsigned long bias = (1ul << (EXPW[fmt] - 1)) - 1, top = (1ul << EXPW[fmt]) - 1;
+    const struct { int s; unsigned long x; int m; } v[DS_P] = {
+        {0, bias, 0}, {0, bias + 1, 3},                       /* 1, 3 */
+        {0, 0, 0}, {1, 0, 0}, {0, top, 0}, {1, top, 0},       /* zeros, infinities */
+        {0, top, 5}, {0, top, 6}, {1, top, 5}, {1, top, 6},   /* NaNs: quiet, signalling */
+        {1, bias, 0}, {0, bias, 1}, {0, bias + 1, 0}, {0, bias - 1, 0},   /* -1, 1+u, 2, .5 */
+        {0, 0, 1}, {0, 0, 2}, {1, 0, 4},                      /* subnormals */
+        {0, 1, 0}, {0, 1, 1},                                 /* the smallest normal, +1 ulp */
+        {0, top - 1, 2}, {1, top - 1, 2},                     /* the largest finite */
+        {0, bias - 7, 4}, {1, bias + 9, 4}, {0, bias + 30, 4}};
+    size_t i;
+    for (i = 0; i < DS_P; i++)
+        aug_put(ds_pl + i * esz, fmt, v[i].s, v[i].x, v[i].m);
+    /* lane 0 is 1/3 (the root's lanes are b's: sqrt(3)), an inexact result,
+     * so a fault on lane 0 shows; lanes 1 to 576 every pair (p, q) of the
+     * pool at lane 1 + 24p + q; past them random finite values */
+    fill(ds_xa, DS_BIG, fmt, K_RANDOM);
+    fill(ds_xb, DS_BIG, fmt, K_RANDOM);
+    memcpy(ds_xa, ds_pl, esz);
+    memcpy(ds_xb, ds_pl + esz, esz);
+    for (i = 1; i < DS_ALL; i++) {
+        memcpy(ds_xa + i * esz, ds_pl + ((i - 1) / DS_P) * esz, esz);
+        memcpy(ds_xb + i * esz, ds_pl + ((i - 1) % DS_P) * esz, esz);
+    }
+}
+
+/* a quiet NaN's encoding: every exponent bit and the top significand bit */
+static int ds_qnan(const unsigned char *e, int fmt)
+{
+    const int width = (int)cft_format_size((cft_format)fmt) * 8, mw = width - 1 - EXPW[fmt];
+    int b;
+    for (b = mw; b < width - 1; b++)
+        if (!((e[b / 8] >> (b % 8)) & 1u))
+            return 0;
+    return (e[(mw - 1) / 8] >> ((mw - 1) % 8)) & 1u;
+}
+
+/* A direct run on both handles held: both statuses CFT_OK, then every lane's
+ * two deposits (the result, the flag word) and its count (2), the run's
+ * flags and its STATUS, byte for byte. A FAIL line names the first lane. */
+static void ds_runs_held(int op, int fmt, int rnd, size_t n, const char *what,
+                         cft_status sh, cft_status ss, const char *msg, uint32_t fh,
+                         uint32_t fs, uint32_t bh, uint32_t bs)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    char x1[70], x2[70];
+    size_t i = 0;
+    if (sh != CFT_OK || ss != CFT_OK) {
+        CHECK(0, "%s %s %s n=%lu %s: GPU %s (%s), software %s", DSI[op],
+              cft_format_name((cft_format)fmt), RND[rnd], (unsigned long)n, what,
+              cft_strerror(sh), msg, cft_strerror(ss));
+        return;
+    }
+    while (i < n && ds_ch[i] == CFT_DIVFULL_NDEPOSITS && ds_cs[i] == CFT_DIVFULL_NDEPOSITS &&
+           same(ds_dh + 2 * i * esz, ds_ds + 2 * i * esz, 2 * esz))
+        i++;
+    if (i == n && fh == fs && bh == bs) {
+        checks++;
+        return;
+    }
+    if (i == n)
+        i = 0;                          /* the run's words alone differ */
+    hex(x1, ds_dh + 2 * i * esz, esz);
+    hex(x2, ds_ds + 2 * i * esz, esz);
+    CHECK(0, "%s %s %s n=%lu %s: lane %lu: GPU %s flag word 0x%02x count %u, software %s "
+          "flag word 0x%02x count %u; the run's flags 0x%x and 0x%x, STATUS 0x%x and 0x%x",
+          DSI[op], cft_format_name((cft_format)fmt), RND[rnd], (unsigned long)n, what,
+          (unsigned long)i, x1, (unsigned)ds_dh[(2 * i + 1) * esz], (unsigned)ds_ch[i], x2,
+          (unsigned)ds_ds[(2 * i + 1) * esz], (unsigned)ds_cs[i], (unsigned)fh, (unsigned)fs,
+          (unsigned)bh, (unsigned)bs);
+}
+
+/* the image run on each handle with the same bank and lanes, the outputs and
+ * flag words of each filled with a pattern of its own first */
+static void ds_run_pair(cft_program *ph, cft_program *ps, int op, int fmt, int rnd,
+                        size_t n, const char *what)
+{
+    const size_t esz = cft_format_size((cft_format)fmt), bb = ds_bank(op, fmt, rnd);
+    const unsigned char *a = op ? ds_xb : ds_xa, *b = op ? NULL : ds_xb;
+    uint32_t fh = 0xA5A5u, fs = 0x5A5Au, bh = 0xA5u, bs = 0x5Au;
+    char msg[400];
+    cft_status sh, ss;
+    size_t i;
+    memset(ds_dh, 0x3C, 2 * n * esz);
+    memset(ds_ds, 0x69, 2 * n * esz);
+    for (i = 0; i < n; i++) {
+        ds_ch[i] = 0xEEEEu;
+        ds_cs[i] = 0x1111u;
+    }
+    sh = cft_program_run_bank(ph, ds_bk, bb, a, b, NULL, ds_dh, ds_ch, n, &fh, &bh);
+    snprintf(msg, sizeof msg, "%s", cft_last_error());
+    ss = cft_program_run_bank(ps, ds_bk, bb, a, b, NULL, ds_ds, ds_cs, n, &fs, &bs);
+    ds_runs_held(op, fmt, rnd, n, what, sh, ss, msg, fh, fs, bh, bs);
+}
+
+/* (a) the image itself: hip:N's loader's answer, then runs at every
+ * attribute - lane 0 alone and every pair at each, 5,000 lanes at one - and
+ * at fp64 a signalling NaN in each position (both signs): a quiet NaN out,
+ * INVALID in deposit 1 */
+static void ds_direct(cft_device *hw, cft_device *sw, int op, int fmt,
+                      int (*probe)(uint64_t *, int))
+{
+    const cft_divfull_entry *e = ds_entry(op, fmt);
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const int checks0 = checks, before = failures;
+    cft_program *ph = NULL, *ps = NULL;
+    cft_status st;
+    int rnd;
+    st = cft_program_load(hw, e->image, e->image_bytes, &ph);
+    printf("    %s %s, %lu bytes, %lu constants (%lu fixed + 5 modes): hip:N's loader: %s%s%s\n",
+           DSI[op], cft_format_name((cft_format)fmt), (unsigned long)e->image_bytes,
+           (unsigned long)e->n_consts, (unsigned long)e->n_fixed, cft_strerror(st),
+           st == CFT_OK ? "" : " - ", st == CFT_OK ? "" : cft_last_error());
+    CHECK(st == CFT_OK, "the %s image at %s: hip:N refused it - %s", DSI[op],
+          cft_format_name((cft_format)fmt), cft_last_error());
+    CHECK(cft_program_load(sw, e->image, e->image_bytes, &ps) == CFT_OK,
+          "the %s image at %s: the software handle refused it - %s", DSI[op],
+          cft_format_name((cft_format)fmt), cft_last_error());
+    if (ph && ps) {
+        for (rnd = 0; rnd < 5; rnd++) {
+            ds_run_pair(ph, ps, op, fmt, rnd, 1, "lane 0 alone");
+            ds_run_pair(ph, ps, op, fmt, rnd, DS_ALL, "every pair");
+        }
+        ds_run_pair(ph, ps, op, fmt, fmt % 5, DS_BIG, "5,000 lanes");
+        if (probe) {
+            uint64_t v[16];
+            memset(v, 0, sizeof v);
+            (void)probe(v, 16);
+            printf("      5,000 lanes, %s: the probe says %llu launches of %llu to %llu lanes "
+                   "(head %llu, reach %llu)\n", RND[fmt % 5], (unsigned long long)v[11],
+                   (unsigned long long)v[13], (unsigned long long)v[12],
+                   (unsigned long long)v[6], (unsigned long long)v[2]);
+        }
+        if (fmt == CFT_FP64) {
+            /* lanes 169 and 8: +sNaN / 1 and 1 / +sNaN; 217 and 10 the same
+             * with -sNaN; the root's lanes 8 and 10 are +sNaN and -sNaN */
+            static const size_t LD[4] = {169, 8, 217, 10}, LR[2] = {8, 10};
+            const int nl = op ? 2 : 4;
+            int j;
+            ds_run_pair(ph, ps, op, fmt, CFT_RNE, DS_ALL, "every pair, again");
+            for (j = 0; j < nl; j++) {
+                const size_t l = op ? LR[j] : LD[j];
+                const unsigned w = ds_dh[(2 * l + 1) * esz];
+                CHECK((w & CFT_FLAG_INVALID) && ds_qnan(ds_dh + 2 * l * esz, fmt),
+                      "%s fp64 lane %lu (a signalling NaN): flag word 0x%02x, result %s a "
+                      "quiet NaN - INVALID and a quiet NaN wanted", DSI[op],
+                      (unsigned long)l, w, ds_qnan(ds_dh + 2 * l * esz, fmt) ? "is" : "is not");
+                printf("      fp64, a signalling NaN in lane %lu: flag word 0x%02x, result a "
+                       "quiet NaN: %s\n", (unsigned long)l, w,
+                       ds_qnan(ds_dh + 2 * l * esz, fmt) ? "yes" : "NO");
+            }
+        }
+    }
+    cft_program_free(ph);
+    cft_program_free(ps);
+    printf("      %s %s: %d runs held, %d failed\n", DSI[op], cft_format_name((cft_format)fmt),
+           checks - checks0, failures - before);
+}
+
+/* (b) Resident: a, b and the deposits in cft_alloc buffers on hip:N, every
+ * pair at rne: the deposits left on the device after a good run (the
+ * authority mark) and read back equal to the software handle's; the second
+ * run binding a, b and the deposits with no page moved. */
+static void ds_resident(cft_device *hw, cft_device *sw, int op, int fmt)
+{
+    const cft_divfull_entry *e = ds_entry(op, fmt);
+    const size_t esz = cft_format_size((cft_format)fmt), n = DS_ALL, ib = n * esz,
+                 db = 2 * n * esz, bb = ds_bank(op, fmt, CFT_RNE);
+    const unsigned char *in = op ? ds_xb : ds_xa;
+    struct rb A, B, D;
+    struct rb *all[3];
+    cft_buffer_info i0[3], i1[3];
+    cft_program *ph = NULL, *ps = NULL;
+    uint32_t fh = 0, fs = 0, bh = 0, bs = 0;
+    cft_status sh, ss;
+    char msg[400];
+    const int nb = op ? 2 : 3;
+    int run, k, still = 1;
+    A.b = B.b = D.b = NULL;
+    all[0] = &A;
+    all[1] = &D;
+    all[2] = &B;
+    if (cft_program_load(hw, e->image, e->image_bytes, &ph) != CFT_OK ||
+        cft_program_load(sw, e->image, e->image_bytes, &ps) != CFT_OK) {
+        CHECK(0, "%s %s resident: loading the image: %s", DSI[op],
+              cft_format_name((cft_format)fmt), cft_last_error());
+        goto out;
+    }
+    CHECK(rb_alloc(hw, &A, ib) && rb_alloc(hw, &D, db) && (op || rb_alloc(hw, &B, ib)),
+          "cft_alloc: %s", cft_last_error());
+    if (!A.b || !D.b || (!op && !B.b))
+        goto out;
+    CHECK(rb_put(&A, in, ib) && (op || rb_put(&B, ds_xb, ib)), "publishing: %s",
+          cft_last_error());
+    memset(ds_ds, 0x69, db);
+    ss = cft_program_run_bank(ps, ds_bk, bb, in, op ? NULL : ds_xb, NULL, ds_ds, ds_cs, n, &fs,
+                              &bs);
+    for (run = 0; run < 2; run++) {
+        for (k = 0; k < nb; k++)
+            i0[k] = rb_info(all[k]);
+        sh = cft_program_run_bank(ph, ds_bk, bb, A.p, op ? NULL : B.p, NULL, D.p, ds_ch, n, &fh,
+                                  &bh);
+        snprintf(msg, sizeof msg, "%s", cft_last_error());
+        for (k = 0; k < nb; k++)
+            i1[k] = rb_info(all[k]);
+        CHECK(sh != CFT_OK || i1[1].device_authority == 1, "%s %s resident: the deposits are "
+              "not left on the device (authority %d)", DSI[op], cft_format_name((cft_format)fmt),
+              i1[1].device_authority);
+        if (run == 1) {
+            for (k = 0; k < nb; k++)
+                still &= i1[k].resident_binds == i0[k].resident_binds + 1 &&
+                         i1[k].staged_binds == i0[k].staged_binds;
+            CHECK(still, "%s %s: the second resident run moved pages (a %llu/%llu, deposits "
+                  "%llu/%llu binds resident/staged after it; \"%s\")", DSI[op],
+                  cft_format_name((cft_format)fmt), (unsigned long long)i1[0].resident_binds,
+                  (unsigned long long)i1[0].staged_binds,
+                  (unsigned long long)i1[1].resident_binds,
+                  (unsigned long long)i1[1].staged_binds, i1[1].staged_why);
+        }
+        CHECK(cft_buffer_from_device(D.b) == CFT_OK && rb_info(&D).device_authority == 0,
+              "%s %s resident: the read-back: %s", DSI[op], cft_format_name((cft_format)fmt),
+              cft_last_error());
+        memcpy(ds_dh, D.p, db);
+        ds_runs_held(op, fmt, CFT_RNE, n, run ? "resident, the second run" : "resident", sh, ss,
+                     msg, fh, fs, bh, bs);
+    }
+    printf("      %s %s resident: the deposits left on the device until read back, the "
+           "second run bound %s with no page moved: %s\n", DSI[op],
+           cft_format_name((cft_format)fmt), op ? "a and the deposits" : "a, b and the deposits",
+           still ? "held" : "NOT held");
+out:
+    cft_program_free(ph);
+    cft_program_free(ps);
+    rb_free(&A);
+    rb_free(&B);
+    rb_free(&D);
+}
+
+/* A failed run's resident deposits (a plant build's fail-launch): LOST,
+ * refused on reading back, its inputs not lost. */
+static void ds_lost(const char *artifact, int fmt)
+{
+    const cft_divfull_entry *e = ds_entry(0, fmt);
+    const size_t esz = cft_format_size((cft_format)fmt), n = 64, ib = n * esz, db = 2 * n * esz;
+    const size_t bb = ds_bank(0, fmt, CFT_RNE);
+    const char *was = getenv("CFT_HIP_PLANT");
+    char keep[64] = "";
+    cft_device *h = NULL;
+    struct rb A, B, D;
+    cft_program *p = NULL;
+    cft_status st;
+    uint32_t fl = 0;
+    A.b = B.b = D.b = NULL;
+    if (was)
+        snprintf(keep, sizeof keep, "%s", was);
+    put_env("CFT_HIP_PLANT", "fail-launch");
+    st = cft_open(artifact, 0, &h);
+    put_env("CFT_HIP_PLANT", keep[0] ? keep : NULL);
+    CHECK(st == CFT_OK, "open with fail-launch: %s", cft_last_error());
+    if (h && cft_program_load(h, e->image, e->image_bytes, &p) == CFT_OK &&
+        rb_alloc(h, &A, ib) && rb_alloc(h, &B, ib) && rb_alloc(h, &D, db)) {
+        CHECK(rb_put(&A, ds_xa, ib) && rb_put(&B, ds_xb, ib), "publishing: %s",
+              cft_last_error());
+        st = cft_program_run_bank(p, ds_bk, bb, A.p, B.p, NULL, D.p, ds_ch, n, &fl, NULL);
+        CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "fail-launch"),
+              "the failed run: %s, \"%s\"", cft_strerror(st), cft_last_error());
+        printf("    a failed run of the whole divide: %s - %s\n", cft_strerror(st),
+               cft_last_error());
+        CHECK(!strncmp(rb_info(&D).staged_why, "LOST:", 5) && rb_info(&D).device_authority == 0 &&
+              strncmp(rb_info(&A).staged_why, "LOST:", 5),
+              "after the failed run: the deposits' why \"%s\", a's \"%s\"", rb_info(&D).staged_why,
+              rb_info(&A).staged_why);
+        printf("    its deposits: %s\n", rb_info(&D).staged_why);
+        st = cft_buffer_from_device(D.b);
+        CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "failed on the device"),
+              "reading LOST deposits back: %s, \"%s\"", cft_strerror(st), cft_last_error());
+    } else if (h) {
+        CHECK(0, "the fail-launch handle: %s", cft_last_error());
+    }
+    cft_program_free(p);
+    rb_free(&A);
+    rb_free(&B);
+    rb_free(&D);
+    cft_close(h);
+}
+
+/* cft_div (op 0) or cft_sqrt (op 1) */
+static cft_status ds_call(cft_device *d, int op, int fmt, int rnd, const void *a,
+                          const void *b, void *out, size_t n, uint32_t *fl)
+{
+    return op ? cft_sqrt(d, (cft_format)fmt, (cft_round)rnd, a, out, n, fl, NULL)
+              : cft_div(d, (cft_format)fmt, (cft_round)rnd, a, b, out, n, fl, NULL);
+}
+
+/* the route a device handle's call takes: 0 the chunk route
+ * (CFT_DIVSQRT_SEQ=0), 1 the program route (both unset: the default), 2 the
+ * whole operation (CFT_DIVSQRT_FULL=1); a software handle's is the chunk
+ * route under all three */
+static void ds_route(int r)
+{
+    put_env("CFT_DIVSQRT_SEQ", r == 0 ? "0" : NULL);
+    put_env("CFT_DIVSQRT_FULL", r == 2 ? "1" : NULL);
+}
+
+/* the GPU's answer held to the software handle's: its status CFT_OK, then
+ * every element and the flag word */
+static void ds_api_held(int op, int fmt, int rnd, int route, size_t n, const char *what,
+                        cft_status sh, const char *msg, const unsigned char *gh,
+                        const unsigned char *gs, uint32_t fh, uint32_t fs)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    char x1[70], x2[70];
+    size_t i = 0;
+    if (sh != CFT_OK) {
+        CHECK(0, "%s %s %s, %s, n=%lu %s: GPU %s (%s)", DSN[op],
+              cft_format_name((cft_format)fmt), RND[rnd], DSR[route], (unsigned long)n, what,
+              cft_strerror(sh), msg);
+        return;
+    }
+    while (i < n && same(gh + i * esz, gs + i * esz, esz))
+        i++;
+    if (i == n && fh == fs) {
+        checks++;
+        return;
+    }
+    if (i == n)
+        i = 0;                          /* the flags alone differ */
+    hex(x1, gh + i * esz, esz);
+    hex(x2, gs + i * esz, esz);
+    CHECK(0, "%s %s %s, %s, n=%lu %s: element %lu: GPU %s flags 0x%02x, software %s "
+          "flags 0x%02x", DSN[op], cft_format_name((cft_format)fmt), RND[rnd], DSR[route],
+          (unsigned long)n, what, (unsigned long)i, x1, (unsigned)fh, x2, (unsigned)fs);
+}
+
+/* the divide's n = 1 cases, as pool indices: every pair of +0, +inf, qNaN,
+ * sNaN, 1, 3, the smallest normal's odd neighbour and the largest finite,
+ * then the largest over 0.5 (overflow), the smallest subnormal over 2 (a
+ * tie), a negative subnormal over 3 and (1 + u) over -1 */
+static void ds_case(int c, int *pa, int *pb)
+{
+    static const unsigned char S[8] = {2, 4, 6, 7, 0, 1, 18, 19};
+    static const unsigned char X[4][2] = {{19, 13}, {14, 12}, {16, 1}, {11, 10}};
+    if (c < 64) {
+        *pa = S[c / 8];
+        *pb = S[c % 8];
+    } else {
+        *pa = X[c - 64][0];
+        *pb = X[c - 64][1];
+    }
+}
+
+/* refused alike on both handles: CFT_ERR_INVALID_ARGUMENT (`any` 0), or any
+ * equal refusal (`any` 1: a format, whose status is the build's) */
+static void ds_refused(cft_device *hw, cft_device *sw, int op, int fmt, int rnd, const void *a,
+                       const void *b, void *d, int any, int route, const char *what)
+{
+    uint32_t fh = 0, fs = 0;
+    const cft_status sh = ds_call(hw, op, fmt, rnd, a, b, d, 1, &fh);
+    const cft_status ss = ds_call(sw, op, fmt, rnd, a, b, d, 1, &fs);
+    CHECK(sh == ss && (any ? sh != CFT_OK : sh == CFT_ERR_INVALID_ARGUMENT),
+          "%s, %s, %s: GPU %s, software %s", DSN[op], DSR[route], what, cft_strerror(sh),
+          cft_strerror(ss));
+}
+
+/* (c) cft_div and cft_sqrt through the API at fmt, each route forced, held
+ * to the software handle's default route: n = 1 a case (the flags of one
+ * element), every pair (577) and 5,000 in one call, d over a and over b,
+ * and at rne n = 0, NULLs, bad formats and a bad attribute */
+static void ds_api(cft_device *hw, cft_device *sw, int fmt)
+{
+    static const size_t NB[2] = {DS_ALL, DS_BIG};
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const int checks0 = checks, before = failures;
+    char msg[400], what[80];
+    int rnd, route, op, c, k, pa, pb;
+    uint32_t fh;
+    cft_status sh, ss;
+    for (rnd = 0; rnd < 5; rnd++) {
+        /* the software handle's answers, its route the default (the chunk
+         * route: it has no device to route to) */
+        ds_route(1);
+        for (c = 0; c < DS_NDIV1 + DS_P; c++) {
+            op = c >= DS_NDIV1;
+            if (!op)
+                ds_case(c, &pa, &pb);
+            else
+                pa = pb = c - DS_NDIV1;
+            k = op ? c - DS_NDIV1 : c;
+            ds_r1f[op][k] = 0x5A5Au;
+            ss = ds_call(sw, op, fmt, rnd, ds_pl + (size_t)pa * esz, ds_pl + (size_t)pb * esz,
+                         ds_r1[op] + (size_t)k * esz, 1, &ds_r1f[op][k]);
+            CHECK(ss == CFT_OK, "the software handle's %s: %s", DSN[op], cft_last_error());
+        }
+        for (op = 0; op < 2; op++)
+            for (k = 0; k < 2; k++) {
+                ds_rbf[op][k] = 0x5A5Au;
+                ss = ds_call(sw, op, fmt, rnd, op ? ds_xb : ds_xa, ds_xb, ds_rb[op][k], NB[k],
+                             &ds_rbf[op][k]);
+                CHECK(ss == CFT_OK, "the software handle's %s n=%lu: %s", DSN[op],
+                      (unsigned long)NB[k], cft_last_error());
+            }
+        for (route = 0; route < 3; route++) {
+            ds_route(route);
+            /* n = 1, a case a call: the flags of exactly one element */
+            for (c = 0; c < DS_NDIV1 + DS_P; c++) {
+                op = c >= DS_NDIV1;
+                if (!op)
+                    ds_case(c, &pa, &pb);
+                else
+                    pa = pb = c - DS_NDIV1;
+                k = op ? c - DS_NDIV1 : c;
+                memset(ds_g, 0x3C, esz);
+                fh = 0xA5A5u;
+                sh = ds_call(hw, op, fmt, rnd, ds_pl + (size_t)pa * esz,
+                             ds_pl + (size_t)pb * esz, ds_g, 1, &fh);
+                snprintf(msg, sizeof msg, "%s", cft_last_error());
+                if (op)
+                    snprintf(what, sizeof what, "(pool %d)", pa);
+                else
+                    snprintf(what, sizeof what, "(pool %d / pool %d)", pa, pb);
+                ds_api_held(op, fmt, rnd, route, 1, what, sh, msg, ds_g,
+                            ds_r1[op] + (size_t)k * esz, fh, ds_r1f[op][k]);
+            }
+            /* every pair, and 5,000 (crossing divsqrt.c's 4,096 chunk) */
+            for (op = 0; op < 2; op++)
+                for (k = 0; k < 2; k++) {
+                    memset(ds_g, 0x3C, NB[k] * esz);
+                    fh = 0xA5A5u;
+                    sh = ds_call(hw, op, fmt, rnd, op ? ds_xb : ds_xa, ds_xb, ds_g, NB[k], &fh);
+                    snprintf(msg, sizeof msg, "%s", cft_last_error());
+                    ds_api_held(op, fmt, rnd, route, NB[k], "in one call", sh, msg, ds_g,
+                                ds_rb[op][k], fh, ds_rbf[op][k]);
+                }
+            /* d over a and over b, held to the unaliased answers */
+            memcpy(ds_t, ds_xa, DS_ALL * esz);
+            fh = 0xA5A5u;
+            sh = cft_div(hw, (cft_format)fmt, (cft_round)rnd, ds_t, ds_xb, ds_t, DS_ALL, &fh, NULL);
+            snprintf(msg, sizeof msg, "%s", cft_last_error());
+            ds_api_held(0, fmt, rnd, route, DS_ALL, "d over a", sh, msg, ds_t, ds_rb[0][0], fh,
+                        ds_rbf[0][0]);
+            memcpy(ds_t, ds_xb, DS_ALL * esz);
+            fh = 0xA5A5u;
+            sh = cft_div(hw, (cft_format)fmt, (cft_round)rnd, ds_xa, ds_t, ds_t, DS_ALL, &fh, NULL);
+            snprintf(msg, sizeof msg, "%s", cft_last_error());
+            ds_api_held(0, fmt, rnd, route, DS_ALL, "d over b", sh, msg, ds_t, ds_rb[0][0], fh,
+                        ds_rbf[0][0]);
+            memcpy(ds_t, ds_xb, DS_ALL * esz);
+            fh = 0xA5A5u;
+            sh = cft_sqrt(hw, (cft_format)fmt, (cft_round)rnd, ds_t, ds_t, DS_ALL, &fh, NULL);
+            snprintf(msg, sizeof msg, "%s", cft_last_error());
+            ds_api_held(1, fmt, rnd, route, DS_ALL, "d over a", sh, msg, ds_t, ds_rb[1][0], fh,
+                        ds_rbf[1][0]);
+            if (rnd == 0)
+                for (op = 0; op < 2; op++) {
+                    fh = 0xDEADu;
+                    sh = ds_call(hw, op, fmt, rnd, ds_xa, ds_xb, ds_g, 0, &fh);
+                    CHECK(sh == CFT_OK && fh == 0, "%s %s, %s, n = 0: %s with flags 0x%x - "
+                          "CFT_OK with the flag word cleared wanted", DSN[op],
+                          cft_format_name((cft_format)fmt), DSR[route], cft_strerror(sh),
+                          (unsigned)fh);
+                    ds_refused(hw, sw, op, fmt, 0, NULL, ds_xb, ds_g, 0, route, "a NULL");
+                    if (!op)
+                        ds_refused(hw, sw, op, fmt, 0, ds_xa, NULL, ds_g, 0, route, "b NULL");
+                    ds_refused(hw, sw, op, fmt, 0, ds_xa, ds_xb, NULL, 0, route, "d NULL");
+                    ds_refused(hw, sw, op, fmt, 5, ds_xa, ds_xb, ds_g, 0, route, "attribute 5");
+                    ds_refused(hw, sw, op, -1, 0, ds_xa, ds_xb, ds_g, 1, route, "format -1");
+                    ds_refused(hw, sw, op, 4, 0, ds_xa, ds_xb, ds_g, 1, route, "format 4");
+                    ds_refused(hw, sw, op, 99, 0, ds_xa, ds_xb, ds_g, 1, route, "format 99");
+                    CHECK(ds_call(NULL, op, fmt, 0, ds_xa, ds_xb, ds_g, 1, &fh) ==
+                          CFT_ERR_INVALID_ARGUMENT, "%s: a NULL device was not refused", DSN[op]);
+                }
+        }
+    }
+    ds_route(1);
+    printf("    %s through the API, each route forced: %d cases a route and attribute at n = "
+           "1, every pair and 5,000 in one call, d over a and b, n = 0, NULLs and bad "
+           "arguments: %d checks, %d failed\n", cft_format_name((cft_format)fmt),
+           DS_NDIV1 + DS_P, checks - checks0, failures - before);
+}
+
+/* (c) The route proof (a plant build): before each call a marker program
+ * (DEPOSIT r0; HALT - its head, 256 bytes, is no route's), then the call
+ * with its route forced, then the probe of the last program run. Its head
+ * says which route ran: the marker's (no program: the chunk route), the
+ * program route's (2,304 for the divide, 3,072 for the root: sq_emit's six
+ * or nine constants), or the whole image's (its instructions and its
+ * n_consts constants of 260 bytes, the GPU's cft_bn). A refused image falls
+ * through to the program route and gives the same bits, so this is the one
+ * check here that can tell. */
+static void ds_proof(cft_device *hw, int fmt, int (*probe)(uint64_t *, int))
+{
+    unsigned char img[32 + 2 * 8], dep[8 * 32];
+    uint64_t ins[2], v[16];
+    cft_program *pm = NULL;
+    uint32_t fl;
+    cft_status st;
+    int op, route;
+    ins[0] = sq_ctrl(3, 0, 0);
+    ins[1] = sq_ctrl(0, 0, 0);
+    if (cft_program_load(hw, img, sq_image(img, fmt, ins, 2, NULL, 0, 1, 0, 0, 0), &pm) !=
+        CFT_OK) {
+        CHECK(0, "the marker program at %s: %s", cft_format_name((cft_format)fmt),
+              cft_last_error());
+        return;
+    }
+    for (op = 0; op < 2; op++)
+        for (route = 0; route < 3; route++) {
+            const cft_divfull_entry *e = ds_entry(op, fmt);
+            const uint64_t ni = (uint64_t)e->image[8] | ((uint64_t)e->image[9] << 8);
+            const uint64_t whole = (((((ni * 8 + 255) & ~(uint64_t)255) +
+                                      (uint64_t)e->n_consts * 260u) + 255) & ~(uint64_t)255);
+            const uint64_t want = route == 0 ? 256u : route == 1 ? (op ? 3072u : 2304u) : whole;
+            const char *ran;
+            memset(v, 0, sizeof v);
+            st = cft_program_run(pm, ds_xa, NULL, NULL, dep, NULL, 8, NULL, NULL);
+            (void)probe(v, 16);
+            CHECK(st == CFT_OK && v[6] == 256u && v[0] == 8u, "the marker program at %s: %s, "
+                  "the probe's head %llu and n %llu - 256 and 8 wanted",
+                  cft_format_name((cft_format)fmt), cft_strerror(st),
+                  (unsigned long long)v[6], (unsigned long long)v[0]);
+            ds_route(route);
+            fl = 0;
+            st = ds_call(hw, op, fmt, CFT_RNE, ds_xa, ds_xb, ds_g, 300, &fl);
+            ds_route(1);
+            memset(v, 0, sizeof v);
+            (void)probe(v, 16);
+            ran = v[6] == 256u ? "no program after the marker (the chunk route)"
+                : v[6] == (op ? 3072u : 2304u) ? "the program route's"
+                : v[6] == whole ? "the whole image's" : "NO route's";
+            CHECK(st == CFT_OK && v[6] == want && v[2] == 0 && v[3] == 0,
+                  "the route proof: %s %s, %s forced: %s, the probe's head %llu (%s) - %llu "
+                  "wanted; reach %llu, lane pool %llu", DSN[op], cft_format_name((cft_format)fmt),
+                  DSR[route], cft_strerror(st), (unsigned long long)v[6], ran,
+                  (unsigned long long)want, (unsigned long long)v[2], (unsigned long long)v[3]);
+            printf("    route proof, %s %s, %s forced: head %llu - %s; n %llu, reach %llu, "
+                   "lane pool %llu, launches %llu\n", DSN[op], cft_format_name((cft_format)fmt),
+                   DSR[route], (unsigned long long)v[6], ran, (unsigned long long)v[0],
+                   (unsigned long long)v[2], (unsigned long long)v[3],
+                   (unsigned long long)v[11]);
+        }
+    cft_program_free(pm);
+}
+
+static void leg_divsqrt(const char *artifact, cft_device *hw, cft_device *sw, int only_fmt)
+{
+    int (*probe)(uint64_t *, int) = DS_PROBE_FN;
+    const char *vs = getenv("CFT_DIVSQRT_SEQ"), *vf = getenv("CFT_DIVSQRT_FULL");
+    const char *was = getenv("CFT_HIP_PLANT"), *ch = getenv("CFT_HIP_CHUNK");
+    const int had_s = vs != NULL, had_f = vf != NULL;
+    const int before = failures, checks0 = checks;
+    char ks[32] = "", kf[32] = "", keep[64] = "";
+    cft_device *h = NULL;
+    clock_t t0 = clock();
+    int f, op, plant_build;
+
+    printf("divsqrt\n");
+    /* the caller's route settings, put back at the end; the plant this
+     * process was started with stays set for any handle opened here */
+    if (vs)
+        snprintf(ks, sizeof ks, "%s", vs);
+    if (vf)
+        snprintf(kf, sizeof kf, "%s", vf);
+    if (was)
+        snprintf(keep, sizeof keep, "%s", was);
+    put_env("CFT_HIP_PLANT", "bogus");
+    plant_build = cft_open(artifact, 0, &h) != CFT_OK;
+    put_env("CFT_HIP_PLANT", keep[0] ? keep : NULL);
+    cft_close(h);
+    h = NULL;
+    CHECK(plant_build == (probe != NULL), "a %s build %s the plant build's probe",
+          plant_build ? "plant" : "default", probe ? "has" : "lacks");
+    printf("  a %s build; the route proof's probe %s; CFT_HIP_PLANT %s; CFT_HIP_CHUNK %s\n",
+           plant_build ? "plant" : "default", probe ? "present" : "absent",
+           keep[0] ? keep : "unset", ch && *ch ? ch : "unset");
+    for (f = 0; f < 4; f++) {
+        if (only_fmt >= 0 && f != only_fmt)
+            continue;
+        ds_lanes(f);
+        printf("  %s\n", cft_format_name((cft_format)f));
+        for (op = 0; op < 2; op++) {
+            ds_direct(hw, sw, op, f, probe);
+            if (f == CFT_FP64 || f == CFT_FP256)
+                ds_resident(hw, sw, op, f);
+        }
+        ds_api(hw, sw, f);
+        if (probe)
+            ds_proof(hw, f, probe);
+    }
+    if (!probe)
+        nrun("  the route proof", "this libcft is a default build, which defines no "
+             "cfth_plant_prog_probe (the plant build's probe of the last program run); build "
+             "with HIP_PLANTS=1 - the bits above hold every route, but a refused image falls "
+             "through to the same bits, so only the probe says which route ran");
+    if (!plant_build) {
+        nrun("  a failed run's deposits LOST", "this libcft is a default build, which has no "
+             "CFT_HIP_PLANT=fail-launch; build with HIP_PLANTS=1");
+    } else {
+        f = only_fmt >= 0 ? only_fmt : CFT_FP64;
+        ds_lanes(f);
+        ds_lost(artifact, f);
+    }
+    put_env("CFT_DIVSQRT_SEQ", had_s ? ks : NULL);
+    put_env("CFT_DIVSQRT_FULL", had_f ? kf : NULL);
+    printf("  divsqrt: %d checks, %s, %.1f s, %d failed\n", checks - checks0,
+           only_fmt >= 0 ? cft_format_name((cft_format)only_fmt) : "every format",
+           (double)(clock() - t0) / CLOCKS_PER_SEC, failures - before);
+}
+
 int main(int argc, char **argv)
 {
     const char *artifact = NULL,
@@ -2656,6 +3347,8 @@ int main(int argc, char **argv)
                        /* round 2's G2B: its legs here, each a line ",name" */
                        ",indexed"
                        ",depth"
+                       /* round 2's G2C: its legs here, each a line ",name" */
+                       ",divsqrt"
                        ;
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
@@ -2692,6 +3385,8 @@ int main(int argc, char **argv)
                     /* round 2's G2B: its legs here, each a line ",name" */
                     ",indexed"
                     ",depth"
+                    /* round 2's G2C: its legs here, each a line ",name" */
+                    ",divsqrt"
                     "] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
@@ -2755,6 +3450,9 @@ int main(int argc, char **argv)
         leg_indexed(artifact, hw, sw, only_fmt, which == 1);
     if (strstr(legs, "depth"))
         leg_depth(artifact, hw, sw, only_fmt);
+    /* round 2's G2C: its legs' dispatch here */
+    if (strstr(legs, "divsqrt"))
+        leg_divsqrt(artifact, hw, sw, only_fmt);
     cft_close(hw);
     cft_close(sw);
     if (shown > 60)
