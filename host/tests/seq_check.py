@@ -218,6 +218,11 @@ feature word and one scratch depth give one corpus at a format and a trial
 count; the same seed and word at another depth give another (the first two
 corpora take no depth and do not move). Formats the device does not carry
 are not compared, by name.
+--device-depth N (the GPU backend's round 2) opens --device's artifact at N
+scratch slots a lane through cft_open_ex - a GPU, hip:N, honours a power of
+two up to the card's 2,048 - and the model runs at the depth that handle
+then publishes, as above; a software handle's depth is --device sw:N, and
+the option beside it, or with no --device, is refused.
 The remote legs' fake servers are the library's own and run as always.
 """
 
@@ -3780,12 +3785,30 @@ def main():
                          "tile of that depth) - at its scratch depth, a "
                          "program needing a bit it does not publish held "
                          "refused by name (the module's text)")
+    ap.add_argument("--device-depth", type=int, default=None, metavar="N",
+                    help="open --device's artifact at N scratch slots a lane "
+                         "(cft_open_ex; hip:N honours a power of two up to "
+                         "2,048) - the model runs at the depth it publishes "
+                         "(the module's text)")
     args = ap.parse_args()
 
     global DEPTH, DEVICE
     lib = load_library()
     dev = ctypes.c_void_p()
-    if args.device is not None and args.device.startswith("sw:"):
+    if args.device_depth is not None and (
+            args.device in (None, "sw") or args.device.startswith("sw:")):
+        raise SystemExit("--device-depth N opens --device's artifact at a "
+                         "depth; a software handle's is --device sw:N")
+    if args.device_depth is not None and not 0 < args.device_depth < 1 << 32:
+        raise SystemExit(f"--device-depth {args.device_depth}: N is scratch "
+                         f"slots a lane, a power of two")
+    if args.device_depth is not None:
+        oa = OpenArgs()
+        oa.struct_size = ctypes.sizeof(OpenArgs)
+        oa.artifact, oa.index = args.device.encode("utf-8"), 0
+        oa.scratch_depth = args.device_depth
+        st = lib.cft_open_ex(ctypes.byref(oa), ctypes.byref(dev))
+    elif args.device is not None and args.device.startswith("sw:"):
         depth = args.device[3:]
         if not depth.isascii() or not depth.isdigit():
             raise SystemExit(f"--device {args.device}: sw:N takes N, a "

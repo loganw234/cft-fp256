@@ -17,8 +17,12 @@
  *             handle's four capacities and its features less the bits
  *             below); the image identity refused by name. What hip:N
  *             lacks, one item a parcel of round 2:
- *               CFT_SEQ_FEAT_INDEXED, and a scratch depth refused,
- *               2,048 and 256 alike (round 2's G2B rewrites this item);
+ *               nothing of round 2's G2B any more: CFT_SEQ_FEAT_INDEXED
+ *               is published, and cft_open_ex opens hip:N at 256, 512,
+ *               1,024 and 2,048 slots (max_scratch says so) and refuses
+ *               4,096 by name, 3 and 0x7fffffff as no power of two, and
+ *               an xclbin's depth by the generic sentence; the default
+ *               handle's max_scratch is still 256;
  *
  *               CFT_SEQ_FEAT_AUGADD (round 2's G2A rewrites this item).
  *   reduce    cft_reduce SUM and MAXALL against the software handle - the
@@ -60,6 +64,32 @@
  *             named.
  *   (round 2's G2A: its legs here)
  *   (round 2's G2B: its legs here)
+ *   indexed   index tables (R16) against the software handle, bit for bit
+ *             with flags, counts, lane bytes and scratch-out: cft_run_ex
+ *             with a table on a, b, c alone, two and three at once, at
+ *             one opcode of each elementwise group, a scalar beside a
+ *             table, every format and attribute, n of 1, 8, 9, 300 and
+ *             5,000, each source longer than n (indices reaching its last
+ *             element) and shorter, one entry in five CFT_IDX_NONE, and d
+ *             over a source refused; cft_program_run_ex with the three
+ *             tables and the scratch table together (a pool longer than
+ *             the block), with a lane mask, a bank, a strict access past
+ *             the depth and the lane bytes, and a table past its source
+ *             refused with nothing run; resident sources, tables and
+ *             deposits (the second run binding resident, a table
+ *             republished between runs, and in a plant build a table in
+ *             a LOST buffer refused); a 96 MiB source, larger than any
+ *             stage, read through a table that crosses many chunks.
+ *   depth     cft_open_ex at 256, 512, 1,024 and 2,048 slots, each against
+ *             a software handle opened at the same depth: an STX/LDX walk
+ *             of depth + 44 slots, which reaches past 256 and wraps at
+ *             the depth (plain) or is reported past it (strict); a static
+ *             slot at depth - 1 runs and one at the depth is refused at
+ *             load (max_scratch); at 512 a 273-slot program with a
+ *             scratch-in and scratch-out block of 273 (cft-debris's
+ *             degree-8 field), refused on a 256-slot handle; slot 256 on
+ *             the default handle and slot 2,047 on a 256-slot one refused;
+ *             and a 2,048-slot handle beside the default, both run.
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
@@ -276,7 +306,6 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
     CHECK(c.tiles == 1 && c.device_version == 0 && c.flags_readable == 1,
           "tiles %u, version %u, flags readable %d - wanted 1, 0, 1",
           (unsigned)c.tiles, (unsigned)c.device_version, c.flags_readable);
-    lacks |= CFT_SEQ_FEAT_INDEXED;   /* round 2's G2B deletes this line */
     /* round 2 publishes the two one parcel at a time: each deletes its own line */
     lacks |= CFT_SEQ_FEAT_AUGADD;    /* round 2's G2A deletes this line */
     want_feat = sw_feat & ~lacks;
@@ -317,32 +346,65 @@ static void leg_open(const char *artifact, cft_device *hw, cft_device *sw)
           (unsigned long)im.struct_size, cft_last_error());
     printf("    image identity: %s - %s\n", cft_strerror(st), cft_last_error());
 
-    memset(&oa, 0, sizeof oa);
-    oa.struct_size = sizeof oa;
-    oa.artifact = artifact;
-    oa.scratch_depth = 2048;
-    st = cft_open_ex(&oa, &h);
-    CHECK(st == CFT_ERR_UNSUPPORTED && h == NULL &&
-          strstr(cft_last_error(), "SOFTWARE handle's depth"),
-          "cft_open_ex at 2,048 scratch slots: %s, \"%s\"", cft_strerror(st),
-          cft_last_error());
-    if (h)
-        cft_close(h);
-    printf("    cft_open_ex(%s, scratch_depth 2048): %s - %s\n", artifact,
-           cft_strerror(st), cft_last_error());
-    /* 256 is the depth a GPU has, and is refused too: the depth is a
-     * software handle's to choose, and the sentence says so */
-    h = NULL;
-    oa.scratch_depth = 256;
-    st = cft_open_ex(&oa, &h);
-    CHECK(st == CFT_ERR_UNSUPPORTED && h == NULL && strstr(cft_last_error(), "names a GPU") &&
-          strstr(cft_last_error(), "256 included"),
-          "cft_open_ex at 256 scratch slots: %s, \"%s\"", cft_strerror(st),
-          cft_last_error());
-    if (h)
-        cft_close(h);
-    printf("    cft_open_ex(%s, scratch_depth 256): %s - %s\n", artifact,
-           cft_strerror(st), cft_last_error());
+    /* the depth (round 2's G2B): 256 to 2,048 open, each in max_scratch;
+     * past the cap, no power of two, and an xclbin's depth refused by
+     * their sentences; the default handle's is still 256 */
+    CHECK(c.max_scratch == 256, "the default handle's max_scratch is %u, not 256",
+          (unsigned)c.max_scratch);
+    {
+        static const uint32_t ok[4] = {256, 512, 1024, 2048};
+        static const struct {
+            const char *art;
+            uint32_t depth;
+            cft_status want;
+            const char *says, *also;
+        } refuse[] = {
+            {NULL, 4096, CFT_ERR_UNSUPPORTED, "slots a lane the GPU backend honours",
+             "2048 is the card's depth"},
+            {NULL, 3, CFT_ERR_INVALID_ARGUMENT, "is not a power of two", "1..32768"},
+            {NULL, 0x7fffffffu, CFT_ERR_INVALID_ARGUMENT, "is not a power of two",
+             "1..32768"},
+            {"cft_hw_emu.xclbin", 256, CFT_ERR_UNSUPPORTED, "names a device, whose depth "
+             "its image fixes", "SOFTWARE handle's depth"}};
+        for (i = 0; i < 4; i++) {
+            cft_caps hc;
+            memset(&oa, 0, sizeof oa);
+            oa.struct_size = sizeof oa;
+            oa.artifact = artifact;
+            oa.scratch_depth = ok[i];
+            memset(&hc, 0, sizeof hc);
+            hc.struct_size = sizeof hc;
+            h = NULL;
+            st = cft_open_ex(&oa, &h);
+            CHECK(st == CFT_OK && h && cft_get_caps(h, &hc) == CFT_OK &&
+                  hc.max_scratch == ok[i] && !strcmp(hc.backend, "hip") &&
+                  hc.seq_features == c.seq_features,
+                  "cft_open_ex(%s, scratch_depth %u): %s, \"%s\", max_scratch %u",
+                  artifact, (unsigned)ok[i], cft_strerror(st), cft_last_error(),
+                  (unsigned)hc.max_scratch);
+            printf("    cft_open_ex(%s, scratch_depth %u): %s, max_scratch %u\n", artifact,
+                   (unsigned)ok[i], cft_strerror(st), (unsigned)hc.max_scratch);
+            cft_close(h);
+        }
+        for (i = 0; i < sizeof refuse / sizeof refuse[0]; i++) {
+            memset(&oa, 0, sizeof oa);
+            oa.struct_size = sizeof oa;
+            oa.artifact = refuse[i].art ? refuse[i].art : artifact;
+            oa.scratch_depth = refuse[i].depth;
+            h = NULL;
+            st = cft_open_ex(&oa, &h);
+            CHECK(st == refuse[i].want && h == NULL &&
+                  strstr(cft_last_error(), refuse[i].says) &&
+                  strstr(cft_last_error(), refuse[i].also),
+                  "cft_open_ex(%s, scratch_depth %lu): %s, \"%s\" - wanted %s, saying "
+                  "\"%s\"", oa.artifact, (unsigned long)refuse[i].depth, cft_strerror(st),
+                  cft_last_error(), cft_strerror(refuse[i].want), refuse[i].says);
+            printf("    cft_open_ex(%s, scratch_depth %lu): %s - %s\n", oa.artifact,
+                   (unsigned long)refuse[i].depth, cft_strerror(st), cft_last_error());
+            if (h)
+                cft_close(h);
+        }
+    }
     printf("  open: %d failed\n", failures - before);
 }
 
@@ -1180,12 +1242,971 @@ static void leg_plants(const char *artifact, cft_device *sw)
 
 /* round 2's G2B: its leg functions here */
 
+/* ---- index tables and scratch depths (round 2's G2B) ----------------------- */
+
+/* The sequencer's words as device-test packs them (docs/SEQUENCER.md;
+ * program.c parses this layout), registers r0 to r15 only: an ALU word
+ * (kb, kc: rb, rc name constants), a control word (0 HALT, 1 REPEAT imm,
+ * 2 ENDREP, 3 DEPOSIT ra), and the scratch codes (6 STL ra to a slot, 7
+ * LDL rd from one, 8 STX ra to [rb], 9 LDX rd from [rb]). */
+static uint64_t sq_alu(unsigned op, unsigned rd, unsigned ra, unsigned rb, unsigned rc,
+                       unsigned kb, unsigned kc)
+{
+    return (uint64_t)op | ((uint64_t)rd << 8) | ((uint64_t)ra << 12) |
+           ((uint64_t)rb << 16) | ((uint64_t)rc << 20) | ((uint64_t)kb << 28) |
+           ((uint64_t)kc << 29);
+}
+
+static uint64_t sq_ctrl(unsigned code, unsigned ra, uint32_t imm)
+{
+    return (uint64_t)code | ((uint64_t)ra << 12) | ((uint64_t)1 << 31) |
+           ((uint64_t)imm << 32);
+}
+
+static uint64_t sq_scr(unsigned code, unsigned rd, unsigned ra, unsigned rb, uint32_t slot)
+{
+    return (uint64_t)code | ((uint64_t)rd << 8) | ((uint64_t)ra << 12) |
+           ((uint64_t)rb << 16) | ((uint64_t)1 << 31) |
+           ((uint64_t)(slot & 0xFFFFFFu) << 32);
+}
+
+/* header, constants (none under BANK_EXT) and instructions: its bytes */
+static size_t sq_image(unsigned char *out, int fmt, const uint64_t *ins, unsigned ni,
+                       const unsigned char *k, unsigned nk, uint32_t md, uint32_t flags,
+                       uint32_t nsi, uint32_t nso)
+{
+    const uint32_t hdr[8] = {0x50544643u, 1, ni, nk, md, (uint32_t)fmt, flags,
+                             (nsi & 0xFFFFu) | ((nso & 0xFFFFu) << 16)};
+    const size_t esz = cft_format_size((cft_format)fmt);
+    size_t off = 32;
+    unsigned i;
+    int b;
+    for (i = 0; i < 8; i++)
+        for (b = 0; b < 4; b++)
+            out[4 * i + (unsigned)b] = (unsigned char)(hdr[i] >> (8 * b));
+    if (!(flags & CFT_PROG_FLAG_BANK_EXT) && nk) {
+        memcpy(out + off, k, nk * esz);
+        off += nk * esz;
+    }
+    for (i = 0; i < ni; i++, off += 8)
+        for (b = 0; b < 8; b++)
+            out[off + (size_t)b] = (unsigned char)(ins[i] >> (8 * b));
+    return off;
+}
+
+/* an unsigned integer as a raw bit pattern (STX and LDX read their slot
+ * from one), and the float 1 + 2^-k (k 0: 1) */
+static void put_int(unsigned char *e, int fmt, uint32_t v)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    size_t j;
+    memset(e, 0, esz);
+    for (j = 0; j < 4 && j < esz; j++)
+        e[j] = (unsigned char)(v >> (8 * j));
+}
+
+static void one_plus(unsigned char *e, int fmt, int k)
+{
+    const int width = (int)cft_format_size((cft_format)fmt) * 8;
+    const int mw = width - 1 - EXPW[fmt];
+    elem(e, fmt, 0, (1ul << (EXPW[fmt] - 1)) - 1, 0);
+    if (k > 0 && k <= mw)
+        e[(mw - k) / 8] |= (unsigned char)(1u << ((mw - k) % 8));
+}
+
+/* n entries into a source of srcn elements: one in five CFT_IDX_NONE (the
+ * lanes `r` shifts), lane 0 the source's LAST element, the rest spread
+ * over the whole of it - so a source cut short, a table read at another
+ * chunk's window, or a sentinel read as 0 each changes an answer */
+static void ix_table(uint32_t *t, size_t n, size_t srcn, unsigned r)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        t[i] = (i + r) % 5 == 4 ? CFT_IDX_NONE
+             : i == 0 ? (uint32_t)(srcn - 1)
+             : (uint32_t)(((uint64_t)i * (2654435761u + 2u * r) + r) % srcn);
+}
+
+static uint32_t pp_bus;         /* the GPU's STATUS from the last prog_pair */
+
+/* One image run on the GPU and on the software handle with the same
+ * arguments, each with its own outputs filled alike first (H's, as the
+ * caller filled them): deposits, counts, lane bytes, scratch-out, flags and
+ * STATUS compared byte for byte, and the two statuses. Returns the GPU's. */
+static cft_status prog_pair(cft_device *hw, cft_device *sw, int fmt, const unsigned char *img,
+                            size_t bytes, cft_run_args *H, uint32_t md, uint32_t nso,
+                            const char *what)
+{
+    const size_t esz = cft_format_size((cft_format)fmt), n = H->n;
+    const size_t db = n * md * esz, sb = n * nso * esz;
+    cft_program *ph = NULL, *ps = NULL;
+    cft_run_args S = *H;
+    uint32_t fh = 0, fs = 0, bh = 0, bs = 0;
+    unsigned char *dep = (unsigned char *)malloc(db + 1), *so = (unsigned char *)malloc(sb + 1);
+    unsigned char *lf = (unsigned char *)malloc(n + 1);
+    uint32_t *cnt = (uint32_t *)malloc(n * 4 + 4);
+    cft_status sth = CFT_ERR_OUT_OF_MEMORY, sts = CFT_ERR_OUT_OF_MEMORY;
+    char msg[600] = "";
+    if (dep && so && lf && cnt) {
+        if (H->deposits) memcpy(dep, H->deposits, db);
+        if (H->scratch_out) memcpy(so, H->scratch_out, sb);
+        if (H->lane_flags) memcpy(lf, H->lane_flags, n);
+        if (H->counts) memcpy(cnt, H->counts, n * 4);
+        S.deposits = H->deposits ? dep : NULL;
+        S.scratch_out = H->scratch_out ? so : NULL;
+        S.lane_flags = H->lane_flags ? lf : NULL;
+        S.counts = H->counts ? cnt : NULL;
+        H->flags_out = &fh;
+        H->bus_out = &bh;
+        S.flags_out = &fs;
+        S.bus_out = &bs;
+        sth = cft_program_load(hw, img, bytes, &ph);
+        if (sth == CFT_OK)
+            sth = cft_program_run_ex(ph, H);
+        snprintf(msg, sizeof msg, "%s", cft_last_error());
+        sts = cft_program_load(sw, img, bytes, &ps);
+        if (sts == CFT_OK)
+            sts = cft_program_run_ex(ps, &S);
+    }
+    CHECK(sth == CFT_OK && sts == CFT_OK, "%s: the GPU says %s (%s), the software handle "
+          "%s (%s)", what, cft_strerror(sth), msg, cft_strerror(sts), cft_last_error());
+    if (sth == CFT_OK && sts == CFT_OK) {
+        const int d1 = !H->deposits || same((const unsigned char *)H->deposits, dep, db);
+        const int d2 = !H->counts || same((const unsigned char *)H->counts,
+                                          (const unsigned char *)cnt, n * 4);
+        const int d3 = !H->scratch_out || same((const unsigned char *)H->scratch_out, so, sb);
+        const int d4 = !H->lane_flags || same(H->lane_flags, lf, n);
+        CHECK(d1 && d2 && d3 && d4 && fh == fs && bh == bs,
+              "%s: the GPU's run differs from the software handle's - deposits %s, counts "
+              "%s, scratch-out %s, lane bytes %s, flags 0x%x and 0x%x, STATUS 0x%x and 0x%x",
+              what, d1 ? "equal" : "DIFFER", d2 ? "equal" : "DIFFER", d3 ? "equal" : "DIFFER",
+              d4 ? "equal" : "DIFFER", (unsigned)fh, (unsigned)fs, (unsigned)bh,
+              (unsigned)bs);
+    }
+    pp_bus = bh;
+    H->flags_out = NULL;
+    H->bus_out = NULL;
+    cft_program_free(ph);
+    cft_program_free(ps);
+    free(dep);
+    free(so);
+    free(lf);
+    free(cnt);
+    return sth;
+}
+
+/* cft_run_ex's tables: the GPU's run (device.c composes it as a three-
+ * instruction program over the indexed streams) against the software
+ * handle's (a host gather and the dense run - the definition). One opcode
+ * of each elementwise group, with the operands it reads. */
+static const struct {
+    cft_op op;
+    unsigned reads;               /* bit 0 a, bit 1 b, bit 2 c */
+} IX_OPS[] = {{CFT_FMA, 7}, {CFT_ADD, 5}, {CFT_ABS, 1}, {CFT_MIN, 3}, {CFT_CMPLT, 3},
+              {CFT_IADD, 3}, {CFT_RECIP_SEED, 1}};    /* ADD is a + c (cft.h) */
+enum { IX_NMAX = 5000, IX_SMAX = 3 * IX_NMAX + 5 };
+static unsigned char ix_src[3][IX_SMAX * 32], ix_den[3][IX_NMAX * 32], ix_dh[IX_NMAX * 32],
+    ix_ds[IX_NMAX * 32];
+static uint32_t ix_tab[3][IX_NMAX];
+
+static void ix_elem(cft_device *hw, cft_device *sw, int f, int small)
+{
+    static const size_t NS[5] = {1, 8, 9, 300, IX_NMAX};
+    const size_t esz = cft_format_size((cft_format)f);
+    size_t o, si, sl;
+    unsigned T, r;
+    int runs = 0, before = failures;
+    char msg[600];
+    for (o = 0; o < sizeof IX_OPS / sizeof IX_OPS[0]; o++)
+        for (T = 1; T < 8; T++) {
+            if ((T & IX_OPS[o].reads) != T)
+                continue;
+            for (si = 0; si < (small ? 4u : 5u); si++)
+                for (sl = 0; sl < 2; sl++) {
+                    const size_t n = NS[si], srcn = sl ? n / 3 + 1 : 3 * n + 5;
+                    const cft_round rnd = (cft_round)(runs % 5);
+                    const int kind = runs % K_COUNT;
+                    const void *opnd[3] = {NULL, NULL, NULL};
+                    uint32_t fh = 0, fs = 0;
+                    cft_status sh, ss;
+                    cft_elem_args E;
+                    memset(&E, 0, sizeof E);
+                    E.struct_size = sizeof E;
+                    for (r = 0; r < 3; r++) {
+                        if (!((IX_OPS[o].reads >> r) & 1u))
+                            continue;
+                        if ((T >> r) & 1u) {
+                            fill(ix_src[r], srcn, f, kind);
+                            ix_table(ix_tab[r], n, srcn, r);
+                            opnd[r] = ix_src[r];
+                        } else {
+                            fill(ix_den[r], n, f, kind);
+                            opnd[r] = ix_den[r];
+                        }
+                    }
+                    E.a = opnd[0];
+                    E.b = opnd[1];
+                    E.c = opnd[2];
+                    E.n = n;
+                    E.idx_a = (T & 1u) ? ix_tab[0] : NULL;
+                    E.idx_b = (T & 2u) ? ix_tab[1] : NULL;
+                    E.idx_c = (T & 4u) ? ix_tab[2] : NULL;
+                    E.idx_a_src = (T & 1u) ? srcn : 0;
+                    E.idx_b_src = (T & 2u) ? srcn : 0;
+                    E.idx_c_src = (T & 4u) ? srcn : 0;
+                    memset(ix_dh, 0x5A, n * esz);
+                    memset(ix_ds, 0x5A, n * esz);
+                    E.d = ix_dh;
+                    E.flags_out = &fh;
+                    sh = cft_run_ex(hw, IX_OPS[o].op, (cft_format)f, rnd, &E);
+                    snprintf(msg, sizeof msg, "%s", cft_last_error());
+                    E.d = ix_ds;
+                    E.flags_out = &fs;
+                    ss = cft_run_ex(sw, IX_OPS[o].op, (cft_format)f, rnd, &E);
+                    runs++;
+                    CHECK(sh == CFT_OK && ss == CFT_OK && same(ix_dh, ix_ds, n * esz) &&
+                              fh == fs,
+                          "cft_run_ex %s %s %s, tables 0x%x, n %lu, source %lu (%s): the "
+                          "GPU %s (%s), flags 0x%x; the software handle %s, flags 0x%x; "
+                          "results %s", cft_op_name(IX_OPS[o].op), cft_format_name(
+                          (cft_format)f), RND[rnd], T, (unsigned long)n, (unsigned long)srcn,
+                          KIND[kind], cft_strerror(sh), msg, (unsigned)fh, cft_strerror(ss),
+                          (unsigned)fs, same(ix_dh, ix_ds, n * esz) ? "equal" : "DIFFER");
+                }
+        }
+    /* a scalar beside a table: FMA, its lowest operand without a table one
+     * element (device.c makes it one of the image's constants) */
+    for (T = 1; T < 7; T++) {
+        const unsigned s = !(T & 1u) ? 0u : !(T & 2u) ? 1u : 2u;
+        static const size_t SN[2] = {9, 300};
+        for (si = 0; si < 2; si++) {
+            const size_t n = SN[si], srcn = 3 * n + 5;
+            uint32_t fh = 0, fs = 0;
+            cft_status sh, ss;
+            cft_elem_args E;
+            memset(&E, 0, sizeof E);
+            E.struct_size = sizeof E;
+            for (r = 0; r < 3; r++) {
+                if ((T >> r) & 1u) {
+                    fill(ix_src[r], srcn, f, K_RANDOM);
+                    ix_table(ix_tab[r], n, srcn, r);
+                } else {
+                    fill(ix_den[r], r == s ? 1 : n, f, K_RANDOM);
+                }
+            }
+            E.a = (T & 1u) ? (const void *)ix_src[0] : ix_den[0];
+            E.b = (T & 2u) ? (const void *)ix_src[1] : ix_den[1];
+            E.c = (T & 4u) ? (const void *)ix_src[2] : ix_den[2];
+            E.n = n;
+            E.scalar_mask = 1u << s;
+            E.idx_a = (T & 1u) ? ix_tab[0] : NULL;
+            E.idx_b = (T & 2u) ? ix_tab[1] : NULL;
+            E.idx_c = (T & 4u) ? ix_tab[2] : NULL;
+            E.idx_a_src = (T & 1u) ? srcn : 0;
+            E.idx_b_src = (T & 2u) ? srcn : 0;
+            E.idx_c_src = (T & 4u) ? srcn : 0;
+            memset(ix_dh, 0x5A, n * esz);
+            memset(ix_ds, 0x5A, n * esz);
+            E.d = ix_dh;
+            E.flags_out = &fh;
+            sh = cft_run_ex(hw, CFT_FMA, (cft_format)f, CFT_RNE, &E);
+            snprintf(msg, sizeof msg, "%s", cft_last_error());
+            E.d = ix_ds;
+            E.flags_out = &fs;
+            ss = cft_run_ex(sw, CFT_FMA, (cft_format)f, CFT_RNE, &E);
+            runs++;
+            CHECK(sh == CFT_OK && ss == CFT_OK && same(ix_dh, ix_ds, n * esz) && fh == fs,
+                  "cft_run_ex fma %s, tables 0x%x, operand %c scalar, n %lu: the GPU %s "
+                  "(%s), the software handle %s, results %s", cft_format_name((cft_format)f),
+                  T, 'a' + s, (unsigned long)n, cft_strerror(sh), msg, cft_strerror(ss),
+                  same(ix_dh, ix_ds, n * esz) ? "equal" : "DIFFER");
+        }
+    }
+    /* d over an indexed source: refused alike, by name */
+    {
+        const size_t n = 300, srcn = 3 * n + 5;
+        cft_status sh, ss;
+        cft_elem_args E;
+        fill(ix_src[0], srcn, f, K_RANDOM);
+        fill(ix_den[2], n, f, K_RANDOM);
+        ix_table(ix_tab[0], n, srcn, 0);
+        memset(&E, 0, sizeof E);
+        E.struct_size = sizeof E;
+        E.a = ix_src[0];
+        E.c = ix_den[2];
+        E.n = n;
+        E.idx_a = ix_tab[0];
+        E.idx_a_src = srcn;
+        E.d = ix_src[0] + 7 * esz;
+        sh = cft_run_ex(hw, CFT_ADD, (cft_format)f, CFT_RNE, &E);
+        snprintf(msg, sizeof msg, "%s", cft_last_error());
+        ss = cft_run_ex(sw, CFT_ADD, (cft_format)f, CFT_RNE, &E);
+        CHECK(sh == CFT_ERR_INVALID_ARGUMENT && ss == sh &&
+              strstr(msg, "d overlaps operand a") && strstr(cft_last_error(), "d overlaps"),
+              "d over an indexed source, %s: the GPU %s (%s), the software handle %s (%s)",
+              cft_format_name((cft_format)f), cft_strerror(sh), msg, cft_strerror(ss),
+              cft_last_error());
+        if (f == CFT_FP64 || f == CFT_FP32)
+            printf("    d over an indexed source (%s): %s - %s\n",
+                   cft_format_name((cft_format)f), cft_strerror(sh), msg);
+    }
+    printf("    cft_run_ex %s: %d runs with tables against the software handle, %d "
+           "failed\n", cft_format_name((cft_format)f), runs, failures - before);
+}
+
+/* cft_program_run_ex with the three tables and the scratch table at once:
+ * r4..r6 gathered from the pool, an FMA of the gathered streams, two
+ * deposits and a scratch-out block - plain, from a bank, and strict with an
+ * LDX past the depth (and the lane bytes), each with and without a mask */
+static void ix_prog(cft_device *hw, cft_device *sw, int f, int small)
+{
+    static const size_t NS[3] = {9, 300, IX_NMAX};
+    const size_t esz = cft_format_size((cft_format)f), nsi = 3, nso = 2;
+    unsigned char k[2 * 32], img[32 + 2 * 32 + 16 * 8];
+    uint64_t ins[16];
+    size_t si, i;
+    int v, m, before = failures, runs = 0;
+    one_plus(k, f, 1);                            /* k0: 1.5 */
+    put_int(k + esz, f, 300);                     /* k1: an index past 256 */
+    for (si = 0; si < (small ? 2u : 3u); si++) {
+        const size_t n = NS[si];
+        const size_t sa = 3 * n + 5, sb = n / 3 + 1, sc = 2 * n + 1, sp = n * nsi * 2 + 7;
+        unsigned char *pa = (unsigned char *)malloc(sa * esz);
+        unsigned char *pb = (unsigned char *)malloc(sb * esz);
+        unsigned char *pc = (unsigned char *)malloc(sc * esz);
+        unsigned char *pp = (unsigned char *)malloc(sp * esz);
+        unsigned char *dep = (unsigned char *)malloc(n * 3 * esz);
+        unsigned char *so = (unsigned char *)malloc(n * nso * esz);
+        unsigned char *lf = (unsigned char *)malloc(n);
+        unsigned char *msk = (unsigned char *)malloc((n + 7) / 8);
+        uint32_t *ta = (uint32_t *)malloc(n * 4), *tb = (uint32_t *)malloc(n * 4);
+        uint32_t *tc = (uint32_t *)malloc(n * 4), *tsi = (uint32_t *)malloc(n * nsi * 4);
+        uint32_t *cnt = (uint32_t *)malloc(n * 4);
+        cft_run_args A;
+        cft_program *p = NULL;
+        cft_status st;
+        char what[160];
+        int untouched;
+        if (!pa || !pb || !pc || !pp || !dep || !so || !lf || !msk || !ta || !tb || !tc ||
+            !tsi || !cnt) {
+            CHECK(0, "indexed programs: out of host memory");
+            goto next;
+        }
+        fill(pa, sa, f, K_RANDOM);
+        fill(pb, sb, f, K_NAN);
+        fill(pc, sc, f, K_RANDOM);
+        fill(pp, sp, f, K_OVERFLOW);
+        ix_table(ta, n, sa, 0);
+        ix_table(tb, n, sb, 1);
+        ix_table(tc, n, sc, 2);
+        ix_table(tsi, n * nsi, sp, 3);
+        for (i = 0; i < (n + 7) / 8; i++)
+            msk[i] = (unsigned char)rnd64();
+        for (v = 0; v < 3; v++)
+            for (m = 0; m < 2; m++) {
+                const uint32_t md = v == 2 ? 3 : 2;
+                const uint32_t flags = CFT_PROG_FLAG_SCRATCH_IO |
+                                       (v == 1 ? CFT_PROG_FLAG_BANK_EXT : 0u) |
+                                       (v == 2 ? CFT_PROG_FLAG_SCRATCH_STRICT : 0u);
+                unsigned ni = 0;
+                size_t bytes;
+                ins[ni++] = sq_scr(7, 4, 0, 0, 0);                 /* LDL r4 <- 0 */
+                ins[ni++] = sq_scr(7, 5, 0, 0, 1);                 /* LDL r5 <- 1 */
+                ins[ni++] = sq_scr(7, 6, 0, 0, 2);                 /* LDL r6 <- 2 */
+                ins[ni++] = sq_alu(CFT_FMA, 7, 0, 1, 4, 0, 0);     /* r7 = a*b + r4 */
+                ins[ni++] = sq_alu(CFT_FMA, 8, 2, 0, 5, 1, 0);     /* r8 = c*k0 + r5 */
+                ins[ni++] = sq_alu(CFT_ADD, 9, 7, 6, 0, 0, 0);     /* r9 = r7 + r6 */
+                ins[ni++] = sq_ctrl(3, 9, 0);
+                ins[ni++] = sq_ctrl(3, 8, 0);
+                ins[ni++] = sq_scr(6, 0, 9, 0, 0);                 /* STL r9 -> 0 */
+                ins[ni++] = sq_scr(6, 0, 7, 0, 1);                 /* STL r7 -> 1 */
+                if (v == 2) {
+                    ins[ni++] = sq_alu(CFT_IADD, 11, 12, 1, 0, 1, 0);  /* r11 = k1 */
+                    ins[ni++] = sq_scr(9, 10, 0, 11, 0);           /* LDX r10 <- [300] */
+                    ins[ni++] = sq_ctrl(3, 10, 0);
+                }
+                ins[ni++] = sq_ctrl(0, 0, 0);
+                bytes = sq_image(img, f, ins, ni, k, 2, md, flags, (uint32_t)nsi,
+                                 (uint32_t)nso);
+                memset(&A, 0, sizeof A);
+                A.struct_size = sizeof A;
+                A.a = pa;
+                A.b = pb;
+                A.c = pc;
+                A.n = n;
+                if (v == 1) {
+                    A.bank = k;
+                    A.bank_bytes = 2 * esz;
+                }
+                A.scratch_in = pp;
+                A.scratch_in_bytes = sp * esz;
+                A.scratch_out = so;
+                A.scratch_out_bytes = n * nso * esz;
+                A.deposits = dep;
+                A.counts = cnt;
+                A.idx_a = ta;
+                A.idx_b = tb;
+                A.idx_c = tc;
+                A.idx_a_src = sa;
+                A.idx_b_src = sb;
+                A.idx_c_src = sc;
+                A.idx_scratch_in = tsi;
+                A.idx_scratch_src = sp;
+                A.lane_mask = m ? msk : NULL;
+                A.lane_mask_bytes = m ? (n + 7) / 8 : 0;
+                A.lane_flags = v == 2 ? lf : NULL;
+                A.lane_flags_bytes = v == 2 ? n : 0;
+                memset(dep, 0x5A, n * 3 * esz);
+                memset(so, 0x5A, n * nso * esz);
+                memset(lf, 0x5A, n);
+                memset(cnt, 0x5A, n * 4);
+                snprintf(what, sizeof what, "a program with four tables, %s, %s, n %lu, %s",
+                         v == 0 ? "plain" : v == 1 ? "a bank" : "strict, lane bytes",
+                         cft_format_name((cft_format)f), (unsigned long)n,
+                         m ? "masked" : "no mask");
+                st = prog_pair(hw, sw, f, img, bytes, &A, md, (uint32_t)nso, what);
+                CHECK(st != CFT_OK || v != 2 || (pp_bus & CFT_STATUS_SCRATCH_RANGE),
+                      "%s: STATUS 0x%x has no SCRATCH_RANGE for an LDX past the depth",
+                      what, (unsigned)pp_bus);
+                runs++;
+            }
+        /* a table past its source: refused by the host check, nothing run */
+        ta[n - 1] = (uint32_t)sa;
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = pa;
+        A.n = n;
+        A.deposits = dep;
+        A.idx_a = ta;
+        A.idx_a_src = sa;
+        memset(dep, 0x5A, n * 3 * esz);
+        ins[0] = sq_ctrl(3, 0, 0);
+        ins[1] = sq_ctrl(0, 0, 0);
+        st = cft_program_load(hw, img, sq_image(img, f, ins, 2, NULL, 0, 1, 0, 0, 0), &p);
+        if (st == CFT_OK)
+            st = cft_program_run_ex(p, &A);
+        for (untouched = 1, i = 0; i < n * esz; i++)
+            untouched &= dep[i] == 0x5A;
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT && strstr(cft_last_error(), "at or past") &&
+              untouched, "a table past its source, n %lu: %s, \"%s\", deposits %s",
+              (unsigned long)n, cft_strerror(st), cft_last_error(),
+              untouched ? "untouched" : "WRITTEN");
+        if (si == 0 && (f == CFT_FP64 || f == CFT_FP32))
+            printf("    a table past its source: %s - %s; the deposits %s\n",
+                   cft_strerror(st), cft_last_error(), untouched ? "untouched" : "WRITTEN");
+        cft_program_free(p);
+    next:
+        free(pa); free(pb); free(pc); free(pp); free(dep); free(so); free(lf); free(msk);
+        free(ta); free(tb); free(tc); free(tsi); free(cnt);
+    }
+    printf("    cft_program_run_ex %s: %d runs with four tables, %d failed\n",
+           cft_format_name((cft_format)f), runs, failures - before);
+}
+
+/* resident sources, tables and deposits: the second run binds resident, a
+ * table republished between runs is the one read, and (in a plant build)
+ * a table in a LOST buffer is refused by that buffer's sentence */
+static void ix_resident(const char *artifact, cft_device *hw, cft_device *sw, int f)
+{
+    enum { N = 1000, SRC = 3000, POOL = 2500 };
+    const size_t esz = cft_format_size((cft_format)f);
+    static unsigned char s[SRC * 32], p[POOL * 32], want[N * 32], got[N * 32], prev[N * 32];
+    static uint32_t t[N], tp[N], t2[N];
+    unsigned char img[32 + 4 * 8];
+    uint64_t ins[4];
+    size_t bytes;
+    struct rb S, T, P, TP, Dd;
+    cft_buffer_info b1[4], b2[4];
+    cft_program *ph = NULL, *ps = NULL;
+    cft_run_args A;
+    cft_status st;
+    uint32_t fl = 0;
+    int k, plant_build, before = failures;
+
+    S.b = T.b = P.b = TP.b = Dd.b = NULL;
+    ins[0] = sq_scr(7, 4, 0, 0, 0);                     /* LDL r4 <- 0 */
+    ins[1] = sq_alu(CFT_ADD, 5, 0, 4, 0, 0, 0);         /* r5 = a + r4 */
+    ins[2] = sq_ctrl(3, 5, 0);
+    ins[3] = sq_ctrl(0, 0, 0);
+    bytes = sq_image(img, f, ins, 4, NULL, 0, 1, CFT_PROG_FLAG_SCRATCH_IO, 1, 0);
+    fill(s, SRC, f, K_RANDOM);
+    fill(p, POOL, f, K_RANDOM);
+    ix_table(t, N, SRC, 0);
+    ix_table(tp, N, POOL, 3);
+    for (k = 0; k < N; k++)
+        t2[k] = t[(k + 1) % N];
+    CHECK(rb_alloc(hw, &S, SRC * esz) && rb_alloc(hw, &T, N * 4) &&
+          rb_alloc(hw, &P, POOL * esz) && rb_alloc(hw, &TP, N * 4) &&
+          rb_alloc(hw, &Dd, N * esz), "cft_alloc: %s", cft_last_error());
+    if (!S.b || !T.b || !P.b || !TP.b || !Dd.b)
+        goto out;
+    CHECK(rb_put(&S, s, SRC * esz) && rb_put(&T, (const unsigned char *)t, N * 4) &&
+          rb_put(&P, p, POOL * esz) && rb_put(&TP, (const unsigned char *)tp, N * 4),
+          "publishing: %s", cft_last_error());
+    CHECK(cft_program_load(hw, img, bytes, &ph) == CFT_OK &&
+          cft_program_load(sw, img, bytes, &ps) == CFT_OK, "loading: %s", cft_last_error());
+    if (!ph || !ps)
+        goto out;
+    for (k = 0; k < 3; k++) {
+        const uint32_t *tab = k < 2 ? t : t2;
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.n = N;
+        A.idx_a_src = SRC;
+        A.idx_scratch_src = POOL;
+        A.scratch_in_bytes = POOL * esz;
+        A.flags_out = &fl;
+        /* the software handle, on plain memory with the same bytes */
+        A.a = s;
+        A.idx_a = tab;
+        A.scratch_in = p;
+        A.idx_scratch_in = tp;
+        A.deposits = want;
+        st = cft_program_run_ex(ps, &A);
+        CHECK(st == CFT_OK, "the software handle: %s", cft_last_error());
+        /* the GPU, every operand resident */
+        b1[0] = rb_info(&S); b1[1] = rb_info(&T); b1[2] = rb_info(&P); b1[3] = rb_info(&TP);
+        A.a = S.p;
+        A.idx_a = (const uint32_t *)T.p;
+        A.scratch_in = P.p;
+        A.idx_scratch_in = (const uint32_t *)TP.p;
+        A.deposits = Dd.p;
+        st = cft_program_run_ex(ph, &A);
+        CHECK(st == CFT_OK && cft_buffer_from_device(Dd.b) == CFT_OK,
+              "resident run %d: %s", k + 1, cft_last_error());
+        memcpy(got, Dd.p, N * esz);
+        b2[0] = rb_info(&S); b2[1] = rb_info(&T); b2[2] = rb_info(&P); b2[3] = rb_info(&TP);
+        CHECK(same(got, want, N * esz), "resident run %d, %s: the deposits differ from the "
+              "software handle's", k + 1, cft_format_name((cft_format)f));
+        if (k == 1) {
+            int j, held = 1;
+            for (j = 0; j < 4; j++)
+                held &= b2[j].resident_binds == b1[j].resident_binds + 1 &&
+                        b2[j].staged_binds == b1[j].staged_binds;
+            CHECK(held, "the second run, %s: source, table, pool and its table should each "
+                  "bind resident with no transfer - resident binds %llu/%llu/%llu/%llu "
+                  "from %llu/%llu/%llu/%llu, staged %llu/%llu/%llu/%llu from "
+                  "%llu/%llu/%llu/%llu", cft_format_name((cft_format)f),
+                  (unsigned long long)b2[0].resident_binds,
+                  (unsigned long long)b2[1].resident_binds,
+                  (unsigned long long)b2[2].resident_binds,
+                  (unsigned long long)b2[3].resident_binds,
+                  (unsigned long long)b1[0].resident_binds,
+                  (unsigned long long)b1[1].resident_binds,
+                  (unsigned long long)b1[2].resident_binds,
+                  (unsigned long long)b1[3].resident_binds,
+                  (unsigned long long)b2[0].staged_binds,
+                  (unsigned long long)b2[1].staged_binds,
+                  (unsigned long long)b2[2].staged_binds,
+                  (unsigned long long)b2[3].staged_binds,
+                  (unsigned long long)b1[0].staged_binds,
+                  (unsigned long long)b1[1].staged_binds,
+                  (unsigned long long)b1[2].staged_binds,
+                  (unsigned long long)b1[3].staged_binds);
+            printf("    resident, %s: the second run bound source, table, pool and its "
+                   "table resident: %s\n", cft_format_name((cft_format)f),
+                   held ? "yes" : "NO");
+            memcpy(prev, got, N * esz);
+            /* the table rewritten and published: the next run reads it */
+            memcpy(T.p, t2, N * 4);
+            CHECK(cft_buffer_to_device(T.b) == CFT_OK, "republishing the table: %s",
+                  cft_last_error());
+        }
+        if (k == 2)
+            CHECK(!same(got, prev, N * esz), "the republished table, %s: the run answered "
+                  "as for the old table", cft_format_name((cft_format)f));
+    }
+    /* a table in a LOST buffer, with a plant build's fail-launch: a run that
+     * wrote the buffer failed, and a program reading it as a table is
+     * refused by the loss's sentence, before anything runs */
+    {
+        /* the plant this process was started with, if any, is put back
+         * after: a later leg's handles must open with it */
+        const char *was = getenv("CFT_HIP_PLANT");
+        char keep[64] = "";
+        cft_device *h = NULL;
+        if (was)
+            snprintf(keep, sizeof keep, "%s", was);
+        put_env("CFT_HIP_PLANT", "bogus");
+        st = cft_open(artifact, 0, &h);
+        put_env("CFT_HIP_PLANT", keep[0] ? keep : NULL);
+        plant_build = st != CFT_OK;
+        if (h)
+            cft_close(h);
+    }
+    if (!plant_build) {
+        nrun("  a table in a LOST buffer", "this libcft is a default build, which has no "
+             "CFT_HIP_PLANT=fail-launch to lose one; build with HIP_PLANTS=1");
+    } else {
+        const char *was = getenv("CFT_HIP_PLANT");
+        char keep[64] = "";
+        cft_device *h = NULL;
+        struct rb L;
+        cft_program *pl = NULL;
+        L.b = NULL;
+        if (was)
+            snprintf(keep, sizeof keep, "%s", was);
+        put_env("CFT_HIP_PLANT", "fail-launch");
+        st = cft_open(artifact, 0, &h);
+        put_env("CFT_HIP_PLANT", keep[0] ? keep : NULL);
+        if (h && rb_alloc(h, &L, N * 4) && rb_put(&L, (const unsigned char *)t, N * 4) &&
+            cft_program_load(h, img, bytes, &pl) == CFT_OK) {
+            st = cft_run(h, CFT_ABS, CFT_FP32, CFT_RNE, s, NULL, NULL, L.p, N, &fl, NULL);
+            CHECK(st == CFT_ERR_INTERNAL && !strncmp(rb_info(&L).staged_why, "LOST:", 5),
+                  "the failed run: %s, buffer \"%s\"", cft_strerror(st), rb_info(&L).staged_why);
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.n = N;
+            A.a = s;
+            A.idx_a = (const uint32_t *)L.p;
+            A.idx_a_src = SRC;
+            A.scratch_in = p;
+            A.scratch_in_bytes = POOL * esz;
+            A.idx_scratch_in = tp;
+            A.idx_scratch_src = POOL;
+            A.deposits = got;
+            st = cft_program_run_ex(pl, &A);
+            CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), "failed on the device"),
+                  "a table in a LOST buffer: %s, \"%s\"", cft_strerror(st), cft_last_error());
+            printf("    a table in a LOST buffer: %s - %s\n", cft_strerror(st),
+                   cft_last_error());
+        } else {
+            CHECK(0, "the fail-launch handle: %s", cft_last_error());
+        }
+        cft_program_free(pl);
+        rb_free(&L);
+        cft_close(h);
+    }
+out:
+    cft_program_free(ph);
+    cft_program_free(ps);
+    rb_free(&S);
+    rb_free(&T);
+    rb_free(&P);
+    rb_free(&TP);
+    rb_free(&Dd);
+    printf("    resident %s: %d failed\n", cft_format_name((cft_format)f), failures - before);
+}
+
+/* a source larger than any stage (96 MiB; a stage is at most 64 MiB), read
+ * through a table over all of it whose lanes cross many chunks */
+static void ix_big(cft_device *hw, cft_device *sw, int f)
+{
+    const size_t esz = cft_format_size((cft_format)f);
+    const size_t srcn = ((size_t)96 << 20) / esz, n = 200000;
+    unsigned char *src = (unsigned char *)malloc(srcn * esz);
+    unsigned char *dep = (unsigned char *)malloc(n * esz);
+    uint32_t *t = (uint32_t *)malloc(n * 4);
+    unsigned char img[32 + 2 * 8];
+    uint64_t ins[2];
+    char what[120];
+    cft_run_args A;
+    if (!src || !dep || !t) {
+        CHECK(0, "a 96 MiB source: out of host memory");
+    } else {
+        fill(src, srcn, f, K_RANDOM);
+        ix_table(t, n, srcn, 0);
+        ins[0] = sq_ctrl(3, 0, 0);
+        ins[1] = sq_ctrl(0, 0, 0);
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = src;
+        A.n = n;
+        A.deposits = dep;
+        A.idx_a = t;
+        A.idx_a_src = srcn;
+        memset(dep, 0x5A, n * esz);
+        snprintf(what, sizeof what, "a %lu-element %s source (96 MiB) through %lu lanes",
+                 (unsigned long)srcn, cft_format_name((cft_format)f), (unsigned long)n);
+        (void)prog_pair(hw, sw, f, img, sq_image(img, f, ins, 2, NULL, 0, 1, 0, 0, 0), &A, 1,
+                        0, what);
+        printf("    %s: compared\n", what);
+    }
+    free(src);
+    free(dep);
+    free(t);
+}
+
+static void leg_indexed(const char *artifact, cft_device *hw, cft_device *sw, int only_fmt,
+                        int small)
+{
+    const int before = failures;
+    int f;
+    printf("indexed\n");
+    for (f = 0; f < 4; f++) {
+        if (only_fmt >= 0 && f != only_fmt)
+            continue;
+        ix_elem(hw, sw, f, small);
+        ix_prog(hw, sw, f, small);
+    }
+    for (f = CFT_FP64; f <= CFT_FP256; f += 2) {
+        if (only_fmt >= 0 && f != only_fmt)
+            continue;
+        ix_resident(artifact, hw, sw, f);
+        if (small)
+            nrun("  a 96 MiB source", "-s small leaves it out; -s large or all runs it");
+        else
+            ix_big(hw, sw, f);
+    }
+    printf("  indexed: %d failed\n", failures - before);
+}
+
+/* An STX/LDX walk of `walk` slots (device-test's, at a length of its own):
+ * v stored into slots 0 .. walk - 1, then read back from walk - 1 down and
+ * summed - past the depth it wraps (plain) or is reported (strict) */
+static size_t walk_image(unsigned char *img, int fmt, uint32_t walk, int strict)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    unsigned char k[3 * 32];
+    uint64_t ins[14];
+    put_int(k, fmt, 1);                                   /* k0: the integer 1 */
+    one_plus(k + esz, fmt, 8);                            /* k1: 1 + 2^-8 */
+    one_plus(k + 2 * esz, fmt, 0);                        /* k2: 1 */
+    ins[0] = sq_alu(CFT_COPYSIGN, 4, 0, 0, 0, 0, 0);       /* v = x */
+    ins[1] = sq_ctrl(1, 0, walk);
+    ins[2] = sq_scr(8, 0, 4, 3, 0);                       /*   STX v -> [i] */
+    ins[3] = sq_alu(CFT_IADD, 3, 3, 0, 0, 1, 0);           /*   i += 1 */
+    ins[4] = sq_alu(CFT_FMA, 4, 4, 1, 2, 1, 1);            /*   v = v * k1 + k2 */
+    ins[5] = sq_ctrl(2, 0, 0);
+    ins[6] = sq_ctrl(1, 0, walk);
+    ins[7] = sq_alu(CFT_ISUB, 3, 3, 0, 0, 1, 0);           /*   i -= 1 */
+    ins[8] = sq_scr(9, 5, 0, 3, 0);                       /*   LDX s <- [i] */
+    ins[9] = sq_alu(CFT_FMA, 6, 5, 2, 6, 1, 0);            /*   acc = s * k2 + acc */
+    ins[10] = sq_ctrl(2, 0, 0);
+    ins[11] = sq_ctrl(3, 6, 0);
+    ins[12] = sq_ctrl(3, 4, 0);
+    ins[13] = sq_ctrl(0, 0, 0);
+    return sq_image(img, fmt, ins, 14, k, 3, 2, strict ? CFT_PROG_FLAG_SCRATCH_STRICT : 0u,
+                    0, 0);
+}
+
+/* STL x -> slot; LDL r4 <- slot; deposit r4 */
+static size_t slot_image(unsigned char *img, int fmt, uint32_t slot)
+{
+    uint64_t ins[4];
+    ins[0] = sq_scr(6, 0, 0, 0, slot);
+    ins[1] = sq_scr(7, 4, 0, 0, slot);
+    ins[2] = sq_ctrl(3, 4, 0);
+    ins[3] = sq_ctrl(0, 0, 0);
+    return sq_image(img, fmt, ins, 4, NULL, 0, 1, 0, 0, 0);
+}
+
+static cft_status open_at(const char *artifact, uint32_t depth, cft_device **out)
+{
+    cft_open_args oa;
+    memset(&oa, 0, sizeof oa);
+    oa.struct_size = sizeof oa;
+    oa.artifact = artifact;
+    oa.scratch_depth = depth;
+    *out = NULL;
+    return cft_open_ex(&oa, out);
+}
+
+/* a load that must be refused by name, naming max_scratch */
+static void load_refused(cft_device *dev, const unsigned char *img, size_t bytes,
+                         const char *what)
+{
+    cft_program *p = NULL;
+    const cft_status st = cft_program_load(dev, img, bytes, &p);
+    CHECK(st != CFT_OK && p == NULL && strstr(cft_last_error(), "max_scratch"),
+          "%s: %s, \"%s\" - wanted a refusal naming max_scratch", what, cft_strerror(st),
+          cft_last_error());
+    printf("    %s: %s - %s\n", what, cft_strerror(st), cft_last_error());
+    cft_program_free(p);
+}
+
+static void leg_depth(const char *artifact, cft_device *hw, cft_device *sw, int only_fmt)
+{
+    static const uint32_t DS[4] = {256, 512, 1024, 2048};
+    enum { N = 100, NB = 300, S273 = 273 };
+    static unsigned char a[NB * 32], dh[NB * 2 * 32], d256[NB * 2 * 32],
+        img[32 + 3 * 32 + 14 * 8];
+    unsigned char *sin_ = NULL, *sout = NULL;
+    cft_device *h = NULL, *s = NULL;
+    cft_run_args A;
+    cft_caps hc, scp;
+    char what[160];
+    size_t bytes, di;
+    int f, strict;
+    const int before = failures;
+
+    printf("depth\n");
+    for (di = 0; di < 4; di++) {
+        const uint32_t D = DS[di];
+        memset(&hc, 0, sizeof hc);
+        hc.struct_size = sizeof hc;
+        memset(&scp, 0, sizeof scp);
+        scp.struct_size = sizeof scp;
+        CHECK(open_at(artifact, D, &h) == CFT_OK && open_at(NULL, D, &s) == CFT_OK &&
+              cft_get_caps(h, &hc) == CFT_OK && cft_get_caps(s, &scp) == CFT_OK &&
+              hc.max_scratch == D && scp.max_scratch == D,
+              "opening %s and the software handle at %u: %s (max_scratch %u and %u)",
+              artifact, (unsigned)D, cft_last_error(), (unsigned)hc.max_scratch,
+              (unsigned)scp.max_scratch);
+        if (!h || !s)
+            goto next;
+        for (f = CFT_FP64; f <= CFT_FP256; f += 2) {
+            if (only_fmt >= 0 && f != only_fmt)
+                continue;
+            fill(a, N, f, K_RANDOM);
+            for (strict = 0; strict < 2; strict++) {
+                bytes = walk_image(img, f, D + 44, strict);
+                memset(&A, 0, sizeof A);
+                A.struct_size = sizeof A;
+                A.a = A.b = A.c = a;
+                A.n = N;
+                A.deposits = dh;
+                memset(dh, 0x5A, N * 2 * 32);
+                snprintf(what, sizeof what, "a walk of %u slots at depth %u, %s%s",
+                         (unsigned)(D + 44), (unsigned)D, cft_format_name((cft_format)f),
+                         strict ? ", strict" : "");
+                (void)prog_pair(h, s, f, img, bytes, &A, 2, 0, what);
+                CHECK(!strict || (pp_bus & CFT_STATUS_SCRATCH_RANGE),
+                      "%s: STATUS 0x%x - an index past %u must be reported", what,
+                      (unsigned)pp_bus, (unsigned)D);
+                if (D > 256) {
+                    /* and the depth reached past 256: the same walk on the
+                     * default (256-slot) handle wraps there (plain) or
+                     * reports there (strict) and answers otherwise */
+                    cft_program *p = NULL;
+                    uint32_t b256 = 0;
+                    A.deposits = d256;
+                    A.bus_out = &b256;
+                    CHECK(cft_program_load(sw, img, bytes, &p) == CFT_OK &&
+                          cft_program_run_ex(p, &A) == CFT_OK, "the 256-slot reference: %s",
+                          cft_last_error());
+                    cft_program_free(p);
+                    CHECK(!same(dh, d256, N * 2 * cft_format_size((cft_format)f)),
+                          "%s: the GPU at %u answered as a 256-slot handle does - the "
+                          "comparison could not tell the depths apart", what, (unsigned)D);
+                }
+            }
+            /* a static slot at depth - 1 runs; one at the depth is refused */
+            bytes = slot_image(img, f, D - 1);
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = a;
+            A.n = N;
+            A.deposits = dh;
+            memset(dh, 0x5A, N * 32);
+            snprintf(what, sizeof what, "static slot %u at depth %u, %s", (unsigned)(D - 1),
+                     (unsigned)D, cft_format_name((cft_format)f));
+            (void)prog_pair(h, s, f, img, bytes, &A, 1, 0, what);
+            bytes = slot_image(img, f, D);
+            snprintf(what, sizeof what, "static slot %u at depth %u", (unsigned)D,
+                     (unsigned)D);
+            load_refused(h, img, bytes, what);
+        }
+        printf("  depth %u: the walk, plain and strict, and slot %u held to the software "
+               "handle at %u\n", (unsigned)D, (unsigned)(D - 1), (unsigned)D);
+    next:
+        cft_close(h);
+        cft_close(s);
+        h = s = NULL;
+    }
+
+    /* 273 static slots at 512, with a scratch-in and scratch-out block of
+     * 273 (cft-debris's degree-8 field): reach 273, not the depth */
+    sin_ = (unsigned char *)malloc((size_t)NB * S273 * 32);
+    sout = (unsigned char *)malloc((size_t)NB * S273 * 32);
+    if (!sin_ || !sout || open_at(artifact, 512, &h) != CFT_OK ||
+        open_at(NULL, 512, &s) != CFT_OK) {
+        CHECK(0, "the 273-slot program: %s", cft_last_error());
+    } else {
+        for (f = CFT_FP64; f <= CFT_FP256; f += 2) {
+            const size_t esz = cft_format_size((cft_format)f);
+            uint64_t ins[8];
+            if (only_fmt >= 0 && f != only_fmt)
+                continue;
+            ins[0] = sq_scr(7, 4, 0, 0, S273 - 1);             /* LDL r4 <- 272 */
+            ins[1] = sq_scr(7, 5, 0, 0, 0);                    /* LDL r5 <- 0 */
+            ins[2] = sq_alu(CFT_FMA, 6, 4, 5, 0, 0, 0);        /* r6 = r4*r5 + a */
+            ins[3] = sq_scr(6, 0, 6, 0, S273 - 1);             /* STL r6 -> 272 */
+            ins[4] = sq_scr(6, 0, 4, 0, 0);                    /* STL r4 -> 0 */
+            ins[5] = sq_ctrl(3, 6, 0);
+            ins[6] = sq_ctrl(0, 0, 0);
+            bytes = sq_image(img, f, ins, 7, NULL, 0, 1, CFT_PROG_FLAG_SCRATCH_IO, S273, S273);
+            fill(a, NB, f, K_RANDOM);
+            fill(sin_, (size_t)NB * S273, f, K_RANDOM);
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = a;
+            A.n = NB;
+            A.deposits = dh;
+            A.scratch_in = sin_;
+            A.scratch_in_bytes = (size_t)NB * S273 * esz;
+            A.scratch_out = sout;
+            A.scratch_out_bytes = (size_t)NB * S273 * esz;
+            memset(dh, 0x5A, NB * esz);
+            memset(sout, 0x5A, (size_t)NB * S273 * esz);
+            snprintf(what, sizeof what, "273 static slots and a 273-slot block at depth "
+                     "512, %s", cft_format_name((cft_format)f));
+            (void)prog_pair(h, s, f, img, bytes, &A, 1, S273, what);
+            printf("    %s: held to the software handle at 512\n", what);
+            load_refused(hw, img, bytes, "the 273-slot block on the default 256-slot handle");
+        }
+    }
+    cft_close(h);
+    cft_close(s);
+    h = s = NULL;
+    free(sin_);
+    free(sout);
+
+    /* slot 256 on the default handle; slot 2,047 on a 256-slot one, which
+     * a 2,048-slot one loads */
+    bytes = slot_image(img, CFT_FP64, 256);
+    load_refused(hw, img, bytes, "static slot 256 on the default handle");
+    if (open_at(artifact, 256, &h) == CFT_OK && open_at(artifact, 2048, &s) == CFT_OK) {
+        cft_program *p = NULL;
+        bytes = slot_image(img, CFT_FP64, 2047);
+        load_refused(h, img, bytes, "static slot 2047 on a handle opened at 256");
+        CHECK(cft_program_load(s, img, bytes, &p) == CFT_OK,
+              "static slot 2047 on a handle opened at 2048: %s", cft_last_error());
+        cft_program_free(p);
+    } else {
+        CHECK(0, "opening at 256 and 2048: %s", cft_last_error());
+    }
+    cft_close(h);
+    cft_close(s);
+    h = s = NULL;
+
+    /* a 2,048-slot handle beside the default, both run, in turn */
+    if (open_at(artifact, 2048, &h) == CFT_OK && open_at(NULL, 2048, &s) == CFT_OK) {
+        int round;
+        fill(a, N, CFT_FP64, K_RANDOM);
+        bytes = walk_image(img, CFT_FP64, 300, 0);
+        for (round = 0; round < 2; round++) {
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = A.b = A.c = a;
+            A.n = N;
+            A.deposits = dh;
+            (void)prog_pair(h, s, CFT_FP64, img, bytes, &A, 2, 0,
+                            "a walk of 300 on the 2,048-slot handle beside the default");
+            A.deposits = d256;
+            (void)prog_pair(hw, sw, CFT_FP64, img, bytes, &A, 2, 0,
+                            "a walk of 300 on the default handle beside a 2,048-slot one");
+        }
+        CHECK(!same(dh, d256, N * 2 * 8), "the 2,048-slot handle and the default answered "
+              "alike for a walk of 300: one of them is not at its depth");
+        printf("    a 2,048-slot handle beside the default: each held to its own depth's "
+               "software handle, twice in turn\n");
+    } else {
+        CHECK(0, "a 2,048-slot handle beside the default: %s", cft_last_error());
+    }
+    cft_close(h);
+    cft_close(s);
+    printf("  depth: %d failed\n", failures - before);
+}
+
 int main(int argc, char **argv)
 {
     const char *artifact = NULL,
                *legs = "open,reduce,seg,compose,alias,two,buffers,plants"
                        /* round 2's G2A: its legs here, each a line ",name" */
                        /* round 2's G2B: its legs here, each a line ",name" */
+                       ",indexed"
+                       ",depth"
                        ;
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
@@ -1219,6 +2240,8 @@ int main(int argc, char **argv)
                     "buffers,plants"
                     /* round 2's G2A: its legs here, each a line ",name" */
                     /* round 2's G2B: its legs here, each a line ",name" */
+                    ",indexed"
+                    ",depth"
                     "] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
@@ -1276,6 +2299,10 @@ int main(int argc, char **argv)
         leg_plants(artifact, sw);
     /* round 2's G2A: its legs' dispatch here */
     /* round 2's G2B: its legs' dispatch here */
+    if (strstr(legs, "indexed"))
+        leg_indexed(artifact, hw, sw, only_fmt, which == 1);
+    if (strstr(legs, "depth"))
+        leg_depth(artifact, hw, sw, only_fmt);
     cft_close(hw);
     cft_close(sw);
     if (shown > 60)
