@@ -7134,8 +7134,10 @@ for them and implements none, so that the GPU route is not held back.
   equal to the committed ones (docs/VALIDATION.md, G1C's entry).
 - Version 2's per-lane flags and marks come from the GPU's own
   executor: the backend publishes `CFT_SEQ_FEAT_LANE_FLAGS` and
-  `CFT_SEQ_FEAT_FLAG_CONTROL`, and its `seq_features` 0x75f1f lacks only
-  `INDEXED` and `AUGADD` (docs/HOSTAPI.md, "The GPU backend").
+  `CFT_SEQ_FEAT_FLAG_CONTROL`, and its `seq_features` 0x75f1f lacked only
+  `INDEXED` and `AUGADD`; since round 2 (G2A and G2B, merged
+  2026-11-17) it is 0x7ff1f, the software handle's own (docs/HOSTAPI.md,
+  "The GPU backend").
 - The backend's seven environment variables are on the writer's list
   (docs/CERTIFICATES.md, "The environment").
 
@@ -7210,6 +7212,9 @@ atmosphere model and the Sun and Moon.
 5. **A `hip` target in cftc,** so that an image's features and depth are
    held at compile time to `hip:N`'s `seq_features` 0x75f1f and its 256
    slots. Today they are compared by hand. This is the compiler's.
+   (2026-11-17: since GPU round 2, hip:N publishes 0x7ff1f, and
+   `cft_open_ex` opens it at up to 2,048 slots; the target would follow
+   the handle's depth.)
 6. **Program rates at binary128, and below a million lanes.** Their
    ladder carries an ESTIMATE factor of up to 3 for their instruction mix
    and their batches of 28,000 to 68,000 objects. GPU-A's part 2 lists
