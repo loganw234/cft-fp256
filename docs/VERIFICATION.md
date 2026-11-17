@@ -313,7 +313,20 @@ authority:
     conformance test, device-test and hip-test. Plants first, each red and
     green without it: flip and drop-flag (the element-wise path), seq-mask
     (the sequencer), reduce-carry (the reduction tree), and the symbol
-    check's own. A lister that shows a GPU while the runtime sees none is
+    check's own. Since 2026-11-17 (parcel G2D) it also holds the three
+    classes the GPU backend's round 2 brought: augmentedAddition (hip-test's
+    aug leg, augmented_check.py, the augmented vector sets whole), index
+    tables and scratch depths to 2,048 (the indexed leg at `-s all`, the
+    depth leg, seq_check and device-test at 2,048 slots) and the divide and
+    square root (the divsqrt leg, divsqrt_check.py under the default and
+    the whole-operation routes, the formatOf sets), each class with its
+    plants red first, each on its own check: aug-flip, aug-flags, aug-swap,
+    seq-aug, idx-chunk, idx-none, src-trunc, depth-clamp, bank-mode,
+    full-flag, full-refuse (the divide's route proof red while its bits
+    stay green) and chunk-tail (an augmented call's last chunk losing its
+    last element: red only where a call crosses a chunk boundary, which
+    only the plants' build makes at a small size). `HIP_FULL=1` adds the
+    divide's chunk route. A lister that shows a GPU while the runtime sees none is
     a failure, and each leg's log names its device, every line the same one. On NVIDIA it is built three
     ways, each held to the same sums: HIP 7.2.4's NVIDIA layer (`hip`),
     plain nvcc through study GPU-A's header (`hip-nvcc`), and HIP built

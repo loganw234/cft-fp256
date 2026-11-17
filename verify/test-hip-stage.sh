@@ -6,10 +6,11 @@
 # backend's gate, parcel G1C, 2026-11-12). Run by hand and recorded, as
 # hw/test-rebuild-argv.sh is for `buildargs`; no stage runs it.
 #
-#     bash verify/test-hip-stage.sh          # the skips: any host, no GPU, seconds
-#     bash verify/test-hip-stage.sh --gpu    # and the two failures, on a host
-#                                            # where the stage runs: two real
-#                                            # builds, minutes
+#     bash verify/test-hip-stage.sh          # the skips and hip_named: any
+#                                            # host, no GPU, seconds
+#     bash verify/test-hip-stage.sh --gpu    # and the five failures, on a host
+#                                            # where the stage runs: five real
+#                                            # builds, minutes each
 #
 # Each case runs a copy of the runner with every `need` line outside the
 # GPU block taken out, so that `--only hip` asks nothing of the other
@@ -27,7 +28,11 @@
 #   3. HIP_DEVICE=9 beside a lister that lists one GPU: SKIP naming the one;
 #   4. no lister on PATH: SKIP "no GPU: neither nvidia-smi nor amd-smi on
 #      PATH" (NOT RUN, named, where a lister lives in a directory the runner
-#      needs, as amd-smi in /usr/bin does).
+#      needs, as amd-smi in /usr/bin does);
+#  10. the stage's hip_named (round 2's G2D), its text taken from the
+#      runner, fed three logs: a plant build's, whose `cft hip:
+#      CFT_HIP_CHUNK=<n>` line names no device, passes; one with a second
+#      device fails, naming it; one with no device line fails.
 # With --gpu, on a host where the stage runs - HIP_ROOT, HIP_PLATFORM and
 # HIP_DEVICE as for the stage, and ROOT's own top-level entries linked into
 # the scratch tree - each a real build in a run of its own:
@@ -38,7 +43,16 @@
 #   6. one plant's run (HIP-PLANT-RUN) made without its plant for the plant
 #      HIP_TEST_BYPASS names, which only this copy reads (default drop-flag):
 #      its check stays green, the stage FAILS naming that plant, and no leg
-#      runs after the plants.
+#      runs after the plants;
+#   7. the same for full-refuse, the plant whose red is the route proof
+#      alone (G2C's): the stage FAILS naming it, so its two-sided check
+#      fails where the plant is absent;
+#   8. the same for aug-flags, a plant judged by hip-test's count of failed
+#      checks (G2A's), read by the stage's one reader of those counts;
+#   9. the plants' build (HIP-PLANTS-BUILD) cut back to its two tools, so
+#      the library in the plants' copy is the default build's: a Python
+#      check run under bank-mode through it is green, and the stage FAILS
+#      on that run's missing device line, CFT_HIP_PLANT=bank-mode.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNSH="$ROOT/verify/run.sh"
@@ -49,7 +63,7 @@ trap 'rm -rf "$T"' EXIT
 FAILS=0
 CASES=0
 
-for m in '^# ---- the GPU backend' '^# ---- report' 'HIP-OPEN-PROBE' 'HIP-PLANT-RUN' '^stage hip '; do
+for m in '^# ---- the GPU backend' '^# ---- report' 'HIP-OPEN-PROBE' 'HIP-PLANT-RUN' 'HIP-PLANTS-BUILD' '^stage hip '; do
   grep -q "$m" "$RUNSH" || { echo "FAIL  $RUNSH has lost '$m', which this test reads"; exit 1; }
 done
 
@@ -174,6 +188,30 @@ else
   expect "4. no lister on PATH: skipped by name" 0 "$(row "no GPU: neither nvidia-smi nor amd-smi on PATH")" "$PASS1"
 fi
 
+# 10. hip_named, the runner's own text, fed three logs (no GPU: the logs are
+# made here): a plant build's at CFT_HIP_CHUNK=64 passes, a second device
+# fails naming it, no device line fails
+sed -n '/^hip_devpart() /p; /^hip_devlines() /p; /^hip_named() {/,/^}/p' "$RUNSH" > "$T/named.sh"
+dev='NVIDIA Stub (sm_120, 36 multiprocessors, bus 0000:05:00.0, 16283 MiB), HIP platform nvidia, runtime 12090, driver 13040; of 1 visible, CUDA_VISIBLE_DEVICES=1'
+two='NVIDIA Stub Two (sm_89, 46 multiprocessors, bus 0000:01:00.0, 12282 MiB), HIP platform nvidia, runtime 12090, driver 13040; of 1 visible, CUDA_VISIBLE_DEVICES=0'
+lib='; this libcft: HIP_ARCH 120, stage 64 MiB, page 256 bytes, kernels 40/40/64/40 registers and 0/0/16864/4160 bytes local a thread (run/level/seq/aug), PLANTS COMPILED IN, CFT_HIP_PLANT=none'
+printf 'libcft build x\ncft hip: hip:0 = %s%s\ncft hip: CFT_HIP_CHUNK=64\n12720 checks, 0 failed, 0 NOT RUN\n' "$dev" "$lib" > "$T/named-chunk.txt"
+printf 'cft hip: hip:0 = %s%s\ncft hip: CFT_HIP_CHUNK=64\ncft hip: hip:0 = %s%s\n' "$dev" "$lib" "$two" "$lib" > "$T/named-two.txt"
+printf 'libcft build x\n12720 checks, 0 failed, 0 NOT RUN\n' > "$T/named-none.txt"
+named() { HIP_DEV="$dev" bash -c '. "$1"; hip_named "$2" probe' _ "$T/named.sh" "$T/named-$1.txt"; }
+o1=$(named chunk); r1=$?
+o2=$(named two); r2=$?
+o3=$(named none); r3=$?
+CASES=$((CASES + 1))
+if [ "$r1" = 0 ] && [ -z "$o1" ] && [ "$r2" = 1 ] \
+   && [[ $o2 == "  FAIL  probe: 1 of its 2 device lines name another device than the stage's"*"NVIDIA Stub Two"* ]] \
+   && [ "$r3" = 1 ] && [[ $o3 == "  FAIL  probe: no CFT_HIP_INFO line"* ]]; then
+  echo "  ok    10. hip_named: a plant build's CFT_HIP_CHUNK line is no device line; a second device and no device line still fail"
+else
+  FAILS=$((FAILS + 1))
+  echo "  FAIL  10. hip_named: the CHUNK log rc $r1 '${o1}'; the second device rc $r2 '${o2:0:160}'; no device line rc $r3 '${o3:0:160}'"
+fi
+
 if [ "$GPU" = 1 ]; then
   echo "== the failures (a copy of the runner; ROOT links this tree's own entries; real builds)"
   # A tree whose entries are this one's, but for verify/, which holds the copy.
@@ -237,8 +275,57 @@ EOF
     [ -n "$log" ] && tail -n 25 "$log" | sed 's/^/          | /'
     [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
   fi
+
+  # 7 and 8: the same, for one of round 2's plants each, a run each
+  bypass() {  # <case> <plant> <how its check is judged>
+    local c=$1 bp=$2 w=$3 d="$T/bypass-$2" log
+    link_tree "$d"
+    mkhip "$d" HIP-PLANT-RUN \
+      '  if [ "$pl" = "$HIP_TEST_BYPASS" ]; then "$@" > "$out" 2>&1; rc=$?; else CFT_HIP_PLANT=$pl "$@" > "$out" 2>&1; rc=$?; fi    # the control: one plant not set' || return 1
+    t0=$(date +%s)
+    go "$d" "bypass-$bp" HIP_TEST_BYPASS="$bp"
+    log=$(ls -d "$d"/verify/state/*/hip.log 2>/dev/null | head -n 1)
+    CASES=$((CASES + 1))
+    if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] \
+       && grep -q "^FAIL  plant $bp did not turn its check red" "$log" \
+       && grep -q '^FAIL  the plants: a check a plant cannot turn red proves nothing' "$log" \
+       && ! grep -q '^== corpora' "$log"; then
+      echo "  ok    $c. plant $bp ($w) run without its plant: FAIL naming it, no leg after the plants ($(( $(date +%s) - t0 )) s)"
+      grep "^FAIL  plant $bp " "$log" | sed 's/^/          /'
+    else
+      FAILS=$((FAILS + 1))
+      echo "  FAIL  $c. plant $bp run without its plant: rc $RC, $VERDICT"
+      [ -n "$log" ] && tail -n 25 "$log" | sed 's/^/          | /'
+      [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
+    fi
+  }
+  bypass 7 full-refuse "the route proof alone, on both sides" || exit 1
+  bypass 8 aug-flags "hip-test's count of failed checks" || exit 1
+
+  # 9. the plants' build cut back to its two tools: the plants' copy keeps
+  # the default build's library, through which a Python check under a plant
+  # is green - the stage must FAIL on the device line that does not name it
+  link_tree "$T/nolib"
+  mkhip "$T/nolib" HIP-PLANTS-BUILD \
+    '  pt=(hip-corpus hip-test)    # the control: the plants build their two tools alone' || exit 1
+  t0=$(date +%s)
+  go "$T/nolib" nolib
+  log=$(ls -d "$T"/nolib/verify/state/*/hip.log 2>/dev/null | head -n 1)
+  CASES=$((CASES + 1))
+  if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] \
+     && grep -q '^FAIL  plant bank-mode did not turn its check red: .* exited 0, .*and no device line names the plant' "$log" \
+     && grep -q '^FAIL  the plants: a check a plant cannot turn red proves nothing' "$log" \
+     && ! grep -q '^== corpora' "$log"; then
+    echo "  ok    9. the plants' library left the default build's: the Python check under bank-mode green, the stage FAILS on its device line ($(( $(date +%s) - t0 )) s)"
+    grep '^FAIL  plant ' "$log" | sed 's/^/          /'
+  else
+    FAILS=$((FAILS + 1))
+    echo "  FAIL  9. the plants' library left the default build's: rc $RC, $VERDICT"
+    [ -n "$log" ] && tail -n 25 "$log" | sed 's/^/          | /'
+    [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
+  fi
 fi
 
 echo
-echo "test-hip-stage: $CASES cases, $FAILS failed$([ "$GPU" = 1 ] || echo '; the failures (5, 6) need --gpu on a host where the stage runs')"
+echo "test-hip-stage: $CASES cases, $FAILS failed$([ "$GPU" = 1 ] || echo "; the failures (5 to 9) need --gpu on a host where the stage runs")"
 [ "$FAILS" -eq 0 ]
