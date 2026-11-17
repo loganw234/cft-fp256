@@ -1,0 +1,27 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
+image atan2 rne: sha256 489a469ce8ab67b5a17c219913399185507f1e8e146313d40a1f705dd1fe8c1b, 520 instructions, 69 words
+image atan2 rtz: sha256 a32e41f6596b687ac6d85b82ffe407eda8ba1fb4423a2cdac63a25edf799d0c4, 520 instructions, 69 words
+image atan2 rdn: sha256 43d00c61b0780c2ac4c651bfc937572cb624c6328ad76b2a4aa25e814fa84083, 520 instructions, 69 words
+image atan2 rup: sha256 7edca2dbc8f5793dfa7b3dff889b7089a3a78b24e5c5004b628e64b88770593a, 520 instructions, 69 words
+image atan2 rmm: sha256 8c6b6423f5fc5966df032988049ac9e4650aa2fd2ef922bcae1195517e6e8fbe, 520 instructions, 69 words
+atan2-f32-x3f800000-d65890db4 all: device 0.304 s, oracle 0.000 s, 16384 lanes a call
+  FLAGS rne a=0x19000000 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rtz a=0x19000000 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rdn a=0x19000000 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rup a=0x19000000 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rmm a=0x19000000 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rne a=0x19000001 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rtz a=0x19000001 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rdn a=0x19000001 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rup a=0x19000001 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rmm a=0x19000001 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rne a=0x19000002 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rtz a=0x19000002 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rdn a=0x19000002 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rup a=0x19000002 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rmm a=0x19000002 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+  FLAGS rne a=0x19000003 lib=0x10 mpfr=0x10 (in the rule's must-mark range, and not marked)
+atan2-f32-x3f800000-d65890db4 all: 5120 cases, 0 value mismatches, 5120 flag mismatches, 1024 encodings, 0 skipped
+atan2-f32-x3f800000-d65890db4 all: 0 marked (rne 0, rtz 0, rdn 0, rup 0, rmm 0), 0 off the list, 0 guesses wrong
+atan2-f32-x3f800000-d65890db4 all: 0 in the rule (must mark 0, band 0), 5120 must-mark lanes not marked

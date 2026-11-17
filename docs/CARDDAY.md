@@ -2564,6 +2564,14 @@ it ok"), and `parse_routine_marks` refuses only a log whose lines disagree with 
 `check_routine` fails on marks only for its own exp smoke (3 marked, none off the list). A range rule in the tool is a later parcel's. What the count does mean: an atan2 slice that passes has its value and flag
 mismatches at 0; a lane that the program marks is compared, not decided, as for every routine.
 
+*Note, 2026-11-16 (parcel M4RR; the paragraph above stays as written, and holds for every atan2 record made before this note).* The "later parcel" has come: for an atan2 op
+`routine-sweep` classes each lane from y and the fixed x by exact arithmetic as **must mark** (t = |y/x| below 2^-76 (1 - INV_EPS_T)), **band** (to 2^-76 / (1 - INV_EPS_T)) or neither,
+the harness's `_tq_band_tw`. A marked lane in the rule is counted in the rule (the new line `<op> <mode>: R in the rule (must mark P, band B), Q must-mark lanes not marked`, and a
+MARK line's suffix `(in the rule: must mark)` or `(in the rule: band)`), "off the list" then counts only a mark neither listed nor in the rule, and a must-mark lane left unmarked is a flag
+mismatch, so the slice fails. A record made before the rule has no rule counts (the key is absent, never zero) and its atan2 "off the list" holds the rule's lanes, which cannot be told
+apart afterwards; the report counts those slices apart. Every atan2 item was fully swept before the rule, so none has a record with it until the items are swept again (docs/VALIDATION.md,
+the entry of 2026-11-16, has the accounting and the cost).
+
 ### The card's rates (added 2026-10-28, parcel TP): cases a second a tile by op and format, and the probe leg
 
 On 2026-10-27 Logan asked whether the measurement metrics should also measure throughput at different precisions, "as now each of the formats gets

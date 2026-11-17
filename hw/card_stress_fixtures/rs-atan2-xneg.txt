@@ -1,0 +1,7 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
+image atan2 rne: sha256 bba5408359a92b2580160f9af7edb2f918a878ff7f8cf488231237721e74faf0, 523 instructions, 70 words
+atan2-f32-xbf800000-da86a60d8 rne: device 0.003 s, oracle 0.000 s, 16384 lanes a call
+atan2-f32-xbf800000-da86a60d8 rne: 64 cases, 0 value mismatches, 0 flag mismatches, 64 encodings, 0 skipped
+atan2-f32-xbf800000-da86a60d8 rne: 0 marked (rne 0, rtz -, rdn -, rup -, rmm -), 0 off the list, 0 guesses wrong
+atan2-f32-xbf800000-da86a60d8 rne: 0 in the rule (must mark 0, band 0), 0 must-mark lanes not marked

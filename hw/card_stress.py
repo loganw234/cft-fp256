@@ -834,7 +834,9 @@ class Driver:
         # parcel M4X2: the directory of the routine images this run's build step made (gen_sweep_images.py --out; a new one each run start,
         # never reused, never deleted by the driver), which every routine job is handed as CFT_SWEEP_IMAGES; None until the step has run
         self.routine_images: Optional[str] = None
-        self.routine_marks = [0, 0, 0, 0]      # this run's routine slices: how many, and their marked lanes, off the list, guesses wrong
+        # this run's routine slices: how many, and their marked lanes, off the list, guesses wrong, then (atan2's rule: a record made before it adds 0)
+        # the marks in the rule's must-mark range and band, and the must-mark lanes left unmarked
+        self.routine_marks = [0, 0, 0, 0, 0, 0, 0]
         # cases and skipped slots of each item's completed slices, to hold a wholly covered item to its whole-space figures
         self.sums: Dict[str, List[int]] = {}
         self.whole_done: set = set()
@@ -2007,7 +2009,7 @@ class Driver:
                 self.note_rate(rec)
                 if it.tool == L.ROUTINE_TOOL:
                     c = rec.get("counts") or {}
-                    for i, key in enumerate((None, "marked", "off_list", "guesses_wrong")):
+                    for i, key in enumerate((None, "marked", "off_list", "guesses_wrong", "rule_must", "rule_band", "must_unmarked")):
                         self.routine_marks[i] += 1 if key is None else int(c.get(key, 0))
                 if st == "fail":
                     self.disagreements += 1
@@ -2536,7 +2538,10 @@ class Driver:
                          + "; the tile computes nothing for a host item")
             if any(it.tool == L.ROUTINE_TOOL for it in self.items):
                 lines.append(f"routine    {routine[0]} slice(s) of the routine items: marked {routine[1]:,} (off the list {routine[2]:,}, guesses wrong "
-                             f"{routine[3]:,}); a mark is counted and named in the report, and fails nothing")
+                             f"{routine[3]:,}"
+                             + (f", in atan2's rule {routine[4] + routine[5]:,}: must mark {routine[4]:,}, band {routine[5]:,}; must-mark lanes not marked "
+                                f"{routine[6]:,}" if routine[4] or routine[5] or routine[6] else "")
+                             + "); a mark is counted and named in the report, and fails nothing")
             lines.append(f"hostpool   {self.pool_note}; {pool_served} slice(s) recorded; in flight: "
                          + ("; ".join(in_flight) if in_flight else "none"))
             if self.sink is not None:

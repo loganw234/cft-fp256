@@ -1,0 +1,27 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
+image atan2 rne: sha256 bba5408359a92b2580160f9af7edb2f918a878ff7f8cf488231237721e74faf0, 523 instructions, 70 words
+image atan2 rtz: sha256 c82e8aa8b22ff7bc6db5010f94c6d4b525b82925eebcc678a421f3b2e58a48a0, 523 instructions, 70 words
+image atan2 rdn: sha256 04823973b74c07f1976512c0ba709452faa3b80bc36e87e9c0b98199e6b7ac5e, 523 instructions, 70 words
+image atan2 rup: sha256 17900861c713bb9e9fe431c1988b3b6029e0b09e07e29026149758bac7780134, 523 instructions, 70 words
+image atan2 rmm: sha256 7966bf6da924c87cff32c8a8d9117e97bc12680ffd81890fb5ae1a0dd537fdcc, 523 instructions, 70 words
+atan2-f32-x3f800000-da86a60d8 all: device 0.280 s, oracle 0.000 s, 16384 lanes a call
+  MARK rne a=0x19000000 guess=0x19000000 right (in the rule: must mark)
+  MARK rtz a=0x19000000 guess=0x18ffffff right (in the rule: must mark)
+  MARK rdn a=0x19000000 guess=0x18ffffff right (in the rule: must mark)
+  MARK rup a=0x19000000 guess=0x19000000 right (in the rule: must mark)
+  MARK rmm a=0x19000000 guess=0x19000000 right (in the rule: must mark)
+  MARK rne a=0x19000001 guess=0x19000001 right (in the rule: must mark)
+  MARK rtz a=0x19000001 guess=0x19000000 right (in the rule: must mark)
+  MARK rdn a=0x19000001 guess=0x19000000 right (in the rule: must mark)
+  MARK rup a=0x19000001 guess=0x19000001 right (in the rule: must mark)
+  MARK rmm a=0x19000001 guess=0x19000001 right (in the rule: must mark)
+  MARK rne a=0x19000002 guess=0x19000002 right (in the rule: must mark)
+  MARK rtz a=0x19000002 guess=0x19000001 right (in the rule: must mark)
+  MARK rdn a=0x19000002 guess=0x19000001 right (in the rule: must mark)
+  MARK rup a=0x19000002 guess=0x19000002 right (in the rule: must mark)
+  MARK rmm a=0x19000002 guess=0x19000002 right (in the rule: must mark)
+  MARK rne a=0x19000003 guess=0x19000003 right (in the rule: must mark)
+atan2-f32-x3f800000-da86a60d8 all: 5120 cases, 0 value mismatches, 0 flag mismatches, 1024 encodings, 0 skipped
+atan2-f32-x3f800000-da86a60d8 all: 5120 marked (rne 1024, rtz 1024, rdn 1024, rup 1024, rmm 1024), 0 off the list, 0 guesses wrong
+atan2-f32-x3f800000-da86a60d8 all: 5120 in the rule (must mark 5120, band 0), 0 must-mark lanes not marked

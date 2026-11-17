@@ -1900,6 +1900,66 @@ def build_routine_run(item="exp-f32-d043b3bb5-all", group="routine"):
     return fx.records(), op
 
 
+def build_rule_run(item="atan2-f32-x3f800000-da86a60d8-all"):
+    """A one-cycle run of atan2 routine slices (parcel M4RR), records as the driver writes them: three slices of 2^20 encodings, the first MADE BEFORE the tiny-quotient
+    rule (no rule keys: 100 marked, all 100 'off the list', the rule's lanes among them), the second with it (100 marked of which 90 must mark and 10 band, 0 off the list,
+    the sixteen named lanes in the rule, one of them WRONG), the third with it and two must-mark lanes left unmarked (counts only: 0 marked). Returns (records, the op)."""
+    op = item[:-4]
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = fx.begin_cycle(T0 + 5, "quad", 1, 3)
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0})])
+    E = 1 << 20
+    named = [{"attr": "rne", "lane": 0x19000000 + i, "guess": 0x19000000 + i, "wrong": i == 3, "off_list": False, "rule": "must mark" if i < 14 else "band"} for i in range(16)]
+    old_named = [dict(n, off_list=True, rule=None) for n in named]
+    by = {"rne": 100, "rtz": 0, "rdn": 0, "rup": 0, "rmm": 0}
+    slices = [
+        (0, E, {"marked": 100, "off_list": 100, "guesses_wrong": 1},
+         {"marks": {"by_attr": by, "named": old_named, "not_named": 84}, "times": {"device_s": 1.0, "oracle_s": 1.0, "lanes_a_call": 16384}}),
+        (E, 2 * E, {"marked": 100, "off_list": 0, "guesses_wrong": 1, "rule_must": 90, "rule_band": 10, "must_unmarked": 0},
+         {"marks": {"by_attr": by, "named": named, "not_named": 84}, "times": {"device_s": 1.0, "oracle_s": 1.0, "lanes_a_call": 16384}}),
+        (2 * E, 3 * E, {"marked": 0, "off_list": 0, "guesses_wrong": 0, "rule_must": 0, "rule_band": 0, "must_unmarked": 2},
+         {"marks": {"by_attr": {k: 0 for k in by}, "named": [], "not_named": 0}, "times": {"device_s": 1.0, "oracle_s": 1.0, "lanes_a_call": 16384}}),
+    ]
+    for lo, hi, mk, extra in slices:
+        sw = {"item": item, "tool": "routine", "op": op, "mode": "all", "reach": "tile", "lo": lo, "hi": hi, "tile": 1, "jobs": 1,
+              "expected_cases": 5 * (hi - lo), "expected_encodings": hi - lo, "group": "routine"}
+        fx.leg("quad", f"sweep-{item}", t, 30, kind="sweep", sweep=sw, tile=1, extra=extra,
+               counts=dict({"cases": 5 * (hi - lo), "value_mismatches": 0, "flag_mismatches": mk.get("must_unmarked", 0), "encodings": hi - lo, "skipped": 0}, **mk),
+               rate={"value": 5 * (hi - lo) / 30.0, "unit": "cases/s"})
+        t += 31
+    fx.end_cycle(t)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=1)
+    return fx.records(), op
+
+
+def group_routine_rule():
+    """Parcel M4RR: the report of an atan2 item whose slices were made before and after the tiny-quotient rule - the rule's counts (must mark, band, must-mark lanes not marked)
+    from the slices that have them only, the slices before it counted apart and never read as zero in the rule, a named lane in the rule marked so, the same under --json - and
+    an exp item, which has no rule, printing no rule line."""
+    group("routine rule")
+    recs, op = build_rule_run()
+    S = R.summarize(recs, rev=None)
+    T = R.render(S)
+    rr = S["sweep"]["routine"]
+    check(len(rr) == 1 and rr[0]["has_rule"] and rr[0]["slices"] == 3 and rr[0]["rule_slices"] == 2 and rr[0]["before_rule"] == 1
+          and (rr[0]["rule_must"], rr[0]["rule_band"], rr[0]["must_unmarked"]) == (90, 10, 2) and rr[0]["marked"] == 200 and rr[0]["off_list"] == 100,
+          "routine rule: the block has 3 slices, 2 made with the rule (90 must mark, 10 band, 2 must-mark lanes not marked) and 1 before it; the 100 off the list are the old slice's", rr)
+    check("      the tiny-quotient rule: 2 slice(s) made with it, in the rule 100 (must mark 90, band 10), must-mark lanes not marked 2; 1 slice(s) made before it" in T
+          and "marked 200 (rne 200, rtz 0, rdn 0, rup 0, rmm 0); off the list 100; guesses wrong 2" in T,
+          "routine rule: the text gives the rule line with the slices made before it apart from the ones with it", T[T.find("a routine item"):][:1200])
+    check("rne a=0x19000003 guess=0x19000003 WRONG (in the rule: must mark)" in T and "rne a=0x1900000f guess=0x1900000f right (in the rule: band)" not in T
+          and "rne a=0x19000003 guess=0x19000003 WRONG (off the list)" in T,
+          "routine rule: a named lane of the slice with the rule that was wrong carries 'in the rule: must mark', the same lane of the old slice '(off the list)', a right lane in the rule is not listed")
+    jr = json.loads(json.dumps(S["sweep"]["routine"], allow_nan=False))      # --json writes the summary, which this is part of
+    check(len(jr) == 1 and (jr[0]["rule_must"], jr[0]["rule_band"], jr[0]["must_unmarked"], jr[0]["rule_slices"], jr[0]["before_rule"]) == (90, 10, 2, 2, 1)
+          and any(n["rule"] == "must mark" for n in jr[0]["named"]) and any(n["rule"] is None for n in jr[0]["named"]),
+          "routine rule: and the JSON carries the rule's counts, the slices before it and each named lane's part of the rule", jr[:1])
+    recs2, _ = build_routine_run()
+    T2 = R.render(R.summarize(recs2, rev=None))
+    check("the tiny-quotient rule" not in T2, "routine rule: an exp item (no rule) prints no rule line, as before")
+
+
 def group_routine():
     """Parcel M4X2: the report over routine slices - the third group, its totals and sentence, the routine block (the claim, the marks by attribute, the lanes the tool named that
     were off the list or wrong, the marks it did not name, the seconds summed), the same under --json, an item the catalog does not name taking its records' group, and a
@@ -3425,6 +3485,7 @@ def main():
         group_json(base)
         group_reach()
         group_routine()
+        group_routine_rule()
         group_wide()
         group_rates()
         group_left_out(base)

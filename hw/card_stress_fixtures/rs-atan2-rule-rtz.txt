@@ -1,0 +1,23 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
+image atan2 rtz: sha256 c82e8aa8b22ff7bc6db5010f94c6d4b525b82925eebcc678a421f3b2e58a48a0, 523 instructions, 70 words
+atan2-f32-x3fb504f3-da86a60d8 rtz: device 0.230 s, oracle 0.002 s, 16384 lanes a call
+  MARK rtz a=0x19b48000 guess=0x197f43fb right (in the rule: must mark)
+  MARK rtz a=0x19b48001 guess=0x197f43fc right (in the rule: must mark)
+  MARK rtz a=0x19b48002 guess=0x197f43fe right (in the rule: must mark)
+  MARK rtz a=0x19b48003 guess=0x197f43ff right (in the rule: must mark)
+  MARK rtz a=0x19b48004 guess=0x197f4400 right (in the rule: must mark)
+  MARK rtz a=0x19b48005 guess=0x197f4402 right (in the rule: must mark)
+  MARK rtz a=0x19b48006 guess=0x197f4403 right (in the rule: must mark)
+  MARK rtz a=0x19b48007 guess=0x197f4405 right (in the rule: must mark)
+  MARK rtz a=0x19b48008 guess=0x197f4406 right (in the rule: must mark)
+  MARK rtz a=0x19b48009 guess=0x197f4407 right (in the rule: must mark)
+  MARK rtz a=0x19b4800a guess=0x197f4409 right (in the rule: must mark)
+  MARK rtz a=0x19b4800b guess=0x197f440a right (in the rule: must mark)
+  MARK rtz a=0x19b4800c guess=0x197f440c right (in the rule: must mark)
+  MARK rtz a=0x19b4800d guess=0x197f440d right (in the rule: must mark)
+  MARK rtz a=0x19b4800e guess=0x197f440f right (in the rule: must mark)
+  MARK rtz a=0x19b4800f guess=0x197f4410 right (in the rule: must mark)
+atan2-f32-x3fb504f3-da86a60d8 rtz: 4096 cases, 0 value mismatches, 0 flag mismatches, 4096 encodings, 0 skipped
+atan2-f32-x3fb504f3-da86a60d8 rtz: 4096 marked (rne -, rtz 4096, rdn -, rup -, rmm -), 0 off the list, 0 guesses wrong
+atan2-f32-x3fb504f3-da86a60d8 rtz: 4096 in the rule (must mark 818, band 3278), 0 must-mark lanes not marked

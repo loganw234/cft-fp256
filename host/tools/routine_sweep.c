@@ -11,6 +11,7 @@
  *   routine-sweep <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>
  *   routine-sweep oracle <op> <rne|rtz|rdn|rup|rmm>      hex lanes on stdin, "lane result flags" a line each out; no device, no image
  *   routine-sweep list                                   the thirteen, each with its images found or `no image`
+ *   routine-sweep rule atan2-f32-x<8 hex digits>         hex y lanes on stdin, "lane none|must|band" a line each out: atan2's rule's class of each (below)
  *
  * op is <name>-f32 for exp, exp2, expm1, log, log2, log1p, sin, cos, tan, atan, asin and acos, and atan2-f32-x<8 hex digits> for
  * atan2 with x fixed and y swept (r0 the lanes' y, r1 the fixed x). Any op may end -d<8 hex digits>, the first 32 bits of the
@@ -34,6 +35,14 @@
  *              replay decides a marked lane;
  *   a lane on the image's .marks list that is not marked is a flag mismatch, named; a mark not on the list is counted as "off
  *   the list", named, and fails nothing - the first sweeps are what find them.
+ *
+ * THE RULE, for an atan2 op: the lanes the routine marks as a RANGE, whatever a list holds. A lane is classed from y and the fixed x by exact
+ * arithmetic (rule_setup_x below, which cites the constants' sources) as must mark (x's sign bit clear, |y| < x, t = |y / x| under lo), band (lo <=
+ * t < hi, where the seed decides, so a mark there is neither required nor forbidden) or neither. A marked lane in the rule is counted in the rule,
+ * not off the list; "off the list" is then a mark neither listed nor in the rule; an UNMARKED must-mark lane is a flag mismatch, as one on the list
+ * is, and fails the slice. After the marks line comes
+ *     <op> <mode>: R in the rule (must mark P, band B), Q must-mark lanes not marked
+ * and a MARK line in the rule ends " (in the rule: must mark)" or " (in the rule: band)". No other op prints these.
  * Each call is held as mathlib_harness.check_r24 holds one: the OR of the bytes' [4:0] is flags_out; STATUS[6] is set exactly
  * when a byte's bit 7 is; no byte has [6:5]; every count is 1; STATUS has no other bit. A failure is a flag mismatch, named by
  * the call's range.
@@ -109,6 +118,7 @@ static const struct { const char *name; mpfr_rnd_t mr; int rmm; } ATT[5] = {
 
 static cft_device *dev;
 static uint64_t cases, vmis, fmis, nmarked[5], off_list, wrong_guess;
+static uint64_t in_must, in_band, must_unmarked;   /* atan2: marks in the rule's must-mark range and band; must-mark lanes left unmarked */
 static int shown_m, shown_f, shown_k;
 static int sabotage;                       /* 0, or CFT_SOAK_SABOTAGE's 1, 2 or 3 */
 static uint64_t sab3_cleared;              /* sabotage 3: the marks it cleared */
@@ -578,7 +588,96 @@ typedef struct {
     image im[5];
     uint32_t chk;                          /* CFT_SWEEP_ORACLE_CHECK */
     size_t lanes;
+    int rule;                              /* atan2 with a positive finite x: the tiny-quotient rule applies (rule_setup) */
+    uint32_t yb_lo, yb_hi;                 /* |y| encodings: [1, yb_lo) must mark, [yb_lo, yb_hi) is the band (|y| < x only) */
 } job;
+
+/* ---- the tiny-quotient rule (atan2) ------------------------------------ */
+
+/* The fp32 routine marks every lane whose quotient t = |y| / x is in the tiny-quotient range: x's sign bit clear, |y| <= |x| and
+ * t~ = n0 RECIP_SEED(d0) under TQR = 2^(emin + 2p + 2) = 2^-76 (python/cft_golden/mathlib.py, _build_atan2_tw, the constant TQR).
+ * t~ is t within the seed's error, which python/cft_golden/mathlib.py's INV_EPS_T = 28/10000 bounds, so as
+ * python/tests/mathlib_inv_harness.py's _tq_band_tw gives them
+ *     lo = 2^-76 (1 - INV_EPS_T) and hi = 2^-76 / (1 - INV_EPS_T):
+ * t < lo is MUST MARK (inside whatever the seed does), lo <= t < hi is the BAND (the seed decides), and the rest is neither.
+ * _tq_shape's shape: y and x finite, y not zero, x's sign bit clear, |y| < x. The classes are exact, in GMP integers: t is
+ * monotone in |y|'s encoding, so the two edges are found once, by bisection, as the first |y| encodings at or past lo and hi. */
+#define RULE_EXP (-126 + 2 * 24 + 2)       /* emin + 2p + 2 at fp32 */
+#define RULE_EPS_NUM 28u                   /* INV_EPS_T = 28 / 10000 */
+#define RULE_EPS_DEN 10000u
+
+/* value(e) = m 2^k for a finite non-negative encoding e */
+static void enc_mk(uint32_t e, uint32_t *m, int *k)
+{
+    uint32_t ex = (e >> 23) & 0xffu, f = e & 0x7fffffu;
+    if (ex == 0) { *m = f; *k = -149; }
+    else { *m = f | 0x800000u; *k = (int)ex - 150; }
+}
+
+/* t(y) >= 2^RULE_EXP * num / den, that is value(y) den >= value(x) num 2^RULE_EXP, for the encodings y and x */
+static int t_at_least(uint32_t y, uint32_t x, uint32_t num, uint32_t den)
+{
+    uint32_t my, mx;
+    int ky, kx, kmin;
+    mpz_t l, r;
+    int ge;
+    enc_mk(y, &my, &ky);
+    enc_mk(x, &mx, &kx);
+    kx += RULE_EXP;
+    kmin = ky < kx ? ky : kx;
+    mpz_init_set_ui(l, my);
+    mpz_mul_ui(l, l, den);
+    mpz_mul_2exp(l, l, (mp_bitcnt_t)(ky - kmin));
+    mpz_init_set_ui(r, mx);
+    mpz_mul_ui(r, r, num);
+    mpz_mul_2exp(r, r, (mp_bitcnt_t)(kx - kmin));
+    ge = mpz_cmp(l, r) >= 0;
+    mpz_clear(l);
+    mpz_clear(r);
+    return ge;
+}
+
+/* the first |y| encoding in [1, x] with t >= 2^RULE_EXP num / den (at |y| = x, t = 1 is past both edges) */
+static uint32_t first_t_at_least(uint32_t x, uint32_t num, uint32_t den)
+{
+    uint32_t lo = 1, hi = x;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (t_at_least(mid, x, num, den)) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+}
+
+static void rule_setup_x(uint32_t x, int *rule, uint32_t *yb_lo, uint32_t *yb_hi)
+{
+    *rule = x != 0 && x < 0x7f800000u;     /* x's sign bit clear, finite, not zero */
+    *yb_lo = *yb_hi = 0;
+    if (*rule) {
+        *yb_lo = first_t_at_least(x, RULE_EPS_DEN - RULE_EPS_NUM, RULE_EPS_DEN);
+        *yb_hi = first_t_at_least(x, RULE_EPS_DEN, RULE_EPS_DEN - RULE_EPS_NUM);
+    }
+}
+
+static void rule_setup(job *J)
+{
+    J->rule = 0;
+    if (J->fn == TF_ATAN2)
+        rule_setup_x(J->x, &J->rule, &J->yb_lo, &J->yb_hi);
+}
+
+/* 0: not in the rule; 1: must mark; 2: the band */
+static int rule_class_of(int rule, uint32_t yb_lo, uint32_t yb_hi, uint32_t x, uint32_t a)
+{
+    uint32_t ay = a & 0x7fffffffu;
+    if (!rule || ay == 0 || ay >= 0x7f800000u || ay >= x)
+        return 0;
+    return ay < yb_lo ? 1 : (ay < yb_hi ? 2 : 0);
+}
+
+static int rule_class(const job *J, uint32_t a)
+{
+    return rule_class_of(J->rule, J->yb_lo, J->yb_hi, J->x, a);
+}
 
 static int on_list(const image *im, uint32_t a)
 {
@@ -682,14 +781,20 @@ static void judge(job *J, int m, uint32_t a, uint32_t lib, uint8_t byte, uint32_
     if (byte & CFT_LANE_MARKED) {
         int wrong = bad || (byte & CFT_FLAGS_ALL) != of;
         int listed = on_list(&J->im[m], a);
+        int rc = rule_class(J, a);
         nmarked[m]++;
-        if (!listed)
+        if (rc == 1)
+            in_must++;
+        else if (rc == 2)
+            in_band++;
+        else if (!listed)
             off_list++;
         if (wrong)
             wrong_guess++;
         if (shown_k++ < SHOW)
             printf("  MARK %s a=0x%08lx guess=0x%08lx %s%s\n", mode, (unsigned long)a, (unsigned long)lib,
-                   wrong ? "WRONG" : "right", listed ? "" : " (off the list)");
+                   wrong ? "WRONG" : "right",
+                   rc == 1 ? " (in the rule: must mark)" : rc == 2 ? " (in the rule: band)" : listed ? "" : " (off the list)");
         return;
     }
     if (bad) {
@@ -700,7 +805,11 @@ static void judge(job *J, int m, uint32_t a, uint32_t lib, uint8_t byte, uint32_
         fmis++;
         rep_flags(mode, a, byte & CFT_FLAGS_ALL, of, "");
     }
-    if (on_list(&J->im[m], a)) {
+    if (rule_class(J, a) == 1) {
+        must_unmarked++;
+        fmis++;
+        rep_flags(mode, a, byte, of, " (in the rule's must-mark range, and not marked)");
+    } else if (on_list(&J->im[m], a)) {
         fmis++;
         rep_flags(mode, a, byte, of, " (on the marks list, and not marked)");
     }
@@ -782,6 +891,7 @@ static void usage(const char *p)
     fprintf(stderr,
             "usage: %s <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>\n"
             "       %s oracle <op> <rne|rtz|rdn|rup|rmm>        hex lanes on stdin\n"
+            "       %s rule atan2-f32-x<8 hex digits>           hex y lanes on stdin, \"lane none|must|band\" a line each out\n"
             "       %s list\n"
             "  op: <name>-f32 for exp exp2 expm1 log log2 log1p sin cos tan atan asin acos, or atan2-f32-x<8 hex digits>;\n"
             "      either may end -d<8 hex digits>, the images' digest (routine-sweep list prints them)\n"
@@ -789,7 +899,7 @@ static void usage(const char *p)
             "  CFT_SWEEP_IMAGES (the images' directory, else sweep-images/ beside the binary), CFT_SOAK_ARTIFACT, CFT_XRT_TILES,\n"
             "  CFT_SWEEP_LANES, CFT_SWEEP_ORACLE_CHECK, CFT_SOAK_SABOTAGE (=1 flips the low bit of, =2 a flag bit of, the first\n"
             "  UNMARKED lane of each call, not the first lane: a marked first lane would only make a wrong guess, which fails\n"
-            "  nothing; =3 clears every mark)\n", p, p, p);
+            "  nothing; =3 clears every mark)\n", p, p, p, p);
 }
 
 static void oracle_init(void)
@@ -884,6 +994,60 @@ static int cmd_oracle(int argc, char **argv)
     return 0;
 }
 
+/* routine-sweep rule <atan2 op>: hex y lanes on stdin, "lane class" a line each out (none, must or band): the tiny-quotient rule's class
+ * of each, with no device and no image, and the two edges on stderr. The class a sweep's judge uses, for tests to hold to the harness. */
+static int cmd_rule(int argc, char **argv)
+{
+    opspec o;
+    const char *why = "";
+    char line[256];
+    int rule;
+    uint32_t yb_lo, yb_hi;
+    if (argc != 3) {
+        usage(argv[0]);
+        return 2;
+    }
+    if (!parse_op(argv[2], &o, &why)) {
+        fprintf(stderr, "routine-sweep: %s: %s\n", argv[2], why);
+        return 2;
+    }
+    if (RTNS[o.ri].fn != TF_ATAN2) {
+        fprintf(stderr, "routine-sweep: rule: only atan2 has a tiny-quotient rule, not %s\n", RTNS[o.ri].name);
+        return 2;
+    }
+    rule_setup_x(o.x, &rule, &yb_lo, &yb_hi);
+    fprintf(stderr, "rule: x 0x%08lx, %s, must mark |y| in [1, 0x%08lx), band [0x%08lx, 0x%08lx), |y| < x only\n", (unsigned long)o.x,
+            rule ? "the rule applies" : "no rule (x's sign bit is set, or x is zero, infinite or a NaN)", (unsigned long)yb_lo,
+            (unsigned long)yb_lo, (unsigned long)yb_hi);
+    while (fgets(line, sizeof line, stdin)) {
+        char *s = line;
+        size_t n;
+        uint64_t v;
+        int c;
+        while (*s == ' ' || *s == '\t')
+            s++;
+        n = strlen(s);
+        while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
+            s[--n] = 0;
+        if (!n)
+            continue;
+        {
+            char tmp[300];
+            const char *h = s;
+            if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+                h = s + 2;
+            snprintf(tmp, sizeof tmp, "0x%s", h);
+            if (!*h || !parse_u64(tmp, &v) || v > 0xffffffffull) {
+                fprintf(stderr, "routine-sweep: rule: not a 32-bit hex lane: %s\n", s);
+                return 2;
+            }
+        }
+        c = rule_class_of(rule, yb_lo, yb_hi, o.x, (uint32_t)v);
+        printf("%08lx %s\n", (unsigned long)v, c == 1 ? "must" : c == 2 ? "band" : "none");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     opspec o;
@@ -899,6 +1063,8 @@ int main(int argc, char **argv)
         return cmd_list(argv[0]);
     if (argc >= 2 && !strcmp(argv[1], "oracle"))
         return cmd_oracle(argc, argv);
+    if (argc >= 2 && !strcmp(argv[1], "rule"))
+        return cmd_rule(argc, argv);
     if (argc != 5) {
         usage(argv[0]);
         return 2;
@@ -933,6 +1099,7 @@ int main(int argc, char **argv)
     J.first = mode < 5 ? mode : 0;
     J.last = mode < 5 ? mode : 4;
     J.lanes = LANES;
+    rule_setup(&J);
     if ((e = getenv("CFT_SWEEP_LANES")) && *e) {
         uint64_t v;
         if (!parse_u64(e, &v) || v < 1 || v > MAXLANES) {
@@ -1042,6 +1209,10 @@ int main(int argc, char **argv)
                argv[4], (unsigned long long)tot, col[0], col[1], col[2], col[3], col[4], (unsigned long long)off_list,
                (unsigned long long)wrong_guess);
     }
+    if (J.fn == TF_ATAN2)
+        printf("%s %s: %llu in the rule (must mark %llu, band %llu), %llu must-mark lanes not marked\n", opword, argv[4],
+               (unsigned long long)(in_must + in_band), (unsigned long long)in_must, (unsigned long long)in_band,
+               (unsigned long long)must_unmarked);
     fprintf(stderr, "%s %s: device %.3f s, oracle %.3f s, %lu lanes a call\n", opword, argv[4], t_device, t_oracle_s,
             (unsigned long)J.lanes);
     for (m = 0; m < 5; m++)
