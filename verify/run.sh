@@ -162,9 +162,11 @@ BUDGET=""
 # acceptance set (acceptance) and the compiler's routines, split from
 # the language's quick stage (lang-routines); and since 2026-11-12 the
 # GPU backend (hip), which costs nothing where it is skipped by name - a
-# host with no hipcc or no GPU, the box and CI among them - and about ten
-# minutes where it runs (564 s on an RTX 5060 Ti under WSL with the
-# desktop loaded, 2026-11-12). `full` is the census.
+# host with no hipcc or no GPU, the box and CI among them - and where it
+# runs about ten minutes with round 1's checks (564 s on an RTX 5060 Ti
+# under WSL with the desktop loaded, 2026-11-12), and 12 to 20 since
+# round 2's joined them (738 s on that GPU and 1,189 s on an RX 7600,
+# 2026-11-17). `full` is the census.
 # Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
@@ -1823,8 +1825,8 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
 #     equal (sw is the definition: GPU-A's captured sums are printed beside
 #     them as information only, and routines-fp32's is stale since M4F2),
 #     and the routine corpora's equal to the golden model's own output too
-#     (refuse.bin, GPU-A's one augmentedAddition case, among them since
-#     round 2, which runs it); an image no device holds (n_consts 513:
+#     (refuse.bin, GPU-A's one augmentedAddition case, is one of the
+#     corpora since round 2 runs it); an image no device holds (n_consts 513:
 #     program.c's check, before any device's own), made here from
 #     refuse.bin's case, refused by its sentence on sw and on hip:0,
 #     whatever features the device publishes. Not the 1M stream, about
@@ -1852,8 +1854,9 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
 #     made here, on sw and on hip:0 under those two routes.
 # HIP_FULL=1, off by default, is the full-width tier: it adds divsqrt.c's
 # chunk route (CFT_DIVSQRT_SEQ=0) to divsqrt_check, to its control in the
-# plants' build and to the formatOf replay - about 67 s more on the RTX
-# 5060 Ti and 168 s on the RX 7600 (2026-11-17).
+# plants' build and to the formatOf replay, about 67 s of runs on the RTX
+# 5060 Ti and 168 s on the RX 7600 - the stage with it 774 s and 1,397 s
+# (2026-11-17), the RX 7600's within 103 s of a 1,500 s timeout.
 # What it asks of its host: hipcc (HIP_ROOT, default /opt/rocm; the
 # platform HIP_PLATFORM, else that installation's hipconfig, else amd), a
 # GPU the platform's lister shows (nvidia-smi -L, or amd-smi list or
@@ -2592,9 +2595,11 @@ PY
   # ---- j. the formatOf sets (754-2019 5.4.1), whose divides and roots are
   # cft_div's and cft_sqrt's: made here in a directory of their own, then
   # cft-selftest on sw and on hip:0 under the default route and the whole
-  # operation - the replay that holds the images' bits against the vectors
-  # - and, under HIP_FULL=1, the chunk route; each the sets and cases of
-  # the software handle's replay of the same directory in this run
+  # operation (where the image runs, which the plants' route proof shows,
+  # its bits against the vectors; like divsqrt_check, a refused image
+  # would fall through to the same bits) and, under HIP_FULL=1, the chunk
+  # route; each the sets and cases of the software handle's replay of the
+  # same directory in this run
   echo "== the formatOf sets: made, then cft-selftest on sw and on hip:0 under each route"
   t0=$(date +%s)
   if hip_cmd "$L/gen-formatof.txt" "$PYBIN" -B "$ROOT/vectors/gen_vectors.py" --out "$V2" \
