@@ -55,9 +55,12 @@
  *
  *   index tables (CFT_SEQ_FEAT_INDEXED);
  *
- *   augmentedAddition (CFT_SEQ_FEAT_AUGADD): augmented.c does not
- *   compile for an NVIDIA device as it is, so this unit is
- *   CFT_NO_AUGMENTED.
+ *   augmentedAddition (CFT_SEQ_FEAT_AUGADD) is no longer one of them
+ *   (round 2's G2A): this unit includes augmented.c's lane functions
+ *   (CFT_AUG_LANES_ONLY, which leaves its entry points to libcft's
+ *   augmented.o), so the executor runs AUGADD and AUGERR, and the API's
+ *   cft_augmented_add, _sub and _mul run here too, on a seam entry of
+ *   their own (cfth_augmented: k_aug, a thread an element).
  *
  * A program's scratch is the software handle's 256 slots, and
  * cft_open_ex refuses any non-zero depth for a GPU by name, 256
@@ -119,11 +122,12 @@
  * One copy means two roles of one call can share bytes on the device,
  * which per-role copies never do. So an input that overlaps an output of
  * the same call in the same buffer is STAGED (read from the mirror,
- * which device.c has brought home first), except cft_run's d == a, where
- * each element is read before its own is written (cft.h); and two
- * outputs that overlap are both staged and written into the mirror in
- * the staged order. No lane reads what another lane writes, so no answer
- * depends on the order lanes run in.
+ * which device.c has brought home first), except cft_run's d == a and an
+ * augmented call's r or e over a or b, where each element is read before
+ * its own is written (cft.h); and two outputs that overlap are both
+ * staged and written into the mirror in the staged order. No lane reads
+ * what another lane writes, so no answer depends on the order lanes run
+ * in.
  *
  * ---------------------------------------------------------------
  * Plants (HIP_PLANTS=1 only)
@@ -153,6 +157,11 @@
  *                  order verifier-V8 found in the XRT backend (KL-464);
  *                  only an upload that fails (CFT_HIP_UPLOAD) shows it
  *   (round 2's G2A: its plants here)
+ *   aug-flip       bit 0 of r's first element in an augmented call
+ *   aug-flags      overflow dropped from an augmented call's flag word
+ *   aug-swap       r and e written in each other's place, first element
+ *   seq-aug        the executor's AUGERR computed as AUGADD: its lane
+ *                  call, wrapped in this unit, delivers r as e
  *   (round 2's G2B: its plants here)
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
@@ -168,15 +177,55 @@
 /* ---- the unit: the tree's own sources, for the host and the device ---- */
 #include <hip/hip_runtime.h>   /* first: blockIdx, and AMD's device memset
                                 * seq_exec.h calls (G1A's known limit 2) */
-#define CFT_NO_AUGMENTED 1
 #define BLOCK_LANES 1          /* a thread is a block of one lane */
 #ifndef CFT_HIP_PLANT_COLLIDE
 /* softfloat.c's one datum, renamed in this unit - see the head */
 #define cft_sf_formats cft_hip_sf_formats
 #endif
+#ifndef CFT_HIP_PLANT_AUG_HOST
+/* augmented.c's lane functions alone: its entry points are C names that
+ * libcft's augmented.o defines, which hip-symcheck holds this unit to
+ * (hip-symcheck-plant removes this define and must see them collide) */
+#define CFT_AUG_LANES_ONLY 1
+#endif
 #include "bigint.c"
 #include "softfloat.c"
+#include "augmented.c"
+#ifdef CFT_HIP_PLANT_AUG_HOST
+/* hip-symcheck-plant's unit only: augmented.c whole, entry points and all,
+ * has no cft_aug_mul_lane (augmented.c defines it under the guard), so the
+ * plant's build names the product's lane here, for k_aug to compile and
+ * the symbol check, not the compiler, to be what refuses the unit */
+CFT_HD int cft_aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa, const cft_bn *xb,
+                            cft_bn *vr, cft_bn *ve, uint32_t *acc)
+{
+    return aug_mul_lane(f, xa, xb, vr, ve, acc);
+}
+#endif
+#ifdef CFT_HIP_PLANTS
+/* The seq-aug plant: the executor's lane call, wrapped here so that
+ * seq_exec.h is not edited, delivers r as e when the launch's word says
+ * so - AUGERR computed as AUGADD. k_seq sets the word from its plant
+ * argument; k_aug calls the lane function itself, never this. Only the
+ * device's pass reads the word, hence maybe_unused for the host's. */
+[[maybe_unused]] static __device__ unsigned g_plant_seq_aug;
+CFT_HD static int plant_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
+                                     const cft_bn *xb, cft_bn *vr, cft_bn *ve,
+                                     uint32_t *acc)
+{
+    const int rc = cft_aug_add_lane(f, xa, xb, vr, ve, acc);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    if (g_plant_seq_aug)
+        cft_bn_copy(ve, vr);
+#endif
+    return rc;
+}
+#define cft_aug_add_lane plant_aug_add_lane
+#endif
 #include "seq_exec.h"
+#ifdef CFT_HIP_PLANTS
+#undef cft_aug_add_lane
+#endif
 #include "backend.h"
 
 #include <chrono>
@@ -242,6 +291,8 @@ enum : unsigned {
     PL_SEQ_MASK = 1u << 5, PL_SEQ_DEPOSIT = 1u << 6, PL_FAIL_LAUNCH = 1u << 7,
     PL_STALE_PUBLISH = 1u << 8, PL_NO_READBACK = 1u << 9, PL_FRESH_EARLY = 1u << 10,
     /* round 2's G2A: its plants here, bits 11 to 15 */
+    PL_AUG_FLIP = 1u << 11, PL_AUG_FLAGS = 1u << 12, PL_AUG_SWAP = 1u << 13,
+    PL_SEQ_AUG = 1u << 14,
     /* round 2's G2B: its plants here, bits 16 to 20 */
 };
 #endif
@@ -397,6 +448,7 @@ __global__ __launch_bounds__(256) void k_seq(cft_program P, cft_fmt_desc f,
 #ifdef CFT_HIP_PLANTS
         if (plant & PL_SEQ_MASK)
             A.lane_mask = NULL;
+        g_plant_seq_aug = (plant & PL_SEQ_AUG) ? 1u : 0u;  /* seq-aug's word, every lane */
 #endif
         P.f = &f;
         B.depth = P.scratch_depth;
@@ -428,6 +480,71 @@ __global__ __launch_bounds__(256) void k_seq(cft_program P, cft_fmt_desc f,
     }
 }
 
+/* The API's augmented calls (cfth_augmented): element i of a chunk through
+ * augmented.c's own lane functions, as its host loops run one - loaded and
+ * stored by its lane_load and lane_store, both inputs read before either
+ * output is written (so r or e may share an input's window), b's sign bit
+ * flipped on its integer encoding for a subtraction exactly as
+ * cft_augmented_sub flips it (never through a double, which would quiet a
+ * signalling NaN), then cft_aug_add_lane or cft_aug_mul_lane. A lane whose
+ * function returns 1, a broken invariant, records its index; the flags
+ * are an OR, a block's word in shared memory first. */
+__global__ __launch_bounds__(256) void k_aug(cft_fmt_desc f, int op, const uint8_t *a,
+                                             const uint8_t *b, uint8_t *r, uint8_t *e,
+                                             size_t n, size_t first, hacc *acc PLANT_PARAM)
+{
+    __shared__ unsigned int blk;
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadIdx.x == 0)
+        blk = 0;
+    __syncthreads();
+    if (i < n) {
+        cft_bn xa, xb, vr, ve;
+        uint32_t fl = 0;
+        int bad;
+        lane_load(&f, a, i, &xa);
+        lane_load(&f, b, i, &xb);
+        if (op == CFT_AUG_SUB) {
+            if (cft_bn_bit(&xb, f.width - 1))
+                cft_bn_clearbit(&xb, f.width - 1);
+            else
+                cft_bn_setbit(&xb, f.width - 1);
+        }
+        bad = op == CFT_AUG_MUL ? cft_aug_mul_lane(&f, &xa, &xb, &vr, &ve, &fl)
+                                : cft_aug_add_lane(&f, &xa, &xb, &vr, &ve, &fl);
+        if (bad) {
+            atomicMin(&acc->fail, ((unsigned long long)(first + i) << 8) |
+                                      (unsigned long long)CFT_ERR_INTERNAL);
+        } else {
+#ifdef CFT_HIP_PLANTS
+            if ((plant & PL_AUG_SWAP) && first + i == 0) {
+                lane_store(&f, r, i, &ve);
+                lane_store(&f, e, i, &vr);
+            } else
+#endif
+            {
+                lane_store(&f, r, i, &vr);
+                lane_store(&f, e, i, &ve);
+            }
+#ifdef CFT_HIP_PLANTS
+            if ((plant & PL_AUG_FLIP) && first + i == 0)
+                r[0] ^= 1u;
+#endif
+            if (fl)
+                atomicOr(&blk, (unsigned int)fl);
+        }
+    }
+    __syncthreads();
+    if (threadIdx.x == 0 && blk) {
+        unsigned int w = blk;
+#ifdef CFT_HIP_PLANTS
+        if (plant & PL_AUG_FLAGS)
+            w &= ~(unsigned int)CFT_SF_OVERFLOW;
+#endif
+        atomicOr(&acc->flags, w);
+    }
+}
+
 /* ==== the handle ======================================================== */
 
 constexpr size_t STAGE_MAX = (size_t)64 << 20;    /* bytes, each side */
@@ -453,7 +570,7 @@ struct Dev {
     size_t pool_bytes = 0, pool_cap = 0;
     size_t free_at_open = 0, total = 0;
     size_t prog_chunk = PROG_CHUNK_START;
-    hipFuncAttributes fa_run, fa_level, fa_seq;
+    hipFuncAttributes fa_run, fa_level, fa_seq, fa_aug;
     bool poisoned = false;
     std::string poison_why;
     size_t page = PAGE_BYTES;     /* CFT_HIP_PAGE in a plant build */
@@ -1171,6 +1288,80 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
     return CFT_OK;
 }
 
+/* ==== the API's augmented calls ========================================= */
+
+/* R[0..3] are a, b, r and e as bind_call decided them: a resident one is
+ * read or written at its device window, the rest staged. The chunk is a
+ * staged call's whatever is resident, as run_impl's is. Staged outputs
+ * come back r first, then e, the order the host's loop writes them. */
+int aug_impl(Dev &D, const char *who, int op, int fmt, const void *a, const void *b,
+             void *r, void *e, size_t n, const Role *R, uint32_t *flags)
+{
+    const cft_fmt_desc f = cft_sf_formats[fmt];
+    const size_t esz = (size_t)f.width / 8;
+    const size_t fixed = 5 * 256 + sizeof(hacc), per = 4 * esz;
+    const uint8_t *in[2] = {(const uint8_t *)a, (const uint8_t *)b};
+    uint8_t *out[2] = {(uint8_t *)r, (uint8_t *)e};
+    uint32_t fl = 0;
+    size_t k, s;
+    if (D.stage <= fixed + per)
+        return fail_alloc(D, who, "the stage", fixed + per, hipErrorOutOfMemory);
+    k = (D.stage - fixed) / per;
+#ifdef CFT_HIP_PLANTS
+    if (D.chunk && D.chunk < k)
+        k = D.chunk;
+#endif
+    for (s = 0; s < n; s += k) {
+        const size_t m = n - s < k ? n - s : k;
+        const uint8_t *dv[2];
+        uint8_t *dq[2];
+        size_t o = 0, oacc, oq[2];
+        int st, q;
+        for (q = 0; q < 2; q++) {               /* a and b */
+            if (R[q].resident) {
+                dv[q] = R[q].dp + s * esz;
+                continue;
+            }
+            std::memcpy(D.host + o, in[q] + s * esz, m * esz);
+            dv[q] = D.dev + o;
+            o = al(o + m * esz);
+        }
+        oacc = o;
+        acc_init(D, oacc);
+        o = al(oacc + sizeof(hacc));
+        for (q = 0; q < 2; q++) {               /* r and e */
+            oq[q] = o;
+            if (R[2 + q].resident) {
+                dq[q] = R[2 + q].dp + s * esz;
+                continue;
+            }
+            dq[q] = D.dev + o;
+            o = al(o + m * esz);
+        }
+        if ((st = h2d(D, who, 0, oacc + sizeof(hacc))) != CFT_OK)
+            return st;
+        k_aug<<<grid_for(m), BLOCK, 0, D.stream>>>(f, op, dv[0], dv[1], dq[0], dq[1], m, s,
+                                                    (hacc *)(D.dev + oacc) PLANT_ARG(D));
+        if ((st = check_launch(D, who, "the augmented kernel", D.fa_aug)) != CFT_OK)
+            return st;
+        if ((st = d2h(D, who, oacc, o - oacc)) != CFT_OK || (st = finish(D, who)) != CFT_OK)
+            return st;
+        const hacc h = acc_read(D, oacc);
+        if (h.fail != NO_FAIL) {
+            set_err(fmt_str("%s: element %llu broke an invariant of augmented.c's lane "
+                            "functions on %s - a defect in libcft, not in the call", who,
+                            (unsigned long long)(h.fail >> 8), D.label.c_str()));
+            return CFT_ERR_INTERNAL;
+        }
+        fl |= h.flags;
+        for (q = 0; q < 2; q++)
+            if (!R[2 + q].resident)
+                std::memcpy(out[q] + s * esz, D.host + oq[q], m * esz);
+    }
+    *flags = fl;
+    return CFT_OK;
+}
+
 /* ==== the reductions ==================================================== */
 
 /* The reduction's chunk: the largest power of two whose elements and the
@@ -1567,6 +1758,10 @@ const struct {
     {"no-readback", PL_NO_READBACK},
     {"fresh-early", PL_FRESH_EARLY},
     /* round 2's G2A: its plants here */
+    {"aug-flip", PL_AUG_FLIP},
+    {"aug-flags", PL_AUG_FLAGS},
+    {"aug-swap", PL_AUG_SWAP},
+    {"seq-aug", PL_SEQ_AUG},
     /* round 2's G2B: its plants here */
 };
 
@@ -1731,8 +1926,10 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
     const hipError_t e1 = hipFuncGetAttributes(&D->fa_run, (const void *)k_run);
     const hipError_t e2 = hipFuncGetAttributes(&D->fa_level, (const void *)k_level);
     const hipError_t e3 = hipFuncGetAttributes(&D->fa_seq, (const void *)k_seq);
-    if (e1 != hipSuccess || e2 != hipSuccess || e3 != hipSuccess) {
-        const hipError_t eb = e1 != hipSuccess ? e1 : e2 != hipSuccess ? e2 : e3;
+    const hipError_t e4 = hipFuncGetAttributes(&D->fa_aug, (const void *)k_aug);
+    if (e1 != hipSuccess || e2 != hipSuccess || e3 != hipSuccess || e4 != hipSuccess) {
+        const hipError_t eb = e1 != hipSuccess ? e1 : e2 != hipSuccess ? e2
+                            : e3 != hipSuccess ? e3 : e4;
         set_err(fmt_str("cft_open: %s is %s, and this libcft's GPU code was built for "
                         "HIP_ARCH %s (%s platform): its kernels do not load there - %s "
                         "(%s). Rebuild with HIP_ARCH naming %s",
@@ -1799,8 +1996,8 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          "cft hip: %s = %s (%s, %d multiprocessors, bus "
                          "%04x:%02x:%02x.0, %zu MiB), HIP platform %s, runtime %d, "
                          "driver %d; of %d visible%s%s%s%s; this libcft: HIP_ARCH %s,"
-                         " stage %zu MiB, page %zu bytes, kernels %d/%d/%d registers "
-                         "and %zu/%zu/%zu bytes local a thread (run/level/seq)%s%s\n",
+                         " stage %zu MiB, page %zu bytes, kernels %d/%d/%d/%d registers "
+                         "and %zu/%zu/%zu/%zu bytes local a thread (run/level/seq/aug)%s%s\n",
                          artifact, D->prop.name, arch_of(D->prop).c_str(),
                          D->prop.multiProcessorCount, (unsigned)D->prop.pciDomainID,
                          (unsigned)D->prop.pciBusID, (unsigned)D->prop.pciDeviceID,
@@ -1809,9 +2006,10 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          vis ? vis : "", hvis ? ", HIP_VISIBLE_DEVICES=" : "",
                          hvis ? hvis : "", CFT_HIP_ARCH, D->stage >> 20, D->page,
                          D->fa_run.numRegs, D->fa_level.numRegs, D->fa_seq.numRegs,
-                         (size_t)D->fa_run.localSizeBytes,
+                         D->fa_aug.numRegs, (size_t)D->fa_run.localSizeBytes,
                          (size_t)D->fa_level.localSizeBytes,
                          (size_t)D->fa_seq.localSizeBytes,
+                         (size_t)D->fa_aug.localSizeBytes,
 #ifdef CFT_HIP_PLANTS
                          ", PLANTS COMPILED IN, CFT_HIP_PLANT=", D->plant_name
 #else
@@ -1838,7 +2036,6 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
     seq->features |= CFT_SEQ_FEAT_SCALAR | CFT_FEAT_REDUCE_SEG;
     seq->features &= ~(uint32_t)CFT_SEQ_FEAT_INDEXED;   /* round 2's G2B deletes this statement */
     /* round 2 publishes the two one parcel at a time: each deletes its own line */
-    seq->features &= ~(uint32_t)CFT_SEQ_FEAT_AUGADD;    /* round 2's G2A deletes this statement */
     *out = D;
     return CFT_OK;
 }
@@ -2149,6 +2346,63 @@ extern "C" int cfth_run(void *hw, int op, int fmt, int rnd, const void *a,
         if ((st = bind_call(D, "cft_run", R, 4)) != CFT_OK)
             return st;
         st = run_impl(D, op, fmt, rnd, a, b, c, d, n, scalar_mask, R, &fl);
+        call_end(D, st, R, 4);
+        if (st == CFT_OK)
+            *flags = fl;
+        return st;
+    });
+}
+
+/* backend.h's cfth_augmented: cft_augmented_add, _sub and _mul (op
+ * CFT_AUG_ADD, _SUB, _MUL) on this device, called by device.c's
+ * cft_device_augmented once augmented.c has validated the call. The roles
+ * are cft_run's four slots: a in CFT_ROLE_A, b in CFT_ROLE_B, r in
+ * CFT_ROLE_D, and e in CFT_ROLE_C's - the call has no third input, and a
+ * fifth role would move CFT_ROLE_COUNT, the stride of the XRT backend's
+ * per-role arrays (backend.h). Both outputs may share an input's window
+ * exactly (alias_ok): every lane reads both inputs before it writes
+ * either output, and no lane touches another's element. */
+extern "C" int cfth_augmented(void *hw, int op, int fmt, const void *a, const void *b,
+                              void *r, void *e, size_t n, const cft_bindings *bind,
+                              uint32_t *flags)
+{
+    static const char *const names[3] = {"cft_augmented_add", "cft_augmented_sub",
+                                         "cft_augmented_mul"};
+    g_err.clear();
+    return at_boundary("an augmented call", [&]() -> int {
+        const char *who = op >= CFT_AUG_ADD && op <= CFT_AUG_MUL ? names[op]
+                                                                : "cft_augmented";
+        Dev &D = *static_cast<Dev *>(hw);
+        uint32_t fl = 0;
+        int st = enter(D, who);
+        if (st != CFT_OK)
+            return st;
+        if (op < CFT_AUG_ADD || op > CFT_AUG_MUL || fmt < 0 || fmt > CFT_MAX_FORMAT || !a ||
+            !b || !r || !e || r == e || !flags) {
+            set_err(fmt_str("%s: the GPU backend was handed an operation, a format or a "
+                            "pointer augmented.c refuses first - a defect in libcft, not "
+                            "in the call", who));
+            return CFT_ERR_INTERNAL;
+        }
+        const size_t esz = (size_t)cft_sf_formats[fmt].width / 8;
+        if (n == 0) {
+            *flags = 0;
+            return CFT_OK;
+        }
+        if (n > ((size_t)-1) / esz) {
+            set_err(fmt_str("%s: %zu elements of %zu bytes overflow a size_t, which "
+                            "augmented.c refuses first - a defect in libcft, not in the "
+                            "call", who, n, esz));
+            return CFT_ERR_INTERNAL;
+        }
+        Role R[4];
+        role_from(R[0], bind, CFT_ROLE_A, n * esz, false, false, false);
+        role_from(R[1], bind, CFT_ROLE_B, n * esz, false, false, false);
+        role_from(R[2], bind, CFT_ROLE_D, n * esz, true, false, true);
+        role_from(R[3], bind, CFT_ROLE_C, n * esz, true, false, true);
+        if ((st = bind_call(D, who, R, 4)) != CFT_OK)
+            return st;
+        st = aug_impl(D, who, op, fmt, a, b, r, e, n, R, &fl);
         call_end(D, st, R, 4);
         if (st == CFT_OK)
             *flags = fl;
