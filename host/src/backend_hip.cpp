@@ -178,6 +178,19 @@
  *                  elements, the rest of its device copy left 0xA5
  *   depth-clamp    the kernel's copy of a program deeper than 256 slots
  *                  at 256 (its scratch_depth and log2)
+ *   (round 2's G2C: its plants here)
+ *   bank-mode      a whole-operation run's five mode words (the last five
+ *                  of the bank of a BANK_EXT program of 42 or more
+ *                  constants and two deposits a lane: divsqrt.c's divfull
+ *                  and sqrtfull) rotated by one, so the image rounds with
+ *                  the next attribute - rne as rtz, ..., rmm as rne
+ *   full-flag      after such a run, INEXACT cleared from lane 0's flag
+ *                  word (its deposit 1)
+ *   full-refuse    a BANK_EXT program of 42 or more constants refused by
+ *                  name (CFT_ERR_UNSUPPORTED) before anything is bound or
+ *                  run: divsqrt.c's ladder falls through to the program
+ *                  route, whose bits are the same, so only a route probe
+ *                  can see it
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
@@ -311,6 +324,8 @@ enum : unsigned {
     /* round 2's G2B: its plants here, bits 16 to 20 */
     PL_IDX_CHUNK = 1u << 16, PL_IDX_NONE = 1u << 17, PL_SRC_TRUNC = 1u << 18,
     PL_DEPTH_CLAMP = 1u << 19,
+    /* round 2's G2C: its plants here, bits 21 to 25 */
+    PL_BANK_MODE = 1u << 21, PL_FULL_FLAG = 1u << 22, PL_FULL_REFUSE = 1u << 23,
 };
 #endif
 
@@ -1506,6 +1521,16 @@ struct ProgProbe {
         kmax, chunk0, launches, max_launch, min_launch, src_bytes, free_at_open;
 };
 ProgProbe g_probe;
+
+/* round 2's G2C's plants act on a whole-operation run: a BANK_EXT program
+ * of 42 or more constants (divfull's 42, sqrtfull's 49) - with two
+ * deposits a lane, its result and its flag word, for the two that touch
+ * its bank or its words */
+bool plant_whole(const cft_program &p, bool two_deposits)
+{
+    return (p.flags & CFT_PROG_FLAG_BANK_EXT) && p.n_consts >= 42 &&
+           (!two_deposits || p.max_deposits == 2);
+}
 #endif
 
 /* One staged indexed source, WHOLE, into the handle's source buffer: a
@@ -1656,6 +1681,16 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
             cft_bn_zero(&bank[q]);
             cft_bn_load(&bank[q], (const uint8_t *)io->bank + q * esz, (int)esz);
         }
+#ifdef CFT_HIP_PLANTS
+        /* bank-mode: the last five words, the attribute's slots, rotated
+         * by one - slot r's word into slot r + 1, the last into the first */
+        if ((D.plant & PL_BANK_MODE) && plant_whole(prog, true)) {
+            const cft_bn last = bank[nk - 1];
+            for (size_t q = nk - 1; q > nk - 5; q--)
+                bank[q] = bank[q - 1];
+            bank[nk - 5] = last;
+        }
+#endif
         kon = bank.data();
     }
     if (nk && !kon) {
@@ -1955,6 +1990,28 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         if (nso && !rso)
             std::memcpy((uint8_t *)io->scratch_out + first * nso * esz, D.host + o_so,
                         k * nso * esz);
+#ifdef CFT_HIP_PLANTS
+        /* full-flag: after the run, lane 0's flag word (deposit 1, its low
+         * byte) loses INEXACT - in the caller's copy, or on the device */
+        if ((D.plant & PL_FULL_FLAG) && first == 0 && md == 2 && plant_whole(prog, true)) {
+            if (!rd) {
+                ((uint8_t *)deposits)[esz] &= (uint8_t)~CFT_SF_INEXACT;
+            } else {
+                uint8_t w = 0;
+                hipError_t e = hipMemcpyAsync(&w, R[3].dp + esz, 1, hipMemcpyDeviceToHost,
+                                              D.stream);
+                if (e == hipSuccess)
+                    e = hipStreamSynchronize(D.stream);
+                w &= (uint8_t)~CFT_SF_INEXACT;
+                if (e == hipSuccess)
+                    e = hipMemcpyAsync(R[3].dp + esz, &w, 1, hipMemcpyHostToDevice, D.stream);
+                if (e == hipSuccess)
+                    e = hipStreamSynchronize(D.stream);
+                if (e != hipSuccess)
+                    return fail_device(D, who, "the full-flag plant's write", e);
+            }
+        }
+#endif
         first += k;
         /* the next chunk's size, from this one's time (the head says why) */
 #ifdef CFT_HIP_PLANTS
@@ -2010,6 +2067,10 @@ const struct {
     {"idx-none", PL_IDX_NONE},
     {"src-trunc", PL_SRC_TRUNC},
     {"depth-clamp", PL_DEPTH_CLAMP},
+    /* round 2's G2C: its plants here */
+    {"bank-mode", PL_BANK_MODE},
+    {"full-flag", PL_FULL_FLAG},
+    {"full-refuse", PL_FULL_REFUSE},
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not
@@ -2809,6 +2870,16 @@ extern "C" int cfth_program_run(void *hw, int fmt, const void *image, size_t ima
                     "loader refuses first - a defect in libcft, not in the call");
             return CFT_ERR_INTERNAL;
         }
+#ifdef CFT_HIP_PLANTS
+        /* full-refuse: before anything is bound, staged or run */
+        if ((D.plant & PL_FULL_REFUSE) && io && io->prog && plant_whole(*io->prog, false)) {
+            set_err(fmt_str("cft_program_run_ex: %s refuses a BANK_EXT program of %u "
+                            "constants, before anything is bound or run "
+                            "(CFT_HIP_PLANT=full-refuse)", D.label.c_str(),
+                            (unsigned)io->prog->n_consts));
+            return (int)CFT_ERR_UNSUPPORTED;
+        }
+#endif
         const size_t esz = (size_t)cft_sf_formats[fmt].width / 8;
         const size_t md = deposits ? (size_t)max_deposits : 0;
         const size_t nsi = io && io->scratch_in ? io->n_scratch_in : 0;

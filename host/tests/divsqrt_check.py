@@ -5,6 +5,15 @@
     python3 host/tests/divsqrt_check.py                # standard sweep
     python3 host/tests/divsqrt_check.py --trials 400   # longer
     python3 host/tests/divsqrt_check.py --formats fp64
+    CFT_LIB=host/libcft.so python3 host/tests/divsqrt_check.py --device hip:0
+                                     # the same sweep through a device
+
+--device ARTIFACT opens the library's cft_open(ARTIFACT) in place of the
+software handle (cft_open(NULL)), so every comparison below holds that
+device's cft_div and cft_sqrt to the model - on a GPU (hip:N) by the route
+divsqrt.c chooses there, which the environment can force: CFT_DIVSQRT_SEQ=0
+the chunk route, CFT_DIVSQRT_FULL=1 the whole-operation images. Without it
+the run is the software handle's, as it always was.
 
 test_sequences.py proves the composed sequence bit-identical to the
 contract div/sqrt AT MODEL LEVEL. This proves the C PORT of that
@@ -84,10 +93,11 @@ def bind(lib):
 
 
 class Device:
-    def __init__(self, lib):
+    def __init__(self, lib, artifact=None):
         self.lib = lib
         handle = ctypes.c_void_p()
-        st = lib.cft_open(None, 0, ctypes.byref(handle))
+        st = lib.cft_open(artifact.encode() if artifact else None, 0,
+                          ctypes.byref(handle))
         if st != 0:
             raise SystemExit(f"cft_open: {lib.cft_strerror(st).decode()}")
         self.handle = handle
@@ -287,10 +297,15 @@ def main():
     ap.add_argument("--trials", type=int, default=None,
                     help="extra random operands per pool (default scales "
                          "with width)")
+    ap.add_argument("--device", metavar="ARTIFACT",
+                    help="cft_open this artifact (hip:N, ...) in place of "
+                         "the software handle")
     args = ap.parse_args()
 
     lib = bind(load_library())
-    dev = Device(lib)
+    dev = Device(lib, args.device)
+    if args.device:
+        print(f"divsqrt_check: device {args.device}")
     rnds = [RND_BY_NAME[r] for r in args.rounding]
     total_bad = 0
     total = 0
