@@ -28240,3 +28240,36 @@ The resident run of part 2 is the same executor at full width through the backen
 **What ran, and GPU time** (the wall time of the runs holding each GPU, an upper bound): before the stages, the RTX 5060 Ti 12.7 minutes in 96 runs (10:23 to 10:53) and the RX 7600 18.2 minutes in 82 runs (10:25 to 10:58); no run waited on a lock. The HIP=0 proof ran on this desktop after the 5060 Ti's runs. The scratch benches (dsbench.c, s1bench.cpp) and the logs stay in G2C's scratch; nothing of them is committed.
 
 **The stage `hip` once on each GPU** (`bash verify/run.sh --only hip --require-all`, each in a git clone of this entry's commit 6a935c35 made from a bundle of branch g2c, its SHA and its content - `leg_divsqrt` in hip_test.c, `PL_FULL_REFUSE` in backend_hip.cpp - checked apart, inside the lead's lock, under a 25-minute timeout). The RTX 5060 Ti, run 20261117-110729-6a935c35, 11:07:29 to 11:15:10: `hip ok 459s`, "VERDICT: PASS, nothing skipped", 0 inner skips; built in 46 s with 0 warnings, hip-symcheck-plant RED twice, the stage's four plants RED at G1C's figures (flip 18,440 results, drop-flag 1,532 flags, seq-mask the routines' sum, reduce-carry 475 of 7,801 checks), bank513.bin refused by name on both handles, the vectors 48 sets and 125,032 cases alike, seq_check 71 s, the certificate corpus green (18 cases remade by cft-segrun on hip:0 and held to their committed bytes, deepwrap-fp64-2048 refused by name with exit 64, as the stage expects), device-test 10,156 and 4,867, hip-test's legs at G1C's counts (alias 52, two 13, buffers 69, reduce 7,801, seg 49,860 and compose 23,220 a format); 349 ok lines, 0 NOTE; 50 device lines, every one the 5060 Ti's. The RX 7600, run 20261117-110734-6a935c35, 11:07:34 to 11:19:19: `hip ok 702s` (G2A's took 802), "VERDICT: PASS, nothing skipped", 0 inner skips, with the lead's read-only mpmath copy on its path (206 files, none newer than a stamp made before it, before and after); built in 20 s and the plants' build in 12 s, 0 warnings; the same four plants RED at the same figures, the same vectors, corpus, device-test and hip-test counts, seq_check 127 s; 349 ok lines, 0 NOTE; 50 device lines. The stage runs none of this parcel's checks yet - the divsqrt leg, `divsqrt_check.py --device`, the formatOf sets, the three plants: wiring them is G2D's - so it holds that nothing else moved. GPU time in all, the stages included: the RTX 5060 Ti 20.3 minutes in 97 runs and the RX 7600 29.9 minutes in 83 runs, 50.2 in all; nothing of G2C's is left running on either.
+
+## 2026-11-17 - the lead's merge of round 2's G2C: the verifier, the replay of `hip` on both GPUs and the box gate (the GPU backend's round 2; author the lead, Opus 5.5)
+
+**What merged.** On main fb264545, G2C (g2c at 28a34d95) was merged with --no-ff as 1ef407f3. There was no conflict, and the merge's tree is g2c's own (cb3cba1e), since main had not moved. This entry's commit follows it.
+
+**The verifier VG2C (Sonnet), on a frozen tree of 28a34d95: no (a), no (b).**
+- It reproduced the HIP=0 proof and the plants. Above all, full-refuse's exact lines: the bits green and the route proof red, with the probe reading 2,304 where 12,800 is wanted.
+- It reproduced the greens on both GPUs and the route heads, which it also recomputed from the image headers.
+- It re-ran the rule on four cells (fp64 and fp256 divide on each GPU): NOT FASTER, with n = 1 within 10% of G2C's medians.
+- It re-applied the rule to all 16 cells from G2C's raw logs: every n = 1 deficit exceeds its spread at least 2.2 times.
+- S1 at fp64 on the RX 7600: 2.668e7 divides a second, against G2C's 2.67e7.
+- **Its notes, carried here:**
+  1. The chunk route's proof is an absence. Head 256 after the marker says that no program ran, which a host fallback would also show. The proof can still fail, since a program run shows another head. G2C's entry words it so ("256 for the chunk route (no program ran)").
+  2. G2C's report says S1's variant (b), the banks as `__constant__` arrays, "does not fit". That holds for the decoded banks: 91 words at 260 bytes (`cft_bn`) for four formats, 94,640 bytes at one attribute, against NVIDIA's 64 KiB. The raw bank bytes, 5,460, would fit, at the cost of decoding in each lane. The figure is in the report, not in G2C's entry.
+  3. The cells at 1 Mi are noisy: VG2C's program route took 378 ms and 616 ms against G2C's 302 and 474, with spreads of 90 and 110 ms. The "SLOWER up to" and "FASTER from" rungs moved by one with that noise. No verdict changes.
+
+**The replay of the stage `hip`** (MEASURED; replay-1117c/replay_g2c.sh, made from replay_g2.sh). `verify/run.sh --only hip --require-all` ran at 1ef407f3 from a fresh clone of a bundle of the merge branch (sha256 8429b33c... on all three machines). HEAD, a clean status and six markers were asserted apart: G2C's leg and its full-refuse plant, G2A's and G2B's markers, HOSTAPI's 0x7ff1f, and the stage. Each run was inside its GPU's lock.
+- **RTX 5060 Ti** (WSL cft-gpu, HIP_DEVICE=1), 12:01:40 to 12:10:16: rc 0 in 512 s, "VERDICT: PASS, nothing skipped", 0 inner skips; hip ok in 508 s. All 50 device lines name the 5060 Ti; seq_features 0x7ff1f.
+- **RX 7600** (nvidia-box, PYTHONPATH at ~/lead-pylib/pylib): 12:01:29 to 12:13:16: rc 0 in 702 s, "VERDICT: PASS, nothing skipped", 0 inner skips; hip ok in 699 s. All 50 device lines name the RX 7600; seq_features 0x7ff1f; 0 files in the copy newer than the run's stamp (the lead's watch, in its ledger).
+- The RTX 4070 was not run.
+
+**The box gate** (MEASURED; box_gate_g2c.sh on amd-arc-box at 1ef407f3, a fresh clone of the same bundle; the SHA, the merge's two parents, the markers and the stage counts asserted apart): 12:01:19 to 12:39:16.
+- `verify/run.sh --budget quick`: rc 0 in 2,272 s, "VERDICT: PASS with 7 skip(s)", 24 stages ok, 0 inner skips. The 7 are each skipped by name: six for a tool the box lacks (lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran), and buildargs because the box's real Vitis takes PATH from the stub. It has the same shape as round 2's first gate.
+- `--only hip,hip-nvcc,hip-source`: rc 0 in 2 s, each skipped by name.
+- The clone's status was clean after, and the 30 files' sums equal the box's (box/gate-g2c).
+
+**For Logan, decisions not built:**
+- the size-dependent route: the whole operation for n of 2,048 and above, the program route below. It is slower beyond the spread nowhere measured, and costs about 125 lines (G2C's estimate);
+- which device-callable shape to build: S1 is recommended, and 3b was OFF.
+
+**Owed:**
+- the WebAssembly rebuild, from G2A and G2B. G2C changed no source the module compiles (only hip_test.c, divsqrt_check.py, backend_hip.cpp's plants and the docs);
+- G2D's stage legs, now including G2C's divsqrt leg, divsqrt_check --device and the formatOf sets.
