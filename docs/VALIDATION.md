@@ -28395,7 +28395,7 @@ At 80468f1a on the RX 7600 (13:53:21 to 14:13:14, load 0.5 to 1.6): built in 20 
 - The RTX 4070 was not run.
 
 **The box gate** (MEASURED; box_gate_g2d.sh on amd-arc-box at 1e43bf19, a fresh clone of the same bundle; the SHA, the merge's two parents, the markers and the stage counts asserted apart): 08:30:48 to 09:09:09, under B0123.
-- `verify/run.sh --budget quick`: rc 0 in 2,295 s, PASS: 24 ok and 7 skipped by name, 0 inner skips. The seven are buildargs (a real Vitis at /data/Xilinx would be sourced) and the six language stages whose toolchains the box lacks (rust, julia, go, csharp, r and fortran): the shape of G2C's gate (24 ok, 7 named skips, 2,272 s).
+- `verify/run.sh --budget quick`: rc 0 in 2,295 s, PASS: 24 ok and 7 skipped by name, 0 inner skips. The seven are buildargs (the box's real Vitis at /data/Xilinx, which rebuild-2022.sh sources, takes PATH from the stub) and the six language stages whose toolchains the box lacks (rust, julia, go, csharp, r and fortran): the shape of G2C's gate (24 ok, 7 named skips, 2,272 s).
 - `--only hip,hip-nvcc,hip-source`: rc 0 in 2 s, each skipped by name: no hipcc, no nvcc and no HIP built from source on the box.
 - The clone's status was 0 after. The stage list read 56 stages, 31 in quick and 46 in gate, beside CLAUDE.md's two counts, which the gate asserted. The 30 logs' sums equal the box's (box/gate-g2d).
 
