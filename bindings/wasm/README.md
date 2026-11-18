@@ -1578,7 +1578,9 @@ module build defines (READ).
 So the module was rebuilt, as every change to its sources requires, and it
 came out the same bytes.
 
-The order was the 2026-10-16 rebuild's, an unchanged module's:
+The steps were the 2026-10-16 rebuild's, an unchanged module's, with
+`build_demos.sh` run before `verify_demos.mjs` as in the 2026-10-30 and
+2026-11-12 rebuilds:
 1. the five native tools `verify_demos.mjs` runs, built from the same
    tree with mingw64 gcc 16.1.0 (19 s, 0 warnings);
 2. `build.sh` (50 s), which reproduced the committed `cft_node.wasm`,
@@ -1594,14 +1596,15 @@ The order was the 2026-10-16 rebuild's, an unchanged module's:
 
 Steps 1 and 4 are the demos stage's own work. The container was the pinned
 emsdk 6.0.9 image, already on the desktop at its digest, through Docker
-Desktop. Two other projects had runs booked on the desktop meanwhile, so
-the times may carry their load.
+Desktop. Two other projects had bookings on the desktop meanwhile, so the
+times may carry their load.
 
 The node and wasm stages were not run again. They passed at the 2026-11-12
 rebuild (`verify/run.sh --only docs,generated,node,wasm,demos` on
 amd-arc-box, PASS, nothing skipped), on the same module bytes. Nothing else
 they read has changed since (READ, `git diff` between the two trees):
-- `bindings/node`, `bindings/wasm`, `vectors/` and `python/cft_golden`;
+- `bindings/node`, `bindings/wasm`, `vectors/` and `python/cft_golden`,
+  and `programs/`, which `program_test.mjs` reads;
 - the stages' functions in `verify/run.sh`: `do_node`, `do_wasm`,
   `do_demos` and `ensure_vectors`.
 
