@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Fifty-nine files, 101,989 lines. Flat in one directory they look like one
+Fifty-nine files, 102,099 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **29,656 lines you consult while working** — the three under *Start here*,
+- **29,676 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,978 lines of tool manual**, one per shipped program;
 - **4,374 lines of operations**, read when you are about to do something to
   hardware;
-- **59,981 lines of record and argument** — the ledger, the roadmap and the
+- **60,071 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 670 | Every gate, what it proves, how long it really takes. Thirteen tiers, fifty-six runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 683 | Every gate, what it proves, how long it really takes. Thirteen tiers, fifty-six runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -55,7 +55,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 4,086 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 4,093 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 2,349 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the nine of them that also run on the tile: M1's six and M2's sin, cos and tan. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 656 | Programs as files: the assembler, the program library, the runner. |
@@ -98,7 +98,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 28,275 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 28,365 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [FIGURES.md](FIGURES.md) | 474 | Fifteen figures of the project - its history, its gate, the card's clocks and its long stress run, the benchmarks, the math library's costs - drawn by script from the record's own data, light and dark, each with a sidecar of its numbers and the digests of its sources, and held to the numbers the README and other documents state. The page is written by `python/project_figures.py`, the `generated` stage's seventh generator, not by hand. |
 | [ROADMAP.md](ROADMAP.md) | 7,310 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |

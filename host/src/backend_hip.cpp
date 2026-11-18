@@ -191,6 +191,12 @@
  *                  run: divsqrt.c's ladder falls through to the program
  *                  route, whose bits are the same, so only a route probe
  *                  can see it
+ *   (round 2's G2D: its plant here, bit 24)
+ *   chunk-tail     an augmented call cut into chunks has the last element
+ *                  of its last chunk skipped - neither run nor copied home,
+ *                  so its r and e are left as they were and its flags
+ *                  unread; a call of one chunk is untouched, so only a call
+ *                  that crosses a chunk boundary can show it (CFT_HIP_CHUNK)
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
@@ -326,6 +332,8 @@ enum : unsigned {
     PL_DEPTH_CLAMP = 1u << 19,
     /* round 2's G2C: its plants here, bits 21 to 25 */
     PL_BANK_MODE = 1u << 21, PL_FULL_FLAG = 1u << 22, PL_FULL_REFUSE = 1u << 23,
+    /* round 2's G2D: its plant here, bit 24 */
+    PL_CHUNK_TAIL = 1u << 24,
 };
 #endif
 
@@ -1347,6 +1355,16 @@ int aug_impl(Dev &D, const char *who, int op, int fmt, const void *a, const void
         k = D.chunk;
 #endif
     for (s = 0; s < n; s += k) {
+#ifdef CFT_HIP_PLANTS
+        /* chunk-tail: past the first chunk, the last one loses its last
+         * element - the call's n one less from here, so neither the kernel
+         * nor the copy home reaches it; a last chunk of one is not run */
+        if ((D.plant & PL_CHUNK_TAIL) && s > 0 && n - s <= k) {
+            if (n - s == 1)
+                break;
+            n--;
+        }
+#endif
         const size_t m = n - s < k ? n - s : k;
         const uint8_t *dv[2];
         uint8_t *dq[2];
@@ -2071,6 +2089,8 @@ const struct {
     {"bank-mode", PL_BANK_MODE},
     {"full-flag", PL_FULL_FLAG},
     {"full-refuse", PL_FULL_REFUSE},
+    /* round 2's G2D: its plant here, bit 24 */
+    {"chunk-tail", PL_CHUNK_TAIL},
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not

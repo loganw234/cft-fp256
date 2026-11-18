@@ -35,7 +35,8 @@
 #   HIP_ROOT=/opt/rocm-7.2.4 HIP_PLATFORM=nvidia HIP_DEVICE=1 bash verify/run.sh --only hip
 #                                      # the GPU backend on the second GPU
 #                                      # nvidia-smi lists, through HIP 7.2.4's
-#                                      # NVIDIA layer (the stage's comment)
+#                                      # NVIDIA layer (the stage's comment);
+#                                      # HIP_FULL=1 adds its full-width tier
 #   Measured durations for every stage, quiet and loaded, are in
 #   docs/VERIFICATION.md - the simulation suites and the formal gate
 #   run for more than an hour each on a busy box.
@@ -161,9 +162,11 @@ BUDGET=""
 # acceptance set (acceptance) and the compiler's routines, split from
 # the language's quick stage (lang-routines); and since 2026-11-12 the
 # GPU backend (hip), which costs nothing where it is skipped by name - a
-# host with no hipcc or no GPU, the box and CI among them - and about ten
-# minutes where it runs (564 s on an RTX 5060 Ti under WSL with the
-# desktop loaded, 2026-11-12). `full` is the census.
+# host with no hipcc or no GPU, the box and CI among them - and where it
+# runs about ten minutes with round 1's checks (564 s on an RTX 5060 Ti
+# under WSL with the desktop loaded, 2026-11-12), and 12 to 20 since
+# round 2's joined them (738 s on that GPU and 1,189 s on an RX 7600,
+# 2026-11-17). `full` is the census.
 # Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
@@ -1801,35 +1804,59 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
 #     line is the device's. A lister that shows the GPU while the runtime of
 #     this build sees none is a FAIL naming both facts, never a skip: a
 #     skip comes from the host, before anything is built;
-#   * the plants, in a copy of the build made with HIP_PLANTS=1: flip and
-#     drop-flag on conf-fp64, seq-mask on routines-fp64 against the
-#     software handle's sum, reduce-carry on hip-test's small fp64
-#     reductions - each RED, with its plant named by the device line, and
-#     GREEN without it - and hip-test's plants leg. A plant that does not
-#     turn its check red fails the stage by name, and nothing runs after it;
+#   * the plants, in a copy of the build made with HIP_PLANTS=1 - its two
+#     tools, its library and cft-selftest, so that a check run through any
+#     of them carries the plant: flip and drop-flag on conf-fp64, seq-mask
+#     on routines-fp64 against the software handle's sum, reduce-carry on
+#     hip-test's small fp64 reductions; and round 2's twelve, each against
+#     its own check alone: aug-flip, aug-flags, aug-swap and seq-aug on
+#     hip-test's fp64 aug leg, idx-chunk, idx-none and src-trunc on its
+#     small fp64 indexed leg at CFT_HIP_CHUNK=8, depth-clamp on its fp64
+#     depth leg, bank-mode and full-flag on divsqrt_check with the whole
+#     operation forced, full-refuse on the divsqrt leg's route proof with
+#     the bits green, chunk-tail on the fp64 aug leg at CFT_HIP_CHUNK=64 -
+#     each RED, with its plant named by the device line, and GREEN without
+#     it; with no plant, the chunk crossings no default build makes and the
+#     route proof's 24 lines; and hip-test's plants leg. A plant that does
+#     not turn its check red fails the stage by name, and nothing runs
+#     after it;
 #   * study GPU-A's corpora (docs/studies/gpu-a), made here: each through
 #     hip-corpus on sw, on hip:0 and on hip:0 --resident, the three sha256s
 #     equal (sw is the definition: GPU-A's captured sums are printed beside
 #     them as information only, and routines-fp32's is stale since M4F2),
-#     and the routine corpora's equal to the golden model's own output too;
-#     an image no device holds (n_consts 513: program.c's check, before any
-#     device's own), made here from refuse.bin's case, refused by its
-#     sentence on sw and on hip:0, whatever features the device publishes.
-#     Not the 1M
-#     stream, about 95 s of GPU time a run;
+#     and the routine corpora's equal to the golden model's own output too
+#     (refuse.bin, GPU-A's one augmentedAddition case, is one of the
+#     corpora since round 2 runs it); an image no device holds (n_consts 513:
+#     program.c's check, before any device's own), made here from
+#     refuse.bin's case, refused by its sentence on sw and on hip:0,
+#     whatever features the device publishes. Not the 1M stream, about
+#     95 s of GPU time a run;
 #   * a bounded vector set at every format and attribute - the elementwise,
-#     magnitude, augmented and reduction sets - replayed by cft-selftest on
-#     sw and on hip:0: the same sets and cases, every case matching
-#     (HIP_FULL_REPLAY=1 replays vectors/out whole instead, its character,
-#     formatOf and transcendental sets too: 1,228,415 cases at the runner's counts);
-#   * seq_check, the `seq` stage's command, through --device hip:0: the
-#     programs needing a bit the device does not publish, if any, counted
-#     refused by name, corpus by corpus;
+#     magnitude, augmented (whole: --augmented 24) and reduction sets -
+#     replayed by cft-selftest on sw and on hip:0: the same sets and cases,
+#     every case matching (HIP_FULL_REPLAY=1 replays vectors/out whole
+#     instead, its character, formatOf and transcendental sets too:
+#     1,228,415 cases at the runner's counts);
+#   * seq_check, the `seq` stage's command, through --device hip:0, at the
+#     default depth and opened at 2,048 slots: every program compared, so
+#     a program refused for a bit the device does not publish is a failure;
 #   * the certificate corpus's conformance test (certificates/corpus.py
 #     check --device hip:0, run from this tree so that its history leg has
-#     the repository), every case cft-segrun remakes made on the GPU;
-#   * device-test -n 96 and -b -n 96, its NOT lines counted against the
-#     recorded 12, 17 and 4; hip-test -s small, leg by leg.
+#     the repository), every case cft-segrun remakes made on the GPU but
+#     deepwrap-fp64-2048, which cft-segrun refuses beside a device;
+#   * device-test -n 96, -b -n 96 and --scratch-depth 2048: NOT COMPARED a
+#     failure, NOT TESTED and NOT RUN a NOTE where they move from round 2's
+#     counts; hip-test -s small, leg by leg, and round 2's aug, indexed (at
+#     -s all), depth and divsqrt legs;
+#   * augmented_check.py and divsqrt_check.py (the default and the
+#     whole-operation routes) through hip:0, each held to the software
+#     handle's count in the same run; the formatOf sets (754-2019 5.4.1),
+#     made here, on sw and on hip:0 under those two routes.
+# HIP_FULL=1, off by default, is the full-width tier: it adds divsqrt.c's
+# chunk route (CFT_DIVSQRT_SEQ=0) to divsqrt_check, to its control in the
+# plants' build and to the formatOf replay, about 67 s of runs on the RTX
+# 5060 Ti and 168 s on the RX 7600 - the stage with it 774 s and 1,397 s
+# (2026-11-17), the RX 7600's within 103 s of a 1,500 s timeout.
 # What it asks of its host: hipcc (HIP_ROOT, default /opt/rocm; the
 # platform HIP_PLATFORM, else that installation's hipconfig, else amd), a
 # GPU the platform's lister shows (nvidia-smi -L, or amd-smi list or
@@ -1889,17 +1916,22 @@ hip_gpu_reason() {  # -> need's skip reason for `gpu`, or nothing when the liste
 # platform, runtime and what is visible - without this build's own figures,
 # which a plant build's registers change.
 hip_devpart() { sed -n 's/^cft hip: hip:0 = \(.*\); this libcft: .*/\1/p'; }
+# <leg log>: its device lines - every `cft hip: ` line but a plant build's
+# `cft hip: CFT_HIP_CHUNK=<n>`, which backend_hip.cpp prints at open beside
+# the device's line and which names no device (counted as one, it failed
+# every chunk-crossing run of the plants' build)
+hip_devlines() { grep '^cft hip: ' "$1" | grep -vE '^cft hip: CFT_HIP_CHUNK=[0-9]+$'; }
 # <leg log> <leg>: every GPU process of the leg named the stage's device
 hip_named() {
   local n m odd
-  n=$(grep -c '^cft hip: ' "$1")
+  n=$(hip_devlines "$1" | grep -c .)
   if [ "$n" -eq 0 ]; then
     echo "  FAIL  $2: no CFT_HIP_INFO line - a run whose log does not name its device is not a result"
     return 1
   fi
-  m=$(grep '^cft hip: ' "$1" | hip_devpart | grep -cxF -- "$HIP_DEV")
+  m=$(hip_devlines "$1" | hip_devpart | grep -cxF -- "$HIP_DEV")
   if [ "$m" -ne "$n" ]; then
-    odd=$(grep '^cft hip: ' "$1" | grep -vF -- "= $HIP_DEV; this libcft: " | head -n 2)
+    odd=$(hip_devlines "$1" | grep -vF -- "= $HIP_DEV; this libcft: " | head -n 2)
     echo "  FAIL  $2: $((n - m)) of its $n device lines name another device than the stage's ($HIP_DEV): $odd"
     return 1
   fi
@@ -1920,6 +1952,40 @@ hip_plant_run() {
   cat "$out"
   return $rc
 }
+# <log>: "M|line" from the summary a check prints of its own failures -
+# hip-test's "N checks, M failed, K NOT RUN", divsqrt_check.py's "FAIL: M
+# of N disagree" - or nothing (a crash, a refusal, no count): one reader
+# for every plant and control of round 2, so a red is a number, read alike
+hip_failed() {
+  sed -n -e 's/^\([0-9][0-9]* checks, \([0-9][0-9]*\) failed.*\)/\2|\1/p' \
+         -e 's/^\(FAIL: \([0-9][0-9]*\) of [0-9][0-9]* disagree.*\)/\2|\1/p' "$1" | head -n 1
+}
+# <log of hip-test -l divsqrt, the plants' build>: the route proof read by
+# the leg's own words. 24 lines (four formats, the divide and the root,
+# three routes), each saying that the route forced is the one its head
+# names - "no program after the marker (the chunk route)", "the program
+# route's", "the whole image's", the leg computing each image's head
+# itself - with reach 0 and lane pool 0. Prints the heads seen, by route;
+# returns 1, saying what it read, when any of that is not so.
+hip_proof() {
+  awk '
+    /^    route proof, / {
+      n++; r = ""
+      if ($0 ~ /the chunk route forced: head [0-9]+ - no program after the marker \(the chunk route\); /) r = "chunk"
+      if ($0 ~ /the program route forced: head [0-9]+ - the program route.s; /) r = "program"
+      if ($0 ~ /the whole-operation route forced: head [0-9]+ - the whole image.s; /) r = "whole"
+      if (r == "" || $0 !~ /, reach 0, lane pool 0, launches [0-9]+$/) { bad++; if (!first) first = $0; next }
+      h = $0; sub(/.* forced: head /, "", h); sub(/ .*/, "", h)
+      if (!((r, h) in seen)) { seen[r, h] = 1; heads[r] = heads[r] " " h }
+    }
+    END {
+      if (n != 24 || bad) {
+        printf "%d route-proof line(s), 24 wanted, %d not naming its forced route with reach 0 and lane pool 0%s\n", n, bad, first ? ": " first : ""
+        exit 1
+      }
+      printf "24 route-proof lines, each naming its forced route: the chunk route head%s after the marker program - no program ran, an absence a host fallback would also show (VG2C note 1); the program route head%s; the whole operation head%s; reach 0 and lane pool 0 on all\n", heads["chunk"], heads["program"], heads["whole"]
+    }' "$1"
+}
 hip_sum() { sha256sum "$1" 2>/dev/null | cut -c1-64; }
 hip_same() { if [ -n "$1" ] && [ "$1" = "$2" ]; then echo "= sw"; else echo "${1:-none}"; fi; }
 # GPU-A's captured output sum for a corpus (docs/studies/gpu-a/captured), or "-"
@@ -1938,9 +2004,19 @@ do_hip() {
   local plat dev=${HIP_DEVICE:-0} root=${HIP_ROOT:-/opt/rocm} arch=${HIP_ARCH:-} \
         tree="$RUNDIR/hip-tree" ptree="$RUNDIR/hip-tree-plants" L="$RUNDIR/hip-logs" \
         C="$RUNDIR/hip-corpora" O="$RUNDIR/hip-out" V="$RUNDIR/hip-vectors" \
-        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap vendor
-  local -a mk bad=()
+        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap vendor \
+        V2="$RUNDIR/hip-vectors-formatof" ch args e named what why api rp dp
+  local -a mk bad=() pt=()
   local -A SW=()
+  # A variable the caller's shell exports must not change what a run here
+  # is (cert2.ENVIRONMENT_NAMES lists what libcft reads): divsqrt.c reads
+  # CFT_DIVSQRT_FULL and CFT_DIVSQRT_SEQ at every cft_div and cft_sqrt, so
+  # an exported FULL=1 would make every default-route run below the whole
+  # operation's, and no log would say so; and an inherited plant-build
+  # instrument (CFT_HIP_PLANT and _CHUNK, which this stage sets run by run,
+  # _PAGE, _UPLOAD) would change every control of the plants' build. A run
+  # that forces a route names it on the command line it prints.
+  unset CFT_DIVSQRT_FULL CFT_DIVSQRT_SEQ CFT_HIP_PLANT CFT_HIP_CHUNK CFT_HIP_PAGE CFT_HIP_UPLOAD
   plat=$(hip_platform)
   case "$plat" in nvidia|amd|cuda) ;;
     *) echo "FAIL  HIP_PLATFORM=$plat: the stage builds for nvidia, amd or cuda (plain nvcc)"; return 1;; esac
@@ -2068,9 +2144,20 @@ do_hip() {
   echo "== plants (HIP_PLANTS=1, a copy of the build: $P)"
   cp -a "$tree" "$ptree" || { echo "FAIL  the plants' copy"; return 1; }
   t0=$(date +%s)
-  "${mk[@]}" -C "$P" HIP_PLANTS=1 hip-corpus hip-test > "$L/build-plants.txt" 2>&1 \
+  # The copy holds the default build's library and tools, which carry no
+  # plant, so a check run through its library (CFT_LIB=$P/libcft.so) or
+  # its cft-selftest would be green under every plant: both are named here
+  # to be rebuilt with the plants (host/Makefile: backend_hip.o and .lo
+  # follow gen/hip/backend-flags; device-test is not, and no plant's check
+  # runs it), and each plant run's own device line, CFT_HIP_PLANT=<name>,
+  # is the proof that what ran carried it.
+  pt=(hip-corpus hip-test "$SHLIB_NAME" cft-selftest)    # HIP-PLANTS-BUILD
+  "${mk[@]}" -C "$P" HIP_PLANTS=1 "${pt[@]}" > "$L/build-plants.txt" 2>&1 \
     || { tail -n 40 "$L/build-plants.txt"; echo "FAIL  the HIP_PLANTS=1 build"; return 1; }
-  echo "hip: the plants' build in $(( $(date +%s) - t0 )) s; warnings: $(grep -ci 'warning' "$L/build-plants.txt")"
+  echo "hip: the plants' build (${pt[*]}) in $(( $(date +%s) - t0 )) s; warnings: $(grep -ci 'warning' "$L/build-plants.txt")"
+  for b in "${pt[@]}"; do
+    printf '  built  %-14s %s\n' "$b" "$(date -r "$P/$b" '+%F %T' 2>/dev/null || echo MISSING)"
+  done
   for pl in flip drop-flag; do
     hip_plant_run "$pl" "$L/plant-$pl.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/conf-fp64.bin" "$O/plant-$pl.out"; rc=$?
     line=$(grep -m1 "against the corpus's expected values [0-9]* results and [0-9]* flags differ" "$L/plant-$pl.txt")
@@ -2099,6 +2186,83 @@ do_hip() {
   else
     bad+=("plant reduce-carry did not turn its check red: hip-test -l reduce -s small -f fp64 exited $rc (${line:-no summary})")
   fi
+  # Round 2's plants, each run against its own check alone - the cheapest
+  # red its parcel measured - and judged by its own number: <plant> <its
+  # reader> <CFT_HIP_CHUNK, or -> <hip-test's arguments>. `ht` is hip-test,
+  # red at "N checks, M failed" with M > 0; `dsc` is divsqrt_check.py
+  # through the plants' library with the whole operation forced
+  # (CFT_DIVSQRT_FULL=1), red at "FAIL: M of N disagree" with M > 0. Only a
+  # plant build reads CFT_HIP_CHUNK: 8 lanes puts every table window past a
+  # chunk boundary, 64 elements cuts the aug leg's calls of 300 and 1,024
+  # pairs. G2C's three act on any BANK_EXT program of 42 or more constants
+  # (the whole-operation images), so each meets its own check only: other
+  # checks would be red under them too (measured once, off the stage:
+  # docs/VALIDATION.md, parcel G2D).
+  for e in "aug-flip ht - -l aug -f fp64" "aug-flags ht - -l aug -f fp64" \
+           "aug-swap ht - -l aug -f fp64" "seq-aug ht - -l aug -f fp64" \
+           "idx-chunk ht 8 -l indexed -s small -f fp64" "idx-none ht 8 -l indexed -s small -f fp64" \
+           "src-trunc ht 8 -l indexed -s small -f fp64" "depth-clamp ht - -l depth -f fp64" \
+           "bank-mode dsc -" "full-flag dsc -" "chunk-tail ht 64 -l aug -f fp64"; do
+    read -r pl b ch args <<< "$e"
+    [ "$ch" = - ] && ch=""
+    f="$L/plant-$pl.txt"
+    if [ "$b" = ht ]; then
+      what="hip-test hip:0 $args${ch:+, CFT_HIP_CHUNK=$ch}"
+      hip_plant_run "$pl" "$f" env CFT_HIP_INFO=1 ${ch:+CFT_HIP_CHUNK=$ch} "$P/hip-test" hip:0 $args; rc=$?
+    else
+      what="divsqrt_check.py --device hip:0, CFT_DIVSQRT_FULL=1, the plants' $SHLIB_NAME"
+      (cd "$ROOT" && hip_plant_run "$pl" "$f" env CFT_HIP_INFO=1 CFT_LIB="$P/$SHLIB_NAME" CFT_DIVSQRT_FULL=1 \
+         "$PYBIN" -B host/tests/divsqrt_check.py --device hip:0); rc=$?
+    fi
+    r=$(hip_failed "$f"); n=${r%%|*}; line=${r#*|}
+    named=$(grep -m1 "^cft hip: .*CFT_HIP_PLANT=$pl\$" "$f")
+    why=""
+    [ -n "$named" ] || why="$why, and no device line names the plant"
+    [ -z "$ch" ] || grep -qx "cft hip: CFT_HIP_CHUNK=$ch" "$f" || why="$why, and no line says CFT_HIP_CHUNK=$ch took"
+    if [ $rc -eq 1 ] && [ "${n:-0}" -gt 0 ] && [ -z "$why" ]; then
+      echo "  RED   plant $pl: $what - $line"
+      grep -m1 '^  FAIL: ' "$f" | sed 's/^ */          the first: /'
+      if [ "$b" = dsc ]; then echo "          what ran: ${named#*; this libcft: }"; fi
+    else
+      bad+=("plant $pl did not turn its check red: $what exited $rc, ${line:-no count of failed checks}$why")
+    fi
+  done
+  # full-refuse, judged on both sides: its red is the route proof's alone.
+  # It refuses the whole-operation image by name, and divsqrt.c's ladder
+  # falls through to the program route, whose bits are the same, so the
+  # divsqrt leg's route proof (the plant build's probe of the last program
+  # run) must say that the program route ran where the whole operation was
+  # forced, while the leg's four "through the API" lines say 0 failed and
+  # divsqrt_check, with the whole operation forced and without, is green.
+  # A route claim the fall-through also satisfies is a check that cannot
+  # fail; a red of the bits would be another fault's.
+  pl=full-refuse; f="$L/plant-$pl.txt"
+  hip_plant_run "$pl" "$f" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l divsqrt; rc=$?
+  r=$(hip_failed "$f"); n=${r%%|*}; line=${r#*|}
+  rp=$(grep -m1 -E "^  FAIL: the route proof: cft_(div|sqrt) fp[0-9]+, the whole-operation route forced: ok, the probe's head [0-9]+ \(the program route's\)" "$f")
+  api=$(grep -cE '^    fp(32|64|128|256) through the API, each route forced: .*: [1-9][0-9]* checks, 0 failed$' "$f")
+  why=""
+  [ $rc -eq 1 ] && [ "${n:-0}" -gt 0 ] || why="$why; hip-test -l divsqrt exited $rc, ${line:-no count of failed checks}"
+  [ -n "$rp" ] || why="$why; no route-proof FAIL line says the program route ran where the whole operation was forced"
+  [ "$api" = 4 ] || why="$why; $api of the leg's four \"through the API\" lines say 0 failed, and its bits must stay green"
+  grep -q "^cft hip: .*CFT_HIP_PLANT=$pl\$" "$f" || why="$why; no device line of the leg names the plant"
+  for v in "" 1; do
+    g="$L/plant-$pl-dsc${v:+-full}.txt"
+    (cd "$ROOT" && hip_plant_run "$pl" "$g" env CFT_HIP_INFO=1 CFT_LIB="$P/$SHLIB_NAME" ${v:+CFT_DIVSQRT_FULL=1} \
+       "$PYBIN" -B host/tests/divsqrt_check.py --device hip:0); r=$?
+    s=$(grep -m1 -E '^OK: [0-9]+ cases|^FAIL: ' "$g")
+    named=$(grep -m1 "^cft hip: .*CFT_HIP_PLANT=$pl\$" "$g")
+    if [ $r -ne 0 ] || [ "${s#OK: }" = "$s" ] || [ -z "$named" ]; then
+      why="$why; divsqrt_check${v:+ under CFT_DIVSQRT_FULL=1} exited $r (${s:-no summary})$([ -n "$named" ] || echo ', and no device line names the plant')"
+    fi
+  done
+  if [ -z "$why" ]; then
+    echo "  RED   plant full-refuse: the route proof red, the bits green - ${rp#  FAIL: }"
+    echo "          the leg: $line; its four \"through the API\" lines 0 failed; divsqrt_check green under the plant, the whole operation forced and not: $(grep -m1 '^OK: ' "$L/plant-$pl-dsc-full.txt") and $(grep -m1 '^OK: ' "$L/plant-$pl-dsc.txt")"
+    echo "          what ran: ${named#*; this libcft: }"
+  else
+    bad+=("plant full-refuse did not turn its check red as it must, by the route proof alone: ${why#; }")
+  fi
   # the same checks on the plants' build with no plant: GREEN, so the red was the plant's
   hip_cmd "$L/plant-none-conf.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/conf-fp64.bin" "$O/plant-none.out" \
     && grep -q "expected values 0 results and 0 flags differ" "$L/plant-none-conf.txt" \
@@ -2108,6 +2272,54 @@ do_hip() {
     || bad+=("the plants' build with no plant does not give the software handle's routines-fp64")
   hip_cmd "$L/plant-none-reduce.txt" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l reduce -s small -f fp64 \
     || bad+=("the plants' build with no plant is not green on hip-test's small fp64 reductions")
+  # Round 2's controls: each plant's own command with no plant, 0 failed of
+  # a count above 0; and the chunk crossings no leg of a default build
+  # makes (there an augmented call's chunk is what the 64 MiB stage holds,
+  # 524,277 pairs at fp256, and a program's starts at 2,048 lanes), here in
+  # the PLANTS' build at CFT_HIP_CHUNK, each run's log carrying that line -
+  # chunk-tail's red above is this crossing's - and divsqrt's route proof
+  # read where the probe exists (hip_proof), with no NOT RUN.
+  for e in "aug - -l aug -f fp64" "aug-chunk64 64 -l aug" "indexed-chunk8 8 -l indexed -s small -f fp64" \
+           "depth - -l depth -f fp64" "depth-chunk64 64 -l depth" "divsqrt - -l divsqrt" \
+           "divsqrt-chunk64 64 -l divsqrt"; do
+    read -r c ch args <<< "$e"
+    [ "$ch" = - ] && ch=""
+    f="$L/plant-none-$c.txt"
+    hip_cmd "$f" env CFT_HIP_INFO=1 ${ch:+CFT_HIP_CHUNK=$ch} "$P/hip-test" hip:0 $args; rc=$?
+    r=$(hip_failed "$f"); n=${r%%|*}; line=${r#*|}
+    why=""; s=""
+    [ $rc -eq 0 ] && [ "$n" = 0 ] && [ "${line%% *}" -gt 0 ] 2>/dev/null || why=", exited $rc, ${line:-no count of checks}"
+    [ -z "$ch" ] || grep -qx "cft hip: CFT_HIP_CHUNK=$ch" "$f" || why="$why, and no line says CFT_HIP_CHUNK=$ch took"
+    if [ "${c%%-*}" = divsqrt ]; then
+      s=$(hip_proof "$f") || why="$why, and its route proof: $s"
+      case $line in *", 0 NOT RUN") ;; *) why="$why, and NOT RUN in a plant build, which has the probe and fail-launch";; esac
+    fi
+    if [ -z "$why" ]; then
+      echo "  GREEN no plant, hip-test hip:0 $args${ch:+, CFT_HIP_CHUNK=$ch}: $line"
+      [ -n "$s" ] && echo "          $s"
+      grep ': the probe says [0-9]* launches of ' "$f" | sed 's/^ */          /'
+    else
+      bad+=("the plants' build with no plant is not green on hip-test hip:0 $args${ch:+, CFT_HIP_CHUNK=$ch}$why")
+    fi
+  done
+  # divsqrt_check through the plants' library, no plant: the default route
+  # and the whole operation; the chunk route is HIP_FULL=1's, as everywhere
+  for v in default whole chunk; do
+    case $v in
+      whole) e=CFT_DIVSQRT_FULL=1;;
+      chunk) e=CFT_DIVSQRT_SEQ=0
+             if [ "${HIP_FULL:-0}" != 1 ]; then echo "  (the chunk route's control, CFT_DIVSQRT_SEQ=0, runs under HIP_FULL=1)"; continue; fi;;
+      *) e="";;
+    esac
+    f="$L/plant-none-dsc-$v.txt"
+    (cd "$ROOT" && hip_cmd "$f" env CFT_HIP_INFO=1 CFT_LIB="$P/$SHLIB_NAME" $e "$PYBIN" -B host/tests/divsqrt_check.py --device hip:0); rc=$?
+    s=$(grep -m1 '^OK: [0-9]* cases' "$f")
+    if [ $rc -eq 0 ] && [ -n "$s" ]; then
+      echo "  GREEN no plant, divsqrt_check.py --device hip:0${e:+, $e}: $s"
+    else
+      bad+=("the plants' build with no plant is not green on divsqrt_check.py --device hip:0${e:+, $e}: exit $rc ($(grep -m1 '^FAIL: ' "$f"))")
+    fi
+  done
   hip_cmd "$L/plant-leg.txt" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l plants \
     || bad+=("hip-test's plants leg: a malformed CFT_HIP_PLANT, CFT_HIP_CHUNK, CFT_HIP_PAGE or CFT_HIP_INFO is not refused by name")
   for f in "$L"/plant-*.txt; do hip_named "$f" "plants, $(basename "$f" .txt)" || bad+=("$(basename "$f" .txt): its device is not the stage's"); done
@@ -2134,7 +2346,7 @@ do_hip() {
     cap=$(hip_captured "$c")
     printf '%-15s %-64s %-7s %-7s %-7s %s\n' "$c" "${SW[$c]}" "$(hip_same "$h" "${SW[$c]}")" \
       "$(hip_same "$s" "${SW[$c]}")" "$( [ "$g" = - ] && echo - || hip_same "$g" "${SW[$c]}")" \
-      "$( [ "$cap" = "${SW[$c]}" ] && echo "= sw" || echo "$cap (not sw's)")"
+      "$( if [ "$cap" = - ]; then echo "- (none captured)"; elif [ "$cap" = "${SW[$c]}" ]; then echo "= sw"; else echo "$cap (not sw's)"; fi)"
     if [ $r -ne 0 ] || [ $rc -ne 0 ] || [ "$h" != "${SW[$c]}" ] || [ "$s" != "${SW[$c]}" ] \
        || { [ "$g" != "-" ] && [ "$g" != "${SW[$c]}" ]; }; then
       bad+=("$c: hip:0 exited $r and --resident $rc; sha256 sw ${SW[$c]}, hip:0 ${h:-none}, resident ${s:-none}$([ "$g" != "-" ] && echo ", golden $g")")
@@ -2189,11 +2401,14 @@ PY
     # fixed and large (MEASURED 2026-11-12: with them a bounded set was
     # 291,298 cases, 151 s on sw alone in cft-gpu, past 120 s on the GPU;
     # the fp256 transcendental sets about a minute each to generate) - they
-    # are HIP_FULL_REPLAY's
+    # are HIP_FULL_REPLAY's; the formatOf sets have a leg of their own,
+    # below. The augmented sets whole (--augmented 24, vectors/out's count:
+    # 552 cases past the 89,064 of 1), one a format, their rounding 9.5's,
+    # each case through cft_augmented_* - on hip:0 the GPU's since G2A
     hip_cmd "$L/gen-vectors.txt" "$PYBIN" -B "$ROOT/vectors/gen_vectors.py" --out "$V" \
         --formats fp32 fp64 fp128 fp256 --rounding rne rtz rdn rup rmm \
         --directed 120 --random 160 --simple 24 --transcend 0 --minmaxmag 1 \
-        --augmented 1 --reduce 1 --character 0 --formatof 0 \
+        --augmented 24 --reduce 1 --character 0 --formatof 0 \
       || { echo "FAIL  gen_vectors.py"; return 1; }
   fi
   (cd "$H" && hip_cmd "$L/vectors-sw.txt" ./cft-selftest "$V"); r=$?
@@ -2208,19 +2423,39 @@ PY
   fi
   hip_named "$L/vectors-hip.txt" vectors || bad+=("vectors: the replay did not name the stage's device")
 
-  # ---- d. seq_check, the `seq` stage's command, through the device
-  echo "== seq_check --device hip:0"
-  t0=$(date +%s)
-  (cd "$ROOT" && hip_cmd "$L/seq.txt" env CFT_HIP_INFO=1 CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/seq_check.py \
-     --trials 250 --formats fp32 fp64 fp128 fp256 --device hip:0); rc=$?
-  if [ $rc -eq 0 ] && grep -q '^device hip:0: backend hip,' "$L/seq.txt" && ! grep -q 'MISMATCH' "$L/seq.txt"; then
-    echo "  ok    seq_check through hip:0, $(( $(date +%s) - t0 )) s; what the device does not publish, refused by name, corpus by corpus:"
-    grep -E 'programs NOT COMPARED - each needs a bit the device does not publish|^  it does not publish' "$L/seq.txt" \
-      | sed 's/^ */        /'
-  else
-    bad+=("seq_check --device hip:0: exit $rc, $(grep -c MISMATCH "$L/seq.txt") MISMATCH line(s)$(grep -q '^device hip:0: backend hip,' "$L/seq.txt" || echo ', and no device line of its own')")
-  fi
-  hip_named "$L/seq.txt" seq_check || bad+=("seq_check: it did not name the stage's device")
+  # ---- d. seq_check, the `seq` stage's command, through the device: at
+  # the default depth, and opened at 2,048 slots (--device-depth, G2B's
+  # cft_open_ex), where the indexed corpus and the deep programs run at the
+  # card's depth. hip:N publishes the software handle's features since
+  # round 2, so a program NOT COMPARED for a bit it does not publish is a
+  # failure now, its line printed as before; the positive lines must say
+  # so. The indexed corpus's "refused by both" (an index at its source's
+  # length, the host's bound check) is not such a line: it is shown.
+  for dp in "" 2048; do
+    echo "== seq_check --device hip:0${dp:+ --device-depth $dp}"
+    t0=$(date +%s)
+    f="$L/seq${dp:+-$dp}.txt"
+    (cd "$ROOT" && hip_cmd "$f" env CFT_HIP_INFO=1 CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/seq_check.py \
+       --trials 250 --formats fp32 fp64 fp128 fp256 --device hip:0 ${dp:+--device-depth $dp}); rc=$?
+    if [ $rc -eq 0 ] && grep -q '^device hip:0: backend hip,' "$f" && ! grep -q 'MISMATCH' "$f"; then
+      echo "  ok    seq_check through hip:0${dp:+ at --device-depth $dp}, $(( $(date +%s) - t0 )) s: $(grep -m1 '^device hip:0: backend hip,' "$f")"
+      grep -E '^[0-9]+ programs from the indexed corpus run through both' "$f" | sed 's/^/        /'
+    else
+      bad+=("seq_check --device hip:0${dp:+ --device-depth $dp}: exit $rc, $(grep -c MISMATCH "$f") MISMATCH line(s)$(grep -q '^device hip:0: backend hip,' "$f" || echo ', and no device line of its own')")
+    fi
+    if grep -qE 'programs NOT COMPARED - each needs a bit the device does not publish|^  it does not publish' "$f"; then
+      grep -E 'programs NOT COMPARED - each needs a bit the device does not publish|^  it does not publish' "$f" \
+        | sed 's/^ */        /'
+      bad+=("seq_check${dp:+ at --device-depth $dp}: hip:0 does not publish a bit a program needs, where it publishes the software handle's features since round 2: $(grep -m1 -E '^  it does not publish|programs NOT COMPARED - each needs a bit' "$f")")
+    fi
+    grep -qx '  it publishes every bit cft.h defines' "$f" \
+      && grep -qx 'the device refused no program for a bit it lacks: every program was compared' "$f" \
+      || bad+=("seq_check${dp:+ at --device-depth $dp}: no line says that hip:0 publishes every bit and that every program was compared")
+    if [ -n "$dp" ] && ! grep -q "^device hip:0: backend hip, .*, max_scratch $dp; " "$f"; then
+      bad+=("seq_check --device-depth $dp: the device line does not say max_scratch $dp - the depth did not take")
+    fi
+    hip_named "$f" "seq_check${dp:+ at $dp}" || bad+=("seq_check${dp:+ at $dp}: it did not name the stage's device")
+  done
 
   # ---- e. the certificate corpus's conformance test through the device
   echo "== certificates/corpus.py check --device hip:0"
@@ -2228,51 +2463,179 @@ PY
   (cd "$ROOT" && hip_cmd "$L/corpus.txt" env CFT_HIP_INFO=1 "$PYBIN" -B certificates/corpus.py check \
      --tool "$H/cft-segrun" --device hip:0); rc=$?
   line=$(grep -m1 '^corpus check --device hip:0: ' "$L/corpus.txt")
-  if [ $rc -eq 0 ] && [ -n "$line" ]; then
+  # Its count line held: the one case refused by name is deepwrap-fp64-2048
+  # - cft-segrun's usage refusal of a stated depth beside a device
+  # (host/tools/segrun.c), not the GPU's: G2B's hip:N opens at 2,048, but
+  # cft-segrun does not ask - and augsum-fp64, whose AUGERR needs AUGADD,
+  # is made on hip:0 since G2A, in no refusal. corpus.py fails unless every
+  # case is remade and held or refused as expected, so with that one
+  # refusal the count remade (18 at 2026-11-17) is every other case.
+  n=$(printf '%s\n' "$line" | sed -n 's/^corpus check --device hip:0: \([0-9]*\) cases remade .*/\1/p')
+  r=$(printf '%s\n' "$line" | sed -n 's/.*; \([0-9]*\) refused by name as expected.*/\1/p')
+  s=$(printf '%s\n' "$line" | sed -n 's/.*; [0-9]* refused by name as expected (\(.*\))$/\1/p')
+  want="deepwrap-fp64-2048: its depth 2048, a stated depth beside a device (cft-segrun's usage refusal)"
+  if [ $rc -eq 0 ] && [ -n "$line" ] && [ "${n:-0}" -gt 0 ] && [ "$r" = 1 ] && [ "$s" = "$want" ]; then
     echo "  ok    $line ($(( $(date +%s) - t0 )) s)"
+    echo "        $n cases remade on hip:0, augsum-fp64 among them; 1 refused by name, $want"
   else
-    bad+=("corpus.py check --device hip:0: exit $rc - $(grep -m1 '^corpus check: ' "$L/corpus.txt")")
+    bad+=("corpus.py check --device hip:0: exit $rc - $(grep -m1 '^corpus check: ' "$L/corpus.txt"); its count line: ${line:-none}; it must remake every case but one and refuse that one by name - $want")
   fi
   hip_named "$L/corpus.txt" "the certificate corpus" || bad+=("the certificate corpus: a run did not name the stage's device")
 
-  # ---- f. device-test, both legs
-  echo "== device-test hip:0 -n 96, then -b -n 96"
-  for b in "" -b; do
-    (cd "$H" && hip_cmd "$L/devtest$b.txt" env CFT_HIP_INFO=1 ./device-test hip:0 $b -n 96); rc=$?
-    line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$L/devtest$b.txt")
+  # ---- f. device-test, both legs, and at 2,048 scratch slots (G2B's
+  # depth, a few seconds). Since round 2 hip:N publishes the software
+  # handle's features, so a NOT COMPARED line (a leg the device cannot be
+  # compared on) is a failure; NOT TESTED and NOT RUN are what a tile or an
+  # HBM channel it has not got leaves, a NOTE where they move from round
+  # 2's counts (17 and 4, 23 and 0, 9 and 4: G2B's, G2C's at the merge)
+  echo "== device-test hip:0 -n 96, then -b -n 96, then --scratch-depth 2048 -n 96"
+  for e in ":17:4" "-b:23:0" "--scratch-depth 2048:9:4"; do
+    b=${e%%:*}; want=${e#*:}
+    g="$L/devtest${b:+-${b//[ -]/}}.txt"
+    (cd "$H" && hip_cmd "$g" env CFT_HIP_INFO=1 ./device-test hip:0 $b -n 96); rc=$?
+    line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$g")
     # the lines that name one absence each, not the summary line that counts them
-    n=$(grep -v '^not on this device' "$L/devtest$b.txt" | grep -c ': NOT COMPARED')
-    f=$(grep -v '^not on this device' "$L/devtest$b.txt" | grep -c ': NOT TESTED')
-    s=$(grep -v '^not on this device' "$L/devtest$b.txt" | grep -c ': NOT RUN')
+    n=$(grep -v '^not on this device' "$g" | grep -c ': NOT COMPARED')
+    f=$(grep -v '^not on this device' "$g" | grep -c ': NOT TESTED')
+    s=$(grep -v '^not on this device' "$g" | grep -c ': NOT RUN')
     if [ $rc -eq 0 ] && [ -n "$line" ]; then
-      echo "  ok    device-test hip:0 ${b:+$b }-n 96: $line; NOT COMPARED $n, NOT TESTED $f, NOT RUN $s lines ($(grep -m1 '^not on this device' "$L/devtest$b.txt"))"
-      [ -z "$b" ] && { [ "$n" = 12 ] && [ "$f" = 17 ] && [ "$s" = 4 ] \
-        || echo "NOTE  device-test hip:0 -n 96: NOT COMPARED $n, NOT TESTED $f, NOT RUN $s, where G1B recorded 12, 17 and 4"; }
+      echo "  ok    device-test hip:0 ${b:+$b }-n 96: $line; NOT COMPARED $n, NOT TESTED $f, NOT RUN $s lines ($(grep -m1 '^not on this device' "$g"))"
+      [ "$f:$s" = "$want" ] \
+        || echo "NOTE  device-test hip:0 ${b:+$b }-n 96: NOT TESTED $f, NOT RUN $s, where round 2 recorded ${want%%:*} and ${want#*:}"
     else
       bad+=("device-test hip:0 ${b:+$b }-n 96: exit $rc (${line:-no summary})")
     fi
-    hip_named "$L/devtest$b.txt" "device-test${b:+ $b}" || bad+=("device-test${b:+ $b}: it did not name the stage's device")
+    if [ "$n" != 0 ]; then
+      grep -v '^not on this device' "$g" | grep ': NOT COMPARED' | sed 's/^ */        /'
+      bad+=("device-test hip:0 ${b:+$b }-n 96: $n NOT COMPARED line(s), where hip:N publishes the software handle's features since round 2: $(grep -v '^not on this device' "$g" | grep -m1 ': NOT COMPARED')")
+    fi
+    hip_named "$g" "device-test${b:+ $b}" || bad+=("device-test${b:+ $b}: it did not name the stage's device")
   done
 
   # ---- g. hip-test, leg by leg, the small reductions (the large ones are
-  # recorded runs, not the stage's)
-  echo "== hip-test hip:0 -s small, leg by leg (the open leg ran as the device's probe, above)"
+  # recorded runs, not the stage's), then round 2's four legs, every
+  # format each: aug (G2A), indexed and depth (G2B), divsqrt (G2C).
+  # indexed runs at -s all: its 96 MiB source (96 MiB of host memory and
+  # as much in the device's source buffer, which both GPUs hold) is read
+  # through a table by 200,000 lanes that cross chunk boundaries in a
+  # default build - the default build's only crossing of a table's
+  # window. A leg must report checks: one that ran none is not a pass.
+  echo "== hip-test hip:0 -s small, leg by leg (the open leg ran as the device's probe, above), then aug, indexed (-s all), depth and divsqrt"
   for n in alias two buffers reduce:fp32 reduce:fp64 reduce:fp128 reduce:fp256 \
-           seg:fp32 seg:fp64 seg:fp128 seg:fp256 compose:fp32 compose:fp64 compose:fp128 compose:fp256; do
+           seg:fp32 seg:fp64 seg:fp128 seg:fp256 compose:fp32 compose:fp64 compose:fp128 compose:fp256 \
+           aug indexed depth divsqrt; do
     f=${n#*:}; [ "$f" = "$n" ] && f=""
+    s=small; [ "$n" = indexed ] && s=all
     t0=$(date +%s)
-    { echo "\$ CFT_HIP_INFO=1 $H/hip-test hip:0 -l ${n%%:*} -s small${f:+ -f $f}"
-      CFT_HIP_INFO=1 "$H/hip-test" hip:0 -l "${n%%:*}" -s small ${f:+-f $f} 2>&1; } > "$L/hiptest-${n/:/-}.txt"; rc=$?
+    { echo "\$ CFT_HIP_INFO=1 $H/hip-test hip:0 -l ${n%%:*} -s $s${f:+ -f $f}"
+      CFT_HIP_INFO=1 "$H/hip-test" hip:0 -l "${n%%:*}" -s $s ${f:+-f $f} 2>&1; } > "$L/hiptest-${n/:/-}.txt"; rc=$?
     line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$L/hiptest-${n/:/-}.txt")
-    if [ $rc -eq 0 ]; then
-      echo "  ok    hip-test -l ${n%%:*}${f:+ -f $f}: $line ($(( $(date +%s) - t0 )) s)"
+    if [ $rc -eq 0 ] && [ "${line%% *}" -gt 0 ] 2>/dev/null; then
+      echo "  ok    hip-test -l ${n%%:*}${f:+ -f $f}$([ $s = all ] && echo ' -s all'): $line ($(( $(date +%s) - t0 )) s)"
       grep ': NOT RUN' "$L/hiptest-${n/:/-}.txt" | sed 's/^ */        /'
     else
       cat "$L/hiptest-${n/:/-}.txt"
-      bad+=("hip-test hip:0 -l ${n%%:*} -s small${f:+ -f $f}: exit $rc (${line:-no summary})")
+      bad+=("hip-test hip:0 -l ${n%%:*} -s $s${f:+ -f $f}: exit $rc (${line:-no summary})$([ "${line%% *}" = 0 ] && echo ' - it ran no check')")
     fi
     hip_named "$L/hiptest-${n/:/-}.txt" "hip-test ${n}" || bad+=("hip-test $n: it did not name the stage's device")
   done
+
+  # ---- h. augmentedAddition through the API (G2A): augmented_check.py on
+  # the software handle and through hip:0, as many comparisons on the GPU
+  # as the software handle's run of the same script makes here
+  echo "== augmented_check.py, the software handle, then --device hip:0"
+  t0=$(date +%s)
+  (cd "$ROOT" && hip_cmd "$L/augcheck-sw.txt" env CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/augmented_check.py); r=$?
+  (cd "$ROOT" && hip_cmd "$L/augcheck.txt" env CFT_HIP_INFO=1 CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/augmented_check.py \
+     --device hip:0); rc=$?
+  s=$(sed -n 's/^augmented_check: \([0-9]*\) comparisons, C == model on every one.*/\1/p' "$L/augcheck-sw.txt")
+  h=$(sed -n 's/^augmented_check: \([0-9]*\) comparisons, C == model on every one.*/\1/p' "$L/augcheck.txt")
+  if [ $r -eq 0 ] && [ $rc -eq 0 ] && grep -qx 'augmented_check: device hip:0' "$L/augcheck.txt" \
+     && [ "${s:-0}" -gt 0 ] && [ "$s" = "$h" ]; then
+    echo "  ok    augmented_check through hip:0: $h comparisons, the software handle's $s ($(( $(date +%s) - t0 )) s)"
+  else
+    bad+=("augmented_check: the software handle exited $r with ${s:-no} comparisons, hip:0 exited $rc with ${h:-no}$(grep -qx 'augmented_check: device hip:0' "$L/augcheck.txt" || echo ', and no line names the device')")
+  fi
+  hip_named "$L/augcheck.txt" augmented_check || bad+=("augmented_check: it did not name the stage's device")
+
+  # ---- i. the divide and the square root through the API (G2C):
+  # divsqrt_check.py on the software handle, then through hip:0 under each
+  # of divsqrt.c's routes, forced on the command line printed: the default
+  # (the program route), the whole operation (CFT_DIVSQRT_FULL=1) and,
+  # under HIP_FULL=1, the chunk route (CFT_DIVSQRT_SEQ=0), each OK with the
+  # software handle's count. They hold bits, not routes: a refused image
+  # falls through to the program route and the same bits. The routes are
+  # proved in the plants' build, by the route proof (hip_proof) and
+  # full-refuse, above.
+  echo "== divsqrt_check.py, the software handle, then --device hip:0 under each route"
+  (cd "$ROOT" && hip_cmd "$L/dsc-sw.txt" env CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/divsqrt_check.py); r=$?
+  s=$(sed -n 's/^OK: \([0-9]*\) cases, library matches the model exactly$/\1/p' "$L/dsc-sw.txt")
+  [ $r -eq 0 ] && [ "${s:-0}" -gt 0 ] || bad+=("divsqrt_check on the software handle: exit $r, ${s:-no} cases")
+  echo "  (each run below holds the bits of the route it forces and does not prove that route ran: a refused image falls through to the same bits - the plants' route proof and full-refuse, above, do)"
+  for v in default whole chunk; do
+    case $v in
+      whole) e=CFT_DIVSQRT_FULL=1;;
+      chunk) e=CFT_DIVSQRT_SEQ=0
+             if [ "${HIP_FULL:-0}" != 1 ]; then echo "  (the chunk route, CFT_DIVSQRT_SEQ=0, runs under HIP_FULL=1)"; continue; fi;;
+      *) e="";;
+    esac
+    t0=$(date +%s)
+    f="$L/dsc-$v.txt"
+    (cd "$ROOT" && hip_cmd "$f" env CFT_HIP_INFO=1 CFT_LIB="$H/$SHLIB_NAME" $e "$PYBIN" -B host/tests/divsqrt_check.py \
+       --device hip:0); rc=$?
+    h=$(sed -n 's/^OK: \([0-9]*\) cases, library matches the model exactly$/\1/p' "$f")
+    if [ $rc -eq 0 ] && grep -qx 'divsqrt_check: device hip:0' "$f" && [ -n "$h" ] && [ "$h" = "$s" ]; then
+      echo "  ok    divsqrt_check through hip:0${e:+, $e}: OK, $h cases, the software handle's $s ($(( $(date +%s) - t0 )) s)"
+    else
+      bad+=("divsqrt_check --device hip:0${e:+, $e}: exit $rc, ${h:-no} cases against the software handle's ${s:-none} ($(grep -m1 '^FAIL: ' "$f"))")
+    fi
+    hip_named "$f" "divsqrt_check${e:+ $e}" || bad+=("divsqrt_check${e:+ $e}: it did not name the stage's device")
+  done
+
+  # ---- j. the formatOf sets (754-2019 5.4.1), whose divides and roots are
+  # cft_div's and cft_sqrt's: made here in a directory of their own, then
+  # cft-selftest on sw and on hip:0 under the default route and the whole
+  # operation (where the image runs, which the plants' route proof shows,
+  # its bits against the vectors; like divsqrt_check, a refused image
+  # would fall through to the same bits) and, under HIP_FULL=1, the chunk
+  # route; each the sets and cases of the software handle's replay of the
+  # same directory in this run
+  echo "== the formatOf sets: made, then cft-selftest on sw and on hip:0 under each route"
+  t0=$(date +%s)
+  if hip_cmd "$L/gen-formatof.txt" "$PYBIN" -B "$ROOT/vectors/gen_vectors.py" --out "$V2" \
+       --formats fp32 fp64 fp128 fp256 --rounding rne rtz rdn rup rmm --formatof 8 \
+       --augmented 0 --directed 0 --random 0 --simple 0 --transcend 0 --reduce -1 \
+       --character 0 --minmaxmag 0 --jobs 4; then
+    nd=$(cat "$V2"/*-formatof*.jsonl 2>/dev/null | grep -cE '"fn": *"div"')
+    nf=$(cat "$V2"/*-formatof*.jsonl 2>/dev/null | grep -cE '"fn": *"sqrt"')
+    echo "hip: the formatOf sets made in $(( $(date +%s) - t0 )) s: $(grep -m1 'SHA256SUMS: the record of' "$L/gen-formatof.txt" | sed 's/.*SHA256SUMS: //'); $nd divides and $nf square roots among their cases"
+    [ "$nd" -gt 0 ] && [ "$nf" -gt 0 ] || bad+=("the formatOf sets hold $nd divides and $nf square roots: nothing of cft_div or cft_sqrt to hold")
+    (cd "$H" && hip_cmd "$L/formatof-sw.txt" ./cft-selftest "$V2"); r=$?
+    s=$(grep -E '^[0-9]+ sets?, [0-9]+ cases, all matching' "$L/formatof-sw.txt" | cut -d'(' -f1)
+    n=$(grep -E '^[0-9]+ cases checked' "$L/formatof-sw.txt")
+    [ $r -eq 0 ] && [ -n "$s" ] && [ -n "$n" ] || bad+=("the formatOf sets on sw: exit $r (${s:-no sets line}; ${n:-no count})")
+    for v in default whole chunk; do
+      case $v in
+        whole) e=CFT_DIVSQRT_FULL=1;;
+        chunk) e=CFT_DIVSQRT_SEQ=0
+               if [ "${HIP_FULL:-0}" != 1 ]; then echo "  (the chunk route's replay, CFT_DIVSQRT_SEQ=0, runs under HIP_FULL=1)"; continue; fi;;
+        *) e="";;
+      esac
+      t0=$(date +%s)
+      g="$L/formatof-$v.txt"
+      (cd "$H" && hip_cmd "$g" env CFT_HIP_INFO=1 $e ./cft-selftest "$V2" hip:0); rc=$?
+      h=$(grep -E '^[0-9]+ sets?, [0-9]+ cases, all matching' "$g" | cut -d'(' -f1)
+      f=$(grep -E '^[0-9]+ cases checked' "$g")
+      if [ $rc -eq 0 ] && [ -n "$h" ] && [ "$h" = "$s" ] && [ -n "$f" ] && [ "$f" = "$n" ]; then
+        echo "  ok    the formatOf sets through hip:0${e:+, $e}: sw and hip:0 alike - ${h}; $f ($(( $(date +%s) - t0 )) s)"
+      else
+        bad+=("the formatOf sets${e:+, $e}: sw ${s:-no sets line} (${n:-no count}), hip:0 exited $rc (${h:-no sets line}; ${f:-no count})")
+      fi
+      hip_named "$g" "formatOf${e:+ $e}" || bad+=("the formatOf sets${e:+ $e}: the replay did not name the stage's device")
+    done
+  else
+    bad+=("gen_vectors.py, the formatOf sets: it exited nonzero, so nothing of them was replayed")
+  fi
 
   if [ ${#bad[@]} -gt 0 ]; then
     printf 'FAIL  %s\n' "${bad[@]}"
@@ -2282,9 +2645,9 @@ PY
   echo "hip: every leg green on the device below"
   echo "device: $HIP_INFO"
 }
-HIP_CORPORA="conf-fp32 conf-fp64 conf-fp128 conf-fp256 routines-fp32 routines-fp64 routines-fp128 routines-fp256 fuzz-fp32 fuzz-fp64 fuzz-fp128 fuzz-fp256 systems bench"
+HIP_CORPORA="conf-fp32 conf-fp64 conf-fp128 conf-fp256 routines-fp32 routines-fp64 routines-fp128 routines-fp256 fuzz-fp32 fuzz-fp64 fuzz-fp128 fuzz-fp256 systems bench refuse"
 need hipcc gpu host-cc python mpmath
-stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (flip, drop-flag, seq-mask, reduce-carry red and green without them), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check, the certificate corpus's conformance test, device-test and hip-test, each leg's log naming its device, every device line the stage's one; skipped by name without hipcc or a GPU" -- do_hip
+stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (round 1's four and round 2's twelve, each red on its own check and green without it; with no plant the chunk crossings and the divide's route proof), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check at two depths, the certificate corpus's conformance test, device-test, hip-test with round 2's aug, indexed, depth and divsqrt legs, augmented_check, divsqrt_check and the formatOf sets, each leg's log naming its device, every device line the stage's one; HIP_FULL=1 adds the divide's chunk route; skipped by name without hipcc or a GPU" -- do_hip
 
 # The same stage on the two other ways to build the backend for NVIDIA
 # (plan decision 3; Logan, 2026-11-10: "install CUDA 13 and make the recipe

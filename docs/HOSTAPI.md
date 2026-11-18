@@ -2488,7 +2488,14 @@ and reduce-carry, each red and green without it), study GPU-A's corpora on
 `sw`, on the GPU and on the GPU resident with one sha256, a bounded vector
 replay, `seq_check.py --device hip:0`, the certificate corpus's conformance
 test (`certificates/corpus.py check --device hip:0`), device-test and
-hip-test. `bash verify/run.sh --only hip` runs it; `HIP_ROOT`,
+hip-test. Since round 2 (2026-11-17, parcel G2D) it holds round 2's
+classes too: round 2's twelve plants first, each red on its own check and
+green without it (G2D's chunk-tail red only where an augmented call
+crosses a chunk boundary), then hip-test's aug, indexed, depth and
+divsqrt legs, `augmented_check.py` and `divsqrt_check.py --device hip:0`
+(each held to the software handle's count), seq_check and device-test
+opened at 2,048 slots, and the formatOf vector sets; `HIP_FULL=1` adds
+the divide's chunk route. `bash verify/run.sh --only hip` runs it; `HIP_ROOT`,
 `HIP_PLATFORM`, `HIP_DEVICE` and `HIP_CUDA` choose; without hipcc or a GPU
 it is skipped by name. On NVIDIA two stages of the full census build it the
 two other ways: `hip-nvcc`, plain nvcc and no HIP (`HIP_PLATFORM=cuda`,
