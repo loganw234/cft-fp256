@@ -1543,6 +1543,76 @@ The module is 69 bytes longer:
     bindings/wasm/conformance.html 1,415,734 bytes  sha256 d91ab7b944b842ba...
     bindings/wasm/demos.html         601,743 bytes  sha256 1a4d602fe5f30554...
 
+### Rebuilt at ABI 0.18, 2026-11-18 (profile 3.1) - the GPU backend's round 2, the same bytes
+
+No ABI change, and the module did not move. Since the rebuild of 2026-11-12
+its sources moved in two parcels of the GPU backend's round 2, both merged
+on 2026-11-17 without a rebuild:
+- G2A, augmentedAddition on the GPU: `host/include/cft.h`,
+  `host/src/augmented.c`, `backend.h`, `device.c` and `softfloat.h`, and
+  `host/Makefile`;
+- G2B, index tables and scratch depths on `hip:N`: `cft.h`, `backend.h`
+  and `device.c`.
+
+G2C and G2D changed only `backend_hip.cpp` among the library's sources,
+and it is built only at HIP=1. `host/Makefile` also moved for G1C's NVIDIA
+legs, after the last rebuild.
+
+The 17 sources the module is built from are the 16 that `build.sh` asks
+`host/Makefile` for (the same list at both trees) and `wasm_api.c`. They
+were preprocessed at the last rebuild's tree and at this one, the way G1A's
+and M4L's entries in `docs/VALIDATION.md` did it: `gcc -E -P -std=c99 -O2
+-D__EMSCRIPTEN__ -Ihost/include` with a stub `<emscripten/emscripten.h>`,
+mingw64 gcc 16.1.0.
+- 16 came out identical.
+- `augmented.c` came out equal once whitespace is normalized. Each of its
+  eight changed lines gains the leading space that `CFT_HD` leaves when it
+  expands to nothing, as it does outside a GPU's compile.
+- A control, this tree with one token changed in `augmented.c`'s host
+  path, reads different in that file and nowhere else.
+
+The rest of the two parcels' changes are comments, macros no module source
+expands, and code under `CFT_ENABLE_HIP` or `CFT_AUG_LANES_ONLY`, which no
+module build defines (READ).
+
+So the module was rebuilt, as every change to its sources requires, and it
+came out the same bytes.
+
+The order was the 2026-10-16 rebuild's, an unchanged module's:
+1. the five native tools `verify_demos.mjs` runs, built from the same
+   tree with mingw64 gcc 16.1.0 (19 s, 0 warnings);
+2. `build.sh` (50 s), which reproduced the committed `cft_node.wasm`,
+   `cft_node.js` and `conformance.html` byte for byte;
+3. `build_demos.sh` (13 s), which reproduced the committed `demos.html`;
+4. `verify_demos.mjs` in check mode (92 s), not `--record`: 48 checks, no
+   FAIL. The recording is stamped with the module, and the module is the
+   same, so there was nothing to re-record. `demos_chains.json` was not
+   touched;
+5. a second clean build of both (49 s and 11 s), with
+   `bindings/wasm/build/` removed between: all 160 files under it, both
+   negative-control pages among them, came out byte for byte.
+
+Steps 1 and 4 are the demos stage's own work. The container was the pinned
+emsdk 6.0.9 image, already on the desktop at its digest, through Docker
+Desktop. Two other projects had runs booked on the desktop meanwhile, so
+the times may carry their load.
+
+The node and wasm stages were not run again. They passed at the 2026-11-12
+rebuild (`verify/run.sh --only docs,generated,node,wasm,demos` on
+amd-arc-box, PASS, nothing skipped), on the same module bytes. Nothing else
+they read has changed since (READ, `git diff` between the two trees):
+- `bindings/node`, `bindings/wasm`, `vectors/` and `python/cft_golden`;
+- the stages' functions in `verify/run.sh`: `do_node`, `do_wasm`,
+  `do_demos` and `ensure_vectors`.
+
+Still **141 `cftw_*` exports**, the same names, and 149 exports in all.
+Nothing moved:
+
+    bindings/node/cft_node.wasm      281,729 bytes  sha256 daa2a3c4cdf3ed2d...  (unchanged)
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,415,734 bytes  sha256 d91ab7b944b842ba...  (unchanged)
+    bindings/wasm/demos.html         601,743 bytes  sha256 1a4d602fe5f30554...  (unchanged)
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
