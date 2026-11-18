@@ -28363,3 +28363,48 @@ At 80468f1a on the RX 7600 (13:53:21 to 14:13:14, load 0.5 to 1.6): built in 20 
 **Not done, and why.** `deepwrap-fp64-2048` stays refused, the one open item: cft-segrun refuses `--scratch-depth` beside any `--device` but `sw` (host/tools/segrun.c :4207 to :4211) before it opens a device, and its only open with a depth is the software branch (:4327 to :4338); G2B's hip:N would honour the depth through `cft_open_ex`, so making the case on the GPU is a certificate-tool change, outside this parcel. The default-build `chunks` leg (6c) is OFF. `device-test` with `CFT_DIVSQRT_FULL=1` exported is not in the stage: it cannot prove which route ran.
 
 **What ran, and GPU time** (the wall time of the runs holding each GPU, builds and generation included: an upper bound). The RTX 5060 Ti, 13:19 to 15:05: 58 single runs (item 0's, the plants' by hand, the collateral) 640.5 s and 8 stage-type runs (the base, the throwaway, the acceptance, the full tier, hip-nvcc, hip-source and test-hip-stage --gpu at the base and the tip) 5,303 s, 99.1 minutes. The RX 7600, 13:17 to 14:36: 44 single runs (item 0's and the plants' by hand) 662 s and 4 stage-type runs (the base, the throwaway, the acceptance, the full tier) 3,729 s, 73.2 minutes. Load: cft-gpu 0.1 to 1.2, the RX 7600 machine 0.5 to 2.0. One mistake, mine: the first script of the collateral ran under an outer `timeout 2400` on the wsl client, which expired while its next run waited on the lock behind the stage runs; that run had not started (no GPU work was cut, no process of it was left), and the rest was queued again. Left in place: G2D's work directories in cft-gpu (2.6 GB) and on the RX 7600 machine (1.6 GB); nothing of G2D's is running on either. Ledger: Data/runs/2026-11-11-gpu-backend/ledger/G2D.md.
+
+## 2026-11-18 - the lead's merge of round 2's G2D: the verifier, the replay of `hip` on both GPUs and the box gate (the GPU backend's round 2, closed; author the lead, Opus 5.5)
+
+**What merged.** On main 821b9367 (night 23's page data on d4964c3c), G2D (g2d at e3f846ee) was merged with --no-ff as 1e43bf19. No conflict: main had moved by night 23's site/nightly.json alone, which G2D does not touch. The merge's tree is c6d5f03b, the tree `git merge-tree --write-tree 821b9367 e3f846ee` gives. This entry's commit follows it. With G2D, round 2's four parcels are on main.
+
+**The verifier VG2D (Sonnet), on a frozen tree of e3f846ee: no (a), no (b).**
+- **The stage at e3f846ee on each GPU** (--require-all, bundle clones):
+  - 760 s on the 5060 Ti and 1,122 s on the RX 7600;
+  - 16 RED, 9 GREEN, 360 ok, 0 NOTE, 0 FAIL; 106 device lines of one device and 23 CHUNK lines;
+  - every plant and leg count equal to G2D's.
+- **Five mutations of the stage, each a FAIL naming the plant:**
+  - every plant run without its plant;
+  - bank-mode's, full-flag's and full-refuse's Python checks pointed at the default library;
+  - three plant names misspelt;
+  - each check reading the previous plant's log;
+  - full-refuse's bits made red by one source line. That fault was shown red in the plants' build first (8,266 checks, 1,684 failed). Two earlier faults of VG2D's own were inert and count for nothing.
+- **Also:**
+  - test-hip-stage: 8 cases, and 14 with --gpu, 0 failed;
+  - k, the tail of 11 and the first program chunk of 2,048 re-derived from the code;
+  - hip_named fed three logs: the base's function fails the CHUNK log, G2D's passes it;
+  - the collateral cells reproduced;
+  - the docs checks, the size, the path scan, and `hipcc -E` (the default unit identical, the plant unit +7 lines).
+- **Its notes, carried here:**
+  1. G2D's entry gives an augmented call's chunk as "what the 64 MiB stage holds", 524,277 pairs at fp256. The stage is the smaller of a 64 MiB cap and an eighth of the memory free when the handle opens (backend_hip.cpp, `D->stage`, READ). So the figure, and the crossing at 524,288 pairs, hold where at least 512 MiB is free at open. On a card with less, the chunk is smaller and a crossing comes sooner. Each device line prints the stage's size: G2D's 5060 Ti runs show 64 MiB in all 106 lines (and in all 109 of its HIP_FULL=1 run), and so does the replay below (64 MiB in all 106 device lines on each GPU).
+  2. G2D's HIP=0 proof, "32 of 32 objects byte-identical", was made from git archives, as its entry says. From git clones at the two commits, build_id.o and build_id.lo differ in the embedded commit text and nowhere else. That is by design, so the proof's scope is the archives.
+
+**The replay of the stage `hip`** (MEASURED; replay-1118/replay_g2d.sh, made by the lead's generator from replay_g2c.sh with every SHA read from git). `verify/run.sh --only hip --require-all` ran at 1e43bf19 from a fresh clone of a bundle of the merge branch (sha256 5fa590ac842c009d... on all three machines). HEAD, a clean status and nine markers were asserted apart: G2D's chunk-tail in backend_hip.cpp and in run.sh, the stage line's twelve, G2C's leg and plant, G2A's and G2B's markers, HOSTAPI's 0x7ff1f, and the stage. Each run was inside its GPU's lock.
+- **RTX 5060 Ti** (WSL cft-gpu, HIP_DEVICE=1), 08:31:05 to 08:47:02: rc 0 in 941 s, "VERDICT: PASS, nothing skipped", 0 inner skips; 16 RED, 9 GREEN, 360 ok, 0 NOTE, 0 FAIL, each G2D's figure; 106 device lines, every one the RTX 5060 Ti (sm_120, bus 0000:05:00.0), and 23 CHUNK lines; the corpus's 18 cases remade and held; seq_features 0x7ff1f. Its 941 s, against G2D's 738 and VG2D's 760, ran on a shared desktop (the WSL VM's load average 4.29 at its start, by the replay's own line; its cause not measured), inside the 1,000 s G2D's brief held the stage to.
+- **RX 7600** (nvidia-box, PYTHONPATH at ~/lead-pylib/pylib), 08:30:15 to 08:48:45: rc 0 in 1,105 s, PASS, nothing skipped, 0 inner skips; the same counts, each G2D's; 106 device lines, every one the RX 7600 (gfx1102, bus 0000:03:00.0), and 23 CHUNK lines; the corpus's 18; seq_features 0x7ff1f; inside the 1,400 s; nothing under the copy's pylib newer than the run's stamp.
+- The RTX 4070 was not run.
+
+**The box gate** (MEASURED; box_gate_g2d.sh on amd-arc-box at 1e43bf19, a fresh clone of the same bundle; the SHA, the merge's two parents, the markers and the stage counts asserted apart): 08:30:48 to 09:09:09, under B0123.
+- `verify/run.sh --budget quick`: rc 0 in 2,295 s, PASS: 24 ok and 7 skipped by name, 0 inner skips. The seven are buildargs (a real Vitis at /data/Xilinx would be sourced) and the six language stages whose toolchains the box lacks (rust, julia, go, csharp, r and fortran): the shape of G2C's gate (24 ok, 7 named skips, 2,272 s).
+- `--only hip,hip-nvcc,hip-source`: rc 0 in 2 s, each skipped by name: no hipcc, no nvcc and no HIP built from source on the box.
+- The clone's status was 0 after. The stage list read 56 stages, 31 in quick and 46 in gate, beside CLAUDE.md's two counts, which the gate asserted. The 30 logs' sums equal the box's (box/gate-g2d).
+
+**Round 2, closed.**
+- **hip:N publishes 0x7ff1f.** It runs augmentedAddition (the executor's AUGADD and AUGERR, and the augmented API on the GPU), index tables and scratch depths to 2,048. The whole-operation divide and root images run bit for bit, by choice and not by default.
+- **The stage `hip`** holds all of it on both GPUs, with 16 plants each red by its own check.
+
+**For Logan, decisions not built:**
+- G2C's size-dependent divide route, and the device-callable form S1;
+- deepwrap-fp64-2048: cft-segrun's refusal of a stated depth beside a device (a segrun.c change).
+
+**Owed:** the WebAssembly rebuild, from G2A and G2B. G2D changed no source the module compiles: of host/src it changed backend_hip.cpp alone, and the module builds host/src's C files.
