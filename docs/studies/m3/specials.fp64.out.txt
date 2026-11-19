@@ -93,4 +93,4 @@ fp64 compound 308 lanes x 5: wrong 0, marked 74, refused 0  | compound: x specia
      rup marked x=0x3ff0000000000001 n=2
      rmm marked x=0x3ff0000000000001 n=-1
      rmm marked x=0x3ff0000000000001 n=2
-fp64: 0 wrong unmarked special lanes; 30 s
+fp64: 0 wrong unmarked special lanes; 22 s

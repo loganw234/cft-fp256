@@ -80,9 +80,14 @@ Nothing in the tree imports the model.
   format's exponent range, so L needs about log2 T_f more bits than p + G:
   8, 11, 15 and 19 at fp32 to fp256 (COMPUTED). The double word holds them
   at fp128 and fp256 (G = 46, uniform); **at fp64 it cannot** (107 bits
-  against 106), and the bound grows with |t|: Bv = |V_h| (2^-97 + |t_h|
-  2^-100), G from 43.8 at |t| = 1 to 36.9 at the top of the range, set by
-  the budget after two tries (3.6, item 6; question 3).
+  against 106), and the bound grows with |t| and with the reduction's k:
+  Bv = |V_h| (2^-97 + |t_h| 2^-100 + |Y_h k| 2^-101), G from 43.8 at
+  |t| = 1 to 36.9 at the top of the range where k = 0, at most 0.63 bits
+  less where |k| >= 1 outside the cancelling zone. B1 was set by the
+  budget after two tries (3.6, item 6); the |Y k| term is send-back 1's
+  fix for the reduction's cancelling zone, |x| in [1/2, 241/256), where
+  k = -1 and log2 m' cancel to L = -0.0871 and the logarithm's error is
+  absolute (3.2, 3.6 item 9; question 3).
 - **The sign and the integer operand** (2.5, 2.6): y's integrality and
   parity in-lane from the encoding in four bands up to 2^262143 (ADD, SUB,
   CMPEQ, IAND, ICMPLT, SELECT); n a constant of the program, its words in
@@ -95,8 +100,8 @@ Nothing in the tree imports the model.
   midpoints mark under rne and rmm. cftc rewrites pow(a, 2), pow(a, 1),
   pow(a, -1) and pown's and rootn's like into a * a, a * 1 and 1 / a,
   bit and flag equal on every lane measured (6).
-- **The cost** (5): pow 431, 489 and 540 instructions at fp64, fp128 and
-  fp256 (powr 21 fewer, pown, rootn and compound 373 to 520), 124 to 202
+- **The cost** (5): pow 434, 489 and 540 instructions at fp64, fp128 and
+  fp256 (powr 21 fewer, pown, rootn and compound 375 to 520), 125 to 202
   bank words, no scratch; pow keeps 30 values live, the round's largest, its
   special rows' conditions living across the main path; two pow calls on
   one x share the logarithm (40 to 47 % of a call).
@@ -109,13 +114,19 @@ Nothing in the tree imports the model.
   operands over their whole ranges and every corner the brief lists, 40 to
   400 lanes a region) 0 wrong after the fixes below; section 4's rows 0
   wrong at the three formats; the first-order budget under 1 Bv in every
-  region sampled (fp64's largest 0.317 Bv, pown(x, 1000); fp128's under
-  0.0014 Bv and fp256's under 0.0031); the mark-rate law within 1.3 sigma;
-  the
-  census's families with every power-of-two exact case decided and every
-  other exact case marked, 0 wrong; eighteen lane and mark plants red in
-  21 named cases at fp64 and at fp256 and two budget plants red in their
-  regions, a nineteenth lane plant shown redundant by design.
+  region sampled on the desktop (sampled figures: 120 lanes a region at
+  fp64, 40 at fp128 and fp256; fp64's largest 0.194 Bv, compound(x, 1000)
+  in the cancelling zone; fp128's under 0.0034 and fp256's under 0.0063),
+  and in the cancelling zone, where the box found the design before
+  send-back 1 past 1 Bv (1.052, compound(x, 1000) at 10,000 lanes), the
+  budget's dominant part bounded on every lane: the logarithm's sum at
+  most 0.171 Bv, 0.219 for compound (COMPUTED, 3.2); the mark-rate law
+  within one sigma; the census's families with every power-of-two exact
+  case decided and every other exact case marked but y = 1's, 0 wrong;
+  eighteen lane and mark plants red in 21 named cases at fp64 and at fp256,
+  two budget plants red in their regions and a third, `zone_bound_off`,
+  red only at the box's volume, a nineteenth lane plant shown redundant by
+  design.
 - **The model found eight things wrong in itself** (3.6), three of them
   design defects that every pool passed and only a region placed by the
   operands' own ranges reached: a tiny y (t_h underflowing) answered by V's
@@ -123,11 +134,16 @@ Nothing in the tree imports the model.
   [2^(p-2), 2^(p-1)); and a negative result rounding to zero answered +0.
   All three fixed, all three plants. And a plant green on every region
   showed a corner no region reached, the logarithm's weakest point, now the
-  region `rhoedge`. No defect in transcend.py was found.
+  region `rhoedge`. Send-back 1 found a ninth at the box's volume: fp64's
+  bound not shown sound in the reduction's cancelling zone, fixed by the
+  |Y k| term (3.6, item 9). No defect in transcend.py was found.
 - **Not done here** (the known limits): fp32 is not modelled (2.8); the
   budgets are the desktop's, 120 lanes a region at fp64 and 40 at fp128 and
-  fp256, and bound their own samples (the larger samples are
-  `box_m3s.sh`'s, for the lead); the language, the compiler and the
+  fp256, and bound their own samples (the larger samples are the box's:
+  `box_m3s.sh`'s and, for the fixed design, `box_m3s_sb1.sh`'s, the lead's
+  run after this commit); fp64's margin in the cancelling zone rests on
+  the analytic bound of its dominant part and on sampled budgets of the
+  rest; the language, the compiler and the
   derivative rules of sections 6 and 7 are designed, not run, but for the
   rewrites' equality; the integer-operand functions run on seq.py at six
   values of n, not every n of the pools; the queue logs' "rc" field is
@@ -389,22 +405,36 @@ up, COMPUTED), and:
 - **at fp64 it does not.** 107 bits are past the double word's 106, and
   M1's plan_log stops at GL = 47 (its floor, 12 u^2). With GL = 47 the
   logarithm's own error is about 2^-104 relative where it does not
-  cancel, and up to about 2^-100.5 where it does: M1's reduction takes
-  m' in [0.94, 1.88), so an x just below 1 is k = -1 with log2 m' near
-  0.91, and k + log2 m' cancels by up to 3.4 bits (the double word's
-  roundings stay relative to the larger term; ESTIMATE, then measured by
-  the budget, 3.2 and 3.6, item 6). PROPOSED: the bound grows with |t|,
+  cancel, and far more where it does: M1's reduction takes m' in
+  [0.94, 1.88), so an x in [1/2, 241/256) is k = -1 with log2 m' up to
+  0.913 (241/256 is the reduction's own boundary, MEASURED by bisection on
+  the model's k, `zonebound.out.txt`), and k + log2 m' cancels by up to
+  3.5 bits, to L = -0.0871 at the top: the **cancelling zone**. The sum's
+  roundings stay at log2 m''s scale, about 2^-106 absolute, whatever L is
+  (3.2's analytic bound). PROPOSED: the bound grows with |t| and with the
+  reduction's k,
 
-      Bv = |V_h| (2^-(p+G) + |t_h| B1),   B1 = 2^-(2p-6) = 2^-100,
+      Bv = |V_h| (2^-(p+G) + |t_h| B1 + |Y_h k| B2),
+      B1 = 2^-(2p-6) = 2^-100,   B2 = 2^-(2p-5) = 2^-101,
 
-  one FMA and one MUL, both rounded upward (+2 instructions). G is 43.8 at
-  |t| = 1, 43.0 at |t| = 8 (results in [2^-8, 2^8]), 40.8 at |t| = 64, and
-  36.9 at the top, |t| = 1,077 (COMPUTED, `bits.out.txt`). B1 was 2^-103
-  first (0.72 Bv in the region `negint`,
-  `first-b1/budget.fp64-pow-negint.out.txt`) and 2^-102 second, which was
-  past 1 Bv for pown(x, 1000) (1.063 Bv,
-  `second-b1/budget.fp64-pown-int1000.out.txt`); 2^-100 is the value 3.2
-  holds. That is the departure from G = 44 at fp64, and
+  rounded upward: against a uniform bound, |t_h| B1 is 2 instructions
+  (a fabs and an FMA) and |Y_h k| B2 2 more (a fabs of k and an FMA; pow
+  and powr one MUL more for |y k|, the integer functions' |n| B2 being a
+  word), made beside the product so that w, not t_h, lives across the
+  exponential. Where k = 0, G is 43.8 at |t| = 1, 43.0 at |t| = 8 (results
+  in [2^-8, 2^8]), 40.8 at |t| = 64, and 36.9 at the top, |t| = 1,077
+  (COMPUTED, `bits.out.txt`); where |k| >= 1 outside the cancelling zone
+  the |Y k| term adds at most 55 % to Bv (G at most 0.63 bits less,
+  COMPUTED: there |L| >= 0.913 |k|, so |Y k| B2 <= 0.548 |t| B1); at the
+  zone's top it multiplies Bv by up to 6.7 (|Y k| B2 = 5.74 |t| B1 there),
+  which is what its sum's absolute error needs. B1 was 2^-103 first (0.72
+  Bv in the region `negint`, `first-b1/budget.fp64-pow-negint.out.txt`)
+  and 2^-102 second, which was past 1 Bv for pown(x, 1000) (1.063 Bv,
+  `second-b1/budget.fp64-pown-int1000.out.txt`); 2^-100 held every region
+  at the desktop's 120 lanes, and the box's larger samples then found the
+  cancelling zone past 1 Bv for compound(x, 1000) (send-back 1; 3.6, item
+  9), which the |Y k| term answers. That is the departure from G = 44 at
+  fp64, and
   question 3 puts it with its alternative, a triple-word logarithm at fp64
   (ESTIMATE: about 2.2 times the logarithm's instructions, the ratio of
   M1's built fp32 triple-word log2, 391 instructions, to its fp64
@@ -604,14 +634,15 @@ PROPOSED, the inherited triple word at G = 40, and NOT modelled here (a
 known limit of the study, said in 0 and 3.3). What it needs:
 - L to p + G + 8 = 72 bits (2.2), which is the triple word's 3p with no
   room for its own roundings: the same position as fp64's double word, so
-  the same law, Bv = |V_h| (2^-(p+G) + |t_h| B1) with B1 about 2^-(3p-6) =
-  2^-66 (ESTIMATE, fp64's rule at three words), G about 38.4 at |t| = 8
-  and 34.7 at |t| = 152 (COMPUTED from those);
+  the same law, Bv = |V_h| (2^-(p+G) + |t_h| B1 + |Y_h k| B2) with B1
+  about 2^-(3p-6) = 2^-66 and B2 about 2^-(3p-5) (ESTIMATE, fp64's rule at
+  three words), G about 38.4 at |t| = 8 and 34.7 at |t| = 152 where k = 0
+  (COMPUTED from those);
 - M1's fp32 log2 and exp2 are built as triple words: 391 and 368 to 373
   instructions, 77 and 72 words, 17 and 20 values live (MEASURED,
   `tw32_ref.out.txt`). The fp32 pow core ESTIMATE: their sum less the two
   final roundings and tests (about 30) plus the product and the two-word
-  r' (about 20) and the specials (about 60), or fp64's 431 (5.1) times
+  r' (about 20) and the specials (about 60), or fp64's 434 (5.1) times
   the 2.1 to 2.7 that fp32's triple word cost against fp64's double word
   in the earlier designs (M1's exp 382 against 178, READ in the ROADMAP's
   E1 paragraph; M2's sin 939 against 406, the ROADMAP's M2X paragraph and
@@ -666,8 +697,8 @@ signed V = V_h + V_l, with three additions:
   (IXOR of the encodings): the interval [V - Bv, V + Bv] holds a rounding
   boundary of the attribute, so the last bit is not decided.
 - **The bound,** Bv = 2^-(p+G) |V_h| at fp128 and fp256 (exact: a power of
-  two times |V_h|), and Bv = |V_h| RUP(2^-(p+G) + |t_h| B1) rounded upward
-  at fp64 (2.2): the first addition.
+  two times |V_h|), and Bv = |V_h| RUP(2^-(p+G) + |t_h| B1 + |Y_h k| B2)
+  rounded upward at fp64 (2.2): the first addition.
 - **"May be exact," under rne and rmm only:** marked also where the interval
   holds a GRID POINT, g1 = RUP(V_h + RDN(V_l - Bv)) <= g2 = RDN(V_h +
   RUP(V_l + Bv)), and in the fixed grid where zr = 0 with |V_l| <= Bv: the
@@ -716,29 +747,35 @@ fragment an n).
 
 | format | function | region (n) | main-path lanes | M max | capacities | bound (bits of margin) | measured worst | residual |
 |---|---|---|---|---|---|---|---|---|
-| fp64 | compound | int (3) | 119 of 120 | 0.0004 | 0.0259 | 0.0263 (5.25) | 0.0071 | 9.5e-06 |
-| fp64 | compound | int1000 (1000) | 120 of 120 | 0.0142 | 0.1226 | 0.1368 (2.87) | 0.0180 | 1.2e-05 |
-| fp64 | pow | edge | 120 of 120 | 0.0013 | 0.0198 | 0.0210 (5.57) | 0.0120 | 3.1e-07 |
+| fp64 | compound | int (3) | 119 of 120 | 0.0003 | 0.0193 | 0.0196 (5.67) | 0.0047 | 9.5e-06 |
+| fp64 | compound | int1000 (1000) | 120 of 120 | 0.0035 | 0.0426 | 0.0461 (4.44) | 0.0054 | 1.2e-05 |
+| fp64 | compound | zone1000 (1000) | 120 of 120 | 0.0103 | 0.1838 | 0.1940 (2.37) | 0.0471 | 4.0e-06 |
+| fp64 | compound | zone12000 (12000) | 119 of 120 | 0.0104 | 0.1306 | 0.1410 (2.83) | 0.0386 | 1.4e-07 |
+| fp64 | pow | edge | 120 of 120 | 0.0010 | 0.0136 | 0.0146 (6.09) | 0.0080 | 2.1e-07 |
 | fp64 | pow | hugey | 0 of 120 | 0.0000 | 0.0000 | 0.0000 (-) | 0.0000 | 0.0e+00 |
 | fp64 | pow | near1 | 117 of 120 | 0.0006 | 0.0567 | 0.0573 (4.13) | 0.0133 | 1.9e-06 |
-| fp64 | pow | negedge | 120 of 120 | 0.0029 | 0.0653 | 0.0682 (3.87) | 0.0195 | 4.1e-07 |
+| fp64 | pow | negedge | 120 of 120 | 0.0029 | 0.0646 | 0.0675 (3.89) | 0.0145 | 2.7e-07 |
 | fp64 | pow | negint | 116 of 120 | 0.0042 | 0.0995 | 0.1037 (3.27) | 0.0173 | 6.4e-06 |
-| fp64 | pow | redb | 120 of 120 | 0.0070 | 0.1471 | 0.1541 (2.70) | 0.0345 | 2.5e-05 |
-| fp64 | pow | rhoedge | 35 of 40 | 0.0381 | 0.1625 | 0.2006 (2.32) | 0.0212 | 1.2e-05 |
+| fp64 | pow | redb | 120 of 120 | 0.0028 | 0.0691 | 0.0719 (3.80) | 0.0137 | 2.1e-05 |
+| fp64 | pow | rhoedge | 113 of 120 | 0.0057 | 0.1100 | 0.1158 (3.11) | 0.0308 | 1.2e-05 |
 | fp64 | pow | small | 120 of 120 | 0.0000 | 0.0011 | 0.0011 (9.78) | 0.0010 | 9.6e-06 |
-| fp64 | pow | sub | 113 of 120 | 0.0002 | 0.0231 | 0.0233 (5.42) | 0.0109 | 3.0e-06 |
+| fp64 | pow | sub | 113 of 120 | 0.0002 | 0.0155 | 0.0157 (5.99) | 0.0075 | 2.4e-06 |
 | fp64 | pow | tinyy | 120 of 120 | 0.0000 | 0.0000 | 0.0000 (19.00) | 0.0000 | 3.6e-25 |
-| fp64 | pow | wide | 117 of 120 | 0.0001 | 0.0180 | 0.0181 (5.79) | 0.0095 | 1.6e-06 |
-| fp64 | pown | int (3) | 117 of 120 | 0.0003 | 0.0221 | 0.0224 (5.48) | 0.0076 | 1.5e-06 |
-| fp64 | pown | int-neg (-3) | 117 of 120 | 0.0002 | 0.0220 | 0.0222 (5.49) | 0.0175 | 3.2e-06 |
-| fp64 | pown | int1000 (1000) | 117 of 120 | 0.0188 | 0.2979 | 0.3167 (1.66) | 0.0246 | 5.6e-06 |
-| fp64 | pown | int17 (17) | 117 of 120 | 0.0032 | 0.0564 | 0.0596 (4.07) | 0.0129 | 3.8e-06 |
+| fp64 | pow | wide | 117 of 120 | 0.0001 | 0.0121 | 0.0121 (6.36) | 0.0063 | 1.1e-06 |
+| fp64 | pow | zone | 116 of 120 | 0.0060 | 0.1119 | 0.1178 (3.09) | 0.0378 | 1.8e-06 |
+| fp64 | pown | int (3) | 117 of 120 | 0.0002 | 0.0151 | 0.0154 (6.03) | 0.0051 | 1.1e-06 |
+| fp64 | pown | int-neg (-3) | 117 of 120 | 0.0002 | 0.0152 | 0.0155 (6.02) | 0.0117 | 2.3e-06 |
+| fp64 | pown | int1000 (1000) | 117 of 120 | 0.0060 | 0.1001 | 0.1061 (3.24) | 0.0241 | 5.6e-06 |
+| fp64 | pown | int17 (17) | 117 of 120 | 0.0019 | 0.0474 | 0.0492 (4.34) | 0.0129 | 3.8e-06 |
 | fp64 | pown | int31 (2147483647) | 117 of 120 | 0.0006 | 0.0568 | 0.0574 (4.12) | 0.0227 | 4.8e-06 |
 | fp64 | pown | int63 (-9223372036854775808) | 0 of 120 | 0.0000 | 0.0000 | 0.0000 (-) | 0.0000 | 0.0e+00 |
-| fp64 | powr | wide | 117 of 120 | 0.0001 | 0.0180 | 0.0181 (5.79) | 0.0095 | 1.6e-06 |
-| fp64 | rootn | int (3) | 120 of 120 | 0.0027 | 0.0396 | 0.0422 (4.57) | 0.0145 | 1.6e-05 |
-| fp64 | rootn | int17 (17) | 120 of 120 | 0.0004 | 0.0276 | 0.0280 (5.16) | 0.0132 | 3.0e-05 |
+| fp64 | pown | zone1000 (1000) | 120 of 120 | 0.0059 | 0.1048 | 0.1107 (3.18) | 0.0364 | 1.2e-06 |
+| fp64 | pown | zone12000 (12000) | 119 of 120 | 0.0060 | 0.0908 | 0.0968 (3.37) | 0.0402 | 2.5e-07 |
+| fp64 | powr | wide | 117 of 120 | 0.0001 | 0.0121 | 0.0121 (6.36) | 0.0063 | 1.1e-06 |
+| fp64 | rootn | int (3) | 120 of 120 | 0.0018 | 0.0274 | 0.0292 (5.10) | 0.0097 | 1.4e-05 |
+| fp64 | rootn | int17 (17) | 120 of 120 | 0.0004 | 0.0208 | 0.0211 (5.56) | 0.0092 | 2.5e-05 |
 | fp128 | compound | int (3) | 40 of 40 | 0.0005 | 0.0001 | 0.0006 (10.73) | 0.0006 | 1.1e-22 |
+| fp128 | compound | zone188000 (188000) | 40 of 40 | 0.0027 | 0.0006 | 0.0034 (8.21) | 0.0031 | 8.2e-23 |
 | fp128 | pow | edge | 40 of 40 | 0.0006 | 0.0001 | 0.0007 (10.45) | 0.0007 | 1.7e-22 |
 | fp128 | pow | hugey | 0 of 40 | 0.0000 | 0.0000 | 0.0000 (-) | 0.0000 | 0.0e+00 |
 | fp128 | pow | near1 | 40 of 40 | 0.0003 | 0.0001 | 0.0004 (11.41) | 0.0003 | 1.4e-22 |
@@ -749,9 +786,12 @@ fragment an n).
 | fp128 | pow | sub | 40 of 40 | 0.0003 | 0.0001 | 0.0004 (11.41) | 0.0003 | 2.5e-22 |
 | fp128 | pow | tinyy | 40 of 40 | 0.0000 | 0.0000 | 0.0000 (-) | 0.0000 | 1.6e-154 |
 | fp128 | pow | wide | 40 of 40 | 0.0006 | 0.0001 | 0.0006 (10.65) | 0.0005 | 1.3e-22 |
+| fp128 | pow | zone | 40 of 40 | 0.0023 | 0.0005 | 0.0028 (8.48) | 0.0025 | 1.9e-22 |
 | fp128 | pown | int (3) | 40 of 40 | 0.0006 | 0.0001 | 0.0007 (10.47) | 0.0006 | 6.7e-23 |
+| fp128 | pown | zone188000 (188000) | 40 of 40 | 0.0027 | 0.0006 | 0.0034 (8.22) | 0.0030 | 1.1e-22 |
 | fp128 | rootn | int (3) | 40 of 40 | 0.0005 | 0.0001 | 0.0005 (10.89) | 0.0005 | 2.5e-22 |
 | fp256 | compound | int (3) | 40 of 40 | 0.0000 | 0.0000 | 0.0000 (16.32) | 0.0000 | 2.6e-60 |
+| fp256 | compound | zone2990000 (2990000) | 38 of 40 | 0.0056 | 0.0006 | 0.0062 (7.33) | 0.0060 | 5.0e-60 |
 | fp256 | pow | edge | 40 of 40 | 0.0017 | 0.0001 | 0.0018 (9.14) | 0.0017 | 5.0e-60 |
 | fp256 | pow | hugey | 0 of 40 | 0.0000 | 0.0000 | 0.0000 (-) | 0.0000 | 0.0e+00 |
 | fp256 | pow | near1 | 40 of 40 | 0.0012 | 0.0001 | 0.0012 (9.66) | 0.0012 | 1.2e-59 |
@@ -762,34 +802,101 @@ fragment an n).
 | fp256 | pow | sub | 40 of 40 | 0.0025 | 0.0001 | 0.0025 (8.63) | 0.0024 | 8.1e-60 |
 | fp256 | pow | tinyy | 40 of 40 | 0.0000 | 0.0000 | 0.0000 (-) | 0.0000 | 0.0e+00 |
 | fp256 | pow | wide | 40 of 40 | 0.0008 | 0.0001 | 0.0008 (10.27) | 0.0007 | 5.7e-60 |
+| fp256 | pow | zone | 40 of 40 | 0.0035 | 0.0005 | 0.0040 (7.95) | 0.0032 | 7.4e-60 |
 | fp256 | pown | int (3) | 40 of 40 | 0.0012 | 0.0001 | 0.0012 (9.66) | 0.0011 | 5.0e-60 |
+| fp256 | pown | zone2990000 (2990000) | 39 of 40 | 0.0056 | 0.0006 | 0.0062 (7.33) | 0.0060 | 1.2e-59 |
 | fp256 | rootn | int (3) | 40 of 40 | 0.0019 | 0.0001 | 0.0020 (8.98) | 0.0019 | 6.8e-60 |
 
-**What it says** (MEASURED above): every region sampled is under 1 Bv. At
-fp64 the largest is pown(x, 1000)'s 0.317 Bv (1.66 bits of margin), the
-logarithm's sum its largest part; pow's largest is the region `rhoedge`'s
-0.201 (2.32 bits; 35 of its 40 lanes on the main path), then `redb`'s
-0.154 (2.70 bits); the regions where |t| is large (`edge`, `negint`,
-`negedge`, `int31`) are at 0.021 to 0.104, the |t| term of fp64's Bv paying
-for the double word's limit there. **At fp128 and fp256 the bound is
-uniform, 2^-(p+G) |V_h|, and every region is under 0.0014 Bv at fp128
-(`rhoedge` 0.0013, the rest 0.0007 or less) and 0.0031 at fp256** (8.36
-bits of margin and more): the double word holds the logarithm with room
-(2.2), and the largest part is the method's own error M (the polynomials
-planned at GL and GE), not a rounding: the capacities are 0.0001 to
-0.0004 Bv, and each region's measured worst is within 0.0003 of its M.
-The residual, what first order leaves out, is
-under 4 x 10^-5 Bv everywhere, so the first-order figures are the figures.
-**The regions `hugey` and `int63` have no main-path lane:** every lane
-there is screened, |t| past the range (2.6), so they test the screens and
-the sign (3.3), not the bound. **The budgets bound their own samples**
-(120 lanes a region at fp64, 40 at fp128 and fp256): the box's larger
-samples (`box_m3s.sh`) are the lead's, and the study's figures are these.
-fp64's first two B1 are in `first-b1/` and `second-b1/` (3.6, item 6).
+**What it says** (MEASURED above; the desktop's samples, 120 lanes a
+region at fp64 and 40 at fp128 and fp256, the cancelling zone's regions
+among them): every region sampled is under 1 Bv. At fp64 the largest is
+compound's `zone1000`, 0.194 Bv (2.37 bits of margin), then its
+`zone12000`, 0.141, pow's `zone` and `rhoedge`, 0.118 and 0.116, and
+pown's `zone1000` and `int1000`, 0.111 and 0.106; the logarithm's sum is
+the largest part of each. The rest are at 0.0011 to 0.104. **At fp128 and
+fp256 the bound is uniform,
+2^-(p+G) |V_h|, and every region is under 0.0034 Bv at fp128 and 0.0063 at
+fp256** (7.3 bits of margin and more), the cancelling zone at the largest
+n on the main path included (`zone188000` 0.0034 and `zone2990000` 0.0062):
+the double word holds the logarithm with room (2.2), the sum's capacity
+there is 0, and the largest part is the method's own error M (the
+polynomials planned at GL and GE): the capacities are 0.0001 to 0.0006 Bv,
+and each region's measured worst is within 0.0004 of its M. The residual,
+what first order leaves out, is under 4 x 10^-5 Bv everywhere, so the
+first-order figures are the figures. **The regions `hugey` and `int63`
+have no main-path lane:** every lane there is screened, |t| past the range
+(2.6), so they test the screens and the sign (3.3), not the bound.
 **The region `rhoedge`** (x where L is the polynomial alone at |r| near
-rho, 3.3) is the one where GL is what holds the bound: 0.201 Bv at fp64,
-0.0013 at fp128 and 0.0023 at fp256 with GL as planned, and 124 Bv at
-fp128 with the logarithm planned at G (the plant `log_short`).
+rho, 3.3) is the one where GL is what holds the bound at fp128 and fp256:
+0.0013 and 0.0023 Bv with GL as planned, and 124 Bv at fp128 with the
+logarithm planned at G (the plant `log_short`).
+
+**These are sampled figures** (send-back 1): each capacity is a maximum
+over the lanes sampled, so a sampled budget is a lower bound on its
+region's, and a region whose worst lanes are rare says little at 120
+lanes. In the design before send-back 1 (no |Y k| term), the desktop's 120
+lanes said 0.317 Bv for pown(x, 1000) (1.66 bits, "the least margin"),
+0.201 for pow's `rhoedge` and 0.021 to 0.104 for the regions where |t| is
+large (`no-b2/`); the box's said 0.802 and 1.052 for compound(x, 1000) at
+2,000 and 10,000 lanes, 0.547 for pown(x, 1000) at 10,000, and 0.586, 0.477
+and 0.419 for pow's `negint`, `rhoedge` and `redb` at 2,000 (MEASURED by the
+lead on amd-arc-box, `box-1119/`). Each of those is the cancelling zone's
+(3.6, item 9), which the sampled regions reached a few lanes at a time.
+The fixed design at the box's volume is the lead's run of
+`box_m3s_sb1.sh`, after this commit; the desktop's view of it at 2,000
+lanes, `zone-curve/`: compound's `zone12000` 0.182 Bv, its plant 0.942.
+The zone's own region keeps the plant under 1 where `int1000` passed it:
+a rounding's capacity counts on every lane once some lane of the region
+makes it inexact, and `int1000`'s lanes outside the zone make the sum's
+last subtraction (e - ngl, exact wherever S = k + gh is, the zone
+included) inexact, so its capacity on the zone's lanes joins the sum
+there; the analytic bound below counts it either way.
+fp64's first two B1 are in `first-b1/` and `second-b1/` (3.6, item 6),
+and its budgets before the |Y k| term in `no-b2/`.
+
+**The bound beyond the sample: the logarithm's sum, analytically**
+(COMPUTED, `zonebound.py`, `zonebound.out.txt`). The sum's five roundings
+(m3pow.py's `log-sum`: fe + L_l; that less the polynomial's low part; F
+(1/ln 2)'s two FMAs; e - ngl) each have capacity |dV/dv| ulp(v)/2, with
+dV/dL = V ln 2 Y and dL/dv 1/ln 2 for the first two (natural-log units)
+and 1 for the rest. On every lane whose k is -1 and |x| < 1, their
+magnitudes are bounded by the words' (|F| < 0.64 and the table's L_j <=
+ln(16/9), so fe, L_l and F (1/ln 2)'s residual are at most 2^-54; S = k +
+gh is exact there, so e = 0), and their ulp/2 sum to at most U = 7.885
+2^-106 in L. So:
+- **in the design before send-back 1,** Bv/|V| = 2^-97 + n |L| 2^-100 for
+  pown and compound (|t| = n |L|), and the sum's capacity at the zone's
+  top, |L| = 0.0871, is at most ln 2 U n / (2^-97 + 0.0871 n 2^-100) =
+  **0.0854 n / (8 + 0.0871 n) Bv**: 0.247 at n = 31, 0.898 at n = 1000,
+  0.973 at n = 12,000, 0.980 as n grows. The top stays on the main path
+  while 0.0871 n
+  < 1,077, so the **worst n is about 12,000** (12,364 the last). The box's
+  0.725 for compound(x, 1000) at 10,000 lanes was approaching its 0.898,
+  and with the rest of the budget (M 0.064, the low word's 0.134 and the
+  polynomial's 0.110 there) the bound passes 1. MEASURED, the scan of n in
+  that design (the plant `zone_bound_off`, 150 lanes of the region
+  `zone<N>` an n, `n-scan/`): the sum's sampled capacity compound 0.21 at n
+  = 31, 0.43 at n = 100, 0.63 at n = 300, 0.75 at n = 1,000, 0.56 at n =
+  3,000, 0.57 at n = 10,000, 0.46 at n = 12,000, 0.03 at n = 13,000; pown
+  0.13 at n = 31, 0.26 at n = 100, 0.38 at n = 300, 0.46 at n = 1,000, 0.54
+  at n = 3,000, 0.37 at n = 10,000, 0.46 at n = 12,000, 0.02 at n = 13,000
+  (each a lower bound, 150 lanes): it rises from n = 31 to near its largest
+  by n = 1,000 and stays there, in the samples' scatter, to n = 12,000; at
+  13,000 no zone lane is on the main path;
+- **with the |Y k| term,** Bv/|V| >= |Y k| 2^-101, so the sum's capacity
+  is at most ln 2 U / 2^-101 = **0.171 Bv** on every such lane, whatever n
+  and L; for compound, whose 1 + x's low word adds four roundings of the
+  same scale (r_l, r_l (1 + r)^-1, the Newton steps for (1 + r)^-1, and
+  the polynomial's low part less r_l's correction), at most **0.219**
+  (U = 10.1 2^-106: COMPUTED the same way). Where k = 1, or |k| >= 2, L
+  does not cancel and |t| B1 carries the sum's error as it did.
+The sampled figures these bound, the fixed design's sum's capacity in the
+zone's regions: compound's `zone1000` 0.122, compound's `zone12000` 0.069,
+pow's `zone` 0.074, pown's `zone1000` 0.073, pown's `zone12000` 0.056,
+compound's `zone12000` at 2,000 lanes 0.088, pow's `zone` at 2,000 lanes
+0.087 Bv, each under its bound (0.171). The rest of each zone budget (M, the
+product, the
+exponential) is sampled only: 0.024 Bv at most on the desktop.
 
 ### 3.3 Measured against it
 
@@ -801,7 +908,7 @@ unmarked lane that differs in bits or flags):
 |---|---|---|---|---|---|
 | fp64 | pow | 794 | 129 / 108 / 108 / 108 / 129 | 0 | 0 |
 | fp64 | powr | 823 | 100 / 79 / 79 / 79 / 100 | 0 | 0 |
-| fp64 | pown | 4260 | 528 / 479 / 479 / 479 / 528 | 0 | 0 |
+| fp64 | pown | 4260 | 530 / 481 / 481 / 481 / 530 | 0 | 0 |
 | fp64 | rootn | 4058 | 76 / 51 / 51 / 51 / 76 | 202 | 0 |
 | fp64 | compound | 4260 | 316 / 284 / 284 / 284 / 316 | 0 | 0 |
 | fp128 | pow | 746 | 146 / 125 / 125 / 125 / 146 | 0 | 0 |
@@ -825,10 +932,13 @@ negative x with odd and even integer y, |y| up to 2^(p+4) (`negint`); x in
 [0.941, 0.965] with large |t|, where M1's reduction leaves L to the
 polynomial alone at |r| near its rho, the logarithm's weakest point
 (`rhoedge`, added after the plant `log_short` was green in every other
-region: 3.6, item 8); and n
-at 3, -3, 17, 1000, 2^31 - 1 for the integer-operand functions (`int`,
-`int-neg`, `int17`, `int1000`, `int31`) - every lane against transcend.py
-under every attribute:
+region: 3.6, item 8); |x| (1 + x for compound) in the reduction's
+cancelling zone, [1/2, 241/256), mostly near its top, at the worst n
+(`zone`, `zone1000`, `zone12000`, and at fp128 and fp256 `zone188000` and
+`zone2990000`, the largest n whose zone top is on the main path: send-back
+1, 3.6 item 9); and n at 3, -3, 17, 1000, 2^31 - 1 for the integer-operand
+functions (`int`, `int-neg`, `int17`, `int1000`, `int31`) - every lane
+against transcend.py under every attribute:
 
 | format | function | region | lanes | marked (rne / rtz / rdn / rup / rmm) | wrong unmarked |
 |---|---|---|---|---|---|
@@ -843,6 +953,7 @@ under every attribute:
 | fp64 | pow | hugey | 400 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pow | negedge | 400 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pow | rhoedge | 400 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | pow | zone | 400 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | powr | wide | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | powr | near1 | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | powr | edge | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -851,11 +962,15 @@ under every attribute:
 | fp64 | powr | sub | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | powr | tinyy | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | powr | hugey | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | powr | rhoedge | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | powr | zone | 200 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pown | int | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pown | int-neg | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pown | int17 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pown | int1000 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | pown | int31 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | pown | zone1000 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | pown | zone12000 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | rootn | int | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | rootn | int-neg | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | rootn | int17 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -866,7 +981,8 @@ under every attribute:
 | fp64 | compound | int17 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | compound | int1000 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp64 | compound | int31 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
-| fp128 | pow | rhoedge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | compound | zone1000 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp64 | compound | zone12000 | 150 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pow | wide | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pow | near1 | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pow | edge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -877,7 +993,8 @@ under every attribute:
 | fp128 | pow | tinyy | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pow | hugey | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pow | negedge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
-| fp128 | powr | rhoedge | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp128 | pow | rhoedge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp128 | pow | zone | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | powr | wide | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | powr | near1 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | powr | edge | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -886,11 +1003,14 @@ under every attribute:
 | fp128 | powr | sub | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | powr | tinyy | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | powr | hugey | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp128 | powr | rhoedge | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp128 | powr | zone | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pown | int | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pown | int-neg | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pown | int17 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pown | int1000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | pown | int31 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp128 | pown | zone188000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | rootn | int | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | rootn | int-neg | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | rootn | int17 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -901,7 +1021,7 @@ under every attribute:
 | fp128 | compound | int17 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | compound | int1000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp128 | compound | int31 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
-| fp256 | pow | rhoedge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp128 | compound | zone188000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pow | wide | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pow | near1 | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pow | edge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -912,7 +1032,8 @@ under every attribute:
 | fp256 | pow | tinyy | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pow | hugey | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pow | negedge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
-| fp256 | powr | rhoedge | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp256 | pow | rhoedge | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp256 | pow | zone | 80 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | powr | wide | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | powr | near1 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | powr | edge | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -921,11 +1042,14 @@ under every attribute:
 | fp256 | powr | sub | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | powr | tinyy | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | powr | hugey | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp256 | powr | rhoedge | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp256 | powr | zone | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pown | int | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pown | int-neg | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pown | int17 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pown | int1000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | pown | int31 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp256 | pown | zone2990000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | rootn | int | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | rootn | int-neg | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | rootn | int17 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
@@ -936,6 +1060,7 @@ under every attribute:
 | fp256 | compound | int17 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | compound | int1000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 | fp256 | compound | int31 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
+| fp256 | compound | zone2990000 | 40 | 0 / 0 / 0 / 0 / 0 | 0 |
 
 **n at int64's extremes** (MEASURED): the budget's region `int63` (pown at
 n = -2^63, fp64) finds 0 main-path lanes of 120 tried
@@ -952,7 +1077,7 @@ transcend.py):
 | format | function | programs | lanes on seq.py (each attribute) | differing from the model | wrong unmarked | most live |
 |---|---|---|---|---|---|---|
 | fp64 | pow | 1 | 794 | 0 | 0 | 30 |
-| fp64 | powr | 1 | 823 | 0 | 0 | 22 |
+| fp64 | powr | 1 | 823 | 0 | 0 | 23 |
 | fp64 | pown | 6 | 904 | 0 | 0 | 21 |
 | fp64 | rootn | 6 | 904 | 0 | 0 | 19 |
 | fp64 | compound | 6 | 904 | 0 | 0 | 22 |
@@ -973,8 +1098,9 @@ lane (MEASURED, the table).
 
 **Errors against mpmath** are the budget's measured worsts above (each
 region's largest |V - f| / Bv, f by mpmath at 6p + 300 bits): the largest
-is 0.0345 Bv at fp64 (the region `redb`), 0.0011 at fp128 (`rhoedge`) and
-0.0030 at fp256 (`redb`), each under its region's bound, as the tool's own
+is 0.0471 Bv at fp64 (compound's `zone1000`), 0.0031 at fp128 (compound's
+`zone188000`) and 0.0060 at fp256 (`zone2990000`), each under its region's
+bound, as the tool's own
 soundness check requires, and each a lower bound on its region's worst.
 
 ### 3.4 How often a lane is marked
@@ -992,8 +1118,10 @@ for |V| in [2^e, 2^(e+1)), that is (COMPUTED)
 
 sig(V) the significand of V in [1, 2); the same formula for each of the
 five, whose Bv has one form: 2^-44 to 2^-42.8 at fp64 under the
-directed three for |t| up to 1, G being G(t) of 2.2 there (36.9 at the
-top of the range, so up to 2^-35.9); 2^-46 to 2^-45 at fp128 and fp256.
+directed three for |t| up to 1 where k = 0, G being G(t) of 2.2 there
+(36.9 at the top of the range, so up to 2^-35.9), and up to 0.63 bits
+more where |k| >= 1 outside the cancelling zone and 2.75 at its top (the
+|Y k| term, 2.2); 2^-46 to 2^-45 at fp128 and fp256.
 **rne and rmm mark twice as often as the directed three:** the "may be
 exact" test adds the grid points to the midpoints. The exact family and
 the families of 3.5 come on top.
@@ -1004,10 +1132,12 @@ seed 3, the law's count summed lane by lane from each lane's own Bv and R):
 
 | attribute | marked | the law | z |
 |---|---|---|---|
-| rne, rmm | 363 | 388.4 | -1.29 |
-| rtz, rdn, rup | 208 | 221.7 | -0.92 |
+| rne, rmm | 436 | 456.6 | -0.96 |
+| rtz, rdn, rup | 309 | 320.3 | -0.63 |
 
-The law holds within 1.3 sigma here. At fp128 and fp256 G' = 8 leaves
+The law holds within one sigma here, the |Y k| term in each lane's Bv
+(the design before it: 363 against 388.4 and 208 against 221.7, z -1.29
+and -0.92). At fp128 and fp256 G' = 8 leaves
 too few marks to test (fp128: 4 against 3.4 and 3 against 1.7 in 300
 lanes, `rate.fp128-pow-wide.out.txt`), so the law is also measured at
 G' = 2 (`rate.fp*-pow-wide-g2.out.txt`):
@@ -1043,7 +1173,7 @@ At fp64, 300 lanes a family (`census.fp64-*.out.txt`), every attribute,
 | **root2k**: y = Y/2^k (k = 1 to 3), x a perfect 2^k-th power | rep 176, mid 1, irr 123 | rep: 119 marked, 57 decided (powers of two); mid: marked | rep: 119 marked, 57 decided; mid: decided |
 | **pow2**: x = +-2^E over the whole range, y an integer, a short dyadic or a p-bit value | rep 73, range 69, irr 158 | all 300 decided, none marked | all 300 decided |
 | **near1**: x = 1 +- k ulp, k < 9, y with t about golden's 2^-(p+3), both sides of it, pow and powr | irr 600 | all decided (the rule beside 1) | all decided |
-| **dominant**: compound(x, n), x = M 2^e, M in {1, 3, 5, 7}, vexp(x) from p + 2 + bits(n) up, n in {2, 3, -1, -2, 5} | irr 300 | 187 marked, 113 decided | 187 marked, 113 decided |
+| **dominant**: compound(x, n), x = M 2^e, M in {1, 3, 5, 7}, vexp(x) from p + 2 + bits(n) up, n in {2, 3, -1, -2, 5} | irr 300 | 188 marked, 112 decided | 188 marked, 112 decided |
 | **edges**: x^y within half an ulp to 2 ulps of the largest finite or of the subnormal grid's least points | irr 300 | all decided | all decided |
 | **smallint**: pown, rootn and compound at n = +-2, +-3 on short odd parts | rep 166, irr 134 | rep: 140 marked, 26 decided | rep: 140 marked, 26 decided |
 
@@ -1061,7 +1191,7 @@ marks it, as the plan of record expected of pow's structured cases.
 
 **The pools' marks, by class** (`poolmarks.py`, `poolmarks.fp64.out.txt`,
 fp64, rne and rtz): pow marks 66 exact representable lanes and 63 (rne) or
-42 (rtz) with no exact value; pown 267 and 8 midpoints and 253 or 212;
+42 (rtz) with no exact value; pown 267 and 8 midpoints and 255 or 214;
 rootn 35 and 41 or 16; compound 222 and 4 midpoints and 90 or 62. The
 marked lanes with no exact value are **the 2p family**: (1 +- k u)^n and
 (1 +- k u)^(+-1 +- j u), which sit within about u^2 of the grid point
@@ -1078,14 +1208,17 @@ What the census says, family by family:
   166; every power-of-two exact case is decided in-lane (pow2: 73 of 73
   representable and 69 of 69 past the range, at every attribute: the
   brief's must-have, the in-lane exactness rule against golden's own rule
-  on lanes that reach it). Every marked exact case is a replay; its guess
+  on lanes that reach it), and no other exact representable lane is
+  decided unmarked but y = 1's, x itself (2.7, item 2): the census's own
+  count, 0 in every family but hard3p, whose 12 exact lanes are y = 1's
+  (60 lane-attributes). Every marked exact case is a replay; its guess
   has the right value under rne and rmm and the inexact flag set (the
   "guess wrong" counts of the outputs).
 - **The midpoints** mark under rne and rmm and are decided under the
   directed three, where a midpoint is no boundary (intpow's 6, root2k's 1).
 - **Beside 1** nothing marks: the rule answers from the signs.
 - **compound's dominant operand** marks where the correction (1 + 1/x)^n
-  is under the bound, 187 of 300: transcend.py decides those by
+  is under the bound, 188 of 300: transcend.py decides those by
   `_round_dyadic_side`; the routine marks them (deciding them would need
   to know x^n is exact, the exact family's question).
 - **The edges** (x^y next to the largest finite or the subnormal grid)
@@ -1099,7 +1232,8 @@ What the census says, family by family:
 
 ### 3.6 What the model found wrong in itself
 
-Eight things, in the order found (the ledger has each with its time):
+Nine things, in the order found (the ledger has each with its time; the
+ninth is send-back 1's):
 1. **The first design was wrong and unmarked at a tiny y** (a design
    defect; MEASURED, then fixed). With y down to the least subnormal, t = y
    log2|x| underflows: for pow(1.2, minSub) at fp64, t_h rounds to 0, V is
@@ -1175,15 +1309,40 @@ Eight things, in the order found (the ledger has each with its time):
    `wide` at fp128 (0.0008 Bv), because a random x almost never lands where
    L is the polynomial's term alone with |r| near rho (x in [0.94, 0.97],
    M1's cell C = 16) and |t| is large. The region `rhoedge` puts it there:
-   the plant is 124 Bv, the design 0.0013 at fp128 (and 0.201 at fp64,
-   0.0023 at fp256). A plant that could not fail on the regions given would
+   the plant is 124 Bv, the design 0.0013 at fp128 (0.0023 at fp256; at
+   fp64 0.201 at the desktop's 120 lanes in the design before send-back 1,
+   and 0.477 at the box's 2,000, `rhoedge` straddling the cancelling zone's
+   top: item 9). A plant that could not fail on the regions given would
    have hidden a design whose GL was too small.
+9. **fp64's bound was not shown sound in the reduction's cancelling zone**
+   (a design defect; found by the lead's box runs at 2,000 and 10,000
+   lanes, send-back 1; MEASURED there and on the desktop, then fixed). With
+   Bv = |V_h| (2^-97 + |t_h| 2^-100), compound(x, 1000)'s first-order budget
+   was 0.137 Bv at the desktop's 120 lanes, 0.802 at 2,000 and 1.052 at
+   10,000 on amd-arc-box (`box-1119/`), its log-sum capacity 0.725 of it;
+   pown(x, 1000)'s 0.547 at 10,000; pow's `negint`, `rhoedge` and `redb`
+   0.586, 0.477 and 0.419 at 2,000. No wrong unmarked lane was seen (the
+   box's worst 0.239 Bv; the desktop's, the plant on the zone at 2,000
+   lanes, 0.353). Each of those budgets is the zone's: |x| (1 + x for
+   compound) in
+   [1/2, 241/256), where M1's reduction takes k = -1 and log2 m' up to
+   0.913, so L cancels to -0.0871 and the sum's roundings, absolute at log2
+   m''s scale, outgrow |t| B1 by up to 11.5 times for a large |Y| (3.2's
+   analytic bound: 0.0854 n / (8 + 0.0871 n) Bv for the sum alone, 0.898
+   at n = 1000). The desktop's regions drew x log-uniformly, so a 120-lane
+   region held a few zone lanes and its capacities, maxima over the lanes,
+   rarely met the zone's worst. The worst n is about 12,000, the largest
+   whose zone top is still on the main path (3.2). Fixed by the term
+   |Y_h k| B2 (2.2); held by the regions `zone` and `zone<N>` and the plant
+   `zone_bound_off`, the design before (8); the box's budgets of the fix at
+   10,000 lanes are the lead's run of `box_m3s_sb1.sh`, after this commit.
 
 No defect in transcend.py was found: every lane compared equal where the
-routine did not mark, and the eight above are the model's own. Three of
-them (items 1, 2 and 7) are design defects that every pool passed and that
-only a region placed by the operands' own ranges reached: the brief's
-warning, which M4's verifier proved on M4's study, held here three times.
+routine did not mark, and the nine above are the model's own. Four of them
+(items 1, 2, 7 and 9) are design defects that every pool passed and that
+only a region placed by the operands' own ranges reached, the fourth only
+at the box's volume: the brief's warning, which M4's verifier proved on
+M4's study, held here four times.
 
 ## 4. The specials and the flags
 
@@ -1303,15 +1462,15 @@ simplify, its attributes RNE, RTZ, RDN, RUP and the program's
 
 | fragment | fp64 | fp128 | fp256 | words (fp64 / fp128 / fp256) | most live, scheduled (design's order) |
 |---|---|---|---|---|---|
-| pow | 426 to 431 | 484 to 489 | 535 to 540 | 128 / 157 / 202 | 30 (39) |
-| powr | 404 to 410 | 462 to 468 | 513 to 519 | 124 / 153 / 198 | 22 (36) |
-| pown(x, 3) | 378 to 384 | 436 to 442 | 487 to 493 | 127 / 156 / 201 | 20 (29) |
-| pown(x, -3) | 379 to 384 | 437 to 442 | 488 to 493 | 127 / 156 / 201 | 20 (29) |
-| pown(x, 2) | 366 to 373 | 424 to 431 | 475 to 482 | 125 / 153 / 198 | 21 (27) |
-| rootn(x, 3) | 379 to 385 | 437 to 443 | 488 to 494 | 126 / 155 / 200 | 19 (28) |
-| rootn(x, 2) | 371 to 378 | 429 to 436 | 480 to 487 | 124 / 153 / 198 | 18 (27) |
-| compound(x, 3) | 402 to 408 | 463 to 469 | 514 to 520 | 125 / 153 / 198 | 22 (29) |
-| compound(x, -1) | 401 to 408 | 462 to 469 | 513 to 520 | 124 / 152 / 197 | 22 (29) |
+| pow | 429 to 434 | 484 to 489 | 535 to 540 | 129 / 157 / 202 | 30 (39), 30 (40) |
+| powr | 407 to 413 | 462 to 468 | 513 to 519 | 125 / 153 / 198 | 22 (36), 23 (37) |
+| pown(x, 3) | 380 to 386 | 436 to 442 | 487 to 493 | 128 / 156 / 201 | 20 (29), 21 (30) |
+| pown(x, -3) | 381 to 386 | 437 to 442 | 488 to 493 | 128 / 156 / 201 | 20 (29), 21 (30) |
+| pown(x, 2) | 368 to 375 | 424 to 431 | 475 to 482 | 125 / 153 / 198 | 21 (27), 21 (28) |
+| rootn(x, 3) | 381 to 387 | 437 to 443 | 488 to 494 | 127 / 155 / 200 | 19 (28), 19 (29) |
+| rootn(x, 2) | 373 to 380 | 429 to 436 | 480 to 487 | 125 / 153 / 198 | 18 (27), 18 (28) |
+| compound(x, 3) | 404 to 410 | 463 to 469 | 514 to 520 | 126 / 153 / 198 | 22 (29), 22 (30) |
+| compound(x, -1) | 403 to 410 | 462 to 469 | 513 to 520 | 125 / 152 / 197 | 22 (29), 22 (30) |
 | pown(x, 0) | 6 | 6 | 6 | 7 / 7 / 7 | 2 (2) |
 | pown(x, 1) | 6 | 6 | 6 | 6 / 6 / 6 | 3 (3) |
 | compound(x, 1) | 25 to 26 | 25 to 26 | 25 to 26 | 10 / 10 / 10 | 7 (7) |
@@ -1326,8 +1485,9 @@ which has no LDX or STX, and `routines.program` runs them with none, 3.3).
 fragment keeps): the logarithm 159 (reduction 19, table 17, polynomial
 107, the sum 16), 37 %; the exponential 120 (reduction 11, table 17, scale
 15, polynomial 64, reconstruction 13), 28 %; the product t = y L 11; the
-test 14, the fixed grid 26, the scaling and flags 17, the exact power of
-two 10 and the rule beside 1 5 (72 in all, 17 %); the classification 14,
+test 17 (the bound's |t| and |Y k| terms among them), the fixed grid 26,
+the scaling and flags 17, the exact power of two 10 and the rule beside 1
+5 (75 in all, 17 %); the classification 14,
 y's integrality and the sign 19, the specials 36 (69, 16 %). The
 logarithm's polynomial is the largest single part: GL = 47 needs K = 12
 double-word steps (M1's log2 at G = 44 has 11, READ in plan_log's
@@ -1336,16 +1496,17 @@ docstring), and 63 and 67 at fp128 and fp256 need 16 and 17.
 **Against the routines it is built from** (MEASURED, `tw32_ref.out.txt`):
 M1's log2 and exp2 under rne are 180 and 178 instructions at fp64, 202 and
 186 at fp128, 232 and 199 at fp256, so 358, 388 and 431 together; pow
-under rne is 431, 489 and 540, 73, 101 and 109 more (COMPUTED): the
+under rne is 434, 489 and 540, 76, 101 and 109 more (COMPUTED): the
 logarithm planned finer, the product, two operands' classification, y's
-integrality and the sign, the exact and beside-1 rules and pow's specials,
-less one final rounding and test.
+integrality and the sign, the exact and beside-1 rules, pow's specials and
+fp64's bound terms, less one final rounding and test.
 
 ### 5.2 Live values, and the proposed caps
 
 pow keeps **30 values live** at fp64, fp128 and fp256 (rne and rmm; 28
-and 29 under the directed three), where powr keeps 22 and the
-integer-operand functions 19 to 22 (MEASURED, 5.1). The eight more are
+under the directed three), where powr keeps 22 (23 at fp64, with send-back
+1's |Y k| term) and the integer-operand functions 19 to 22 (MEASURED,
+5.1). The eight more are
 pow's: y's classification and integrality and the sign's conditions,
 computed from x and y at the start and read by the specials at the end,
 live across the whole main path in each of the scheduler's three orders.
@@ -1357,15 +1518,19 @@ in M4's study's note on M4C), which is 0 for pow's 30, so every value live
 across a pow call spills (ESTIMATE, by that rule; cftc's allocator is not
 run here).
 `sched.py` measures a fourth order, depth-first from the result before
-the flag word: at fp64 it keeps 29 under rne and rmm, where the scheduler's
-choice keeps 30, and 30 under the directed three, where it keeps 29; 28 and
-29 at fp128 and fp256 (MEASURED, `sched.fp64.out.txt`, `sched.fp128.out.txt`,
-`sched.fp256.out.txt`). The better of the two for each attribute would cap
-pow at 29: the conditions are read at both ends of the fragment whatever
-the order, and the count is the design's, not the scheduler's.
+the flag word: at fp128 and fp256 it keeps 28 under rne and rmm, where the
+scheduler's choice keeps 30, and 29 under the directed three, where it
+keeps 28; at fp64, with the |Y k| term, 31 under every attribute, where
+the choice keeps 30 and 28 (it kept 29 and 30 before the term) (MEASURED,
+`sched.fp64.out.txt`, `sched.fp128.out.txt`, `sched.fp256.out.txt`). The
+better of the two for each attribute would cap pow at 28 at fp128 and
+fp256 and leave it at 30 at fp64: the conditions are read at both ends of
+the fragment whatever the order, and the count is the design's, not the
+scheduler's.
 
 PROPOSED, `LIVE_CAP` rows at fp64, fp128 and fp256 (question 8): pow 30,
-powr 22, pown 21, rootn 19, compound 22; fp32's when it is measured (2.8).
+powr 23 at fp64 and 22 at fp128 and fp256, pown 21, rootn 19, compound
+22; fp32's when it is measured (2.8).
 pow's is the largest of the round's (M2's 26, M4's 19 at fp64, READ in
 routines.py).
 
@@ -1385,22 +1550,22 @@ inliner hash-conses on opcode, attribute and operands):
 
 | pow(x, y) with ... | fp64: shared, together (apart) | fp128: shared, together (apart) | fp256: shared, together (apart) |
 |---|---|---|---|
-| pow(x, z), the same x | 172, 690 (862) | 217, 761 (978) | 255, 825 (1080) |
-| pow(w, y), the same y | 29, 833 (862) | 29, 949 (978) | 29, 1051 (1080) |
-| powr(x, y) | 326, 515 (841) | 384, 573 (957) | 435, 624 (1059) |
-| pown(x, 3) | 169, 646 (815) | 214, 717 (931) | 252, 781 (1033) |
-| rootn(x, 3) | 169, 647 (816) | 214, 718 (932) | 252, 782 (1034) |
-| log2(x), M1's | 9, 602 (611) | 9, 682 (691) | 9, 763 (772) |
-| log(x), M1's | 10, 607 (617) | 10, 687 (697) | 10, 768 (778) |
-| exp2(x), M1's | 7, 602 (609) | 7, 668 (675) | 7, 732 (739) |
-| pown(x, 5) against pown(x, 3) | 176, 592 (768) | 221, 663 (884) | 259, 727 (986) |
+| pow(x, z), the same x | 173, 695 (868) | 217, 761 (978) | 255, 825 (1080) |
+| pow(w, y), the same y | 29, 839 (868) | 29, 949 (978) | 29, 1051 (1080) |
+| powr(x, y) | 329, 518 (847) | 384, 573 (957) | 435, 624 (1059) |
+| pown(x, 3) | 170, 650 (820) | 214, 717 (931) | 252, 781 (1033) |
+| rootn(x, 3) | 170, 651 (821) | 214, 718 (932) | 252, 782 (1034) |
+| log2(x), M1's | 9, 605 (614) | 9, 682 (691) | 9, 763 (772) |
+| log(x), M1's | 10, 610 (620) | 10, 687 (697) | 10, 768 (778) |
+| exp2(x), M1's | 7, 605 (612) | 7, 668 (675) | 7, 732 (739) |
+| pown(x, 5) against pown(x, 3) | 177, 595 (772) | 221, 663 (884) | 259, 727 (986) |
 
 (MEASURED counts, `share.fp64.out.txt`, `share.fp128.out.txt` and
 `share.fp256.out.txt`, the table made by `tables.py`; the last row is two
 pown calls, pown(x, 5) beside pown(x, 3).) So **calls on the same x
-share the logarithm** (172, 217 and 255 instructions at fp64, fp128 and
+share the logarithm** (173, 217 and 255 instructions at fp64, fp128 and
 fp256, the reduction, the table and the polynomial: 40 to 47 % of pow),
-pow and powr of the same operands share 326 to 435 instructions (76 to
+pow and powr of the same operands share 329 to 435 instructions (76 to
 81 % of pow), and two powers of one base cost 1.5 to 1.6 calls, not 2
 (COMPUTED from the table). **They share almost nothing with M1's routines** in the same
 program: the core's logarithm reduces |x| (pow's x may be negative) where
@@ -1486,7 +1651,7 @@ attributes):
 
 The eight proposed rewrites take the two exponents programs write most
 (2 and -1) and the identity out of the routine: pow(a, 2) is one MUL
-where the routine is 431 to 540 instructions and marks every exact square
+where the routine is 434 to 540 instructions and marks every exact square
 (3.5). They are exact because each is a single correctly rounded operation
 of the same exact value: a^2 is x^2 rounded once, as pow(a, 2) is, and so
 for 1/a. The three not proposed differ where the measurement says, the
@@ -1563,7 +1728,8 @@ quick tests and the long runs are the lead's.
    (`hugey`), the overflow and underflow edges with both signs of the
    result (`edge`, `negedge`), t at the reduction's boundaries (`redb`), a
    negative x with odd and even integer y (`negint`), the logarithm's
-   weakest point (`rhoedge`), n at int64's extremes), on the model and on
+   weakest point (`rhoedge`), the reduction's cancelling zone at the worst
+   n (`zone`, `zone<N>`), n at int64's extremes), on the model and on
    seq.py; the first design's tiny-y lanes (3.6, item 1) among them by
    name.
 3. **The bound, against an independent reference,** mpmath at 4p + 200
@@ -1633,7 +1799,8 @@ the plant, under 1 without).
 | side_rule_off | the first design beside 1: V's rounding (3.6, 1) | lane | pow(1.2, minSub) rup: 1 (transcend: 1 + 2^-52); pow(5/6, minSub) rtz: 1 | red |
 | screen_low | the overflow screen at emax + 1, not emax + 2 | lane | pow(21, 0x406d244c78367a0d), t_h0 = 1024 exactly, rne: +inf with overflow (transcend: 0x7feffffffffffecd, inexact) | red |
 | mark_silenced | the mark never set | lane | pow(3, 2) rtz: 9 - ulp, unmarked (transcend: 9) | red |
-| bound_tight | fp64's B1 dropped (a uniform 2^-97) | budget | the region `edge`: 2.78 Bv (`budget.fp64-pow-edge-bound_tight.out.txt`) | - |
+| bound_tight | fp64's |t| and |Y k| terms dropped (a uniform 2^-97) | budget | the region `edge`: 2.78 Bv (`budget.fp64-pow-edge-bound_tight.out.txt`) | - |
+| zone_bound_off | the design before send-back 1: fp64's |Y k| term dropped (3.6, 9) | budget | compound's region `int1000` at 10,000 lanes, seed 3: past 1 Bv at the box's volume as the design it reproduces (1.052 Bv, `box-1119/`; the plant's 2,000-lane run equals that design's box run, 0.802349 Bv against the box's 0.802349, `zone-curve/`); its own 10,000-lane run is `box_m3s_sb1.sh`'s; under 1 at the desktop's sizes (`zone12000` 0.753 at 120 lanes, 0.942 at 2,000) | - |
 | log_short | the logarithm planned at G, not GL | budget | fp128's region `rhoedge`: 124 Bv (2^6.96), the control 0.0013 (`budget.fp128-pow-rhoedge-log_short.out.txt`); not red in `wide` (0.0008), where the table term carries L | - |
 
 The brief's ten: an exact case left to the enclosure (exact_unmarked); a
@@ -1650,8 +1817,11 @@ every named case is right or marked without the plant. midpoint_unmarked
 cannot be red in this design and is shown as such, not counted. In all:
 eighteen lane and mark plants, red in their 21 named cases at fp64 and at
 fp256 (`plants.fp256.out.txt`: 21 of 21; the subnormal midpoint lane of
-midpoint_unmarked has no fp256 counterpart), and two budget plants
-(bound_tight, log_short) red in their regions.
+midpoint_unmarked has no fp256 counterpart), and three budget plants:
+bound_tight and log_short red in their regions on the desktop, and
+zone_bound_off red only at volume (the box's 1.052 Bv for the design it
+reproduces, 10,000 lanes; at the desktop's 120 and 2,000 lanes it stays
+under 1, and is no red plant there).
 
 ## 9. Questions for Logan, each with a recommendation
 
@@ -1677,7 +1847,7 @@ sections' named.
      fp128 and fp256, two at fp32 and fp64), its parity and sign the
      build's, rootn's 1/n in two words (2.6). Its cost: one or two bank
      words an n, a fragment an n (cftc keys the routine by n), and nothing
-     in-lane; pown(x, 3) is 384 instructions at fp64 against pow's 431
+     in-lane; pown(x, 3) is 386 instructions at fp64 against pow's 434
      (5.1, MEASURED). No lane type changes.
    - (b) A run-time integer, carried as one or two format words a lane and
      its parity found in-lane as y's is (2.5): about pow's cost (the
@@ -1685,26 +1855,52 @@ sections' named.
      ESTIMATE about 440 instructions at fp64), and a new kind of lane value
      in the language, the host and the certificate, for no request that
      exists.
-3. **G at fp64.** The double word cannot hold G = 44 for every t: the
-   logarithm needs 107 bits where the double word holds 106 (2.2).
-   - (a) **The bound grows with |t|, Bv = |V_h| (2^-97 + |t_h| 2^-100), two
-     instructions (Recommended):** G is 43.8 at |t| = 1, 43.0 at |t| = 8
-     (results in [2^-8, 2^8]), 40.8 at |t| = 64 and 36.9 at the top of the
-     range, the mark rate rising with it (3.4); held by the budget (3.2).
-     Its cost: 2 instructions and one bank word (B1), and a mark rate that
-     rises with |t|, about 2^-36 a call at the top of the range (3.4).
-   - (a') The same law with M1's reduction re-centred so that x just below
-     1 is never k = -1 (m' in [1/sqrt 2, sqrt 2), a table of other cells):
-     the 3.4-bit cancellation gone and B1 about 2^-103, G 39.8 at the top
-     (ESTIMATE); its cost a reduction and a table of its own beside M1's
-     (ESTIMATE 10 to 20 instructions and 8 to 16 bank words, and their
+3. **G at fp64** (re-asked after send-back 1, with its evidence). The
+   double word cannot hold G = 44 for every t: the logarithm needs 107
+   bits where the double word holds 106 (2.2), and in the reduction's
+   cancelling zone (|x| in [1/2, 241/256), k = -1) its error is absolute,
+   about 2^-106 at log2 m''s scale, while L falls to -0.0871. The design
+   the study first recommended, Bv = |V_h| (2^-97 + |t_h| 2^-100), held
+   every region at the desktop's 120 lanes and failed its own method at
+   the box's 10,000: compound(x, 1000) 1.052 Bv (3.2, 3.6 item 9), and
+   its sum's capacity there is bounded only by 0.0854 n / (8 + 0.0871 n)
+   Bv, 0.97 at the worst n (COMPUTED, 3.2).
+   - (a) **The bound grows with |t| and with the reduction's k, Bv =
+     |V_h| (2^-97 + |t_h| 2^-100 + |Y_h k| 2^-101) (Recommended):** G is
+     43.8 at |t| = 1, 43.0 at |t| = 8, 40.8 at |t| = 64 and 36.9 at the
+     top of the range where k = 0, at most 0.63 bits less where |k| >= 1
+     outside the zone, and up to 2.75 bits less at the zone's top (Bv 6.7
+     times the first design's there). Its cost: 4 instructions against a
+     uniform bound, 2 of them the |Y k| term's (pow and powr 5 and 3), and
+     two bank words; pow 434 instructions at fp64 against the first
+     design's 431 (5.1); marks unchanged where k = 0 and at most 1.55
+     times the first design's elsewhere outside the zone (3.4). Its
+     evidence: the sum's capacity bounded on every lane whose k is -1, at
+     most 0.171 Bv, 0.219 for compound (COMPUTED, 3.2), and the sampled
+     budgets of the rest (fp64's largest 0.194 Bv, compound's `zone1000` on
+     the desktop; the box's at
+     10,000 lanes the lead's run of `box_m3s_sb1.sh`).
+   - (a') The re-centred reduction (m' in [1/sqrt 2, sqrt 2), a table of
+     other cells): no cancelling zone (at most 1 bit), so no |Y k| term,
+     and B1 about 2^-103, G 39.8 at the top (ESTIMATE): fewer marks than
+     (a) at large |t|; its cost a reduction and a table of its own beside
+     M1's (ESTIMATE 10 to 20 instructions and 8 to 16 bank words, and their
      check), and the sharing with M1's log2 that is already small (5.4).
+   - (a'') No |Y k| term and B1 raised until the zone's top holds, about
+     2^-97.3: 2 instructions fewer than (a), and 6.7 times (a)'s mark rate
+     at large |t| on every lane, k = 0 included (COMPUTED from 2.2's
+     ratios).
    - (b) A triple-word logarithm at fp64, G = 44 everywhere: ESTIMATE about
      2.2 times the logarithm's instructions (2.2), about 220 more a call
      (pow about 650 at fp64), and the triple word's live values.
-   - (c) A uniform G = 37 at fp64, the top's: 2 instructions fewer than
-     (a), and 128 times the mark rate on every lane, most of whose t are
-     small.
+   - (c) A uniform G at fp64: to hold the zone's top it would have to be
+     about 35 (the sum's absolute error, 7.9 2^-106 in L, times |Y| up to
+     12,364 and ln 2, at a quarter of Bv: COMPUTED), 4 instructions fewer
+     than (a) and about 500 times its mark rate where |t| is small.
+   - (d) B1 per function or per |n|: does not reach the cause, the
+     reduction's k, which pow with a large y meets as pown and compound do;
+     per |n| it would raise the bound for every x of a large n, the zone's
+     and the rest.
 4. **The exact family.** Practical programs hit x^2, x^3, x^0.5, x^1.5,
    2^y and 10^n constantly (3.5's census).
    - (a) **Decide in-lane only what is cheap and exact - a power-of-two x at
@@ -1781,7 +1977,8 @@ part of one, each with its section 8 checks and the lead's gates:
    the exponential with a double-word argument, the sign, the in-lane
    power-of-two rule, y = 1, the "may be exact" test, the screens, both
    tables of specials, the plants of section 8, a `--check` of the new
-   constants (GL's and GE's coefficients, B1, the screens' words).
+   constants (GL's and GE's coefficients, B1 and B2, the screens' words),
+   and the cancelling zone's regions among the committed sets.
 2. **pown, rootn and compound** on the same core, their n-keyed fragments
    and the n = 0 and n = 1 fragments, the int64 words.
 3. **fp32's triple word** (2.8), measured before it is built, as M2X
@@ -1817,13 +2014,14 @@ mpmath 1.3.0 on the desktop. Every fragment is built on the tree's
 | file | what it is | its outputs |
 |---|---|---|
 | `m3core.py` | paths, encodings, transcend.py's call, the true value at 4p + 200 bits (mpf values read through `_mpf_`; `to_man_exp` is not called) | |
-| `m3pow.py` | **the design**: `plan` (G, GL, GE, B1), the one core `build` on `mathlib.Build`, the five front ends, the specials, `build_small` (n = 0 and 1), the plants (`PLANTS`) | |
+| `m3pow.py` | **the design**: `plan` (G, GL, GE, B1) and `plan_b2` (B2, send-back 1), the one core `build` on `mathlib.Build`, the five front ends, the specials, `build_small` (n = 0 and 1), the plants (`PLANTS`) | |
 | `m3harness.py` | the pools (the vector sets' and the stage's, deduplicated) and the comparison against transcend.py | |
 | `pools_run.py` | every pool lane, model against transcend.py | `pools_run.*.out.txt` |
-| `regions.py`, `regions_run.py` | the placed regions of 3.3 and their run against transcend.py | `regions_run.*.out.txt` (`-first`: the first design's) |
+| `regions.py`, `regions_run.py` | the placed regions of 3.3, the cancelling zone's (`zone`, `zone<N>`) and `int<N>` among them, and their run against transcend.py | `regions_run.*.out.txt` (`-first`, `-second`: the first designs') |
 | `onseq.py` | the scheduled fragments as programs on seq.py, against the model and transcend.py | `onseq.*.out.txt` |
 | `specials.py` | section 4's rows | `specials.*.out.txt` |
-| `budget.py` | the first-order budget (the tree's `mathlib_inv_budget.InvAnalyzer` by subclass) | `budget.*.out.txt`; `first-b1/`, `second-b1/`: fp64's earlier B1 |
+| `budget.py` | the first-order budget (the tree's `mathlib_inv_budget.InvAnalyzer` by subclass) | `budget.*.out.txt`; `first-b1/`, `second-b1/`: fp64's earlier B1; `no-b2/`: fp64's before send-back 1's |Y k| term; `zone-curve/`: the zone at 2,000 lanes |
+| `zonebound.py` | the cancelling zone's top by bisection on k, and the analytic bound of the logarithm's sum (3.2, send-back 1) | `zonebound.out.txt` |
 | `rate.py` | the mark-rate law, bound inflated | `rate.*.out.txt` |
 | `census.py` | the structured families | `census.*.out.txt` |
 | `poolmarks.py` | the pools' marked lanes by class | `poolmarks.fp64.out.txt` |
@@ -1833,30 +2031,43 @@ mpmath 1.3.0 on the desktop. Every fragment is built on the tree's
 | `bits.py`, `tw32_ref.py` | 2.2's table; M1's built fragments' sizes | `bits.out.txt`, `tw32_ref.out.txt` |
 | `tables.py` | the study's tables, made from the outputs | |
 | `complete.py` | that every captured run completed: no traceback, and its script's closing line (below) | `complete.out.txt` |
-| `queue1.sh`, `queue2.sh`, `queue3.sh` | the desktop's runs in order, one at a time | `queue1.log`, `queue2.log`, `queue3.log` (their "rc": below) |
-| `box_m3s.sh` | the larger samples, for the lead on amd-arc-box | none yet |
+| `queue1.sh` to `queue5.sh` | the desktop's runs in order, one at a time (4 and 5: send-back 1's) | `queue1.log` to `queue5.log` (the first three's "rc": below) |
+| `box_m3s.sh` | the larger samples, for the lead on amd-arc-box | the lead's (`box-1119/` holds three of them) |
+| `box_m3s_sb1.sh` | send-back 1's larger samples: the fix and its plant at volume, the regions and the census at the box's sizes, fp128 and fp256 at their worst regions | the lead's, after this commit |
+| `box-1119/` | the lead's box outputs the study cites, copied in (MEASURED by the lead at d2bd90fa's model code, which the design before the |Y k| term is) | |
 
-The model is 21 Python files and 4 shell scripts, 3,167 lines
-(COUNTED, `wc -l` over `*.py` and `*.sh` at the study's commit), with 142
-captured outputs (`*.out.txt`, `first-b1/` and `second-b1/` among them) and
-the three queue logs: 170 files in all.
+The model is 22 Python files and 7 shell scripts, 3,629 lines (COUNTED,
+`wc -l` over `*.py` and `*.sh` at the study's commit), with 210 captured
+outputs (`*.out.txt`; `first-b1/`, `second-b1/`, `no-b2/`, `zone-curve/`
+and `n-scan/` among them), the lead's 16 box outputs in `box-1119/`, and
+the five queue logs: 260 files in all.
 
-**The queue logs' "rc" is not the runs' status** (found after the study's
-first commit, in a review of the scripts): their wrapper read `$?` inside
-the same `echo` as `$(date ...)`, which sets it, so every end line says
-rc 0 whatever its run did (MEASURED on this desktop's sh: a failing command
-logged through that form reads rc 0). The three scripts now read it on its
-own line (MEASURED: failing commands then log rc 2 and 3), and the logs are
-kept as made, for their times. The runs are held instead by `complete.py`
-(MEASURED, `complete.out.txt`): each of the 141 outputs it reads (all but
-its own) holds no traceback (the queues sent each run's stderr into its
-output, and the runs made by hand were read as they ran) and closes with
-its own script's last line, or, for `poolmarks` and `rewrites`, all its
-rows; 20 of 20 controls (real outputs cut short, emptied or given a
-traceback, in memory) are flagged; and no queue run reached its 900 s
-timeout (the longest took 502 s, by the logs' own times). `box_m3s.sh`'s last line is
-no status either: its outputs are checked the same way, `complete.py
-OUTDIR`.
+**The first three queue logs' "rc" is not the runs' status** (found after
+the study's first commit, in a review of the scripts): their wrapper read
+`$?` inside the same `echo` as `$(date ...)`, which sets it, so every end
+line says rc 0 whatever its run did (MEASURED on this desktop's sh: a
+failing command logged through that form reads rc 0). The three scripts
+now read it on its own line (MEASURED: failing commands then log rc 2 and
+3), and their logs are kept as made, for their times; `queue4.sh` and
+`queue5.sh` were written so, and their logs' rc is the run's: 0 for every
+run but queue5's last, `complete.py`, rc 1, which had found one of its own
+controls unflagged (its new pass check's pattern for the specials' rows
+held a backspace where `\b` was meant); fixed, and rerun by hand for the
+committed `complete.out.txt`. The runs are held by `complete.py`
+(MEASURED, `complete.out.txt`): each of the 209 outputs it reads (all but
+its own; not `box-1119/`) holds no traceback (the queues sent each run's
+stderr into its output, and the runs made by hand were read as they ran),
+closes with its own script's last line, or, for `poolmarks` and
+`rewrites`, all its rows, and, since send-back 1 (VM3S's note 4: finished
+is not passed), counts 0 wrong unmarked lanes and 0 lanes of seq.py
+differing from the model wherever it counts them, the first designs' two
+runs kept as evidence excepted; 25 of 25 controls (real outputs cut short,
+emptied, given a traceback or a nonzero count, in memory) are flagged, and
+the two first designs' runs pass as kept; and no queue run reached its
+900 s timeout (the longest took 502 s, by the logs' own times). The box
+scripts' last lines are no status either: `box_m3s_sb1.sh` ends by running
+`complete.py OUTDIR` and exits with xargs's status, 0 only if every job's
+was.
 
 To rerun a figure: `python -B <script> <args>` from `docs/studies/m3/`, the
 arguments as the queue scripts give them (the first line of each output

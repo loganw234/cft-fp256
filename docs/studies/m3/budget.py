@@ -16,7 +16,7 @@
 # rounding's largest capacity |s_i| ulp(v_i)/2, in units of each lane's Bv.
 # The RESIDUAL, what first order leaves out, is measured beside it.
 #
-#   python budget.py FMT FN REGION N [seed]
+#   python budget.py FMT FN REGION N [seed] [plant]
 
 import sys
 import time
@@ -141,7 +141,8 @@ def main():
     print(f"{fmt.name} {fn} region {region}: {s['lanes']} main-path lanes "
           f"of {len(lanes)} (n = {nint}), seed {seed}, G {bld.meta['G']}, "
           f"GL {bld.meta['GL']}, GE {bld.meta['GE']}, B1 "
-          f"2^{lg(bld.meta['B1']) if bld.meta['B1'] else '-inf'}")
+          f"2^{lg(bld.meta['B1']) if bld.meta['B1'] else '-inf'}, B2 "
+          f"2^{lg(bld.meta['B2']) if bld.meta['B2'] else '-inf'}")
     print(f"  rounding instructions active {s['rounding']}")
     print(f"  M max {s['Mmax']:.6f} Bv; capacities {s['S_cap']:.6f} Bv; "
           f"BOUND {s['bound']:.6f} Bv (2^{lg(s['bound']):.2f})")

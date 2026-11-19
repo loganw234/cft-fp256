@@ -31,12 +31,23 @@
 #           even integer), x within 2^-p of 1 and of -1 or anywhere: the
 #           screens and the even-integer sign
 #   int     pown, rootn and compound: x log-uniform with t in range, at the
-#           n of region_n (one n a region; the budget builds at it)
+#           n of region_n (one n a region; the budget builds at it);
+#           "int<N>" names any n
+#   zone    send-back 1: |x| (1 + x for compound) in the cancelling zone
+#           of M1's reduction, [1/2, 241/256), where k = -1 and log2 m' up to
+#           0.913 make L as small as -0.0871 (241/256 is the reduction's own
+#           boundary, MEASURED by bisection on the model's k): six tenths
+#           uniform in [0.92, 241/256), two tenths uniform over the whole
+#           zone, a tenth log-uniform within 2^-6 of the top, a tenth just
+#           above it (k = 0), at a large n only where |n L| is in range;
+#           pow's and powr's y from t uniform in range; "zone<N>" at n = N
+#           for pown and compound
 #
 #   region(fmt, fn, name, count, seed) -> [(x, y)] or [(x, n)]
 
 import math
 import random
+import re
 from fractions import Fraction
 
 import mpmath
@@ -45,7 +56,7 @@ from m3core import sf, dec, enc, val, INTARG
 import m3pow as M
 
 NAMES = ("wide", "near1", "edge", "redb", "small", "negint", "sub",
-         "tinyy", "hugey", "negedge", "rhoedge")
+         "tinyy", "hugey", "negedge", "rhoedge", "zone")
 INT_NS = {"int": 3, "int-neg": -3, "int17": 17, "int1000": 1000,
           "int31": (1 << 31) - 1, "int63": -(1 << 63), "int2": 2,
           "intm1": -1, "intm2": -2}
@@ -54,7 +65,26 @@ INT_NS = {"int": 3, "int-neg": -3, "int17": 17, "int1000": 1000,
 def region_n(fn, name, seed=1):
     if fn not in INTARG:
         return None
-    return INT_NS.get(name, 3)
+    if name in INT_NS:
+        return INT_NS[name]
+    m = re.fullmatch(r"(?:int|zone)(-?\d+)", name)
+    return int(m.group(1)) if m else 3
+
+
+ZONE_TOP = Fraction(241, 256)     # m = 2X = 241/128: the seed's cells 9, 8
+
+
+def _zone_x(fmt, rng, lo=0.5):
+    """X in the cancelling zone, mostly near its top (see the head); at
+    a large n, X >= lo, where |n log2 X| stays on the main path."""
+    u = rng.random()
+    if u < 0.6:
+        return Fraction(rng.uniform(max(0.92, lo), float(ZONE_TOP)))
+    if u < 0.8:
+        return Fraction(rng.uniform(lo, float(ZONE_TOP)))
+    if u < 0.9:
+        return ZONE_TOP - Fraction(2.0 ** -rng.uniform(6, 50))
+    return ZONE_TOP + Fraction(rng.uniform(0, 0.01))
 
 
 def _log2(fmt, x):
@@ -128,7 +158,36 @@ def region(fmt, fn, name, count, seed=1):
     while len(out) < count and tries < 50 * count + 100:
         tries += 1
         lane = None
-        if fn in INTARG:
+        if name.startswith("zone"):
+            nz = region_n(fn, name, seed) if fn in INTARG else None
+            lo = 0.5
+            if nz and fn != "rootn":
+                lo = max(0.5, 2.0 ** (-Tf / abs(nz)))
+            X = _zone_x(fmt, rng, lo)
+            if fn == "compound":
+                x = enc(fmt, X - 1)
+                lane = (x, region_n(fn, name, seed))
+            elif fn in INTARG:
+                x = enc(fmt, X)
+                n = region_n(fn, name, seed)
+                if rng.random() < 0.5 and (fn != "rootn" or n % 2):
+                    x |= fmt.sign_mask
+                lane = (x, n)
+            else:
+                x = enc(fmt, X)
+                t = rng.uniform(-Tf, Tf)
+                y = _y_for(fmt, x, t)
+                if y is None:
+                    continue
+                if fn == "pow" and rng.random() < 0.3:
+                    # a negative base with an integer y
+                    yi = round(dec(fmt, y))
+                    if yi in (0, 1, -1):
+                        continue
+                    y = enc(fmt, Fraction(yi))
+                    x |= fmt.sign_mask
+                lane = (x, y)
+        elif fn in INTARG:
             n = region_n(fn, name, seed)
             if fn == "compound":
                 # 1 + x across (0, max]: x from just above -1 to the largest

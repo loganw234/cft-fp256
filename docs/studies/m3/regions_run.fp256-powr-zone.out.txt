@@ -1,0 +1,2 @@
+fp256 powr region zone: 40 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp256 powr: 0 wrong unmarked in all; 2 s

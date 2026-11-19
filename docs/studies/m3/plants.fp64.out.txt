@@ -20,4 +20,4 @@ fp64 side_rule_off          pow      rup lane   x=0x3ff3333333333333 y=0x1: plan
 fp64 side_rule_off          pow      rtz lane   x=0x3feaaaaaaaaaaaab y=0x1: plant WRONG (0x3ff0000000000000, 0x10), control right (0x3fefffffffffffff, 0x10), transcend (0x3fefffffffffffff, 0x10) -> RED
 fp64 screen_low             pow      rne lane   x=0x4035000000000000 y=0x406d244c78367a0d: plant WRONG (0x7ff0000000000000, 0x14), control right (0x7feffffffffffecd, 0x10), transcend (0x7feffffffffffecd, 0x10) -> RED
 fp64 mark_silenced          pow      rtz lane   x=0x4008000000000000 y=0x4000000000000000: plant WRONG (0x4021ffffffffffff, 0x10), control marked (0x4021ffffffffffff, 0x90), transcend (0x4022000000000000, 0x0) -> RED
-fp64: 21 of 21 lane and mark cases red; 5 s (the budget plants: budget.py with a plant)
+fp64: 21 of 21 lane and mark cases red; 4 s (the budget plants: budget.py with a plant)

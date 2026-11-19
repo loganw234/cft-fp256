@@ -8,4 +8,6 @@ fp64 powr region sub: 200 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/ru
 fp64 powr region tinyy: 200 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
 fp64 powr region hugey: 200 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
 fp64 powr region negedge: 0 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
-fp64 powr: 0 wrong unmarked in all; 43 s
+fp64 powr region rhoedge: 200 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 powr region zone: 200 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 powr: 0 wrong unmarked in all; 34 s

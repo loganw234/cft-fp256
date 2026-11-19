@@ -84,7 +84,8 @@ def regions():
             if lanes == "0":
                 continue            # a region that does not apply (powr's
                                     # negative bases)
-            rows.append(((FMORD[fmt], FNORD[fn], k),
+            extra = 0 if re.search(r"regions_run\.fp\d+-\w+\.out", f) else 1
+            rows.append(((FMORD[fmt], FNORD[fn], extra, k),
                          f"| {fmt} | {fn} | {reg} | {lanes} | "
                          f"{mk.replace('/', ' / ')} | {wr} |"))
     for _k, line in sorted(rows):

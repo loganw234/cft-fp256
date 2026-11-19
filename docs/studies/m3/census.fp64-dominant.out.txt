@@ -1,7 +1,7 @@
 fp64 family dominant: 300 lanes; classes irr 300
-  rne: irr: 300 lanes, marked 187 (guess wrong 0), decided 113, WRONG 0
-  rtz: irr: 300 lanes, marked 187 (guess wrong 122), decided 113, WRONG 0
-  rdn: irr: 300 lanes, marked 187 (guess wrong 122), decided 113, WRONG 0
-  rup: irr: 300 lanes, marked 187 (guess wrong 142), decided 113, WRONG 0
-  rmm: irr: 300 lanes, marked 187 (guess wrong 0), decided 113, WRONG 0
-fp64 dominant: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 8 s
+  rne: irr: 300 lanes, marked 188 (guess wrong 0), decided 112, WRONG 0
+  rtz: irr: 300 lanes, marked 188 (guess wrong 122), decided 112, WRONG 0
+  rdn: irr: 300 lanes, marked 188 (guess wrong 122), decided 112, WRONG 0
+  rup: irr: 300 lanes, marked 188 (guess wrong 142), decided 112, WRONG 0
+  rmm: irr: 300 lanes, marked 188 (guess wrong 0), decided 112, WRONG 0
+fp64 dominant: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 5 s

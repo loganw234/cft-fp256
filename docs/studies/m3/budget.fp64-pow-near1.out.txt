@@ -1,4 +1,4 @@
-fp64 pow region near1: 117 main-path lanes of 120 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-100.0
+fp64 pow region near1: 117 main-path lanes of 120 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-100.0, B2 2^-101.0
   rounding instructions active 139
   M max 0.000646 Bv; capacities 0.056661 Bv; BOUND 0.057307 Bv (2^-4.13)
   measured worst 0.013283 Bv at x=0x3feffffffffffff4 y=0xc367520130b9a44f
@@ -11,4 +11,4 @@ fp64 pow region near1: 117 main-path lanes of 120 (n = None), seed 1, G 44, GL 4
     exp-reduce   capacity 0.000028  observed 0.000008
     test         capacity 0.000000  observed 0.000000
     fixed-grid   capacity 0.000000  observed 0.000000
-  6 s
+  3 s

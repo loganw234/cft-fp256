@@ -1,0 +1,3 @@
+fp64 compound region zone1000: 150 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 compound region zone12000: 150 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 compound: 0 wrong unmarked in all; 5 s

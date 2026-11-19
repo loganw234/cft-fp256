@@ -63,7 +63,11 @@ PLANTS = {
     "zero_sign_lost": "the first design: a negative result rounding to "
                       "zero on the subnormal grid answered +0",
     "log_short": "the logarithm planned at G, not GL",
-    "bound_tight": "Bv's |t| term dropped at fp64",
+    "bound_tight": "Bv's |t| and |Y k| terms dropped at fp64 (a uniform "
+                   "2^-(p+G))",
+    "zone_bound_off": "the first design at fp64: Bv's |Y k| term dropped "
+                      "(send-back 1: k = -1 with log2 m' near 0.91 cancels "
+                      "and the logarithm's absolute error is left to |t| B1)",
 }
 
 
@@ -101,6 +105,24 @@ def plan(fmt, G=None):
     # was past 1 Bv for pown(x, 1000) (the study's 3.6, item 6)
     B1 = Fraction(0) if GL == want else Fraction(1, 2 ** (2 * fmt.prec - 6))
     return G, GL, GE, B1
+
+
+def plan_b2(fmt):
+    """B2, the bound's coefficient of |Y_h k| (send-back 1): where the
+    reduction's k is not 0, the logarithm's sum k + log2 m' rounds at
+    log2 m''s scale, up to 1, whatever L is, and where k = -1 and log2 m'
+    is near 0.91 (x just below 16/17) L is 0.0875 and the sum's absolute
+    error is 11 times its share of |t| B1. So the bound carries the
+    logarithm's absolute error as its own term, |Y_h k| B2: the sum's
+    roundings, at most 7.9 2^-106 in L (COMPUTED in the study's 3.2 from
+    the words' magnitudes), against B2 = 2^-(2p-5) = 2^-101 at fp64; 0 at
+    fp128 and fp256, where the double word holds GL with room."""
+    return Fraction(1, 2 ** (2 * fmt.prec - 5))
+
+
+def _enc_up(fmt, q):
+    """q > 0 rounded upward into fmt (a bound's coefficient)."""
+    return ml._enc(fmt, q, RUP)
 
 
 def int_words(fmt, n):
@@ -225,15 +247,18 @@ def build(fn, fmt, rnd, n=None, plant=None, G=None, GL=None, shift=0):
         GL = GL0
     if plant == "log_short":
         GL = G
+    B2 = plan_b2(fmt) if B1 else Fraction(0)
     if plant == "bound_tight":
-        B1 = Fraction(0)
+        B1 = B2 = Fraction(0)
+    if plant == "zone_bound_off":
+        B2 = Fraction(0)
     KL, DL = ml.plan_log(fmt, GL)
     KE, DE = ml.plan_exp(fmt, GE)
     cl_, ce = _consts(fmt, fn, GL, KL, DL, GE, KE, DE, plant)
     b = PBuild(fmt, rnd, f"{fn}-{fmt.name}-{AN[rnd]}")
     b.inputs = ("a", "b") if fn in ("pow", "powr") else ("a",)
     b.meta.update(fn=fn, G=G, GL=GL, GE=GE, KL=KL, DL=DL, KE=KE, DE=DE,
-                  B1=B1, n=n, plant=plant, family="double word", N=N,
+                  B1=B1, B2=B2, n=n, plant=plant, family="double word", N=N,
                   shift=shift)
     k_ = ml._words_common(b)
     ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
@@ -363,6 +388,30 @@ def build(fn, fmt, rnd, n=None, plant=None, G=None, GL=None, shift=0):
     ovs = b.cmple(W("TOVF", ml._enc_exact(fmt, hi_t)), th0)
     uns = b.cmple(th0, W("TUNF", ml._enc_exact(fmt, fmt.emin - p - 2)))
 
+    # ---- the bound's coefficient w, at fp64 (Bv = |V_h| w at the test) -------
+    # made here, beside the product, so that th's last use is the exponential's
+    # reduction and w, not th, lives across the exponential
+    if plant == "bound_loose":
+        shift -= 40
+    wB = None
+    if B1 or B2:
+        _at(b, "test", "head2")
+        wB = W("BREL", ml._pow2(fmt, -(p + G) + shift))
+        if B1:
+            wB = b.fma(b.fabs(th), W("B1", ml._enc(fmt, B1 * 2 ** shift)),
+                       wB, RUP)
+        if B2:
+            akf = b.fabs(kf)
+            if fn in ("pow", "powr"):
+                yk = b.mul(akf, yc.ax, RUP)
+                wB = b.fma(yk, W("B2", _enc_up(fmt, B2 * 2 ** shift)), wB,
+                           RUP)
+            else:
+                ay = (Fraction(1, abs(n)) if fn == "rootn"
+                      else Fraction(abs(n)))
+                wB = b.fma(akf, W("YB2", _enc_up(fmt, ay * B2 * 2 ** shift)),
+                           wB, RUP)
+
     # ---- 2^t: M1's exp2 with a double-word argument -------------------------
     _at(b, "exp-reduce", "reduce")
     MAGIC = W("MAGIC", ce["MAGIC"])
@@ -434,13 +483,10 @@ def build(fn, fmt, rnd, n=None, plant=None, G=None, GL=None, shift=0):
     R = b.add(Vh, Vl, rnd)
     aVh = b.fabs(Vh)
     ath = b.fabs(th)
-    # `shift` inflates the bound 2^shift times, for the mark-rate law
-    if plant == "bound_loose":
-        shift -= 40
-    if B1:
-        w = b.fma(ath, W("B1", ml._enc(fmt, B1 * 2 ** shift)),
-                  W("BREL", ml._pow2(fmt, -(p + G) + shift)), RUP)
-        Bv = b.mul(aVh, w, RUP)
+    # `shift` inflates the bound 2^shift times, for the mark-rate law (and
+    # bound_loose's 2^-40 is taken where w is made, above)
+    if wB is not None:
+        Bv = b.mul(aVh, wB, RUP)
     else:
         Bv = b.mul(aVh, W("BREL", ml._pow2(fmt, -(p + G) + shift)))
     lo_dn = b.sub(Vl, Bv, RDN)

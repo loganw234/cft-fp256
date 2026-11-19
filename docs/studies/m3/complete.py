@@ -2,12 +2,18 @@
 # logs' "rc" field is the status of the `date` beside it, not the run's (the
 # queue scripts read $? after a command substitution in the same line; the
 # scripts are fixed, the logs kept as made), so this is the check of the
-# runs instead: every *.out.txt here, first-b1/ and second-b1/ included,
+# runs instead: every *.out.txt here, its SUBDIRS' included (not box-1119/,
+# the lead's box outputs copied in),
 # holds no traceback (each run's stderr went into its output) and closes
 # with its own script's last line - a summary or a timing line, or, for the
 # two that close on a list of lanes (poolmarks, rewrites), all their rows.
-# Then controls: copies of real outputs, cut short, emptied or given a
-# traceback, in memory, each of which must be flagged. With a directory, it
+# And, since send-back 1 (VM3S's note 4: finished is not passed), every
+# finished output that counts its wrong unmarked lanes, or seq.py's lanes
+# differing from the model, must count 0, but the two first designs' runs
+# kept as the evidence of their defects (FIRST). Then controls: copies of
+# real outputs, cut short, emptied, given a traceback or a nonzero count,
+# in memory, each of which must be flagged, and a first design's run, which
+# must not be. With a directory, it
 # checks that one's outputs instead (the box's, for the lead; their stderr
 # is the job log's, so there a failed job shows as an output without its
 # closing line); the controls are always made from this directory's outputs.
@@ -36,7 +42,14 @@ CLOSE = {
     "tw32_ref": r"^fp256 log1p",
     "sched": r"compound\(x, 3\)",
     "share": r"with exp2\(x\), M1's",
+    "zonebound": r"the sum's five: [\d.]+ Bv; compound's nine",
 }
+# The counts that must be 0 in a finished output.
+ZERO = (r"WRONG UNMARKED (\d+)", r"(\d+) wrong unmarked",
+        r"\bwrong (\d+), marked", r"(\d+) differing from the model")
+# The first designs' runs, wrong by design (the study's 3.6, items 2 and 7).
+FIRST = ("regions_run.fp64-pow-first.out.txt",
+         "regions_run.fp64-pow-second.out.txt")
 # The two that close on a list of lanes: their rows, counted.
 ROWS = {
     "poolmarks": (r"^fp64 \w+\s+(rne|rtz):", 10),   # five functions, two attributes
@@ -44,8 +57,8 @@ ROWS = {
 }
 
 
-def verdict(script, text):
-    """None when the output is complete, else why not."""
+def verdict(script, text, name=""):
+    """None when the output is complete and passed, else why not."""
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if "Traceback" in text or "Error" in text:
         return "a traceback or an error"
@@ -54,22 +67,32 @@ def verdict(script, text):
     if script in CLOSE:
         if not re.search(CLOSE[script], lines[-1]):
             return "closes with %r" % lines[-1][:80]
-        return None
-    if script in ROWS:
+    elif script in ROWS:
         pat, want = ROWS[script]
         got = sum(1 for ln in lines if re.match(pat, ln))
-        return None if got == want else "%d rows, %d expected" % (got, want)
-    return "no rule for the script %s" % script
+        if got != want:
+            return "%d rows, %d expected" % (got, want)
+    else:
+        return "no rule for the script %s" % script
+    if name not in FIRST:
+        for pat in ZERO:
+            for m in re.finditer(pat, text):
+                if int(m.group(1)):
+                    return "finished, not passed: %r" % m.group(0)
+    return None
 
 
 def script_of(path):
     return os.path.basename(path).split(".")[0]
 
 
+SUBDIRS = ("first-b1", "second-b1", "no-b2", "zone-curve", "n-scan")
+
+
 def outputs(d):
     files = sorted(glob.glob(os.path.join(d, "*.out.txt"))
-                   + glob.glob(os.path.join(d, "first-b1", "*.out.txt"))
-                   + glob.glob(os.path.join(d, "second-b1", "*.out.txt")))
+                   + [f for s in SUBDIRS
+                      for f in glob.glob(os.path.join(d, s, "*.out.txt"))])
     return [f for f in files if not os.path.basename(f).startswith("complete.")]
 
 
@@ -82,12 +105,12 @@ def main():
     files = outputs(d)
     bad = 0
     for f in files:
-        why = verdict(script_of(f), read(f))
+        why = verdict(script_of(f), read(f), os.path.basename(f))
         if why:
             bad += 1
             print("INCOMPLETE", os.path.relpath(f, d).replace("\\", "/"), why)
-    print(f"{len(files)} outputs; {bad} without their closing line or with a "
-          f"traceback")
+    print(f"{len(files)} outputs; {bad} without their closing line, with a "
+          f"traceback or with a nonzero wrong count")
 
     # The controls, in memory, from this directory's outputs: each must be
     # flagged.
@@ -108,11 +131,30 @@ def main():
         t = texts[name]
         controls.append((name + " cut to %d lines" % keep, script_of(name),
                          "\n".join(t.splitlines()[:keep]) + "\n"))
+    for name, a, b in (("pools_run.fp64.out.txt", "WRONG UNMARKED 0",
+                        "WRONG UNMARKED 3"),
+                       ("census.fp64-intpow.out.txt", ": 0 wrong unmarked",
+                        ": 2 wrong unmarked"),
+                       ("specials.fp64.out.txt", "wrong 0, marked",
+                        "wrong 1, marked"),
+                       ("onseq.fp64.out.txt", "0 differing from the model",
+                        "1 differing from the model"),
+                       ("regions_run.fp64-pow.out.txt", " 0 wrong unmarked in",
+                        " 7 wrong unmarked in")):
+        t = texts[name]
+        assert a in t, (name, a)
+        controls.append((name + " with a nonzero count", script_of(name),
+                         t.replace(a, b, 1)))
     missed = [c[0] for c in controls if verdict(c[1], c[2]) is None]
     for m in missed:
         print("CONTROL NOT FLAGGED", m)
-    print(f"{len(controls) - len(missed)} of {len(controls)} controls flagged")
-    sys.exit(1 if bad or missed else 0)
+    keep = [n for n in FIRST if verdict(script_of(n), texts[n], n) is not None]
+    for n in keep:
+        print("FIRST DESIGN FLAGGED", n)
+    print(f"{len(controls) - len(missed)} of {len(controls)} controls flagged; "
+          f"{len(FIRST) - len(keep)} of {len(FIRST)} first designs' runs "
+          f"passed as kept")
+    sys.exit(1 if bad or missed or keep else 0)
 
 
 if __name__ == "__main__":

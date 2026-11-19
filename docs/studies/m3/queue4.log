@@ -1,0 +1,139 @@
+2026-11-19 14:17:36 start costs.fp64.out.txt: costs.py fp64
+2026-11-19 14:17:40 end costs.fp64.out.txt (rc 0)
+2026-11-19 14:17:40 start sched.fp64.out.txt: sched.py fp64
+2026-11-19 14:17:42 end sched.fp64.out.txt (rc 0)
+2026-11-19 14:17:43 start share.fp64.out.txt: share.py fp64
+2026-11-19 14:17:44 end share.fp64.out.txt (rc 0)
+2026-11-19 14:17:44 start budget.fp64-pow-wide.out.txt: budget.py fp64 pow wide 120 1
+2026-11-19 14:17:49 end budget.fp64-pow-wide.out.txt (rc 0)
+2026-11-19 14:17:49 start budget.fp64-pow-near1.out.txt: budget.py fp64 pow near1 120 1
+2026-11-19 14:17:54 end budget.fp64-pow-near1.out.txt (rc 0)
+2026-11-19 14:17:54 start budget.fp64-pow-edge.out.txt: budget.py fp64 pow edge 120 1
+2026-11-19 14:17:59 end budget.fp64-pow-edge.out.txt (rc 0)
+2026-11-19 14:17:59 start budget.fp64-pow-redb.out.txt: budget.py fp64 pow redb 120 1
+2026-11-19 14:18:04 end budget.fp64-pow-redb.out.txt (rc 0)
+2026-11-19 14:18:04 start budget.fp64-pow-small.out.txt: budget.py fp64 pow small 120 1
+2026-11-19 14:18:09 end budget.fp64-pow-small.out.txt (rc 0)
+2026-11-19 14:18:09 start budget.fp64-pow-negint.out.txt: budget.py fp64 pow negint 120 1
+2026-11-19 14:18:14 end budget.fp64-pow-negint.out.txt (rc 0)
+2026-11-19 14:18:14 start budget.fp64-pow-sub.out.txt: budget.py fp64 pow sub 120 1
+2026-11-19 14:18:19 end budget.fp64-pow-sub.out.txt (rc 0)
+2026-11-19 14:18:19 start budget.fp64-pow-tinyy.out.txt: budget.py fp64 pow tinyy 120 1
+2026-11-19 14:18:24 end budget.fp64-pow-tinyy.out.txt (rc 0)
+2026-11-19 14:18:25 start budget.fp64-pow-hugey.out.txt: budget.py fp64 pow hugey 120 1
+2026-11-19 14:18:26 end budget.fp64-pow-hugey.out.txt (rc 0)
+2026-11-19 14:18:26 start budget.fp64-pow-negedge.out.txt: budget.py fp64 pow negedge 120 1
+2026-11-19 14:18:31 end budget.fp64-pow-negedge.out.txt (rc 0)
+2026-11-19 14:18:31 start budget.fp64-pow-rhoedge.out.txt: budget.py fp64 pow rhoedge 120 1
+2026-11-19 14:18:36 end budget.fp64-pow-rhoedge.out.txt (rc 0)
+2026-11-19 14:18:36 start budget.fp64-pow-zone.out.txt: budget.py fp64 pow zone 120 1
+2026-11-19 14:18:41 end budget.fp64-pow-zone.out.txt (rc 0)
+2026-11-19 14:18:41 start budget.fp64-powr-wide.out.txt: budget.py fp64 powr wide 120 1
+2026-11-19 14:18:46 end budget.fp64-powr-wide.out.txt (rc 0)
+2026-11-19 14:18:46 start budget.fp64-pown-int.out.txt: budget.py fp64 pown int 120 1
+2026-11-19 14:18:51 end budget.fp64-pown-int.out.txt (rc 0)
+2026-11-19 14:18:51 start budget.fp64-pown-int-neg.out.txt: budget.py fp64 pown int-neg 120 1
+2026-11-19 14:18:56 end budget.fp64-pown-int-neg.out.txt (rc 0)
+2026-11-19 14:18:56 start budget.fp64-pown-int17.out.txt: budget.py fp64 pown int17 120 1
+2026-11-19 14:19:00 end budget.fp64-pown-int17.out.txt (rc 0)
+2026-11-19 14:19:00 start budget.fp64-pown-int1000.out.txt: budget.py fp64 pown int1000 120 1
+2026-11-19 14:19:05 end budget.fp64-pown-int1000.out.txt (rc 0)
+2026-11-19 14:19:05 start budget.fp64-pown-int31.out.txt: budget.py fp64 pown int31 120 1
+2026-11-19 14:19:10 end budget.fp64-pown-int31.out.txt (rc 0)
+2026-11-19 14:19:10 start budget.fp64-pown-int63.out.txt: budget.py fp64 pown int63 120 1
+2026-11-19 14:19:12 end budget.fp64-pown-int63.out.txt (rc 0)
+2026-11-19 14:19:12 start budget.fp64-pown-zone1000.out.txt: budget.py fp64 pown zone1000 120 1
+2026-11-19 14:19:17 end budget.fp64-pown-zone1000.out.txt (rc 0)
+2026-11-19 14:19:17 start budget.fp64-pown-zone12000.out.txt: budget.py fp64 pown zone12000 120 1
+2026-11-19 14:19:20 end budget.fp64-pown-zone12000.out.txt (rc 0)
+2026-11-19 14:19:20 start budget.fp64-rootn-int.out.txt: budget.py fp64 rootn int 120 1
+2026-11-19 14:19:25 end budget.fp64-rootn-int.out.txt (rc 0)
+2026-11-19 14:19:26 start budget.fp64-rootn-int17.out.txt: budget.py fp64 rootn int17 120 1
+2026-11-19 14:19:31 end budget.fp64-rootn-int17.out.txt (rc 0)
+2026-11-19 14:19:31 start budget.fp64-compound-int.out.txt: budget.py fp64 compound int 120 1
+2026-11-19 14:19:36 end budget.fp64-compound-int.out.txt (rc 0)
+2026-11-19 14:19:36 start budget.fp64-compound-int1000.out.txt: budget.py fp64 compound int1000 120 1
+2026-11-19 14:19:41 end budget.fp64-compound-int1000.out.txt (rc 0)
+2026-11-19 14:19:41 start budget.fp64-compound-zone1000.out.txt: budget.py fp64 compound zone1000 120 1
+2026-11-19 14:19:46 end budget.fp64-compound-zone1000.out.txt (rc 0)
+2026-11-19 14:19:46 start budget.fp64-compound-zone12000.out.txt: budget.py fp64 compound zone12000 120 1
+2026-11-19 14:19:49 end budget.fp64-compound-zone12000.out.txt (rc 0)
+2026-11-19 14:19:49 start budget.fp64-pow-edge-bound_tight.out.txt: budget.py fp64 pow edge 120 1 bound_tight
+2026-11-19 14:19:54 end budget.fp64-pow-edge-bound_tight.out.txt (rc 0)
+2026-11-19 14:19:54 start budget.fp64-compound-zone12000-zone_bound_off.out.txt: budget.py fp64 compound zone12000 120 1 zone_bound_off
+2026-11-19 14:19:57 end budget.fp64-compound-zone12000-zone_bound_off.out.txt (rc 0)
+2026-11-19 14:19:57 start budget.fp64-pow-zone-zone_bound_off.out.txt: budget.py fp64 pow zone 120 1 zone_bound_off
+2026-11-19 14:20:02 end budget.fp64-pow-zone-zone_bound_off.out.txt (rc 0)
+2026-11-19 14:20:02 start regions_run.fp64-pow.out.txt: regions_run.py fp64 pow 400
+2026-11-19 14:21:44 end regions_run.fp64-pow.out.txt (rc 0)
+2026-11-19 14:21:44 start regions_run.fp64-powr.out.txt: regions_run.py fp64 powr 200
+2026-11-19 14:22:19 end regions_run.fp64-powr.out.txt (rc 0)
+2026-11-19 14:22:19 start regions_run.fp64-pown.out.txt: regions_run.py fp64 pown 150
+2026-11-19 14:22:33 end regions_run.fp64-pown.out.txt (rc 0)
+2026-11-19 14:22:33 start regions_run.fp64-rootn.out.txt: regions_run.py fp64 rootn 150
+2026-11-19 14:22:48 end regions_run.fp64-rootn.out.txt (rc 0)
+2026-11-19 14:22:48 start regions_run.fp64-compound.out.txt: regions_run.py fp64 compound 150
+2026-11-19 14:23:02 end regions_run.fp64-compound.out.txt (rc 0)
+2026-11-19 14:23:02 start regions_run.fp64-pown-zone.out.txt: regions_run.py fp64 pown 150 zone1000 zone12000
+2026-11-19 14:23:08 end regions_run.fp64-pown-zone.out.txt (rc 0)
+2026-11-19 14:23:08 start regions_run.fp64-compound-zone.out.txt: regions_run.py fp64 compound 150 zone1000 zone12000
+2026-11-19 14:23:15 end regions_run.fp64-compound-zone.out.txt (rc 0)
+2026-11-19 14:23:15 start specials.fp64.out.txt: specials.py fp64
+2026-11-19 14:23:38 end specials.fp64.out.txt (rc 0)
+2026-11-19 14:23:38 start plants.fp64.out.txt: plants.py fp64
+2026-11-19 14:23:43 end plants.fp64.out.txt (rc 0)
+2026-11-19 14:23:43 start census.fp64-intpow.out.txt: census.py fp64 intpow 300
+2026-11-19 14:23:49 end census.fp64-intpow.out.txt (rc 0)
+2026-11-19 14:23:49 start census.fp64-root2k.out.txt: census.py fp64 root2k 300
+2026-11-19 14:23:55 end census.fp64-root2k.out.txt (rc 0)
+2026-11-19 14:23:55 start census.fp64-pow2.out.txt: census.py fp64 pow2 300
+2026-11-19 14:23:59 end census.fp64-pow2.out.txt (rc 0)
+2026-11-19 14:23:59 start census.fp64-near1.out.txt: census.py fp64 near1 300
+2026-11-19 14:24:10 end census.fp64-near1.out.txt (rc 0)
+2026-11-19 14:24:10 start census.fp64-dominant.out.txt: census.py fp64 dominant 300
+2026-11-19 14:24:16 end census.fp64-dominant.out.txt (rc 0)
+2026-11-19 14:24:16 start census.fp64-edges.out.txt: census.py fp64 edges 300
+2026-11-19 14:24:23 end census.fp64-edges.out.txt (rc 0)
+2026-11-19 14:24:23 start census.fp64-smallint.out.txt: census.py fp64 smallint 300
+2026-11-19 14:24:31 end census.fp64-smallint.out.txt (rc 0)
+2026-11-19 14:24:31 start census.fp64-hard3p.out.txt: census.py fp64 hard3p 400
+2026-11-19 14:24:38 end census.fp64-hard3p.out.txt (rc 0)
+2026-11-19 14:24:38 start rate.fp64-pow-wide.out.txt: rate.py fp64 pow wide 600 8 3
+2026-11-19 14:24:49 end rate.fp64-pow-wide.out.txt (rc 0)
+2026-11-19 14:24:49 start rate.fp64-pow-wide-g2.out.txt: rate.py fp64 pow wide 300 2 3
+2026-11-19 14:24:55 end rate.fp64-pow-wide-g2.out.txt (rc 0)
+2026-11-19 14:24:55 start regions_run.fp128-pow-zone.out.txt: regions_run.py fp128 pow 80 zone
+2026-11-19 14:24:58 end regions_run.fp128-pow-zone.out.txt (rc 0)
+2026-11-19 14:24:58 start regions_run.fp128-powr-zone.out.txt: regions_run.py fp128 powr 40 zone
+2026-11-19 14:25:00 end regions_run.fp128-powr-zone.out.txt (rc 0)
+2026-11-19 14:25:00 start budget.fp128-pow-zone.out.txt: budget.py fp128 pow zone 40 1
+2026-11-19 14:25:03 end budget.fp128-pow-zone.out.txt (rc 0)
+2026-11-19 14:25:03 start regions_run.fp256-pow-zone.out.txt: regions_run.py fp256 pow 80 zone
+2026-11-19 14:25:07 end regions_run.fp256-pow-zone.out.txt (rc 0)
+2026-11-19 14:25:07 start regions_run.fp256-powr-zone.out.txt: regions_run.py fp256 powr 40 zone
+2026-11-19 14:25:09 end regions_run.fp256-powr-zone.out.txt (rc 0)
+2026-11-19 14:25:09 start budget.fp256-pow-zone.out.txt: budget.py fp256 pow zone 40 1
+2026-11-19 14:25:13 end budget.fp256-pow-zone.out.txt (rc 0)
+2026-11-19 14:25:13 start regions_run.fp128-pown-zone.out.txt: regions_run.py fp128 pown 40 zone188000
+2026-11-19 14:25:15 end regions_run.fp128-pown-zone.out.txt (rc 0)
+2026-11-19 14:25:15 start regions_run.fp256-pown-zone.out.txt: regions_run.py fp256 pown 40 zone2990000
+2026-11-19 14:25:18 end regions_run.fp256-pown-zone.out.txt (rc 0)
+2026-11-19 14:25:18 start budget.fp128-pown-zone188000.out.txt: budget.py fp128 pown zone188000 40 1
+2026-11-19 14:25:20 end budget.fp128-pown-zone188000.out.txt (rc 0)
+2026-11-19 14:25:20 start budget.fp256-pown-zone2990000.out.txt: budget.py fp256 pown zone2990000 40 1
+2026-11-19 14:25:22 end budget.fp256-pown-zone2990000.out.txt (rc 0)
+2026-11-19 14:25:22 start regions_run.fp128-compound-zone.out.txt: regions_run.py fp128 compound 40 zone188000
+2026-11-19 14:25:24 end regions_run.fp128-compound-zone.out.txt (rc 0)
+2026-11-19 14:25:24 start regions_run.fp256-compound-zone.out.txt: regions_run.py fp256 compound 40 zone2990000
+2026-11-19 14:25:27 end regions_run.fp256-compound-zone.out.txt (rc 0)
+2026-11-19 14:25:27 start budget.fp128-compound-zone188000.out.txt: budget.py fp128 compound zone188000 40 1
+2026-11-19 14:25:28 end budget.fp128-compound-zone188000.out.txt (rc 0)
+2026-11-19 14:25:28 start budget.fp256-compound-zone2990000.out.txt: budget.py fp256 compound zone2990000 40 1
+2026-11-19 14:25:30 end budget.fp256-compound-zone2990000.out.txt (rc 0)
+2026-11-19 14:25:30 start onseq.fp64.out.txt: onseq.py fp64 pow powr pown rootn compound --ns 2,-2,3,17,9223372036854775807,-9223372036854775808
+2026-11-19 14:27:34 end onseq.fp64.out.txt (rc 0)
+2026-11-19 14:27:34 start pools_run.fp64.out.txt: pools_run.py fp64
+2026-11-19 14:31:03 end pools_run.fp64.out.txt (rc 0)
+2026-11-19 14:31:03 start poolmarks.fp64.out.txt: poolmarks.py fp64
+2026-11-19 14:32:22 end poolmarks.fp64.out.txt (rc 0)
+queue4 exit 0

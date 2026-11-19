@@ -50,7 +50,7 @@ fp64 powr     rtz: marked by class irr 42, rep 37
     irr marked: x=0x3ff0000000000001 y=0xbff0000000000005
     irr marked: x=0x3ff0000000000001 y=0x3ff0000000000005
     irr marked: x=0x3ff0000000000002 y=0xbff0000000000000
-fp64 pown     rne: marked by class irr 253, mid 8, rep 267
+fp64 pown     rne: marked by class irr 255, mid 8, rep 267
     irr marked: x=0x3fefffffffffffff n=-1
     irr marked: x=0x3fefffffffffffff n=2
     irr marked: x=0x3fefffffffffffff n=-4
@@ -63,7 +63,7 @@ fp64 pown     rne: marked by class irr 253, mid 8, rep 267
     irr marked: x=0x3fffffffffffffff n=-3
     irr marked: x=0x3fffffffffffffff n=4
     irr marked: x=0x3fffffffffffffff n=-8
-fp64 pown     rtz: marked by class irr 212, rep 267
+fp64 pown     rtz: marked by class irr 214, rep 267
     irr marked: x=0x3fefffffffffffff n=2
     irr marked: x=0x3fefffffffffffff n=-4
     irr marked: x=0x3fefffffffffffff n=5
