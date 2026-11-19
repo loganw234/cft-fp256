@@ -1,0 +1,14 @@
+fp256 pow region zone: 9993 main-path lanes of 10000 (n = None), seed 3, G 46, GL 67, GE 48, B1 2^-inf, B2 2^-inf
+  rounding instructions active 234
+  M max 0.006018 Bv; capacities 0.000617 Bv; BOUND 0.006635 Bv (2^-7.24)
+  measured worst 0.005971 Bv at x=0x3fffee1fffffffcc8d7fe232f380000000000000000000000000000000000000 y=0x40014552fb53915a9e7ad86d264f390d62ff350b74b78124542e12bfa0917d6d
+  residual (second order, measured) 1.421e-59 Bv; bound + residual 0.006635 Bv
+    log-poly     capacity 0.000541  observed 0.000511
+    exp-poly     capacity 0.000076  observed 0.000073
+    log-sum      capacity 0.000000  observed 0.000000
+    product      capacity 0.000000  observed 0.000000
+    exp-recon    capacity 0.000000  observed 0.000000
+    exp-reduce   capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  922 s

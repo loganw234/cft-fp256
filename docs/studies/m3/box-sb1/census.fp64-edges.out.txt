@@ -1,0 +1,7 @@
+fp64 family edges: 3000 lanes; classes irr 3000
+  rne: irr: 3000 lanes, marked 0 (guess wrong 0), decided 3000, WRONG 0
+  rtz: irr: 3000 lanes, marked 0 (guess wrong 0), decided 3000, WRONG 0
+  rdn: irr: 3000 lanes, marked 0 (guess wrong 0), decided 3000, WRONG 0
+  rup: irr: 3000 lanes, marked 0 (guess wrong 0), decided 3000, WRONG 0
+  rmm: irr: 3000 lanes, marked 0 (guess wrong 0), decided 3000, WRONG 0
+fp64 edges: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 54 s

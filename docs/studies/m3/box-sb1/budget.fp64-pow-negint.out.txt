@@ -1,0 +1,14 @@
+fp64 pow region negint: 9788 main-path lanes of 10000 (n = None), seed 3, G 44, GL 47, GE 46, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 146
+  M max 0.007096 Bv; capacities 0.173286 Bv; BOUND 0.180381 Bv (2^-2.47)
+  measured worst 0.043278 Bv at x=0xbfed2740995eb6bd y=0xc09b9c0000000000
+  residual (second order, measured) 2.046e-05 Bv; bound + residual 0.180402 Bv
+    log-sum      capacity 0.106871  observed 0.078284
+    log-poly     capacity 0.042790  observed 0.036861
+    product      capacity 0.017224  observed 0.014935
+    exp-poly     capacity 0.003221  observed 0.001544
+    exp-recon    capacity 0.003027  observed 0.002293
+    exp-reduce   capacity 0.000152  observed 0.000118
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  356 s

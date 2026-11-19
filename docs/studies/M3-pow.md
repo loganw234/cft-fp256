@@ -117,7 +117,11 @@ Nothing in the tree imports the model.
   region sampled on the desktop (sampled figures: 120 lanes a region at
   fp64, 40 at fp128 and fp256; fp64's largest 0.194 Bv, compound(x, 1000)
   in the cancelling zone; fp128's under 0.0034 and fp256's under 0.0063),
-  and in the cancelling zone, where the box found the design before
+  and at the box's 10,000 lanes (MEASURED by the lead, `box-sb1/`) every
+  fp64 region of the fix under 1 Bv too, its largest compound(x, 1000)'s
+  `int1000` at 0.374 (1.42 bits), above the desktop's sampled largest, and
+  fp128's and fp256's at most 0.0036 and 0.0072; and in the cancelling
+  zone, where the box found the design before
   send-back 1 past 1 Bv (1.052, compound(x, 1000) at 10,000 lanes), the
   budget's dominant part bounded on every lane: the logarithm's sum at
   most 0.171 Bv, 0.231 for compound (COMPUTED, 3.2); the mark-rate law
@@ -141,10 +145,11 @@ Nothing in the tree imports the model.
 - **Not done here** (the known limits): fp32 is not modelled (2.8); the
   budgets are the desktop's, 120 lanes a region at fp64 and 40 at fp128 and
   fp256, and bound their own samples (the larger samples are the box's:
-  `box_m3s.sh`'s and, for the fixed design, `box_m3s_sb1.sh`'s, the lead's
-  run after this commit); fp64's margin in the cancelling zone rests on
-  the analytic bound of its dominant part and on sampled budgets of the
-  rest; the language, the compiler and the
+  `box_m3s.sh`'s and, for the fixed design, `box_m3s_sb1.sh`'s, 10,000
+  lanes a region, `box-sb1/`; those too are samples, and the box's fp64
+  largest, 0.374, is above the desktop's 0.194); fp64's margin in the
+  cancelling zone rests on the analytic bound of its dominant part and on
+  sampled budgets of the rest; the language, the compiler and the
   derivative rules of sections 6 and 7 are designed, not run, but for the
   rewrites' equality; the integer-operand functions run on seq.py at six
   values of n, not every n of the pools; the queue logs' "rc" field is
@@ -843,9 +848,25 @@ large (`no-b2/`); the box's said 0.802 and 1.052 for compound(x, 1000) at
 and 0.419 for pow's `negint`, `rhoedge` and `redb` at 2,000 (MEASURED by the
 lead on amd-arc-box, `box-1119/`). Each of those is the cancelling zone's
 (3.6, item 9), which the sampled regions reached a few lanes at a time.
-The fixed design at the box's volume is the lead's run of
-`box_m3s_sb1.sh`, after this commit; the desktop's view of it at 2,000
-lanes, `zone-curve/`: compound's `zone12000` 0.182 Bv, its plant 0.942.
+**The fixed design at the box's volume** (MEASURED on amd-arc-box, the
+lead's run of `box_m3s_sb1.sh` at b4698a80, 14:45 to 15:51, every job rc
+0, `box-sb1/`; bound + residual, 10,000 lanes, seed 3): fp64, compound's
+`int1000`
+0.374 and `zone12000` 0.183, pown's `int1000` 0.156 and `zone12000`
+0.143, pow's `negint`, `redb`, `rhoedge` and `zone` 0.180, 0.133, 0.146
+and 0.187, every one under 1 Bv. The largest, compound's `int1000` at
+0.374 (1.42 bits of margin), is above the desktop's sampled largest
+(0.194, `zone1000`): its log-sum is 0.157, under the cell-by-cell bound,
+and its low word's and polynomial's parts are 0.104 and 0.079 (the zone
+regions' at 2,000 lanes: 0.021 and 0.050); which lanes set them is not
+traced here. The plant at the box's volume:
+`int1000` 1.052 Bv, red, the design before's figure exactly; `zone12000`
+at 20,000 lanes 0.943, under 1. fp128 at most 0.0036 (pow's `zone`) and
+fp256 0.0072 (compound's `zone2990000`), the log-sum's capacity 0 in
+each: no growth there. fp64's regions at the first box run's sizes (the
+zone's among them) and the census at 3,000 lanes a family: 0 wrong
+unmarked. The desktop's view at 2,000 lanes, `zone-curve/`: compound's
+`zone12000` 0.182 Bv, its plant 0.942.
 The zone's top alone (`zone12000`, every lane's gh near 0.9) keeps the
 plant under 1, where `int1000` passed it and so did `zone1000`, which
 draws over the whole zone (1.015 Bv at 150 lanes, `n-scan/`): a
@@ -1348,8 +1369,10 @@ ninth is send-back 1's):
    rarely met the zone's worst. The worst n is about 12,000, the largest
    whose zone top is still on the main path (3.2). Fixed by the term
    |Y_h k| B2 (2.2); held by the regions `zone` and `zone<N>` and the plant
-   `zone_bound_off`, the design before (8); the box's budgets of the fix at
-   10,000 lanes are the lead's run of `box_m3s_sb1.sh`, after this commit.
+   `zone_bound_off`, the design before (8); at the box's 10,000 lanes the
+   fix holds every fp64 region under 1 Bv, compound's `int1000` the
+   largest at 0.374, and the plant is red at `int1000`, 1.052 Bv (3.2,
+   `box-sb1/`).
 
 No defect in transcend.py was found: every lane compared equal where the
 routine did not mark, and the nine above are the model's own. Four of them
@@ -1814,7 +1837,7 @@ the plant, under 1 without).
 | screen_low | the overflow screen at emax + 1, not emax + 2 | lane | pow(21, 0x406d244c78367a0d), t_h0 = 1024 exactly, rne: +inf with overflow (transcend: 0x7feffffffffffecd, inexact) | red |
 | mark_silenced | the mark never set | lane | pow(3, 2) rtz: 9 - ulp, unmarked (transcend: 9) | red |
 | bound_tight | fp64's |t| and |Y k| terms dropped (a uniform 2^-97) | budget | the region `edge`: 2.78 Bv (`budget.fp64-pow-edge-bound_tight.out.txt`) | - |
-| zone_bound_off | the design before send-back 1: fp64's |Y k| term dropped (3.6, 9) | budget | compound's region `int1000` at 10,000 lanes, seed 3: past 1 Bv at the box's volume as the design it reproduces (1.052 Bv, `box-1119/`; the plant's 2,000-lane run equals that design's box run, 0.802349 Bv against the box's 0.802349, `zone-curve/`); its own 10,000-lane run is `box_m3s_sb1.sh`'s; red on the desktop at compound's `zone1000`, 1.015 Bv at 150 lanes (`n-scan/`), and under 1 at `zone12000` (0.753 at 120 lanes, 0.942 at 2,000) | - |
+| zone_bound_off | the design before send-back 1: fp64's |Y k| term dropped (3.6, 9) | budget | compound's region `int1000` at 10,000 lanes, seed 3: past 1 Bv at the box's volume as the design it reproduces (1.052 Bv, `box-1119/`; the plant's 2,000-lane run equals that design's box run, 0.802349 Bv against the box's 0.802349, `zone-curve/`); its own 10,000-lane run on the box, 1.052026 Bv (`box-sb1/`); red on the desktop at compound's `zone1000`, 1.015 Bv at 150 lanes (`n-scan/`), and under 1 at `zone12000` (0.753 at 120 lanes, 0.942 at 2,000) | - |
 | log_short | the logarithm planned at G, not GL | budget | fp128's region `rhoedge`: 124 Bv (2^6.96), the control 0.0013 (`budget.fp128-pow-rhoedge-log_short.out.txt`); not red in `wide` (0.0008), where the table term carries L | - |
 
 The brief's ten: an exact case left to the enclosure (exact_unmarked); a
@@ -1894,9 +1917,10 @@ sections' named.
      evidence: the sum's capacity bounded on every lane whose k is -1, at
      most 0.171 Bv, 0.231 for compound (COMPUTED by the reduction's cells,
      3.2), and the sampled
-     budgets of the rest (fp64's largest 0.194 Bv, compound's `zone1000` on
-     the desktop; the box's at
-     10,000 lanes the lead's run of `box_m3s_sb1.sh`).
+     budgets of the rest (fp64's largest 0.194 Bv, compound's `zone1000`,
+     on the desktop's 120 lanes; at the box's 10,000 lanes 0.374,
+     compound's `int1000`, 1.42 bits of margin, and the plant red there at
+     1.052: MEASURED by the lead, `box-sb1/`).
    - (a') The re-centred reduction (m' in [1/sqrt 2, sqrt 2), a table of
      other cells): no cancelling zone (at most 1 bit), so no |Y k| term,
      and B1 about 2^-103, G 39.8 at the top (ESTIMATE): fewer marks than
@@ -2050,14 +2074,15 @@ mpmath 1.3.0 on the desktop. Every fragment is built on the tree's
 | `complete.py` | that every captured run completed: no traceback, and its script's closing line (below) | `complete.out.txt` |
 | `queue1.sh` to `queue5.sh` | the desktop's runs in order, one at a time (4 and 5: send-back 1's) | `queue1.log` to `queue5.log` (the first three's "rc": below) |
 | `box_m3s.sh` | the larger samples, for the lead on amd-arc-box | the lead's (`box-1119/` holds three of them) |
-| `box_m3s_sb1.sh` | send-back 1's larger samples: the fix and its plant at volume, the regions and the census at the box's sizes, fp128 and fp256 at their worst regions | the lead's, after this commit |
+| `box_m3s_sb1.sh` | send-back 1's larger samples: the fix and its plant at volume, the regions and the census at the box's sizes, fp128 and fp256 at their worst regions | the lead's run at b4698a80, `box-sb1/` |
+| `box-sb1/` | that run's 37 outputs, copied in (MEASURED by the lead; `complete.py box-sb1` over them: 0 flagged, `complete.box-sb1.out.txt`) | |
 | `box-1119/` | the lead's box outputs the study cites, copied in (MEASURED by the lead at d2bd90fa's model code, which the design before the |Y k| term is) | |
 
-The model is 22 Python files and 7 shell scripts, 3,629 lines (COUNTED,
-`wc -l` over `*.py` and `*.sh` at the study's commit), with 210 captured
+The model is 22 Python files and 7 shell scripts, 3,749 lines (COUNTED,
+`wc -l` over `*.py` and `*.sh` at the study's commit), with 211 captured
 outputs (`*.out.txt`; `first-b1/`, `second-b1/`, `no-b2/`, `zone-curve/`
-and `n-scan/` among them), the lead's 16 box outputs in `box-1119/`, and
-the five queue logs: 260 files in all.
+and `n-scan/` among them), the lead's 53 box outputs in `box-1119/` (16)
+and `box-sb1/` (37), and the five queue logs: 298 files in all.
 
 **The first three queue logs' "rc" is not the runs' status** (found after
 the study's first commit, in a review of the scripts): their wrapper read

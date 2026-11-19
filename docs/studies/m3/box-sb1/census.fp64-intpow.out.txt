@@ -1,0 +1,7 @@
+fp64 family intpow: 3000 lanes; classes irr 861, mid 46, rep 2093
+  rne: irr: 861 lanes, marked 0 (guess wrong 0), decided 861, WRONG 0; mid: 46 lanes, marked 46 (guess wrong 21), decided 0, WRONG 0; rep: 2093 lanes, marked 1735 (guess wrong 1735), decided 358, WRONG 0
+  rtz: irr: 861 lanes, marked 0 (guess wrong 0), decided 861, WRONG 0; mid: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; rep: 2093 lanes, marked 1735 (guess wrong 1735), decided 358, WRONG 0
+  rdn: irr: 861 lanes, marked 0 (guess wrong 0), decided 861, WRONG 0; mid: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; rep: 2093 lanes, marked 1735 (guess wrong 1735), decided 358, WRONG 0
+  rup: irr: 861 lanes, marked 0 (guess wrong 0), decided 861, WRONG 0; mid: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; rep: 2093 lanes, marked 1735 (guess wrong 1735), decided 358, WRONG 0
+  rmm: irr: 861 lanes, marked 0 (guess wrong 0), decided 861, WRONG 0; mid: 46 lanes, marked 46 (guess wrong 14), decided 0, WRONG 0; rep: 2093 lanes, marked 1735 (guess wrong 1735), decided 358, WRONG 0
+fp64 intpow: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 48 s

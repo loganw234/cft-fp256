@@ -1,0 +1,13 @@
+fp64 pow region wide: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region near1: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region edge: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region redb: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region small: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region negint: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region sub: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region tinyy: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region hugey: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region negedge: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region rhoedge: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region zone: 1000 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow: 0 wrong unmarked in all; 213 s

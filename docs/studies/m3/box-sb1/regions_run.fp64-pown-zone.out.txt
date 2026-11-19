@@ -1,0 +1,3 @@
+fp64 pown region zone1000: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pown region zone12000: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pown: 0 wrong unmarked in all; 14 s
