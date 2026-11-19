@@ -423,11 +423,15 @@ up, COMPUTED), and:
       Bv = |V_h| (2^-(p+G) + |t_h| B1 + |Y_h k| B2),
       B1 = 2^-(2p-6) = 2^-100,   B2 = 2^-(2p-5) = 2^-101,
 
-  rounded upward: against a uniform bound, |t_h| B1 is 2 instructions
-  (a fabs and an FMA) and |Y_h k| B2 2 more (a fabs of k and an FMA; pow
-  and powr one MUL more for |y k|, the integer functions' |n| B2 being a
-  word), made beside the product so that w, not t_h, lives across the
-  exponential. Where k = 0, G is 43.8 at |t| = 1, 43.0 at |t| = 8 (results
+  rounded upward: against a uniform bound, |t_h| B1 is 1 instruction (an
+  FMA; its fabs of t_h is the beside-1 test's, shared) and |Y_h k| B2 2
+  more (a fabs of k and an FMA; pow and powr one MUL more for |y k|, the
+  integer functions' |n| B2 being a word), made beside the product so
+  that w, not t_h, lives across the exponential (MEASURED against the
+  plant `bound_tight`, the uniform bound, under rne: pow 434 against 430,
+  powr 413 against 409, pown(x, 3) 386 against 383, rootn(x, 3) 387
+  against 384, compound(x, 3) 410 against 407; send-back 3). Where k = 0, G
+  is 43.8 at |t| = 1, 43.0 at |t| = 8 (results
   in [2^-8, 2^8]), 40.8 at |t| = 64, and 36.9 at the top, |t| = 1,077
   (COMPUTED, `bits.out.txt`); where |k| >= 1 outside the cancelling zone
   the |Y k| term adds at most 55 % to Bv (G at most 0.63 bits less,
@@ -1909,9 +1913,11 @@ sections' named.
      top of the range where k = 0, at most 0.63 bits less where |k| >= 1
      outside the zone, and up to 2.75 bits less at the zone's top (Bv 6.7
      times the first design's there). Its cost, against a uniform bound:
-     4 instructions for pown, rootn and compound and 5 for pow and powr,
-     of which the |Y k| term is 2 and 3 (MEASURED: pow 434 and powr 413
-     against the first design's 431 and 410, pown(x, 3) 386 against 384,
+     3 instructions for pown, rootn and compound and 4 for pow and powr,
+     of which the |Y k| term is 2 and 3 and |t_h| B1 1, its fabs shared
+     with the beside-1 test (MEASURED under rne: pow 434 and powr 413
+     against the uniform bound's 430 and 409, the plant `bound_tight`, and
+     the first design's 431 and 410; pown(x, 3) 386 against 383 and 384;
      5.1); and two bank words; marks unchanged where k = 0 and at most 1.55
      times the first design's elsewhere outside the zone (3.4). Its
      evidence: the sum's capacity bounded on every lane whose k is -1, at
@@ -1928,7 +1934,8 @@ sections' named.
      M1's (ESTIMATE 10 to 20 instructions and 8 to 16 bank words, and their
      check), and the sharing with M1's log2 that is already small (5.4).
    - (a'') No |Y k| term and B1 raised until the zone's top holds, about
-     2^-97.3: 2 instructions fewer than (a), and 6.7 times (a)'s mark rate
+     2^-97.3: the |Y k| term's 2 instructions fewer than (a), 3 for pow and
+     powr, and 6.7 times (a)'s mark rate
      at large |t| on every lane, k = 0 included (COMPUTED from 2.2's
      ratios).
    - (b) A triple-word logarithm at fp64, G = 44 everywhere: ESTIMATE about
@@ -1936,8 +1943,9 @@ sections' named.
      (pow about 650 at fp64), and the triple word's live values.
    - (c) A uniform G at fp64: to hold the zone's top it would have to be
      about 35 (the sum's absolute error, 7.9 2^-106 in L, times |Y| up to
-     12,364 and ln 2, at a quarter of Bv: COMPUTED), 4 instructions fewer
-     than (a) and about 500 times its mark rate where |t| is small.
+     12,364 and ln 2, at a quarter of Bv: COMPUTED), 3 instructions fewer
+     than (a), 4 for pow and powr, and about 500 times its mark rate where
+     |t| is small.
    - (d) B1 per function or per |n|: does not reach the cause, the
      reduction's k, which pow with a large y meets as pown and compound do;
      per |n| it would raise the bound for every x of a large n, the zone's
