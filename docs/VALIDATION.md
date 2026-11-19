@@ -28431,7 +28431,7 @@ At 80468f1a on the RX 7600 (13:53:21 to 14:13:14, load 0.5 to 1.6): built in 20 
     | the follower at fp64 | [31, 30, 30, 30] | [64, 0, 0, 0] |
     | the follower at fp256 | [31, 30, 30, 30] | [64, 0, 0, 0] |
 
-  - **The marks:** at fp64, lanes 3, 67, 131 and 195 (one a tile; atan2, asin, acos and atan by the controls' lines) carry bit 7 of their byte (0x90, 0x91) in segment 0, whose STATUS 0x40 carries STATUS[6]. At fp256, lanes 3, 19, 35 and 51 (atan2, atan, asin and acos) carry it (0x90) in segment 0. Bit 7 is on no other lane of any segment, and STATUS[6] in no other segment. The golden mark check re-ran segment 0 on seq.py for 16 lanes of each entry: each end the certified one, and each lane's byte the probe's. Each marked lane, moved off its centre by a relative 2^-20 with a dense tail, no longer marks on seq.py (8 controls, bytes 0x10 and 0x11).
+  - **The marks:** at fp64, lanes 3, 67, 131 and 195 (one on each tile; the controls' lines name them atan2, asin, acos and atan) carry bit 7 of their byte (0x90, 0x91) in segment 0, whose STATUS 0x40 carries STATUS[6]. At fp256, lanes 3, 19, 35 and 51 (atan2, atan, asin and acos) carry it (0x90) in segment 0. Bit 7 is on no other lane of any segment, and STATUS[6] in no other segment. The golden mark check re-ran segment 0 on seq.py for 16 lanes of each entry: each end the certified one, and each lane's byte the probe's. Each marked lane, moved off its centre by a relative 2^-20 with a dense tail, no longer marks on seq.py (8 controls, bytes 0x10 and 0x11).
   - Every entry printed that the mark probe opened the certificate's device (xrt, 4 tiles, 4,096 slots a lane, image 4f9921a25af65444), and that its 4 segments, re-run from their certified starts, end where the certificate's boundaries do, bit for bit, with its flag words and STATUS.
 - **With the golden audit:** `acceptance rev8: 2 of 2 PASS` as u50-rev8-quad (set), 56 checks ok, 0 failed, 508 s, and each entry's golden audit accepted it, every segment re-run on seq.py (344.6 s at fp64, 105.8 s at fp256), with cft-audit's verdict its own line for line.
 - **The ten again, as the regression:** `acceptance rev8: 10 of 10 PASS` as u50-rev8-quad (set), 201 checks ok, 0 failed, 130 s. The pendulum's and the attitude's fp256 entries again mark their declared range lane 31 past 2^1024, as on 2026-11-04.
@@ -28451,7 +28451,7 @@ At 80468f1a on the RX 7600 (13:53:21 to 14:13:14, load 0.5 to 1.6): built in 20 
 
 **What M4 built,** by the study's section 10 (docs/studies/M4-invtrig.md), each item with its parcel's VALIDATION entry above:
 
-| item | what | parcels | their entries, and the merges |
+| item | what | parcels | their entries' dates, and the merges |
 |---|---|---|---|
 | 1 | the golden generator at fp64, fp128 and fp256: the one core with atan, asin and acos on it, atan2 with two inputs, the budget, the rate law and the families | M4G1, M4G2, M4G3, M4G4 | 2026-11-09 and 10; 57ba36af, bcad47d4, 75c819c8, 49de63c6 |
 | 2 | fp32 as a triple word | M4F1, M4F2 | 2026-11-10; 9b7be55c, 973ad1b0 |
@@ -28461,11 +28461,11 @@ At 80468f1a on the RX 7600 (13:53:21 to 14:13:14, load 0.5 to 1.6): built in 20 
 | 6 | the stages' legs | M4SL | 2026-11-11; a1233e5c |
 | 7 | the revision-8 set's inverse-trigonometric case, and the card leg on rev8q | M4A, then the lead's card leg | 2026-11-11, 3fd75869; the card leg at a279ba59 (above) |
 
-**And the fp32 sweeps,** which the round's plan made the close wait for, since they are fp32's bound evidence: the triple word has no budget B (parcel M4F2's limit 2, above). The tool is M4X's (e15de69f). Its items in the nightly catalog are M4X2's (88cea451) and M4CAT's (76103b65), and atan2's range rule in the tool is M4RR's (00ebe4ad). By Logan's answers of 2026-11-06 the tool sweeps all thirteen fp32 routines, and atan2 at every y for nine fixed x. **All 21 routine items are fully covered,** M4's twelve on night 21 (the weekend window from 2026-11-13), with no disagreement (site/nightly.json at 821b9367: `totals.fully_covered` and `totals.disagreements`).
+**And the fp32 sweeps,** which the round's plan made the close wait for, since they are fp32's bound evidence: the triple word has no budget B (parcel M4F2's limit 2, above). The tool is M4X's (e15de69f). Its items in the nightly catalog are M4X2's (88cea451) and M4CAT's (76103b65), and atan2's range rule in the tool is M4RR's (00ebe4ad). By Logan's answers of 2026-11-06 the tool sweeps all thirteen fp32 routines, and atan2 at every y for nine fixed x. **All 21 routine items are fully covered,** M4's twelve on night 21 (the weekend window from 2026-11-13), with no disagreement (site/nightly.json at 821b9367 and at a279ba59: `totals.fully_covered` and `totals.disagreements`).
 
 **How it was held:**
-- all sixteen of the build's parcels had a Sonnet author and a Haiku verifier, Logan's model for M4 (2026-11-06: "M4 Monday with Sonnet and Haiku"). READ in each parcel's report, where the author names its model, and in the round's ledger, where each verifier's dispatch names its model;
-- each merge had the lead's gate on amd-arc-box (the round's box/ folder: gate-m4g1, gate-m4x, gate-w2, gate-m4x2, gate-w3, gate-m4f2, gate-w4, gate-1112 with its re-gate, and gate-m4rr with its re-gate);
+- all sixteen of the build's parcels had a Sonnet author and a Haiku verifier, Logan's model for M4 (2026-11-06: "M4 Monday with Sonnet and Haiku"). READ in each parcel's report, where the author names its model, and in the round's ledger, where each verifier's dispatch or verdict line names its model;
+- each merge had the lead's gate on amd-arc-box (the round's box/ folder: gate-m4g1, gate-m4x, gate-w2, gate-m4x2, gate-w3, gate-m4f2, gate-w4, gate-1112 with regate-1112, and gate-m4rr with gate-m4rr2);
 - the card leg (2026-11-19, above): 2 of 2 PASS (54 checks, 0 failed) on the two, and 2 of 2 PASS again (56 checks, 0 failed) with the golden audit over every segment;
 - the nightly's revision-8 leg on the quad has run the same two entries, with the other nineteen, 133 times since night 1112, in 133 of the 185 cycles begun since then, each a pass of 21 entries (READ in the run's metrics.jsonl and driver.log as copied with night 1118's records).
 

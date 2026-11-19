@@ -2405,12 +2405,16 @@ section gives what differs, and where the record is.
     An exact quotient below the gate is meant to be decided in the lane,
     but at some x it marks under rtz, rdn and rup (docs/VALIDATION.md,
     2026-11-16, parcel M4RR's): a replay, not a wrong answer.
-  - The four have no stated range.
+  - **No stated range:** unlike sin, cos and tan past 2^1024, none of
+    the four marks a lane for an argument's size alone. atan2's band
+    above is set by the quotient's size.
 
   The definition replays a marked lane (docs/LANGUAGE.md, "A marked
   lane"), and `transcend.py` stays the one definition.
 - **Held:**
-  - golden-first, with a planted fault for every check;
+  - golden-first, with planted faults run against the checks: the
+    parcels' VALIDATION entries say which, and M4P's names two mutants
+    that no part of its routine corpus catches;
   - through libcft's sequencer at fp64, fp128 and fp256: 120 programs
     and 6,850 lanes at the gate's settings, 0 mismatches
     (docs/VALIDATION.md, 2026-11-10, "program.c parity for atan, asin,
