@@ -28408,3 +28408,87 @@ At 80468f1a on the RX 7600 (13:53:21 to 14:13:14, load 0.5 to 1.6): built in 20 
 - deepwrap-fp64-2048: cft-segrun's refusal of a stated depth beside a device (a segrun.c change).
 
 **Owed:** the WebAssembly rebuild, from G2A and G2B. G2D changed no source the module compiles: of host/src it changed backend_hip.cpp alone, and the module builds host/src's C files.
+
+## 2026-11-19 - the lead's: M4's card leg on rev8q - the phase follower at fp64 and fp256 passes 2 of 2 on the card, with the golden audit over every segment, and the ten again; the study's section 10 item 7 holds on the card
+
+**What ran** (box_m4a_card.sh on amd-arc-box, 08:36:50 to 08:49:11; MEASURED, READ in its summary and logs):
+- **The tree:** a fresh clone of main at a279ba59 (night 24's page data, on 340cd287), its SHA and content asserted apart: the follower's fp256 entry in REV8_ROUTINES, and the record's 22 entries with 2 declaring the range lane.
+- **The image:** $HOME/cardday-rev8q/cft_hw_quad.xclbin, its sha256 equal to the one the clone's hw/card_stress.py names for the quad (4f9921a2...).
+- **The build:** `make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so`, exit 0 in 33 s, 0 warnings. xrt_coreutil was linked into cft-segrun, libcft.so and cft-audit, once each (`ldd`).
+- **The card:** `[0000:02:00.1] xilinx_u50_gen3x16_xdma_base_5`, `44654095-25B4-C06A-EC6D-0B479D3FEBE8`, `user(inst=128)`, ready `Yes` (`xbutil examine`).
+- **Beside it:** cft-debris's DEBRIS-H on the box's CPUs (B0176, nice 19), the load 11.86 at the start.
+- **The commands** were docs/CARDDAY.md's, "The inverse-trigonometric routine entries in the revision-8 set": `python3 -B programs/acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad --segrun host/cft-segrun --audit host/cft-audit --lib host/libcft.so --only <entries>`, run three times:
+  - on the two, phasefollower-rk4-tangent-fp64 and -fp256;
+  - on the two with `--golden all`;
+  - on the ten of REV8_ROUTINES[:10]: M1's six (the Lotka-Volterra, diode and culture entries) and M2's four (the pendulum and the attitude), each at fp64 and fp256.
+
+**The results:**
+- **The two:** `acceptance rev8: 2 of 2 PASS` as u50-rev8-quad (set), 54 checks ok, 0 failed, 65 s. Each entry ran 4 segments of 10 steps on the card: fp64's 256 lanes in 8.5 s by cft-segrun, fp256's 64 in 0.9 s. cft-audit accepted each in full (11.5 s and 4.7 s). The golden spot check re-ran segment 3 on seq.py for 16 lanes of each, every end the certified one. Every boundary hash, flag word and STATUS was the set's.
+  - Each entry's flag words and STATUS words:
+
+    | entry | flags | STATUS |
+    |---|---|---|
+    | the follower at fp64 | [31, 30, 30, 30] | [64, 0, 0, 0] |
+    | the follower at fp256 | [31, 30, 30, 30] | [64, 0, 0, 0] |
+
+  - **The marks:** at fp64, lanes 3, 67, 131 and 195 (one a tile; atan2, asin, acos and atan by the controls' lines) carry bit 7 of their byte (0x90, 0x91) in segment 0, whose STATUS 0x40 carries STATUS[6]. At fp256, lanes 3, 19, 35 and 51 (atan2, atan, asin and acos) carry it (0x90) in segment 0. Bit 7 is on no other lane of any segment, and STATUS[6] in no other segment. The golden mark check re-ran segment 0 on seq.py for 16 lanes of each entry: each end the certified one, and each lane's byte the probe's. Each marked lane, moved off its centre by a relative 2^-20 with a dense tail, no longer marks on seq.py (8 controls, bytes 0x10 and 0x11).
+  - Every entry printed that the mark probe opened the certificate's device (xrt, 4 tiles, 4,096 slots a lane, image 4f9921a25af65444), and that its 4 segments, re-run from their certified starts, end where the certificate's boundaries do, bit for bit, with its flag words and STATUS.
+- **With the golden audit:** `acceptance rev8: 2 of 2 PASS` as u50-rev8-quad (set), 56 checks ok, 0 failed, 508 s, and each entry's golden audit accepted it, every segment re-run on seq.py (344.6 s at fp64, 105.8 s at fp256), with cft-audit's verdict its own line for line.
+- **The ten again, as the regression:** `acceptance rev8: 10 of 10 PASS` as u50-rev8-quad (set), 201 checks ok, 0 failed, 130 s. The pendulum's and the attitude's fp256 entries again mark their declared range lane 31 past 2^1024, as on 2026-11-04.
+- **After the run:** the clone's `git status --porcelain` empty and no leg failed; the sums of the 4 logs, copied with the summary and the script to the round's box/m4a-card/ and checked there (4 OK).
+
+**What it proves:** the device reproduces the software backend's guesses, marks and lane bytes for atan, asin, acos and atan2 at fp64 and fp256 under rdn, entry by entry, on the quad. That includes atan2's pair, the windows and the ratio centre, and the inverse fragments streaming from the image past the store. So the study's section 10 item 7 holds on the card: "STATUS[6] and the lane byte on a structured argument ... and the acceptance set's case".
+
+**Beside it, the nightly:** the stress run's revision-8 leg on the quad has run the same two entries, with the other nineteen, 133 times since night 1112, in 133 of the 185 cycles begun since then. Every one of the 133 was `pass` with 21 entries, and no other verdict was recorded (READ in the run's metrics.jsonl and driver.log as copied with night 1118's records; the deep image's own leg of 1 entry ran 25 times, all `pass`). The last leg's own log (cycle 619's, copied with its sum to the M4 round's box/nightly-leg-c0619/) ends `21 of 21 PASS`, the follower's two entries among them. That leg is `--legs set`, without the golden audit.
+
+**Known limits:**
+- **One image, the quad.** The rule gives the two no other target.
+- **The study's own case is not on this leg.** `atan(3 2^-26)` under rne at fp64 is a centre of INV_FAMILY under rne and of no rdn list, and the follower is compiled rdn. A second reference under rne is the lead's decision, not taken (M4A's limit 1).
+- **No range lane,** since the inverse fragments have no range rule.
+- **Nothing here about the sweep's range rule** for atan2's tiny-quotient band (M4RR's).
+
+## 2026-11-19 - M4's build, closed: atan, asin, acos and atan2, correctly rounded, from the golden generator to the card, 2026-11-09 to 2026-11-19 (the lead)
+
+**What M4 built,** by the study's section 10 (docs/studies/M4-invtrig.md), each item with its parcel's VALIDATION entry above:
+
+| item | what | parcels | their entries, and the merges |
+|---|---|---|---|
+| 1 | the golden generator at fp64, fp128 and fp256: the one core with atan, asin and acos on it, atan2 with two inputs, the budget, the rate law and the families | M4G1, M4G2, M4G3, M4G4 | 2026-11-09 and 10; 57ba36af, bcad47d4, 75c819c8, 49de63c6 |
+| 2 | fp32 as a triple word | M4F1, M4F2 | 2026-11-10; 9b7be55c, 973ad1b0 |
+| 3 | program.c parity | M4P | 2026-11-10; 3e573825 |
+| 4 | the language at 1.3 | M4L | 2026-11-11; e3cbda4a |
+| 5 | cftc VERSION 8, with the phase follower as the reference, and the call loop's fix for atan2 at fp32 | M4C, M4LF | 2026-11-11; e3cbda4a, deb9c3ca |
+| 6 | the stages' legs | M4SL | 2026-11-11; a1233e5c |
+| 7 | the revision-8 set's inverse-trigonometric case, and the card leg on rev8q | M4A, then the lead's card leg | 2026-11-11, 3fd75869; the card leg at a279ba59 (above) |
+
+**And the fp32 sweeps,** which the round's plan made the close wait for, since they are fp32's bound evidence: the triple word has no budget B (parcel M4F2's limit 2, above). The tool is M4X's (e15de69f). Its items in the nightly catalog are M4X2's (88cea451) and M4CAT's (76103b65), and atan2's range rule in the tool is M4RR's (00ebe4ad). By Logan's answers of 2026-11-06 the tool sweeps all thirteen fp32 routines, and atan2 at every y for nine fixed x. **All 21 routine items are fully covered,** M4's twelve on night 21 (the weekend window from 2026-11-13), with no disagreement (site/nightly.json at 821b9367: `totals.fully_covered` and `totals.disagreements`).
+
+**How it was held:**
+- all sixteen of the build's parcels had a Sonnet author and a Haiku verifier, Logan's model for M4 (2026-11-06: "M4 Monday with Sonnet and Haiku"). READ in each parcel's report, where the author names its model, and in the round's ledger, where each verifier's dispatch names its model;
+- each merge had the lead's gate on amd-arc-box (the round's box/ folder: gate-m4g1, gate-m4x, gate-w2, gate-m4x2, gate-w3, gate-m4f2, gate-w4, gate-1112 with its re-gate, and gate-m4rr with its re-gate);
+- the card leg (2026-11-19, above): 2 of 2 PASS (54 checks, 0 failed) on the two, and 2 of 2 PASS again (56 checks, 0 failed) with the golden audit over every segment;
+- the nightly's revision-8 leg on the quad has run the same two entries, with the other nineteen, 133 times since night 1112, in 133 of the 185 cycles begun since then, each a pass of 21 entries (READ in the run's metrics.jsonl and driver.log as copied with night 1118's records).
+
+**Logan's answers that shaped it:**
+- the study's thirteen, approved as recommended (2026-10-23);
+- on the round's plan (2026-11-06): "1. Partial is acceptable 2. Card 3. Yes include M1 and M2 routines". So atan2's sweep takes nine x, the sweeps run on the U50, and the tool covers the nine routines built before M4.
+
+**Known limits, carried:**
+- **The study's own card case is not on the card.** `atan(3 2^-26)` under rne at fp64 is a centre of INV_FAMILY under rne. The follower is compiled rdn (the M4 contract's decision 5), so the case is on no rdn list. A second reference under rne is the lead's decision, not taken (M4A's limit 1).
+- **atan2's fp32 sweep is partial by design:** every y at nine x, not the 2^64 pairs.
+- **The exact-quotient gap** (M4RR, above): at some x, atan2's exact quotients below the gate mark under rtz, rdn and rup. This was measured at fp32, where it is 44 lanes (y = x 2^m for m = -75 to -32) at each of x = 0x3fb504f3 and 0x7f7fffff under each of rtz, rdn and rup, and by draws at fp64, fp128 and fp256. The design meant these to be decided in the lane. A marked lane is replayed, so the cost is a replay, not a wrong answer. `atan2_status`'s statement that such a quotient is never marked is false at those lanes.
+- **At fp32 the range edge is not the demand's.** The image marks below the triple word's 2^-76, while `atan2_status` and the range pairs use the double word's band, below about 2^-100. So lanes between the two edges are marked without being demanded. No false green follows. The band at the range's edge, where the seed's error decides, is exercised at no format (M4SL's limit 7).
+- **atan2's sweeps predate the tool's range rule.** No stored atan2 record has the rule's counts until the nine items are swept again (M4RR's limit), about 31 hours of the tool's device time.
+- **The bound at fp64, fp128 and fp256 is sampled,** and the card's fp32 sweeps are the exhaustive part (M4F2's limit 1).
+- **The inverse case runs on one image,** the quad, streaming from the image past the store, and has no range lane.
+- **The remaining per-parcel limits are in each entry above.**
+
+**The records that counted nine on the tile now count thirteen:**
+- README.md: the header cell, the golden model's row, the bullet "Thirteen of the thirty-nine also run on the tile" with the card's third run, and the plan's M4 line made past;
+- docs/README.md: TRANSCENDENTALS.md's row and the M4 study's row (written before it was built; built since);
+- docs/TRANSCENDENTALS.md: dated notes of 2026-11-19 beside those of 2026-11-05, and a new last section, "atan, asin, acos and atan2 on the tile";
+- CAPABILITIES.md: clause 9's parenthesis, and a dated note, the qualification covering thirteen functions;
+- docs/ROADMAP.md: the M4 block, built through the card and closed;
+- docs/CARDDAY.md: the inverse section's heading and its first paragraph, which now say the card leg has run.
+
+**Next in the math library,** by docs/ROADMAP.md: M3, the pow family, the last of the round's builds. Its structured cases need 2p to 3p bits, and it has no study yet.

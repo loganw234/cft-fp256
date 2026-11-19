@@ -6245,6 +6245,33 @@ function gains an L3 rule.
     items of the nightly catalog by the round's plan (parcel M4X2),
     with the box's CPU as the fallback; and the tool sweeps all
     thirteen fp32 routines, M1's six and M2's three among them.
+  - **Built through the card, and closed** (2026-11-19):
+    - **the golden generator** at fp64, fp128 and fp256 (parcels M4G1
+      to M4G4, merged 2026-11-09 and 10) and **fp32's triple word**
+      (M4F1 and M4F2, 2026-11-10);
+    - **program.c parity** (M4P, 3e573825);
+    - **the language, 1.3** (M4L) and **cftc's VERSION 8** (M4C), with
+      the phase follower as the reference, merged together at e3cbda4a
+      on 2026-11-11, and the call loop's fix for atan2 at fp32 (M4LF,
+      deb9c3ca);
+    - **the stages' legs** (M4SL, a1233e5c);
+    - **the revision-8 set's inverse-trigonometric case** (M4A,
+      3fd75869);
+    - **the fp32 sweeps on the card** (the tool M4X, the catalog's items
+      M4X2 and M4CAT, atan2's range rule M4RR): all 21 routine items
+      fully covered, M4's twelve on night 21, with no disagreement;
+    - **the card leg on rev8q,** the lead's: 2 of 2 PASS, with the
+      golden audit 2 of 2, STATUS[6] and the lane byte on a structured
+      argument of each of the four functions at fp64 and fp256, and the
+      ten again 10 of 10.
+
+    All seven items of the study's section 10 are built: the generator,
+    fp32, program.c parity, the language, cftc, the stages' legs and the
+    card. Each has its parcel's checks and the lead's gates. The open
+    ends are the VALIDATION entries' known limits: the study's own rne
+    case is not on the card, atan2's sweep is at nine x, atan2's exact
+    quotients below the gate mark at some x (a replay, not a wrong
+    answer), and one image.
 - **Their order:** M2's study can run beside M1's build; M4 follows
   M2 (step 6's plan asked only that it follow L4, which step 6
   built); M3 comes last, as step 6's plan has it.

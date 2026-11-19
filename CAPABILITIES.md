@@ -228,6 +228,12 @@ So the qualification covers nine functions and no other. They are
 routines of the same kind, and the tile still has no transcendental
 datapath.
 
+*Note of 2026-11-19.* atan, asin, acos and atan2 join them (M4's build,
+2026-11-09 to 2026-11-19; docs/TRANSCENDENTALS.md, "atan, asin, acos and
+atan2 on the tile"). So the qualification covers thirteen functions and
+no other. They are routines of the same kind, and the tile still has no
+transcendental datapath.
+
 ## The atlas-engine det_* library
 
 `atlas-engine`'s deterministic library is the workload this tile exists
@@ -336,9 +342,10 @@ in docs/COMPATIBILITY.md) gets the full story.
   nextDown, classification, totalOrder, the signaling comparisons,
   remainder. Clause 9 followed in four steps between 2026-09-02 and
   2026-09-03: all thirty-nine functions of table 9.1, correctly rounded
-  in the library rather than in the tile (nine of them also as tile
-  routines: six since M1's build, 2026-10-13 to 2026-10-19, and sin, cos
-  and tan since M2's, 2026-10-27 to 2026-11-04; see "Recommended
+  in the library rather than in the tile (thirteen of them also as tile
+  routines: six since M1's build, 2026-10-13 to 2026-10-19, sin, cos
+  and tan since M2's, 2026-10-27 to 2026-11-04, and atan, asin, acos
+  and atan2 since M4's, 2026-11-09 to 2026-11-19; see "Recommended
   operations"), with the radian trigonometry reduced against a
   270,336-bit 2/pi; the seven reductions of 9.4; the
   three augmented operations of 9.5; the three payload operations of

@@ -19,7 +19,7 @@ Apache-2.0.
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
 | binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,072,415** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 31 opcodes, 5 rounding modes, 39 transcendentals (9 also run on the tile) | one ABI; software, FPGA or remote; no dependencies | **56** gate stages, 29 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| 31 opcodes, 5 rounding modes, 39 transcendentals (13 also run on the tile) | one ABI; software, FPGA or remote; no dependencies | **56** gate stages, 29 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
 
@@ -192,7 +192,7 @@ the tables and the method; the charts regenerate with
 
 | piece | what it is |
 |---|---|
-| `python/cft_golden` | The definition of correct. Exact Python - integers only, the standard library alone for the arithmetic, with mpmath's interval context deciding the transcendentals: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. It also generates the nine transcendental routines that run on the tile (`python/cft_golden/mathlib.py`), and its definition replays any lane one of them marks undecided. Everything else is scored against this, never against each other. |
+| `python/cft_golden` | The definition of correct. Exact Python - integers only, the standard library alone for the arithmetic, with mpmath's interval context deciding the transcendentals: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. It also generates the thirteen transcendental routines that run on the tile (`python/cft_golden/mathlib.py`), and its definition replays any lane one of them marks undecided. Everything else is scored against this, never against each other. |
 | `rtl/` | The tile. Fifteen 16-stage pipelined fused-multiply-add cores in four banks - 8x fp32, 4x fp64, 2x fp128, 1x fp256, each a separate pipe at its own significand width - plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. (A shared fracturable multiplier exists behind `FUSE_MUL` and ships **off**: fracturing spends DSP blocks to save logic, which is the wrong trade on an FPGA - `docs/NOVEL.md` entry 6.) Yosys-clean, portability enforced in CI. |
 | `tb/` and `formal/` | 29 simulation targets checking every result and every flag against the golden model, and 38 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
 | `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. On a multi-tile card an elementwise call is split across every tile and a segmented reduction by whole segments; a whole-array reduction takes the largest power of two of the tiles, because only that cuts the tree at a node; and, since 2026-09-25, a sequencer program's lanes are cut across every tile the same way an elementwise call's elements are. |
@@ -290,12 +290,14 @@ runs that failed stay in the record. The load-bearing ones:
   before that day, whose count saturated at 2^40, fails the same check
   of the arithmetic on 3,969,901 of 10,334,817 (the check built against
   that library, on the desktop, 2026-09-30).
-- **Nine of the thirty-nine also run on the tile.** They are routines
-  the language's compiler writes into a program that revision 8's tiles
-  run:
+- **Thirteen of the thirty-nine also run on the tile.** They are
+  routines the language's compiler writes into a program that revision
+  8's tiles run:
   - exp, expm1, exp2, log, log1p and log2 (the math library's M1 build,
     2026-10-13 to 2026-10-19);
-  - sin, cos and tan (its M2 build, 2026-10-27 to 2026-11-04).
+  - sin, cos and tan (its M2 build, 2026-10-27 to 2026-11-04);
+  - atan, asin, acos and atan2 (its M4 build, 2026-11-09 to
+    2026-11-19).
 
   A routine decides its last bit in the lane. Where it cannot, it marks
   the lane (bit 7 of the lane byte, STATUS[6]) and the definition
@@ -308,7 +310,16 @@ runs that failed stay in the record. The load-bearing ones:
     (`docs/VALIDATION.md`, "M1's build, seventh wave, closed");
   - the pendulum and the attitude at fp64 and fp256 on 2026-11-04: 4 of
     4 passed, 111 checks, the six again 6 of 6 (`docs/VALIDATION.md`,
-    "the lead's: M2's wave 4 card leg on rev8q").
+    "the lead's: M2's wave 4 card leg on rev8q");
+  - the phase follower at fp64 and fp256 on 2026-11-19: 2 of 2
+    passed, 54 checks, with the golden audit 2 of 2, and the ten again
+    10 of 10
+    (`docs/VALIDATION.md`, "the lead's: M4's card leg on rev8q").
+
+  At fp32 the card has also swept the thirteen against MPFR: every
+  argument of the twelve routines of one argument, and every y of atan2
+  at nine x, with no disagreement (the nightly page; the last of them
+  covered in the weekend window from 2026-11-13).
 
   The operations are in `docs/LANGUAGE.md`, "The operations". The host
   operations are unchanged: `cft_exp` still issues no `cft_run` pass,
@@ -448,8 +459,9 @@ What is planned:
 - **The rest of the math library**, each part a design study before it
   is built. sin, cos and tan (M2, `docs/studies/M2-trig.md`) were the
   next build, and since 2026-11-04 they run on the tile and the card
-  (above). Then come atan, atan2, asin and acos (M4, whose study is
-  done), and the pow family (M3) last.
+  (above); atan, atan2, asin and acos (M4, `docs/studies/M4-invtrig.md`)
+  followed, on the tile and the card since 2026-11-19 (above). The pow
+  family (M3) is last.
 - **One gallery**, "with literature-checked answers and published
   certificates", as the roadmap puts it: step 7 of its work order, after
   step 6. It is not `docs/FIGURES.md`, the gallery of the project's

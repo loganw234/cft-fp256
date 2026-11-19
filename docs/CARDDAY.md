@@ -3019,7 +3019,7 @@ which the six's leg could not show. It does not run an rtz image (no reference i
 seq-check's trig part is the fragment-level evidence) and it does not run the attitude's tan at fp64
 (TRIG_FAMILY has no tan centre at fp64 under rdn).
 
-## The inverse-trigonometric routine entries in the revision-8 set (added 2026-11-11; the card leg is not yet run)
+## The inverse-trigonometric routine entries in the revision-8 set (added 2026-11-11; the card leg ran on rev8q on 2026-11-19)
 
 M4's build, the study's section 10 item 7 (docs/studies/M4-invtrig.md): STATUS[6] and the lane byte on a
 structured argument of atan, asin, acos and atan2, and the acceptance set with an inverse-trigonometric case.
@@ -3027,8 +3027,14 @@ Parcel M4A built the software side (docs/VALIDATION.md, 2026-11-11): `programs/a
 **two routine entries more**, after the ten of the sections above - the committed phase follower
 (`phasefollower-rk4-tangent-fp64`, `-fp256`: atan2 of two state components in the step, and atan, asin and acos
 each of one in its tangent system, **round rdn**) of `programs/systems/compiled-tangent/`. The driver's
-docstring ("The routine entries") is the definition. **The card leg has not run; the lead adds its results
-below after the run.**
+docstring ("The routine entries") is the definition.
+**The card leg has run: on rev8q on amd-arc-box, 2026-11-19** (the lead's, at a279ba59; docs/VALIDATION.md,
+"the lead's: M4's card leg on rev8q"). Its three runs printed, MEASURED:
+- on the two: `acceptance rev8: 2 of 2 PASS` as u50-rev8-quad, 54 checks ok, 0 failed, 65 s; at fp64 lanes 3, 67, 131
+  and 195 and at fp256 lanes 3, 19, 35 and 51 mark in segment 0 (bit 7, STATUS[6]), on no other lane or segment;
+- with `--golden all`: 2 of 2 PASS, 56 checks ok, 0 failed, 508 s, the golden audit accepting each entry with every
+  segment re-run on seq.py (344.6 s at fp64, 105.8 s at fp256);
+- the ten of REV8_ROUTINES[:10] again: 10 of 10 PASS, 201 checks ok, 0 failed, 130 s.
 
 What is different from the sections above:
 - **Quad only, again, and past the store.** The rule puts both on `u50-rev8-quad` (MEASURED 2026-11-11:

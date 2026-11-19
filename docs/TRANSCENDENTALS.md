@@ -28,6 +28,11 @@ cos and tan run on the tile too, the same way. The section after "The
 six on the tile", "sin, cos and tan on the tile", says what they are.
 Their host operations are unchanged.*
 
+*Note of 2026-11-19. Since M4's build (2026-11-09 to 2026-11-19) atan,
+asin, acos and atan2 run on the tile too, the same way. The last
+section, "atan, asin, acos and atan2 on the tile", says what they are.
+Their host operations are unchanged.*
+
 ## The promise, and why it is the only one worth making
 
 **Correctly rounded, at all four formats, under all five rounding
@@ -94,6 +99,12 @@ the tile", has the details and the record.*
 for sin, cos and tan, so nine of the thirty-nine have that tile path.
 Their host operations issue no `cft_run` pass either. The section "sin,
 cos and tan on the tile", at the end, has their details.*
+
+*Note of 2026-11-19. M4's build (2026-11-09 to 2026-11-19) did the same
+for atan, asin, acos and atan2, so thirteen of the thirty-nine have that
+tile path. Their host operations issue no `cft_run` pass either. The
+section "atan, asin, acos and atan2 on the tile", at the end, has their
+details.*
 
 ## Two implementations, one definition
 
@@ -2296,6 +2307,10 @@ what they are not, and where the record is.
   section). The other thirty are host operations only, and M4 and M3
   remain.*
 
+  *Note of 2026-11-19: atan, asin, acos and atan2 have been built since
+  (the last section). The other twenty-six are host operations only,
+  and M3 remains.*
+
 ---
 
 # sin, cos and tan on the tile
@@ -2347,3 +2362,69 @@ is.
     (docs/VALIDATION.md, "the lead's: M2's wave 4 card leg on rev8q").
 - **Not here:** the other thirty, which are host operations only. M4
   (atan, atan2, asin and acos) comes next, and M3 (the pow family) last.
+
+  *Note of 2026-11-19: M4 has been built since (the next section). The
+  other twenty-six are host operations only, and M3 remains.*
+
+---
+
+# atan, asin, acos and atan2 on the tile
+
+atan, asin, acos and atan2 are also routines the tile runs, since the math
+library round's M4 build (2026-11-09 to 2026-11-19). Everything above is
+about libcft's host operations and is left as it was. "The six on the
+tile" holds for these four in what they are and what they are not; this
+section gives what differs, and where the record is.
+
+- **Programs of the tile's instructions, on revision 8.** M4's build
+  changed no RTL either: the rtl tree is still 44b963dd.
+  - `python/cft_golden/mathlib.py` generates each of the four at each
+    of the four formats and five attributes, 80 fragments.
+  - fp64, fp128 and fp256 share one core: sign (C + sigma atan(n/d)),
+    with a table of eight entries read through an index from RECIP_SEED
+    and one double-word quotient. asin and acos reach it through a
+    double-word root of the product form, and atan2 rides it with its
+    two inputs and its quadrant.
+  - fp32 is a triple word.
+  - The design is docs/studies/M4-invtrig.md.
+- **Operations of the language, not of the ABI.** `cftc` compiles each
+  run-time `atan(a)`, `asin(a)`, `acos(a)` and `atan2(y, x)` as a
+  routine (language 1.3 and cftc's output version 8, 2026-11-11), for
+  the software targets and revision 8's. Revision 7's refuse such a
+  program with `target-feature`. The host operations call none of them,
+  as above.
+- **Decided in the lane, or marked.**
+  - **The structured families:** near a family's centre
+    (`python/tests/mathlib_inv_family.py`) the routine cannot decide the
+    last bit and marks the lane, as the six do.
+  - **atan2's tiny quotients:** a lane whose quotient |y/x| is below the
+    range's edge, 2^(emin + p + 2) of its format, is marked: 2^-967 at
+    fp64, 2^-16267 at fp128 and 2^-261903 at fp256. The test is on the
+    seed's quotient, so a lane within the seed's error of the edge may go
+    either way. fp32's image marks below its triple word's edge, 2^-76.
+    An exact quotient below the gate is meant to be decided in the lane,
+    but at some x it marks under rtz, rdn and rup (docs/VALIDATION.md,
+    2026-11-16, parcel M4RR's): a replay, not a wrong answer.
+  - The four have no stated range.
+
+  The definition replays a marked lane (docs/LANGUAGE.md, "A marked
+  lane"), and `transcend.py` stays the one definition.
+- **Held:**
+  - golden-first, with a planted fault for every check;
+  - through libcft's sequencer at fp64, fp128 and fp256: 120 programs
+    and 6,850 lanes at the gate's settings, 0 mismatches
+    (docs/VALIDATION.md, 2026-11-10, "program.c parity for atan, asin,
+    acos and atan2");
+  - by the `lang-routines` and `tangent` stages, under the marked-lane
+    rule (docs/VALIDATION.md, 2026-11-11, "atan, asin, acos and atan2 in
+    the stages' legs");
+  - at fp32 by the card's sweeps against MPFR: every argument of atan,
+    asin and acos, and every y of atan2 at nine x, all fully covered in
+    the weekend window from 2026-11-13, with no disagreement (the nightly
+    page; docs/CARDDAY.md, "The four inverse routines as items");
+  - and on the card, rev8q, 2026-11-19: the phase follower at fp64
+    and fp256, 2 of 2, with the golden audit over every segment, and the
+    ten earlier entries again, 10 of 10
+    (docs/VALIDATION.md, "the lead's: M4's card leg on rev8q").
+- **Not here:** the other twenty-six, which are host operations only.
+  M3 (the pow family) is the math library's last planned build.
