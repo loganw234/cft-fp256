@@ -6223,6 +6223,19 @@ function gains an L3 rule.
     ends are the VALIDATION entries' known limits: no rtz reference, no
     tan mark at fp64, and one image.
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
+  - **Its study is done** (2026-11-19, by Logan's word that day: "Go
+    ahead once M4 is pushed"): docs/studies/M3-pow.md, merged at
+    8e8a7acc, with eleven questions for Logan (its section 9), each
+    with a recommendation. One core serves pow, powr, pown, rootn and
+    compound: sign 2^t with t = Y log2|X|, M1's log2 planned finer and
+    M1's exp2 with a double-word argument. The integer operand is a
+    constant.
+  - **Its study was sent back twice.** The lead's larger samples on
+    amd-arc-box found fp64's first-order budget for compound(x, 1000)
+    past 1 Bv at 10,000 lanes, from one zone of M1's reduction.
+    - The fix: a |Y k| term in fp64's bound, two or three instructions.
+    - At 10,000 lanes it holds every fp64 region under 1 Bv (the largest
+      0.374), and the plant without it is red.
 - **M4, atan, atan2, asin and acos.**
   - **Its study is done** (2026-10-23, ahead of M2's build, by Logan's
     word that day: "Yes and go ahead with the study now"):
