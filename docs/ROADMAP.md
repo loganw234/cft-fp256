@@ -6230,12 +6230,44 @@ function gains an L3 rule.
     compound: sign 2^t with t = Y log2|X|, M1's log2 planned finer and
     M1's exp2 with a double-word argument. The integer operand is a
     constant.
-  - **Its study was sent back twice.** The lead's larger samples on
-    amd-arc-box found fp64's first-order budget for compound(x, 1000)
-    past 1 Bv at 10,000 lanes, from one zone of M1's reduction.
-    - The fix: a |Y k| term in fp64's bound, two or three instructions.
-    - At 10,000 lanes it holds every fp64 region under 1 Bv (the largest
-      0.374), and the plant without it is red.
+  - **Its study was sent back three times.**
+    - The first time, the lead's larger samples on amd-arc-box found
+      fp64's first-order budget for compound(x, 1000) past 1 Bv at
+      10,000 lanes, from one zone of M1's reduction. The fix is a
+      |Y k| term in fp64's bound, two or three instructions. At 10,000
+      lanes it holds every fp64 region under 1 Bv (the largest 0.374),
+      and the plant without it is red.
+    - Then its verifier sent it back twice for two of the fix's figures:
+      compound's analytic bound, and an instruction count.
+    - (The lead's note of 879d805d said "twice"; it was written before
+      the third. That commit's message keeps it.)
+  - **Logan's answers on M3's study** (2026-11-19, by AskUserQuestion):
+    "Approve all as recommended (Recommended)". So each of the study's
+    eleven (its section 9) is settled as its option (a):
+    1. **The set and the order:** all five on one core, pow and powr
+       first, then pown, then rootn and compound.
+    2. **The integer operand:** a constant of the program only, checked
+       in int64's range; anything else is refused by name.
+    3. **G at fp64:** the bound grows with |t| and with the reduction's
+       k (send-back 1's |Y k| term).
+    4. **The exact family:** decided in-lane only where cheap and exact
+       (a power-of-two x at an integer t, y = 1, n = 0 and 1). Every
+       other exact case is marked and replayed, and cftc rewrites the
+       exponents 2, 1 and -1.
+    5. **fp32:** built after fp64 to fp256, measured first, as M2X
+       measured M2's.
+    6. **The "may be exact" test** under rne and rmm: kept in-lane.
+    7. **Constant arguments:** the folds and refusals as section 6
+       states them.
+    8. **Live caps:** the measured caps, per function and format.
+    9. **The derivative rules:** as section 7.
+    10. **Versions:** cftc's output version 8 to 9 and the language 1.3
+        to 1.4, with `compound` reserved.
+    11. **Out of scope:** exp10, exp10m1, log10, log2p1, log10p1, rSqrt
+        and hypot are not in M3's build. Each would be a parcel of its
+        own after it, if a workload asks.
+
+    M3's build is a round of its own, as M2's and M4's were.
 - **M4, atan, atan2, asin and acos.**
   - **Its study is done** (2026-10-23, ahead of M2's build, by Logan's
     word that day: "Yes and go ahead with the study now"):
