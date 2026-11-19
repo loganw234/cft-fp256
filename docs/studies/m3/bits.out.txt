@@ -1,0 +1,9 @@
+fp32: p 24, G 40, T_f 152 (log2 7.25), extra 8; the logarithm needs p + G + log2 T_f = 71.25 bits; the double word holds 48, the triple word 72: the triple word, with no room for its own roundings (not modelled here)
+fp64: p 53, G 44, T_f 1077 (log2 10.07), extra 11; the logarithm needs p + G + log2 T_f = 107.07 bits; the double word holds 106, M1's plan_log reaches GL 47; planned GL 47 (K 12, D 24), GE 46, B1 2^-100
+    |t| = 1: Bv/|V| = 2^-96.83, G at that |t| 43.83
+    |t| = 8: Bv/|V| = 2^-96.00, G at that |t| 43.00
+    |t| = 64: Bv/|V| = 2^-93.83, G at that |t| 40.83
+    |t| = 1024: Bv/|V| = 2^-89.99, G at that |t| 36.99
+    |t| = 1077: Bv/|V| = 2^-89.92, G at that |t| 36.92
+fp128: p 113, G 46, T_f 16497 (log2 14.01), extra 15; the logarithm needs p + G + log2 T_f = 173.01 bits; the double word holds 226, M1's plan_log reaches GL 107; planned GL 63 (K 16, D 42), GE 48, B1 0
+fp256: p 237, G 46, T_f 262381 (log2 18.00), extra 19; the logarithm needs p + G + log2 T_f = 301.00 bits; the double word holds 474, M1's plan_log reaches GL past 166 (the search's end); planned GL 67 (K 17, D 73), GE 48, B1 0

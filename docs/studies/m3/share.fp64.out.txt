@@ -1,0 +1,10 @@
+fp64, rne: pow(x, y) is 431 instructions
+  with pow(x, z), the same x: 172 shared; together 690 against 862 apart
+  with pow(w, y), the same y: 29 shared; together 833 against 862 apart
+  with powr(x, y): 326 shared; together 515 against 841 apart
+  with pown(x, 3): 169 shared; together 646 against 815 apart
+  pown(x, 5) against pown(x, 3): 176 shared of 384; together 592 against 768 apart
+  with rootn(x, 3): 169 shared; together 647 against 816 apart
+  with log2(x), M1's: 9 shared; together 602 against 611 apart
+  with log(x), M1's: 10 shared; together 607 against 617 apart
+  with exp2(x), M1's: 7 shared; together 602 against 609 apart

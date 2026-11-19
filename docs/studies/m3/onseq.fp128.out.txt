@@ -1,0 +1,26 @@
+fp128 pow      rne: 1 programs, 746 lanes on seq.py, 0 differing from the model, marked 146, WRONG UNMARKED 0, most live 30
+fp128 pow      rtz: 1 programs, 746 lanes on seq.py, 0 differing from the model, marked 125, WRONG UNMARKED 0, most live 28
+fp128 pow      rdn: 1 programs, 746 lanes on seq.py, 0 differing from the model, marked 125, WRONG UNMARKED 0, most live 28
+fp128 pow      rup: 1 programs, 746 lanes on seq.py, 0 differing from the model, marked 125, WRONG UNMARKED 0, most live 28
+fp128 pow      rmm: 1 programs, 746 lanes on seq.py, 0 differing from the model, marked 146, WRONG UNMARKED 0, most live 30
+fp128 powr     rne: 1 programs, 775 lanes on seq.py, 0 differing from the model, marked 115, WRONG UNMARKED 0, most live 22
+fp128 powr     rtz: 1 programs, 775 lanes on seq.py, 0 differing from the model, marked 94, WRONG UNMARKED 0, most live 21
+fp128 powr     rdn: 1 programs, 775 lanes on seq.py, 0 differing from the model, marked 94, WRONG UNMARKED 0, most live 21
+fp128 powr     rup: 1 programs, 775 lanes on seq.py, 0 differing from the model, marked 94, WRONG UNMARKED 0, most live 21
+fp128 powr     rmm: 1 programs, 775 lanes on seq.py, 0 differing from the model, marked 115, WRONG UNMARKED 0, most live 22
+fp128 pown     rne: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 235, WRONG UNMARKED 0, most live 21
+fp128 pown     rtz: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 233, WRONG UNMARKED 0, most live 20
+fp128 pown     rdn: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 233, WRONG UNMARKED 0, most live 20
+fp128 pown     rup: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 233, WRONG UNMARKED 0, most live 20
+fp128 pown     rmm: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 235, WRONG UNMARKED 0, most live 21
+fp128 rootn    rne: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 52, WRONG UNMARKED 0, most live 19
+fp128 rootn    rtz: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 39, WRONG UNMARKED 0, most live 17
+fp128 rootn    rdn: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 39, WRONG UNMARKED 0, most live 17
+fp128 rootn    rup: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 39, WRONG UNMARKED 0, most live 17
+fp128 rootn    rmm: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 52, WRONG UNMARKED 0, most live 19
+fp128 compound rne: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 174, WRONG UNMARKED 0, most live 22
+fp128 compound rtz: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 161, WRONG UNMARKED 0, most live 20
+fp128 compound rdn: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 161, WRONG UNMARKED 0, most live 20
+fp128 compound rup: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 161, WRONG UNMARKED 0, most live 20
+fp128 compound rmm: 6 programs, 870 lanes on seq.py, 0 differing from the model, marked 174, WRONG UNMARKED 0, most live 22
+192 s

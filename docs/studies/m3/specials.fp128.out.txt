@@ -1,0 +1,96 @@
+fp128 pow       32 lanes x 5: wrong 0, marked 0, refused 0  | y = +-0 (pow: 1, even x = NaN; powr: finite x > 0)
+fp128 pow       15 lanes x 5: wrong 0, marked 0, refused 0  | x = +1 (pow: 1, even y = NaN; powr: finite y)
+fp128 pow        2 lanes x 5: wrong 0, marked 0, refused 0  | x = -1 and y = +-inf
+fp128 pow        7 lanes x 5: wrong 0, marked 0, refused 0  | a sNaN in either operand
+fp128 pow        9 lanes x 5: wrong 0, marked 0, refused 0  | a qNaN in either, no row above
+fp128 pow       12 lanes x 5: wrong 0, marked 0, refused 0  | x = +-0, y < 0 (odd, even, non-integer, -inf)
+fp128 pow       14 lanes x 5: wrong 0, marked 0, refused 0  | x = +-0, y > 0
+fp128 pow       24 lanes x 5: wrong 0, marked 0, refused 0  | x = +-inf
+fp128 pow       16 lanes x 5: wrong 0, marked 0, refused 0  | y = +-inf, |x| < 1 and > 1
+fp128 pow       28 lanes x 5: wrong 0, marked 0, refused 0  | x < 0 finite, y not an integer
+fp128 pow       55 lanes x 5: wrong 0, marked 34, refused 0  | x < 0, y odd integer (sign kept), across y's bands
+     rne marked x=0xc0008000000000000000000000000000 y=0x40008000000000000000000000000000
+     rne marked x=0xbffe4000000000000000000000000000 y=0x40008000000000000000000000000000
+     rtz marked x=0xc0008000000000000000000000000000 y=0x40008000000000000000000000000000
+     rtz marked x=0xbffe4000000000000000000000000000 y=0x40008000000000000000000000000000
+     rdn marked x=0xc0008000000000000000000000000000 y=0x40008000000000000000000000000000
+     rdn marked x=0xbffe4000000000000000000000000000 y=0x40008000000000000000000000000000
+     rup marked x=0xc0008000000000000000000000000000 y=0x40008000000000000000000000000000
+     rup marked x=0xbffe4000000000000000000000000000 y=0x40008000000000000000000000000000
+     rmm marked x=0xc0008000000000000000000000000000 y=0x40008000000000000000000000000000
+     rmm marked x=0xbffe4000000000000000000000000000 y=0x40008000000000000000000000000000
+fp128 pow       30 lanes x 5: wrong 0, marked 20, refused 0  | x < 0, y even integer, y past 2^p
+     rne marked x=0xc0008000000000000000000000000000 y=0x40000000000000000000000000000000
+     rne marked x=0xbffe4000000000000000000000000000 y=0x40000000000000000000000000000000
+     rtz marked x=0xc0008000000000000000000000000000 y=0x40000000000000000000000000000000
+     rtz marked x=0xbffe4000000000000000000000000000 y=0x40000000000000000000000000000000
+     rdn marked x=0xc0008000000000000000000000000000 y=0x40000000000000000000000000000000
+     rdn marked x=0xbffe4000000000000000000000000000 y=0x40000000000000000000000000000000
+     rup marked x=0xc0008000000000000000000000000000 y=0x40000000000000000000000000000000
+     rup marked x=0xbffe4000000000000000000000000000 y=0x40000000000000000000000000000000
+     rmm marked x=0xc0008000000000000000000000000000 y=0x40000000000000000000000000000000
+     rmm marked x=0xbffe4000000000000000000000000000 y=0x40000000000000000000000000000000
+fp128 pow        9 lanes x 5: wrong 0, marked 0, refused 0  | y = 1: x itself (exact)
+fp128 pow        5 lanes x 5: wrong 0, marked 5, refused 0  | subnormal operands
+     rne marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rtz marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rdn marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rup marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rmm marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+fp128 pow       13 lanes x 5: wrong 0, marked 0, refused 0  | overflowing and underflowing results
+fp128 powr      32 lanes x 5: wrong 0, marked 0, refused 0  | y = +-0 (pow: 1, even x = NaN; powr: finite x > 0)
+fp128 powr      15 lanes x 5: wrong 0, marked 0, refused 0  | x = +1 (pow: 1, even y = NaN; powr: finite y)
+fp128 powr       2 lanes x 5: wrong 0, marked 0, refused 0  | x = -1 and y = +-inf
+fp128 powr       7 lanes x 5: wrong 0, marked 0, refused 0  | a sNaN in either operand
+fp128 powr       9 lanes x 5: wrong 0, marked 0, refused 0  | a qNaN in either, no row above
+fp128 powr      12 lanes x 5: wrong 0, marked 0, refused 0  | x = +-0, y < 0 (odd, even, non-integer, -inf)
+fp128 powr      14 lanes x 5: wrong 0, marked 0, refused 0  | x = +-0, y > 0
+fp128 powr      24 lanes x 5: wrong 0, marked 0, refused 0  | x = +-inf
+fp128 powr      16 lanes x 5: wrong 0, marked 0, refused 0  | y = +-inf, |x| < 1 and > 1
+fp128 powr      28 lanes x 5: wrong 0, marked 0, refused 0  | x < 0 finite, y not an integer
+fp128 powr      55 lanes x 5: wrong 0, marked 0, refused 0  | x < 0, y odd integer (sign kept), across y's bands
+fp128 powr      30 lanes x 5: wrong 0, marked 0, refused 0  | x < 0, y even integer, y past 2^p
+fp128 powr       9 lanes x 5: wrong 0, marked 0, refused 0  | y = 1: x itself (exact)
+fp128 powr       5 lanes x 5: wrong 0, marked 5, refused 0  | subnormal operands
+     rne marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rtz marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rdn marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rup marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+     rmm marked x=0x3f8f8000000000000000000000000000 y=0x40008000000000000000000000000000
+fp128 powr      13 lanes x 5: wrong 0, marked 0, refused 0  | overflowing and underflowing results
+fp128 powr      20 lanes x 5: wrong 0, marked 0, refused 0  | powr: x < 0 (every y, qNaN included)
+fp128 powr       8 lanes x 5: wrong 0, marked 0, refused 0  | powr: +-0 to +-0, +inf to +-0, +1 to +-inf
+fp128 pown     308 lanes x 5: wrong 0, marked 186, refused 0  | pown: x specials and neighbours of +-1, 0 and the range against n at 0, +-1, +-2, +-3, 4, +-17 and int64's extremes
+     rne marked x=0x3fff0000000000000000000000000001 n=-1
+     rne marked x=0x3fff0000000000000000000000000001 n=2
+     rtz marked x=0x3fff0000000000000000000000000001 n=-1
+     rtz marked x=0x3fff0000000000000000000000000001 n=2
+     rdn marked x=0x3fff0000000000000000000000000001 n=-1
+     rdn marked x=0x3fff0000000000000000000000000001 n=2
+     rup marked x=0x3fff0000000000000000000000000001 n=-1
+     rup marked x=0x3fff0000000000000000000000000001 n=2
+     rmm marked x=0x3fff0000000000000000000000000001 n=-1
+     rmm marked x=0x3fff0000000000000000000000000001 n=2
+fp128 rootn    308 lanes x 5: wrong 0, marked 29, refused 110  | rootn: x specials and neighbours of +-1, 0 and the range against n at 0, +-1, +-2, +-3, 4, +-17 and int64's extremes
+     rne marked x=0x3fff0000000000000000000000000001 n=-1
+     rne marked x=0x3fff0000000000000000000000000001 n=2
+     rtz marked x=0x3fff0000000000000000000000000001 n=-1
+     rtz marked x=0x3fff0000000000000000000000000001 n=-2
+     rdn marked x=0x3fff0000000000000000000000000001 n=-1
+     rdn marked x=0x3fff0000000000000000000000000001 n=-2
+     rup marked x=0x3fff0000000000000000000000000001 n=-1
+     rup marked x=0x3fff0000000000000000000000000001 n=-2
+     rmm marked x=0x3fff0000000000000000000000000001 n=-1
+     rmm marked x=0x3fff0000000000000000000000000001 n=2
+fp128 compound 308 lanes x 5: wrong 0, marked 94, refused 0  | compound: x specials and neighbours of +-1, 0 and the range against n at 0, +-1, +-2, +-3, 4, +-17 and int64's extremes
+     rne marked x=0x3fff0000000000000000000000000001 n=-1
+     rne marked x=0x3fff0000000000000000000000000001 n=2
+     rtz marked x=0x3fff0000000000000000000000000001 n=-1
+     rtz marked x=0x3fff0000000000000000000000000001 n=2
+     rdn marked x=0x3fff0000000000000000000000000001 n=-1
+     rdn marked x=0x3fff0000000000000000000000000001 n=2
+     rup marked x=0x3fff0000000000000000000000000001 n=-1
+     rup marked x=0x3fff0000000000000000000000000001 n=2
+     rmm marked x=0x3fff0000000000000000000000000001 n=-1
+     rmm marked x=0x3fff0000000000000000000000000001 n=2
+fp128: 0 wrong unmarked special lanes; 54 s

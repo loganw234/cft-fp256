@@ -1,0 +1,14 @@
+fp64 pow region rhoedge: 35 main-path lanes of 40 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-100.0
+  rounding instructions active 139
+  M max 0.038114 Bv; capacities 0.162453 Bv; BOUND 0.200567 Bv (2^-2.32)
+  measured worst 0.021206 Bv at x=0x3fee1d60daac0ca6 y=0xc0ba4a18b30062d3
+  residual (second order, measured) 1.220e-05 Bv; bound + residual 0.200579 Bv
+    log-sum      capacity 0.124480  observed 0.095541
+    log-poly     capacity 0.027733  observed 0.022017
+    product      capacity 0.009024  observed 0.007772
+    exp-recon    capacity 0.000894  observed 0.000480
+    exp-poly     capacity 0.000276  observed 0.000102
+    exp-reduce   capacity 0.000045  observed 0.000017
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  1 s

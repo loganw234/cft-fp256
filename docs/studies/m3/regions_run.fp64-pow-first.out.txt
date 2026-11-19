@@ -1,0 +1,38 @@
+fp64 pow region wide: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region near1: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region edge: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region redb: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region small: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region negint: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 25
+    rne WRONG x=0xbff000000000016a y=0xc3244ce68648287a got (0x7ff8000000000000, 0x1) want (0xab39c575318eb59a, 0x10)
+    rne WRONG x=0xbff0000000000389 y=0x43285fac64090d34 got (0xfe16479f8cc1a483, 0x10) want (0x7e16479f8cc1a483, 0x10)
+    rne WRONG x=0xbff0000000000149 y=0x4325de0b3dcfb3ec got (0xd4346c6be9c9fe90, 0x10) want (0x54346c6be9c9fe90, 0x10)
+    rtz WRONG x=0xbff000000000016a y=0xc3244ce68648287a got (0x7ff8000000000000, 0x1) want (0xab39c575318eb599, 0x10)
+    rtz WRONG x=0xbff0000000000389 y=0x43285fac64090d34 got (0xfe16479f8cc1a482, 0x10) want (0x7e16479f8cc1a482, 0x10)
+    rtz WRONG x=0xbff0000000000149 y=0x4325de0b3dcfb3ec got (0xd4346c6be9c9fe8f, 0x10) want (0x54346c6be9c9fe8f, 0x10)
+    rdn WRONG x=0xbff000000000016a y=0xc3244ce68648287a got (0x7ff8000000000000, 0x1) want (0xab39c575318eb59a, 0x10)
+    rdn WRONG x=0xbff0000000000389 y=0x43285fac64090d34 got (0xfe16479f8cc1a483, 0x10) want (0x7e16479f8cc1a482, 0x10)
+    rdn WRONG x=0xbff0000000000149 y=0x4325de0b3dcfb3ec got (0xd4346c6be9c9fe90, 0x10) want (0x54346c6be9c9fe8f, 0x10)
+    rup WRONG x=0xbff000000000016a y=0xc3244ce68648287a got (0x7ff8000000000000, 0x1) want (0xab39c575318eb599, 0x10)
+    rup WRONG x=0xbff0000000000389 y=0x43285fac64090d34 got (0xfe16479f8cc1a482, 0x10) want (0x7e16479f8cc1a483, 0x10)
+    rup WRONG x=0xbff0000000000149 y=0x4325de0b3dcfb3ec got (0xd4346c6be9c9fe8f, 0x10) want (0x54346c6be9c9fe90, 0x10)
+    rmm WRONG x=0xbff000000000016a y=0xc3244ce68648287a got (0x7ff8000000000000, 0x1) want (0xab39c575318eb59a, 0x10)
+    rmm WRONG x=0xbff0000000000389 y=0x43285fac64090d34 got (0xfe16479f8cc1a483, 0x10) want (0x7e16479f8cc1a483, 0x10)
+    rmm WRONG x=0xbff0000000000149 y=0x4325de0b3dcfb3ec got (0xd4346c6be9c9fe90, 0x10) want (0x54346c6be9c9fe90, 0x10)
+fp64 pow region sub: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region tinyy: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region hugey: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 0
+fp64 pow region negedge: 400 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), WRONG UNMARKED 506
+    rne WRONG x=0xc050e3cc598f0cd1 y=0xc066200000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rne WRONG x=0xbed4a0a78933e4b5 y=0x404e800000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rne WRONG x=0xbfe1abd31b927874 y=0x4093a40000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rtz WRONG x=0xc050e3cc598f0cd1 y=0xc066200000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rtz WRONG x=0xbed4a0a78933e4b5 y=0x404e800000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rtz WRONG x=0xbfe1abd31b927874 y=0x4093a40000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rup WRONG x=0xc050e3cc598f0cd1 y=0xc066200000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rup WRONG x=0xbed4a0a78933e4b5 y=0x404e800000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rup WRONG x=0xbfe1abd31b927874 y=0x4093a40000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rmm WRONG x=0xc050e3cc598f0cd1 y=0xc066200000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rmm WRONG x=0xbed4a0a78933e4b5 y=0x404e800000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+    rmm WRONG x=0xbfe1abd31b927874 y=0x4093a40000000000 got (0x0, 0x18) want (0x8000000000000000, 0x18)
+fp64 pow: 531 wrong unmarked in all; 95 s

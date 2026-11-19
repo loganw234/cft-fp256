@@ -1,0 +1,23 @@
+fp64 exact_unmarked         pow      rne lane   x=0x4008000000000000 y=0x4000000000000000: plant WRONG (0x4022000000000000, 0x10), control marked (0x4022000000000000, 0x90), transcend (0x4022000000000000, 0x0) -> RED
+fp64 exact_unmarked         pow      rne lane   x=0x4024000000000000 y=0x4008000000000000: plant WRONG (0x408f400000000000, 0x10), control marked (0x408f400000000000, 0x90), transcend (0x408f400000000000, 0x0) -> RED
+fp64 exact_rule_off         pow      rtz mark   x=0x4000000000000000 y=0x4024000000000000: plant marked (0x4090000000000000, 0x90), control right (0x4090000000000000, 0x0), transcend (0x4090000000000000, 0x0) -> RED
+fp64 exact_rule_off         pow      rne mark   x=0x3fe0000000000000 y=0x4008000000000000: plant marked (0x3fc0000000000000, 0x90), control right (0x3fc0000000000000, 0x0), transcend (0x3fc0000000000000, 0x0) -> RED
+fp64 exact_rule_no_tl       pow      rne lane   x=0x7e70000000000000 y=0x3f689374bc6a7efa: plant WRONG (0x4020000000000000, 0x0), control right (0x4020000000000000, 0x10), transcend (0x4020000000000000, 0x10) -> RED
+fp64 midpoint_unmarked      pow      rne redundant x=0x3298000000000000 y=0x4014000000000000: plant marked (0x79, 0x98), control marked (0x79, 0x98) -> EQUAL TO THE CONTROL (not counted)
+fp64 bound_loose            pow      rne lane   x=0x3ff80016dc000000 y=0x4000000000000000: plant WRONG (0x400200224a105469, 0x10), control marked (0x400200224a105469, 0x90), transcend (0x400200224a105468, 0x10) -> RED
+fp64 pow_zero_nan           pow      rne lane   x=0x7ff8000000000000 y=0x0: plant WRONG (0x7ff8000000000000, 0x0), control right (0x3ff0000000000000, 0x0), transcend (0x3ff0000000000000, 0x0) -> RED
+fp64 pow_one_nan            pow      rne lane   x=0x3ff0000000000000 y=0x7ff8000000000000: plant WRONG (0x7ff8000000000000, 0x0), control right (0x3ff0000000000000, 0x0), transcend (0x3ff0000000000000, 0x0) -> RED
+fp64 sign_even              pow      rne lane   x=0xbff199999999999a y=0x4000000000000000: plant WRONG (0xbff35c28f5c28f5d, 0x10), control right (0x3ff35c28f5c28f5d, 0x10), transcend (0x3ff35c28f5c28f5d, 0x10) -> RED
+fp64 sign_odd_lost          pow      rne lane   x=0xbff199999999999a y=0x4008000000000000: plant WRONG (0x3ff54bc6a7ef9db4, 0x10), control right (0xbff54bc6a7ef9db4, 0x10), transcend (0xbff54bc6a7ef9db4, 0x10) -> RED
+fp64 zero_sign_lost         pow      rne lane   x=0xbfb0000000000000 y=0x4070d00000000000: plant WRONG (0x0, 0x18), control right (0x8000000000000000, 0x18), transcend (0x8000000000000000, 0x18) -> RED
+fp64 integrality_wide       pow      rne lane   x=0xbff0000000000001 y=0x4320000000000002: plant WRONG (0x7ff8000000000000, 0x1), control right (0xbffa61298e1e069d, 0x10), transcend (0xbffa61298e1e069d, 0x10) -> RED
+fp64 powr_neg_ok            powr     rne lane   x=0xc000000000000000 y=0x3fe0000000000000: plant WRONG (0x3ff6a09e667f3bcd, 0x10), control right (0x7ff8000000000000, 0x1), transcend (0x7ff8000000000000, 0x1) -> RED
+fp64 powr_zero_zero         powr     rne lane   x=0x0 y=0x0: plant WRONG (0x3ff0000000000000, 0x0), control right (0x7ff8000000000000, 0x1), transcend (0x7ff8000000000000, 0x1) -> RED
+fp64 rootn_m0_neg           rootn    rne lane   x=0x8000000000000000 n=2: plant WRONG (0x8000000000000000, 0x0), control right (0x0, 0x0), transcend (0x0, 0x0) -> RED
+fp64 compound_onep_rounded  compound rne lane   x=0x3fb999999999999a n=3: plant WRONG (0x3ff54bc6a7ef9db4, 0x10), control right (0x3ff54bc6a7ef9db2, 0x10), transcend (0x3ff54bc6a7ef9db2, 0x10) -> RED
+fp64 near_one_gate_off      pow      rtz mark   x=0x3ff0000000000001 y=0x3c30000000000000: plant marked (0x3ff0000000000000, 0x90), control right (0x3ff0000000000000, 0x10), transcend (0x3ff0000000000000, 0x10) -> RED
+fp64 side_rule_off          pow      rup lane   x=0x3ff3333333333333 y=0x1: plant WRONG (0x3ff0000000000000, 0x10), control right (0x3ff0000000000001, 0x10), transcend (0x3ff0000000000001, 0x10) -> RED
+fp64 side_rule_off          pow      rtz lane   x=0x3feaaaaaaaaaaaab y=0x1: plant WRONG (0x3ff0000000000000, 0x10), control right (0x3fefffffffffffff, 0x10), transcend (0x3fefffffffffffff, 0x10) -> RED
+fp64 screen_low             pow      rne lane   x=0x4035000000000000 y=0x406d244c78367a0d: plant WRONG (0x7ff0000000000000, 0x14), control right (0x7feffffffffffecd, 0x10), transcend (0x7feffffffffffecd, 0x10) -> RED
+fp64 mark_silenced          pow      rtz lane   x=0x4008000000000000 y=0x4000000000000000: plant WRONG (0x4021ffffffffffff, 0x10), control marked (0x4021ffffffffffff, 0x90), transcend (0x4022000000000000, 0x0) -> RED
+fp64: 21 of 21 lane and mark cases red; 5 s (the budget plants: budget.py with a plant)

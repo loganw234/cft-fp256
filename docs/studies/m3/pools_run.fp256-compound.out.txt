@@ -1,0 +1,6 @@
+fp256 compound rne: lanes 3204, marked 322, wrong guesses 206, refused 0, WRONG UNMARKED 0
+fp256 compound rtz: lanes 3204, marked 297, wrong guesses 202, refused 0, WRONG UNMARKED 0
+fp256 compound rdn: lanes 3204, marked 297, wrong guesses 202, refused 0, WRONG UNMARKED 0
+fp256 compound rup: lanes 3204, marked 297, wrong guesses 201, refused 0, WRONG UNMARKED 0
+fp256 compound rmm: lanes 3204, marked 322, wrong guesses 201, refused 0, WRONG UNMARKED 0
+fp256: 0 wrong unmarked lanes in all; 499 s

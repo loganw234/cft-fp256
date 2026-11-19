@@ -1,0 +1,16 @@
+fp256 compound region int: 40 main-path lanes of 40 (n = 3), seed 1, G 46, GL 67, GE 48, B1 2^-inf
+  rounding instructions active 245
+  M max 0.000005 Bv; capacities 0.000007 Bv; BOUND 0.000012 Bv (2^-16.32)
+  measured worst 0.000008 Bv at x=0x490a80c3643c1d01bf597604ffd68e5593c81b5f9356787bd4b3e838455258b7 n=3
+  residual (second order, measured) 2.610e-60 Bv; bound + residual 0.000012 Bv
+    exp-poly     capacity 0.000007  observed 0.000004
+    log-poly     capacity 0.000000  observed 0.000000
+    product      capacity 0.000000  observed 0.000000
+    log-sum      capacity 0.000000  observed 0.000000
+    exp-recon    capacity 0.000000  observed 0.000000
+    exp-reduce   capacity 0.000000  observed 0.000000
+    log-reduce   capacity 0.000000  observed 0.000000
+    log-lowword  capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  13 s

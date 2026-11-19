@@ -1,0 +1,6 @@
+fp128 rootn    rne: lanes 3941, marked 79, wrong guesses 45, refused 190, WRONG UNMARKED 0
+fp128 rootn    rtz: lanes 3941, marked 51, wrong guesses 35, refused 190, WRONG UNMARKED 0
+fp128 rootn    rdn: lanes 3941, marked 51, wrong guesses 35, refused 190, WRONG UNMARKED 0
+fp128 rootn    rup: lanes 3941, marked 51, wrong guesses 35, refused 190, WRONG UNMARKED 0
+fp128 rootn    rmm: lanes 3941, marked 79, wrong guesses 48, refused 190, WRONG UNMARKED 0
+fp128: 0 wrong unmarked lanes in all; 116 s

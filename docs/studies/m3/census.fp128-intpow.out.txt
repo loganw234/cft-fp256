@@ -1,0 +1,7 @@
+fp128 family intpow: 150 lanes; classes irr 46, mid 1, rep 103
+  rne: irr: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; mid: 1 lanes, marked 1 (guess wrong 0), decided 0, WRONG 0; rep: 103 lanes, marked 94 (guess wrong 94), decided 9, WRONG 0
+  rtz: irr: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; mid: 1 lanes, marked 0 (guess wrong 0), decided 1, WRONG 0; rep: 103 lanes, marked 94 (guess wrong 94), decided 9, WRONG 0
+  rdn: irr: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; mid: 1 lanes, marked 0 (guess wrong 0), decided 1, WRONG 0; rep: 103 lanes, marked 94 (guess wrong 94), decided 9, WRONG 0
+  rup: irr: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; mid: 1 lanes, marked 0 (guess wrong 0), decided 1, WRONG 0; rep: 103 lanes, marked 94 (guess wrong 94), decided 9, WRONG 0
+  rmm: irr: 46 lanes, marked 0 (guess wrong 0), decided 46, WRONG 0; mid: 1 lanes, marked 1 (guess wrong 1), decided 0, WRONG 0; rep: 103 lanes, marked 94 (guess wrong 94), decided 9, WRONG 0
+fp128 intpow: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 4 s

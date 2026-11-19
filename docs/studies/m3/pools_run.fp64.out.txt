@@ -1,0 +1,26 @@
+fp64 pow      rne: lanes 794, marked 129, wrong guesses 67, refused 0, WRONG UNMARKED 0
+fp64 pow      rtz: lanes 794, marked 108, wrong guesses 66, refused 0, WRONG UNMARKED 0
+fp64 pow      rdn: lanes 794, marked 108, wrong guesses 66, refused 0, WRONG UNMARKED 0
+fp64 pow      rup: lanes 794, marked 108, wrong guesses 66, refused 0, WRONG UNMARKED 0
+fp64 pow      rmm: lanes 794, marked 129, wrong guesses 67, refused 0, WRONG UNMARKED 0
+fp64 powr     rne: lanes 823, marked 100, wrong guesses 38, refused 0, WRONG UNMARKED 0
+fp64 powr     rtz: lanes 823, marked 79, wrong guesses 37, refused 0, WRONG UNMARKED 0
+fp64 powr     rdn: lanes 823, marked 79, wrong guesses 37, refused 0, WRONG UNMARKED 0
+fp64 powr     rup: lanes 823, marked 79, wrong guesses 37, refused 0, WRONG UNMARKED 0
+fp64 powr     rmm: lanes 823, marked 100, wrong guesses 38, refused 0, WRONG UNMARKED 0
+fp64 pown     rne: lanes 4260, marked 528, wrong guesses 281, refused 0, WRONG UNMARKED 0
+fp64 pown     rtz: lanes 4260, marked 479, wrong guesses 267, refused 0, WRONG UNMARKED 0
+fp64 pown     rdn: lanes 4260, marked 479, wrong guesses 267, refused 0, WRONG UNMARKED 0
+fp64 pown     rup: lanes 4260, marked 479, wrong guesses 267, refused 0, WRONG UNMARKED 0
+fp64 pown     rmm: lanes 4260, marked 528, wrong guesses 267, refused 0, WRONG UNMARKED 0
+fp64 rootn    rne: lanes 4058, marked 76, wrong guesses 50, refused 202, WRONG UNMARKED 0
+fp64 rootn    rtz: lanes 4058, marked 51, wrong guesses 35, refused 202, WRONG UNMARKED 0
+fp64 rootn    rdn: lanes 4058, marked 51, wrong guesses 35, refused 202, WRONG UNMARKED 0
+fp64 rootn    rup: lanes 4058, marked 51, wrong guesses 35, refused 202, WRONG UNMARKED 0
+fp64 rootn    rmm: lanes 4058, marked 76, wrong guesses 44, refused 202, WRONG UNMARKED 0
+fp64 compound rne: lanes 4260, marked 316, wrong guesses 226, refused 0, WRONG UNMARKED 0
+fp64 compound rtz: lanes 4260, marked 284, wrong guesses 223, refused 0, WRONG UNMARKED 0
+fp64 compound rdn: lanes 4260, marked 284, wrong guesses 223, refused 0, WRONG UNMARKED 0
+fp64 compound rup: lanes 4260, marked 284, wrong guesses 222, refused 0, WRONG UNMARKED 0
+fp64 compound rmm: lanes 4260, marked 316, wrong guesses 223, refused 0, WRONG UNMARKED 0
+fp64: 0 wrong unmarked lanes in all; 256 s
