@@ -2412,9 +2412,11 @@ section gives what differs, and where the record is.
   The definition replays a marked lane (docs/LANGUAGE.md, "A marked
   lane"), and `transcend.py` stays the one definition.
 - **Held:**
-  - golden-first, with planted faults run against the checks: the
-    parcels' VALIDATION entries say which, and M4P's names two mutants
-    that no part of its routine corpus catches;
+  - golden-first, with planted faults run against the checks. Fifteen
+    of the sixteen parcels' VALIDATION entries report plants; M4LF's,
+    a cftc fix held by the lead's reproduction and 28 tests, reports
+    none. M4P's names two mutants that no part of its routine corpus
+    catches;
   - through libcft's sequencer at fp64, fp128 and fp256: 120 programs
     and 6,850 lanes at the gate's settings, 0 mismatches
     (docs/VALIDATION.md, 2026-11-10, "program.c parity for atan, asin,
