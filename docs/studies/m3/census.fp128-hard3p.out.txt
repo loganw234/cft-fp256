@@ -1,0 +1,7 @@
+fp128 family hard3p: 200 lanes; classes irr 194, rep 6
+  rne: irr: 194 lanes, marked 194 (guess wrong 2), decided 0, WRONG 0; rep: 6 lanes, marked 0 (guess wrong 0), decided 6, WRONG 0
+  rtz: irr: 194 lanes, marked 162 (guess wrong 0), decided 32, WRONG 0; rep: 6 lanes, marked 0 (guess wrong 0), decided 6, WRONG 0
+  rdn: irr: 194 lanes, marked 162 (guess wrong 0), decided 32, WRONG 0; rep: 6 lanes, marked 0 (guess wrong 0), decided 6, WRONG 0
+  rup: irr: 194 lanes, marked 162 (guess wrong 0), decided 32, WRONG 0; rep: 6 lanes, marked 0 (guess wrong 0), decided 6, WRONG 0
+  rmm: irr: 194 lanes, marked 194 (guess wrong 2), decided 0, WRONG 0; rep: 6 lanes, marked 0 (guess wrong 0), decided 6, WRONG 0
+fp128 hard3p: 0 wrong unmarked; 7 s

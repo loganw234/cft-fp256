@@ -1,0 +1,17 @@
+PLANT zone_bound_off: the first design at fp64: Bv's |Y k| term dropped (send-back 1: k = -1 with log2 m' near 0.91 cancels and the logarithm's absolute error is left to |t| B1)
+fp64 compound region zone300: 150 main-path lanes of 150 (n = 300), seed 1, G 44, GL 47, GE 46, B1 2^-100.0, B2 2^-inf
+  rounding instructions active 155
+  M max 0.053807 Bv; capacities 0.802729 Bv; BOUND 0.856536 Bv (2^-0.22)
+  measured worst 0.243133 Bv at x=0xbfae0a19788473a0 n=300
+  residual (second order, measured) 1.235e-05 Bv; bound + residual 0.856548 Bv
+    log-sum      capacity 0.628255  observed 0.295768
+    log-poly     capacity 0.093014  observed 0.048813
+    log-lowword  capacity 0.068128  observed 0.059758
+    product      capacity 0.011505  observed 0.008076
+    exp-recon    capacity 0.000934  observed 0.000734
+    exp-poly     capacity 0.000846  observed 0.000456
+    exp-reduce   capacity 0.000047  observed 0.000033
+    log-reduce   capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  4 s

@@ -1,0 +1,11 @@
+fp128 pow      rne: lanes 746, marked 146, wrong guesses 72, refused 0, WRONG UNMARKED 0
+fp128 pow      rtz: lanes 746, marked 125, wrong guesses 70, refused 0, WRONG UNMARKED 0
+fp128 pow      rdn: lanes 746, marked 125, wrong guesses 70, refused 0, WRONG UNMARKED 0
+fp128 pow      rup: lanes 746, marked 125, wrong guesses 70, refused 0, WRONG UNMARKED 0
+fp128 pow      rmm: lanes 746, marked 146, wrong guesses 74, refused 0, WRONG UNMARKED 0
+fp128 powr     rne: lanes 775, marked 115, wrong guesses 41, refused 0, WRONG UNMARKED 0
+fp128 powr     rtz: lanes 775, marked 94, wrong guesses 39, refused 0, WRONG UNMARKED 0
+fp128 powr     rdn: lanes 775, marked 94, wrong guesses 39, refused 0, WRONG UNMARKED 0
+fp128 powr     rup: lanes 775, marked 94, wrong guesses 39, refused 0, WRONG UNMARKED 0
+fp128 powr     rmm: lanes 775, marked 115, wrong guesses 43, refused 0, WRONG UNMARKED 0
+fp128: 0 wrong unmarked lanes in all; 45 s

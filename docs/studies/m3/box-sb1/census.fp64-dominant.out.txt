@@ -1,0 +1,7 @@
+fp64 family dominant: 2999 lanes; classes irr 2999
+  rne: irr: 2999 lanes, marked 1934 (guess wrong 0), decided 1065, WRONG 0
+  rtz: irr: 2999 lanes, marked 1934 (guess wrong 1219), decided 1065, WRONG 0
+  rdn: irr: 2999 lanes, marked 1934 (guess wrong 1219), decided 1065, WRONG 0
+  rup: irr: 2999 lanes, marked 1934 (guess wrong 1420), decided 1065, WRONG 0
+  rmm: irr: 2999 lanes, marked 1934 (guess wrong 0), decided 1065, WRONG 0
+fp64 dominant: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 50 s

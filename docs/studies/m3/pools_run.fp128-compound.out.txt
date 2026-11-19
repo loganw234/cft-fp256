@@ -1,0 +1,6 @@
+fp128 compound rne: lanes 4131, marked 423, wrong guesses 283, refused 0, WRONG UNMARKED 0
+fp128 compound rtz: lanes 4131, marked 384, wrong guesses 277, refused 0, WRONG UNMARKED 0
+fp128 compound rdn: lanes 4131, marked 384, wrong guesses 277, refused 0, WRONG UNMARKED 0
+fp128 compound rup: lanes 4131, marked 384, wrong guesses 276, refused 0, WRONG UNMARKED 0
+fp128 compound rmm: lanes 4131, marked 423, wrong guesses 280, refused 0, WRONG UNMARKED 0
+fp128: 0 wrong unmarked lanes in all; 135 s

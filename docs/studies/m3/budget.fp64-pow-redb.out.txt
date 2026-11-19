@@ -1,0 +1,14 @@
+fp64 pow region redb: 120 main-path lanes of 120 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 147
+  M max 0.002758 Bv; capacities 0.069108 Bv; BOUND 0.071866 Bv (2^-3.80)
+  measured worst 0.013669 Bv at x=0x3feb4832c802fc9b y=0xc05481687c5d94ce
+  residual (second order, measured) 2.077e-05 Bv; bound + residual 0.071886 Bv
+    log-sum      capacity 0.050105  observed 0.037677
+    product      capacity 0.006758  observed 0.005242
+    log-poly     capacity 0.005527  observed 0.002527
+    exp-poly     capacity 0.003357  observed 0.002071
+    exp-recon    capacity 0.003203  observed 0.002222
+    exp-reduce   capacity 0.000157  observed 0.000115
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  4 s

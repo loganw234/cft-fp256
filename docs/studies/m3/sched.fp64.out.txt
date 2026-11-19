@@ -1,0 +1,5 @@
+fp64 pow: by phase 34/33/33/33/34; depth first, flags first 30/28/28/28/30; design order 40/39/39/39/40; depth first, result first 31/31/31/31/31; schedule_order's choice 30/28/28/28/30 (rne/rtz/rdn/rup/rmm)
+fp64 powr: by phase 26/25/25/25/26; depth first, flags first 23/21/21/21/23; design order 37/36/36/36/37; depth first, result first 31/31/31/31/31; schedule_order's choice 23/21/21/21/23 (rne/rtz/rdn/rup/rmm)
+fp64 pown(x, 3): by phase 21/21/21/21/21; depth first, flags first 22/22/22/22/22; design order 30/30/30/30/30; depth first, result first 23/22/22/22/23; schedule_order's choice 21/21/21/21/21 (rne/rtz/rdn/rup/rmm)
+fp64 rootn(x, 3): by phase 21/21/21/21/21; depth first, flags first 19/18/18/18/19; design order 29/29/29/29/29; depth first, result first 23/22/22/22/23; schedule_order's choice 19/18/18/18/19 (rne/rtz/rdn/rup/rmm)
+fp64 compound(x, 3): by phase 25/24/24/24/25; depth first, flags first 22/21/21/21/22; design order 30/30/30/30/30; depth first, result first 25/24/24/24/25; schedule_order's choice 22/21/21/21/22 (rne/rtz/rdn/rup/rmm)

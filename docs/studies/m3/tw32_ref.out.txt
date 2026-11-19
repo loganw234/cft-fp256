@@ -1,0 +1,12 @@
+fp32 log2   instructions 391/391/391/391/391 (rne..rmm), words 77, live 17
+fp32 exp2   instructions 371/369/369/368/373 (rne..rmm), words 72, live 20
+fp32 log1p  instructions 431/433/433/431/431 (rne..rmm), words 80, live 20
+fp64 log2   instructions 180/180/180/180/180 (rne..rmm), words 74, live 13
+fp64 exp2   instructions 178/176/176/175/180 (rne..rmm), words 64, live 13
+fp64 log1p  instructions 220/222/222/220/220 (rne..rmm), words 77, live 12
+fp128 log2   instructions 202/202/202/202/202 (rne..rmm), words 90, live 13
+fp128 exp2   instructions 186/184/184/183/188 (rne..rmm), words 73, live 13
+fp128 log1p  instructions 242/244/244/242/242 (rne..rmm), words 93, live 12
+fp256 log2   instructions 232/232/232/232/232 (rne..rmm), words 120, live 13
+fp256 exp2   instructions 199/197/197/196/201 (rne..rmm), words 86, live 13
+fp256 log1p  instructions 272/274/274/272/272 (rne..rmm), words 123, live 12

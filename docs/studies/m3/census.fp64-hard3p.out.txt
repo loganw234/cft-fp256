@@ -1,0 +1,7 @@
+fp64 family hard3p: 400 lanes; classes irr 388, rep 12
+  rne: irr: 388 lanes, marked 388 (guess wrong 2), decided 0, WRONG 0; rep: 12 lanes, marked 0 (guess wrong 0), decided 12, WRONG 0
+  rtz: irr: 388 lanes, marked 337 (guess wrong 0), decided 51, WRONG 0; rep: 12 lanes, marked 0 (guess wrong 0), decided 12, WRONG 0
+  rdn: irr: 388 lanes, marked 337 (guess wrong 0), decided 51, WRONG 0; rep: 12 lanes, marked 0 (guess wrong 0), decided 12, WRONG 0
+  rup: irr: 388 lanes, marked 337 (guess wrong 0), decided 51, WRONG 0; rep: 12 lanes, marked 0 (guess wrong 0), decided 12, WRONG 0
+  rmm: irr: 388 lanes, marked 388 (guess wrong 3), decided 0, WRONG 0; rep: 12 lanes, marked 0 (guess wrong 0), decided 12, WRONG 0
+fp64 hard3p: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 60; 7 s

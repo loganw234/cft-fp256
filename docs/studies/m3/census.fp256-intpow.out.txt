@@ -1,0 +1,7 @@
+fp256 family intpow: 150 lanes; classes irr 47, rep 103
+  rne: irr: 47 lanes, marked 0 (guess wrong 0), decided 47, WRONG 0; rep: 103 lanes, marked 97 (guess wrong 97), decided 6, WRONG 0
+  rtz: irr: 47 lanes, marked 0 (guess wrong 0), decided 47, WRONG 0; rep: 103 lanes, marked 97 (guess wrong 97), decided 6, WRONG 0
+  rdn: irr: 47 lanes, marked 0 (guess wrong 0), decided 47, WRONG 0; rep: 103 lanes, marked 97 (guess wrong 97), decided 6, WRONG 0
+  rup: irr: 47 lanes, marked 0 (guess wrong 0), decided 47, WRONG 0; rep: 103 lanes, marked 97 (guess wrong 97), decided 6, WRONG 0
+  rmm: irr: 47 lanes, marked 0 (guess wrong 0), decided 47, WRONG 0; rep: 103 lanes, marked 97 (guess wrong 97), decided 6, WRONG 0
+fp256 intpow: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 6 s

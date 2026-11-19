@@ -1,0 +1,14 @@
+fp64 pow region negedge: 120 main-path lanes of 120 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-100.0
+  rounding instructions active 145
+  M max 0.002864 Bv; capacities 0.065304 Bv; BOUND 0.068168 Bv (2^-3.87)
+  measured worst 0.019503 Bv at x=0xbfe531d27b5401ac y=0x409c3c0000000000
+  residual (second order, measured) 4.078e-07 Bv; bound + residual 0.068168 Bv
+    log-sum      capacity 0.052218  observed 0.042721
+    product      capacity 0.010759  observed 0.009684
+    log-poly     capacity 0.002270  observed 0.001694
+    exp-recon    capacity 0.000030  observed 0.000024
+    exp-poly     capacity 0.000025  observed 0.000016
+    exp-reduce   capacity 0.000002  observed 0.000001
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  4 s

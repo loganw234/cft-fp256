@@ -1,0 +1,34 @@
+fp64 pow              instructions 434/429/430/430/434 (rne/rtz/rdn/rup/rmm); words 129; live 30/28/28/28/30 scheduled, 40 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, special 36, fixed-grid 26, front 19, log-reduce 19, log-table 17, test 17, exp-table 17, final 17, log-sum 16, exp-scale 15, classify 14, exp-recon 13, product 11, exp-reduce 11, exact 10, beside-1 5
+fp64 powr             instructions 413/407/407/407/413 (rne/rtz/rdn/rup/rmm); words 125; live 23/21/21/21/23 scheduled, 37 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, special 39, fixed-grid 24, log-reduce 19, log-table 17, test 17, exp-table 17, final 17, log-sum 16, exp-scale 15, classify 14, exp-recon 13, product 11, exp-reduce 11, exact 8, beside-1 4
+fp64 pown(x, 3)       instructions 386/380/380/380/386 (rne/rtz/rdn/rup/rmm); words 128; live 21/21/21/21/21 scheduled, 30 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, fixed-grid 26, log-reduce 19, log-table 17, exp-table 17, final 17, log-sum 16, test 16, exp-scale 15, special 15, exp-recon 13, product 11, exp-reduce 11, exact 10, classify 7, beside-1 4, front 1
+fp64 pown(x, -3)      instructions 386/381/381/381/386 (rne/rtz/rdn/rup/rmm); words 128; live 21/21/21/21/21 scheduled, 30 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, fixed-grid 26, log-reduce 19, log-table 17, exp-table 17, final 17, log-sum 16, test 16, exp-scale 15, special 15, exp-recon 13, product 11, exp-reduce 11, exact 10, classify 7, beside-1 4, front 1
+fp64 pown(x, 2)       instructions 375/368/368/368/375 (rne/rtz/rdn/rup/rmm); words 125; live 21/20/20/20/21 scheduled, 28 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, fixed-grid 24, log-reduce 19, log-table 17, exp-table 17, final 17, log-sum 16, test 16, exp-scale 15, exp-recon 13, product 11, exp-reduce 11, special 11, exact 8, classify 6, beside-1 3
+fp64 rootn(x, 3)      instructions 387/381/381/381/387 (rne/rtz/rdn/rup/rmm); words 127; live 19/18/18/18/19 scheduled, 29 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, fixed-grid 26, log-reduce 19, log-table 17, exp-table 17, final 17, log-sum 16, test 16, exp-scale 15, special 15, exp-recon 13, product 12, exp-reduce 11, exact 10, classify 7, beside-1 4, front 1
+fp64 rootn(x, 2)      instructions 380/373/373/373/380 (rne/rtz/rdn/rup/rmm); words 125; live 18/17/17/17/18 scheduled, 28 in the design's order; Fast2Sum 26, TwoSum 0
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 107, exp-poly 64, fixed-grid 24, log-reduce 19, log-table 17, exp-table 17, final 17, log-sum 16, test 16, exp-scale 15, special 15, exp-recon 13, product 11, exp-reduce 11, exact 8, classify 7, beside-1 3
+fp64 compound(x, 3)   instructions 410/404/404/404/410 (rne/rtz/rdn/rup/rmm); words 126; live 22/21/21/21/22 scheduled, 30 in the design's order; Fast2Sum 26, TwoSum 1
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 108, exp-poly 64, log-lowword 24, fixed-grid 24, log-reduce 21, log-table 17, exp-table 17, final 17, special 17, log-sum 16, test 16, exp-scale 15, exp-recon 13, product 11, exp-reduce 11, exact 10, classify 6, beside-1 3
+fp64 compound(x, -1)  instructions 410/403/403/403/410 (rne/rtz/rdn/rup/rmm); words 125; live 22/21/21/21/22 scheduled, 30 in the design's order; Fast2Sum 26, TwoSum 1
+    plan: G 44, GL 47 (K 12, D 24), GE 46 (K 7, D 13)
+    rne by part: log-poly 108, exp-poly 64, log-lowword 24, fixed-grid 24, log-reduce 21, log-table 17, exp-table 17, final 17, special 17, log-sum 16, test 16, exp-scale 15, exp-recon 13, product 11, exp-reduce 11, exact 10, classify 6, beside-1 3
+fp64 pown(x, 0)       instructions 6/6/6/6/6 (rne/rtz/rdn/rup/rmm); words 7; live 2/2/2/2/2 scheduled, 2 in the design's order; Fast2Sum 0, TwoSum 0
+    rne by part: classify 4, special 2
+fp64 pown(x, 1)       instructions 6/6/6/6/6 (rne/rtz/rdn/rup/rmm); words 6; live 3/3/3/3/3 scheduled, 3 in the design's order; Fast2Sum 0, TwoSum 0
+    rne by part: classify 4, special 2
+fp64 compound(x, 1)   instructions 25/26/26/26/26 (rne/rtz/rdn/rup/rmm); words 10; live 7/7/7/7/7 scheduled, 7 in the design's order; Fast2Sum 0, TwoSum 1
+    rne by part: special 20, classify 5
+fp64: distinct bank words over these fragments and the five attributes: 145

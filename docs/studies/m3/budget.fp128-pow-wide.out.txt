@@ -1,0 +1,14 @@
+fp128 pow region wide: 40 main-path lanes of 40 (n = None), seed 1, G 46, GL 63, GE 48, B1 2^-inf
+  rounding instructions active 187
+  M max 0.000553 Bv; capacities 0.000070 Bv; BOUND 0.000623 Bv (2^-10.65)
+  measured worst 0.000534 Bv at x=0xfc7830d10988d8fe46f18b77b29dd13 y=0xbff90a0d18f90ea814f21c91731eefb8
+  residual (second order, measured) 1.258e-22 Bv; bound + residual 0.000623 Bv
+    exp-poly     capacity 0.000070  observed 0.000033
+    log-poly     capacity 0.000000  observed 0.000000
+    product      capacity 0.000000  observed 0.000000
+    log-sum      capacity 0.000000  observed 0.000000
+    exp-recon    capacity 0.000000  observed 0.000000
+    exp-reduce   capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  3 s

@@ -1,0 +1,2 @@
+209 outputs; 0 without their closing line, with a traceback, with a nonzero wrong count, past 1 Bv unplanted or with a plant not red
+29 of 29 controls flagged; 2 of 2 first designs' runs and 2 of 2 budgets meant to be past 1 Bv passed as kept

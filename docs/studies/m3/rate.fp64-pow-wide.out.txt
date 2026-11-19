@@ -1,0 +1,7 @@
+fp64 pow region wide: 600 lanes, seed 3, G' = 8 (the bound 2^36 times its own)
+  rne: 600 lanes, marked 436, the law predicts 456.6, z = -0.96
+  rtz: 600 lanes, marked 309, the law predicts 320.3, z = -0.63
+  rdn: 600 lanes, marked 309, the law predicts 320.3, z = -0.63
+  rup: 600 lanes, marked 309, the law predicts 320.3, z = -0.63
+  rmm: 600 lanes, marked 436, the law predicts 456.6, z = -0.96
+  10 s

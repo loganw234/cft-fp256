@@ -1,0 +1,6 @@
+fp256 pown     rne: lanes 3204, marked 497, wrong guesses 289, refused 0, WRONG UNMARKED 0
+fp256 pown     rtz: lanes 3204, marked 467, wrong guesses 291, refused 0, WRONG UNMARKED 0
+fp256 pown     rdn: lanes 3204, marked 467, wrong guesses 291, refused 0, WRONG UNMARKED 0
+fp256 pown     rup: lanes 3204, marked 467, wrong guesses 291, refused 0, WRONG UNMARKED 0
+fp256 pown     rmm: lanes 3204, marked 497, wrong guesses 285, refused 0, WRONG UNMARKED 0
+fp256: 0 wrong unmarked lanes in all; 123 s

@@ -1,0 +1,15 @@
+PLANT bound_tight: Bv's |t| and |Y k| terms dropped at fp64 (a uniform 2^-(p+G))
+fp64 pow region edge: 120 main-path lanes of 120 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-inf, B2 2^-inf
+  rounding instructions active 143
+  M max 0.169074 Bv; capacities 2.608527 Bv; BOUND 2.777601 Bv (2^1.47)
+  measured worst 1.547476 Bv at x=0x3bdffe541913b4b5 y=0xc02f7dde1dfd94f4
+  residual (second order, measured) 4.250e-05 Bv; bound + residual 2.777644 Bv
+    product      capacity 1.386294  observed 0.997236
+    log-sum      capacity 1.196337  observed 0.820375
+    log-poly     capacity 0.018464  observed 0.010233
+    exp-recon    capacity 0.004159  observed 0.003597
+    exp-poly     capacity 0.003080  observed 0.002598
+    exp-reduce   capacity 0.000193  observed 0.000157
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  4 s

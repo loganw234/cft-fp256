@@ -1,0 +1,7 @@
+fp128 pow region wide: 300 lanes, seed 3, G' = 8 (the bound 2^38 times its own)
+  rne: 300 lanes, marked 4, the law predicts 3.4, z = +0.34
+  rtz: 300 lanes, marked 3, the law predicts 1.7, z = +1.01
+  rdn: 300 lanes, marked 3, the law predicts 1.7, z = +1.01
+  rup: 300 lanes, marked 3, the law predicts 1.7, z = +1.01
+  rmm: 300 lanes, marked 4, the law predicts 3.4, z = +0.34
+  9 s

@@ -1,0 +1,14 @@
+fp64 rootn region int: 120 main-path lanes of 120 (n = 3), seed 1, G 44, GL 47, GE 46, B1 2^-102.0
+  rounding instructions active 146
+  M max 0.009930 Bv; capacities 0.133743 Bv; BOUND 0.143674 Bv (2^-2.80)
+  measured worst 0.052784 Bv at x=0x6d8d5adbf304fbe9 n=3
+  residual (second order, measured) 3.308e-05 Bv; bound + residual 0.143707 Bv
+    product      capacity 0.090020  observed 0.070961
+    log-sum      capacity 0.038630  observed 0.029272
+    exp-recon    capacity 0.002641  observed 0.001897
+    exp-poly     capacity 0.002281  observed 0.000791
+    exp-reduce   capacity 0.000141  observed 0.000112
+    log-poly     capacity 0.000030  observed 0.000024
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  5 s

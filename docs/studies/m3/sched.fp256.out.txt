@@ -1,0 +1,5 @@
+fp256 pow: by phase 32/31/31/31/32; depth first, flags first 30/28/28/28/30; design order 39/38/38/38/39; depth first, result first 28/29/29/29/28; schedule_order's choice 30/28/28/28/30 (rne/rtz/rdn/rup/rmm)
+fp256 powr: by phase 24/23/23/23/24; depth first, flags first 22/21/21/21/22; design order 36/35/35/35/36; depth first, result first 28/28/28/28/28; schedule_order's choice 22/21/21/21/22 (rne/rtz/rdn/rup/rmm)
+fp256 pown(x, 3): by phase 20/20/20/20/20; depth first, flags first 22/20/20/20/22; design order 29/29/29/29/29; depth first, result first 22/20/20/20/22; schedule_order's choice 20/20/20/20/20 (rne/rtz/rdn/rup/rmm)
+fp256 rootn(x, 3): by phase 20/20/20/20/20; depth first, flags first 19/17/17/17/19; design order 28/28/28/28/28; depth first, result first 22/20/20/20/22; schedule_order's choice 19/17/17/17/19 (rne/rtz/rdn/rup/rmm)
+fp256 compound(x, 3): by phase 24/23/23/23/24; depth first, flags first 22/20/20/20/22; design order 29/29/29/29/29; depth first, result first 24/23/23/23/24; schedule_order's choice 22/20/20/20/22 (rne/rtz/rdn/rup/rmm)

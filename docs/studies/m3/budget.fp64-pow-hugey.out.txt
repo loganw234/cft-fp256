@@ -1,0 +1,6 @@
+fp64 pow region hugey: 0 main-path lanes of 120 (n = None), seed 1, G 44, GL 47, GE 46, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 0
+  M max 0.000000 Bv; capacities 0.000000 Bv; BOUND 0.000000 Bv (2^-inf)
+  measured worst 0.000000 Bv at -
+  residual (second order, measured) 0.000e+00 Bv; bound + residual 0.000000 Bv
+  0 s

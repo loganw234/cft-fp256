@@ -1,0 +1,16 @@
+fp64 compound region int63: 9993 main-path lanes of 10000 (n = -9223372036854775808), seed 3, G 44, GL 47, GE 46, B1 2^-100.0
+  rounding instructions active 162
+  M max 0.000645 Bv; capacities 0.039220 Bv; BOUND 0.039865 Bv (2^-4.65)
+  measured worst 0.013198 Bv at x=0xbc679a326ec4dd46 n=-9223372036854775808
+  residual (second order, measured) 3.738e-05 Bv; bound + residual 0.039902 Bv
+    log-sum      capacity 0.025921  observed 0.018375
+    log-poly     capacity 0.006718  observed 0.004365
+    exp-recon    capacity 0.003274  observed 0.002638
+    exp-poly     capacity 0.003126  observed 0.002009
+    exp-reduce   capacity 0.000181  observed 0.000144
+    log-reduce   capacity 0.000000  observed 0.000000
+    log-lowword  capacity 0.000000  observed 0.000000
+    product      capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  361 s

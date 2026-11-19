@@ -1,0 +1,29 @@
+the cancelling zone's top X_b = 0.9414062499999999 (241/256), |L| >= 0.087111 there (MEASURED by bisection on k)
+  a Fl1   |v| <= 2^-53.00: ulp/2 <= 2^-106, dL/dv 1.4427: 1.443 2^-106 in L
+  b Fl    |v| <= 2^-52.83: ulp/2 <= 2^-106, dL/dv 1.4427: 1.443 2^-106 in L
+  c ngl1  |v| <= 2^-52.81: ulp/2 <= 2^-106, dL/dv 1.0000: 1.000 2^-106 in L
+  d ngl   |v| <= 2^-51.53: ulp/2 <= 2^-105, dL/dv 1.0000: 2.000 2^-106 in L
+  e lo    |v| <= 2^-51.09: ulp/2 <= 2^-105, dL/dv 1.0000: 2.000 2^-106 in L
+  U, the sum's five roundings: 7.885 2^-106 in L (e at most 2^-54 where gh < 1/2: lo stays in its binade)
+the design before send-back 1, Bv/|V| = 2^-97 + |t| 2^-100: the sum's capacity at the zone's top, ln2 U n / (2^-97 + n |L| 2^-100):
+  n =     31: 0.247 Bv
+  n =    100: 0.511 Bv
+  n =    300: 0.751 Bv
+  n =   1000: 0.898 Bv
+  n =   3000: 0.951 Bv
+  n =  10000: 0.971 Bv
+  n =  12000: 0.973 Bv
+  n -> inf: 0.980 Bv; in closed form 0.08540 n / (8 + 0.08711 n)
+the fix, Bv/|V| >= |Y k| 2^-101 (k = -1): the capacity at most ln2 U / B2:
+  the sum's five, over the whole zone: 0.171 Bv
+  compound's nine over the whole zone with c <= 1, |L| B1 left out: U = 22.080 2^-106, 0.478 Bv
+  compound's nine by the reduction's cells (c = C/16; Bv/|V| >= |Y| (|L| B1 + B2), |L| the cell's least):
+    C = 16: X in [0.50000, 0.51660), |L| >= 0.9529, r in [+0.0000, +0.0332]: U = 13.161 2^-106, 0.098 Bv (the five alone 0.010)
+    C = 15: X in [0.51660, 0.55176), |L| >= 0.8579, r in [-0.0314, +0.0345]: U = 11.714 2^-106, 0.093 Bv (the five alone 0.010)
+    C = 14: X in [0.55176, 0.59277), |L| >= 0.7544, r in [-0.0344, +0.0374]: U = 12.030 2^-106, 0.104 Bv (the five alone 0.021)
+    C = 13: X in [0.59277, 0.63965), |L| >= 0.6446, r in [-0.0367, +0.0394]: U = 11.761 2^-106, 0.111 Bv (the five alone 0.023)
+    C = 12: X in [0.63965, 0.69531), |L| >= 0.5243, r in [-0.0405, +0.0430]: U = 12.105 2^-106, 0.128 Bv (the five alone 0.042)
+    C = 11: X in [0.69531, 0.76172), |L| >= 0.3927, r in [-0.0439, +0.0474]: U = 11.837 2^-106, 0.144 Bv (the five alone 0.060)
+    C = 10: X in [0.76172, 0.84180), |L| >= 0.2485, r in [-0.0479, +0.0522]: U = 12.069 2^-106, 0.175 Bv (the five alone 0.093)
+    C =  9: X in [0.84180, 0.94141), |L| >= 0.0871, r in [-0.0530, +0.0591]: U = 12.524 2^-106, 0.231 Bv (the five alone 0.145)
+  compound's nine, the largest cell: 0.231 Bv; the five's, by cell: 0.145 Bv (every lane whose k is -1 and |x| < 1)

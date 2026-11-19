@@ -1,0 +1,16 @@
+fp64 compound region zone12000: 119 main-path lanes of 120 (n = 12000), seed 1, G 44, GL 47, GE 46, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 153
+  M max 0.010413 Bv; capacities 0.130571 Bv; BOUND 0.140984 Bv (2^-2.83)
+  measured worst 0.038632 Bv at x=0xbfae892f54d67a50 n=12000
+  residual (second order, measured) 1.376e-07 Bv; bound + residual 0.140984 Bv
+    log-sum      capacity 0.069203  observed 0.055308
+    log-poly     capacity 0.041884  observed 0.026027
+    log-lowword  capacity 0.013188  observed 0.010735
+    product      capacity 0.006242  observed 0.004754
+    exp-poly     capacity 0.000027  observed 0.000017
+    exp-recon    capacity 0.000025  observed 0.000021
+    exp-reduce   capacity 0.000002  observed 0.000001
+    log-reduce   capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  3 s

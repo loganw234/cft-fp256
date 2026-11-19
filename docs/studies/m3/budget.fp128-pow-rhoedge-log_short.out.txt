@@ -1,0 +1,15 @@
+PLANT log_short: the logarithm planned at G, not GL
+fp128 pow region rhoedge: 40 main-path lanes of 40 (n = None), seed 1, G 46, GL 46, GE 48, B1 2^-inf
+  rounding instructions active 162
+  M max 64.918060 Bv; capacities 59.170701 Bv; BOUND 124.088760 Bv (2^6.96)
+  measured worst 33.981454 Bv at x=0x3ffee256f953da42342c3c9eecbfb15b y=0x40102b27e11eff2103af449a4db245d0
+  residual (second order, measured) 1.649e-22 Bv; bound + residual 124.088760 Bv
+    log-poly     capacity 59.170628  observed 37.058927
+    exp-poly     capacity 0.000073  observed 0.000048
+    log-sum      capacity 0.000000  observed 0.000000
+    product      capacity 0.000000  observed 0.000000
+    exp-recon    capacity 0.000000  observed 0.000000
+    exp-reduce   capacity 0.000000  observed 0.000000
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  2 s

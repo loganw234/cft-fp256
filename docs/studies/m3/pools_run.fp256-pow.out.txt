@@ -1,0 +1,11 @@
+fp256 pow      rne: lanes 746, marked 152, wrong guesses 74, refused 0, WRONG UNMARKED 0
+fp256 pow      rtz: lanes 746, marked 131, wrong guesses 72, refused 0, WRONG UNMARKED 0
+fp256 pow      rdn: lanes 746, marked 131, wrong guesses 72, refused 0, WRONG UNMARKED 0
+fp256 pow      rup: lanes 746, marked 131, wrong guesses 72, refused 0, WRONG UNMARKED 0
+fp256 pow      rmm: lanes 746, marked 152, wrong guesses 73, refused 0, WRONG UNMARKED 0
+fp256 powr     rne: lanes 775, marked 120, wrong guesses 42, refused 0, WRONG UNMARKED 0
+fp256 powr     rtz: lanes 775, marked 99, wrong guesses 40, refused 0, WRONG UNMARKED 0
+fp256 powr     rdn: lanes 775, marked 99, wrong guesses 40, refused 0, WRONG UNMARKED 0
+fp256 powr     rup: lanes 775, marked 99, wrong guesses 40, refused 0, WRONG UNMARKED 0
+fp256 powr     rmm: lanes 775, marked 120, wrong guesses 41, refused 0, WRONG UNMARKED 0
+fp256: 0 wrong unmarked lanes in all; 49 s

@@ -1,0 +1,7 @@
+fp256 pow region wide: 200 lanes, seed 3, G' = 2 (the bound 2^44 times its own)
+  rne: 200 lanes, marked 153, the law predicts 145.3, z = +0.64
+  rtz: 200 lanes, marked 75, the law predicts 72.6, z = +0.28
+  rdn: 200 lanes, marked 75, the law predicts 72.6, z = +0.28
+  rup: 200 lanes, marked 75, the law predicts 72.6, z = +0.28
+  rmm: 200 lanes, marked 153, the law predicts 145.3, z = +0.64
+  7 s

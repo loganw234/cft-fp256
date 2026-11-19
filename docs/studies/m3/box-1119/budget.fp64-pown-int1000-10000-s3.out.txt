@@ -1,0 +1,14 @@
+fp64 pown region int1000: 9767 main-path lanes of 10000 (n = 1000), seed 3, G 44, GL 47, GE 46, B1 2^-100.0
+  rounding instructions active 145
+  M max 0.036811 Bv; capacities 0.510234 Bv; BOUND 0.547045 Bv (2^-0.87)
+  measured worst 0.197822 Bv at x=0xbfed8d34d9dbd45c n=1000
+  residual (second order, measured) 3.516e-05 Bv; bound + residual 0.547080 Bv
+    log-sum      capacity 0.457790  observed 0.352619
+    log-poly     capacity 0.035822  observed 0.029137
+    product      capacity 0.010997  observed 0.010729
+    exp-recon    capacity 0.003085  observed 0.002621
+    exp-poly     capacity 0.002365  observed 0.002081
+    exp-reduce   capacity 0.000175  observed 0.000130
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  319 s

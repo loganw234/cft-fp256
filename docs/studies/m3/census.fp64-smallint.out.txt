@@ -1,0 +1,7 @@
+fp64 family smallint: 300 lanes; classes irr 134, rep 166
+  rne: irr: 134 lanes, marked 0 (guess wrong 0), decided 134, WRONG 0; rep: 166 lanes, marked 140 (guess wrong 140), decided 26, WRONG 0
+  rtz: irr: 134 lanes, marked 0 (guess wrong 0), decided 134, WRONG 0; rep: 166 lanes, marked 140 (guess wrong 140), decided 26, WRONG 0
+  rdn: irr: 134 lanes, marked 0 (guess wrong 0), decided 134, WRONG 0; rep: 166 lanes, marked 140 (guess wrong 140), decided 26, WRONG 0
+  rup: irr: 134 lanes, marked 0 (guess wrong 0), decided 134, WRONG 0; rep: 166 lanes, marked 140 (guess wrong 140), decided 26, WRONG 0
+  rmm: irr: 134 lanes, marked 0 (guess wrong 0), decided 134, WRONG 0; rep: 166 lanes, marked 140 (guess wrong 140), decided 26, WRONG 0
+fp64 smallint: 0 wrong unmarked; exact lanes representable and decided unmarked whose base (x, or 1 + x for compound) is not a power of two, over the five attributes: 0; 6 s
