@@ -10,7 +10,11 @@
 # And, since send-back 1 (VM3S's note 4: finished is not passed), every
 # finished output that counts its wrong unmarked lanes, or seq.py's lanes
 # differing from the model, must count 0, but the two first designs' runs
-# kept as the evidence of their defects (FIRST). Then controls: copies of
+# kept as the evidence of their defects (FIRST). Since send-back 2, a budget
+# at or past 1 Bv fails too (BOUND, or bound + residual) unless it is meant
+# to be: run with one of the model's budget plants, which budget.py names on
+# its first line, or an earlier design's kept by its path (KEPT); and a
+# plants output fails short of all red. Then controls: copies of
 # real outputs, cut short, emptied, given a traceback or a nonzero count,
 # in memory, each of which must be flagged, and a first design's run, which
 # must not be. With a directory, it
@@ -42,7 +46,7 @@ CLOSE = {
     "tw32_ref": r"^fp256 log1p",
     "sched": r"compound\(x, 3\)",
     "share": r"with exp2\(x\), M1's",
-    "zonebound": r"the sum's five: [\d.]+ Bv; compound's nine",
+    "zonebound": r"compound's nine, the largest cell: [\d.]+ Bv",
 }
 # The counts that must be 0 in a finished output.
 ZERO = (r"WRONG UNMARKED (\d+)", r"(\d+) wrong unmarked",
@@ -55,10 +59,19 @@ ROWS = {
     "poolmarks": (r"^fp64 \w+\s+(rne|rtz):", 10),   # five functions, two attributes
     "rewrites": (r"^fp64 \S.* -> ", 11),            # section 6's eleven rows
 }
+# Send-back 2: a budget at or past 1 Bv fails (its BOUND or its bound +
+# residual), as send-back 1's did, but for the budgets that are meant to be:
+# a budget run with one of the model's budget plants, which budget.py names
+# on its first line ("PLANT <name>: ..."), and the earlier designs' budgets
+# kept as the evidence of why they were left, named here by their paths.
+BUDGET_PLANTS = ("bound_tight", "log_short", "zone_bound_off")
+KEPT = {"second-b1/budget.fp64-pown-int1000.out.txt":
+        "B1 = 2^-102, 1.063 Bv: why B1 is 2^-100 (the study's 3.6, item 6)"}
 
 
 def verdict(script, text, name=""):
-    """None when the output is complete and passed, else why not."""
+    """None when the output is complete and passed, else why not. `name`
+    is the output's path below the directory, with forward slashes."""
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if "Traceback" in text or "Error" in text:
         return "a traceback or an error"
@@ -74,11 +87,23 @@ def verdict(script, text, name=""):
             return "%d rows, %d expected" % (got, want)
     else:
         return "no rule for the script %s" % script
-    if name not in FIRST:
+    if os.path.basename(name) not in FIRST:
         for pat in ZERO:
             for m in re.finditer(pat, text):
                 if int(m.group(1)):
                     return "finished, not passed: %r" % m.group(0)
+    if script == "budget":
+        plant = re.match(r"PLANT ([a-z_0-9]+):", lines[0])
+        expected = (plant is not None and plant.group(1) in BUDGET_PLANTS) \
+            or name in KEPT
+        worst = max([float(v) for v in re.findall(
+            r"(?:BOUND|bound [+] residual) ([0-9.]+) Bv", text)] or [0.0])
+        if worst >= 1 and not expected:
+            return "a budget at or past 1 Bv: %.6f" % worst
+    if script == "plants":
+        m = re.search(r"([0-9]+) of ([0-9]+) lane and mark cases red", lines[-1])
+        if m and int(m.group(1)) < int(m.group(2)):
+            return "plants short of all red: %r" % m.group(0)
     return None
 
 
@@ -105,12 +130,14 @@ def main():
     files = outputs(d)
     bad = 0
     for f in files:
-        why = verdict(script_of(f), read(f), os.path.basename(f))
+        rel = os.path.relpath(f, d).replace("\\", "/")
+        why = verdict(script_of(f), read(f), rel)
         if why:
             bad += 1
-            print("INCOMPLETE", os.path.relpath(f, d).replace("\\", "/"), why)
+            print("INCOMPLETE", rel, why)
     print(f"{len(files)} outputs; {bad} without their closing line, with a "
-          f"traceback or with a nonzero wrong count")
+          f"traceback, with a nonzero wrong count, past 1 Bv unplanted or "
+          f"with a plant not red")
 
     # The controls, in memory, from this directory's outputs: each must be
     # flagged.
@@ -145,16 +172,43 @@ def main():
         assert a in t, (name, a)
         controls.append((name + " with a nonzero count", script_of(name),
                          t.replace(a, b, 1)))
+    # send-back 2's: a design's budget past 1 Bv, by its BOUND and by its
+    # bound + residual, and one given a PLANT line of a name no budget plant
+    # has; a plants output short of all red
+    t = texts["budget.fp64-compound-zone1000.out.txt"]
+    bnd = re.search(r"BOUND ([0-9.]+) Bv", t).group(0)
+    res = re.search(r"bound [+] residual ([0-9.]+) Bv", t).group(0)
+    controls.append(("a design budget, BOUND past 1", "budget",
+                     t.replace(bnd, "BOUND 1.051942 Bv", 1)))
+    controls.append(("a design budget, bound + residual past 1", "budget",
+                     t.replace(res, "bound + residual 1.000001 Bv", 1)))
+    controls.append(("a design budget past 1 under an unknown PLANT line",
+                     "budget", "PLANT no_such_plant: x\n"
+                     + t.replace(bnd, "BOUND 1.051942 Bv", 1)))
+    t = texts["plants.fp64.out.txt"]
+    assert "21 of 21 lane and mark cases red" in t
+    controls.append(("plants, 17 of 21 red", "plants",
+                     t.replace("21 of 21 lane and mark cases red",
+                               "17 of 21 lane and mark cases red")))
     missed = [c[0] for c in controls if verdict(c[1], c[2]) is None]
     for m in missed:
         print("CONTROL NOT FLAGGED", m)
     keep = [n for n in FIRST if verdict(script_of(n), texts[n], n) is not None]
     for n in keep:
         print("FIRST DESIGN FLAGGED", n)
+    # and the budgets meant to be past 1 Bv must pass as expected: a plant's
+    # (bound_tight's 2.78 Bv) and the kept earlier design's (second-b1/)
+    meant = [("budget.fp64-pow-edge-bound_tight.out.txt",
+              texts["budget.fp64-pow-edge-bound_tight.out.txt"])]
+    meant += [(k, read(os.path.join(HERE, *k.split("/")))) for k in KEPT]
+    wrongly = [k for k, t in meant if verdict("budget", t, k) is not None]
+    for k in wrongly:
+        print("EXPECTED BUDGET FLAGGED", k)
     print(f"{len(controls) - len(missed)} of {len(controls)} controls flagged; "
-          f"{len(FIRST) - len(keep)} of {len(FIRST)} first designs' runs "
-          f"passed as kept")
-    sys.exit(1 if bad or missed or keep else 0)
+          f"{len(FIRST) - len(keep)} of {len(FIRST)} first designs' runs and "
+          f"{len(meant) - len(wrongly)} of {len(meant)} budgets meant to be "
+          f"past 1 Bv passed as kept")
+    sys.exit(1 if bad or missed or keep or wrongly else 0)
 
 
 if __name__ == "__main__":

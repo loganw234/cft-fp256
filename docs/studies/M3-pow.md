@@ -120,13 +120,14 @@ Nothing in the tree imports the model.
   and in the cancelling zone, where the box found the design before
   send-back 1 past 1 Bv (1.052, compound(x, 1000) at 10,000 lanes), the
   budget's dominant part bounded on every lane: the logarithm's sum at
-  most 0.171 Bv, 0.219 for compound (COMPUTED, 3.2); the mark-rate law
+  most 0.171 Bv, 0.231 for compound (COMPUTED, 3.2); the mark-rate law
   within one sigma; the census's families with every power-of-two exact
   case decided and every other exact case marked but y = 1's, 0 wrong;
   eighteen lane and mark plants red in 21 named cases at fp64 and at fp256,
   two budget plants red in their regions and a third, `zone_bound_off`,
-  red only at the box's volume, a nineteenth lane plant shown redundant by
-  design.
+  red on the desktop at compound's `zone1000` (1.015 Bv) and, as the
+  design it reproduces, at `int1000` on the box (1.052), a nineteenth lane
+  plant shown redundant by design.
 - **The model found eight things wrong in itself** (3.6), three of them
   design defects that every pool passed and only a region placed by the
   operands' own ranges reached: a tiny y (t_h underflowing) answered by V's
@@ -845,12 +846,14 @@ lead on amd-arc-box, `box-1119/`). Each of those is the cancelling zone's
 The fixed design at the box's volume is the lead's run of
 `box_m3s_sb1.sh`, after this commit; the desktop's view of it at 2,000
 lanes, `zone-curve/`: compound's `zone12000` 0.182 Bv, its plant 0.942.
-The zone's own region keeps the plant under 1 where `int1000` passed it:
-a rounding's capacity counts on every lane once some lane of the region
-makes it inexact, and `int1000`'s lanes outside the zone make the sum's
-last subtraction (e - ngl, exact wherever S = k + gh is, the zone
-included) inexact, so its capacity on the zone's lanes joins the sum
-there; the analytic bound below counts it either way.
+The zone's top alone (`zone12000`, every lane's gh near 0.9) keeps the
+plant under 1, where `int1000` passed it and so did `zone1000`, which
+draws over the whole zone (1.015 Bv at 150 lanes, `n-scan/`): a
+rounding's capacity counts on every lane once some lane of the region
+makes it inexact, and the lanes whose gh is under 1/2 make the sum's last
+subtraction (e - ngl, exact wherever S = k + gh is) inexact, so its
+capacity on the top's lanes joins the sum there; the analytic bound below
+counts it either way.
 fp64's first two B1 are in `first-b1/` and `second-b1/` (3.6, item 6),
 and its budgets before the |Y k| term in `no-b2/`.
 
@@ -862,8 +865,9 @@ dV/dL = V ln 2 Y and dL/dv 1/ln 2 for the first two (natural-log units)
 and 1 for the rest. On every lane whose k is -1 and |x| < 1, their
 magnitudes are bounded by the words' (|F| < 0.64 and the table's L_j <=
 ln(16/9), so fe, L_l and F (1/ln 2)'s residual are at most 2^-54; S = k +
-gh is exact there, so e = 0), and their ulp/2 sum to at most U = 7.885
-2^-106 in L. So:
+gh is exact where gh >= 1/2, and below, Fast2Sum's error e is at most
+ulp(S)/2 = 2^-54, which leaves e - ngl in the same binade: send-back 2,
+VM3S's note), and their ulp/2 sum to at most U = 7.885 2^-106 in L. So:
 - **in the design before send-back 1,** Bv/|V| = 2^-97 + n |L| 2^-100 for
   pown and compound (|t| = n |L|), and the sum's capacity at the zone's
   top, |L| = 0.0871, is at most ln 2 U n / (2^-97 + 0.0871 n 2^-100) =
@@ -886,10 +890,20 @@ gh is exact there, so e = 0), and their ulp/2 sum to at most U = 7.885
 - **with the |Y k| term,** Bv/|V| >= |Y k| 2^-101, so the sum's capacity
   is at most ln 2 U / 2^-101 = **0.171 Bv** on every such lane, whatever n
   and L; for compound, whose 1 + x's low word adds four roundings of the
-  same scale (r_l, r_l (1 + r)^-1, the Newton steps for (1 + r)^-1, and
-  the polynomial's low part less r_l's correction), at most **0.219**
-  (U = 10.1 2^-106: COMPUTED the same way). Where k = 1, or |k| >= 2, L
-  does not cancel and |t| B1 carries the sum's error as it did.
+  same scale (r_l = u_l 2^-k c, r_l (1 + r)^-1, the Newton steps for
+  (1 + r)^-1, and the polynomial's low part less r_l's correction), at
+  most **0.231 Bv**, taken cell by cell: each of the reduction's cells C =
+  9 to 16 in the zone (found by bisection on the model's c = C/16) with
+  its own c, F, r and least |L|, and Bv/|V| >= |Y| (|L| B1 + B2). The top
+  cell, C = 9, is the largest (U = 12.5 2^-106, |L| >= 0.0871); the others
+  are at most 0.175, and C = 16 (c = 1, the zone's bottom) 0.098, since
+  its |L| is near 1. Over the whole zone with c <= 1 and the |L| B1 term
+  left out, the same count gives 0.478 Bv, conservative because the
+  largest c and the largest F do not meet (COMPUTED, `zonebound.out.txt`).
+  The first count said 0.219 on c <= 9/16, which holds only in the top
+  cell, and with the Newton steps' term near 0; send-back 2 found it.
+  Where k = 1, or |k| >= 2, L does not cancel and |t| B1 carries the
+  sum's error as it did.
 The sampled figures these bound, the fixed design's sum's capacity in the
 zone's regions: compound's `zone1000` 0.122, compound's `zone12000` 0.069,
 pow's `zone` 0.074, pown's `zone1000` 0.073, pown's `zone12000` 0.056,
@@ -1800,7 +1814,7 @@ the plant, under 1 without).
 | screen_low | the overflow screen at emax + 1, not emax + 2 | lane | pow(21, 0x406d244c78367a0d), t_h0 = 1024 exactly, rne: +inf with overflow (transcend: 0x7feffffffffffecd, inexact) | red |
 | mark_silenced | the mark never set | lane | pow(3, 2) rtz: 9 - ulp, unmarked (transcend: 9) | red |
 | bound_tight | fp64's |t| and |Y k| terms dropped (a uniform 2^-97) | budget | the region `edge`: 2.78 Bv (`budget.fp64-pow-edge-bound_tight.out.txt`) | - |
-| zone_bound_off | the design before send-back 1: fp64's |Y k| term dropped (3.6, 9) | budget | compound's region `int1000` at 10,000 lanes, seed 3: past 1 Bv at the box's volume as the design it reproduces (1.052 Bv, `box-1119/`; the plant's 2,000-lane run equals that design's box run, 0.802349 Bv against the box's 0.802349, `zone-curve/`); its own 10,000-lane run is `box_m3s_sb1.sh`'s; under 1 at the desktop's sizes (`zone12000` 0.753 at 120 lanes, 0.942 at 2,000) | - |
+| zone_bound_off | the design before send-back 1: fp64's |Y k| term dropped (3.6, 9) | budget | compound's region `int1000` at 10,000 lanes, seed 3: past 1 Bv at the box's volume as the design it reproduces (1.052 Bv, `box-1119/`; the plant's 2,000-lane run equals that design's box run, 0.802349 Bv against the box's 0.802349, `zone-curve/`); its own 10,000-lane run is `box_m3s_sb1.sh`'s; red on the desktop at compound's `zone1000`, 1.015 Bv at 150 lanes (`n-scan/`), and under 1 at `zone12000` (0.753 at 120 lanes, 0.942 at 2,000) | - |
 | log_short | the logarithm planned at G, not GL | budget | fp128's region `rhoedge`: 124 Bv (2^6.96), the control 0.0013 (`budget.fp128-pow-rhoedge-log_short.out.txt`); not red in `wide` (0.0008), where the table term carries L | - |
 
 The brief's ten: an exact case left to the enclosure (exact_unmarked); a
@@ -1819,9 +1833,10 @@ eighteen lane and mark plants, red in their 21 named cases at fp64 and at
 fp256 (`plants.fp256.out.txt`: 21 of 21; the subnormal midpoint lane of
 midpoint_unmarked has no fp256 counterpart), and three budget plants:
 bound_tight and log_short red in their regions on the desktop, and
-zone_bound_off red only at volume (the box's 1.052 Bv for the design it
-reproduces, 10,000 lanes; at the desktop's 120 and 2,000 lanes it stays
-under 1, and is no red plant there).
+zone_bound_off red on the desktop at compound's `zone1000` (1.015 Bv at
+150 lanes, `n-scan/`) and at the box's volume as the design it
+reproduces (1.052 Bv at `int1000`, 10,000 lanes); at the zone's top alone
+(`zone12000`) it stays under 1 at 2,000 lanes.
 
 ## 9. Questions for Logan, each with a recommendation
 
@@ -1870,13 +1885,15 @@ sections' named.
      43.8 at |t| = 1, 43.0 at |t| = 8, 40.8 at |t| = 64 and 36.9 at the
      top of the range where k = 0, at most 0.63 bits less where |k| >= 1
      outside the zone, and up to 2.75 bits less at the zone's top (Bv 6.7
-     times the first design's there). Its cost: 4 instructions against a
-     uniform bound, 2 of them the |Y k| term's (pow and powr 5 and 3), and
-     two bank words; pow 434 instructions at fp64 against the first
-     design's 431 (5.1); marks unchanged where k = 0 and at most 1.55
+     times the first design's there). Its cost, against a uniform bound:
+     4 instructions for pown, rootn and compound and 5 for pow and powr,
+     of which the |Y k| term is 2 and 3 (MEASURED: pow 434 and powr 413
+     against the first design's 431 and 410, pown(x, 3) 386 against 384,
+     5.1); and two bank words; marks unchanged where k = 0 and at most 1.55
      times the first design's elsewhere outside the zone (3.4). Its
      evidence: the sum's capacity bounded on every lane whose k is -1, at
-     most 0.171 Bv, 0.219 for compound (COMPUTED, 3.2), and the sampled
+     most 0.171 Bv, 0.231 for compound (COMPUTED by the reduction's cells,
+     3.2), and the sampled
      budgets of the rest (fp64's largest 0.194 Bv, compound's `zone1000` on
      the desktop; the box's at
      10,000 lanes the lead's run of `box_m3s_sb1.sh`).
@@ -2061,9 +2078,17 @@ closes with its own script's last line, or, for `poolmarks` and
 `rewrites`, all its rows, and, since send-back 1 (VM3S's note 4: finished
 is not passed), counts 0 wrong unmarked lanes and 0 lanes of seq.py
 differing from the model wherever it counts them, the first designs' two
-runs kept as evidence excepted; 25 of 25 controls (real outputs cut short,
-emptied, given a traceback or a nonzero count, in memory) are flagged, and
-the two first designs' runs pass as kept; and no queue run reached its
+runs kept as evidence excepted; since send-back 2, no budget is at or past
+1 Bv (its BOUND or its bound + residual) unless it is meant to be: run
+with one of the model's budget plants, which budget.py names on its first
+line (`PLANT bound_tight:`, `log_short`, `zone_bound_off`), or the earlier
+design kept in `second-b1/` (1.063 Bv), named by its path; and no plants
+output is short of all red. 29 of 29 controls (real outputs cut short,
+emptied, given a traceback, a nonzero count, a BOUND or a bound +
+residual past 1, a PLANT line of no budget plant, or 17 of 21 red, in
+memory) are flagged, and the two first designs' runs and the two budgets
+meant to be past 1 Bv (bound_tight's 2.78 and `second-b1/`'s) pass as
+kept; and no queue run reached its
 900 s timeout (the longest took 502 s, by the logs' own times). The box
 scripts' last lines are no status either: `box_m3s_sb1.sh` ends by running
 `complete.py OUTDIR` and exits with xargs's status, 0 only if every job's
