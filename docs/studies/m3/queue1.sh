@@ -10,7 +10,12 @@ run() {
     out=$1; shift
     echo "$(date '+%F %T') start $out: $*"
     timeout 900 "$PY" -B "$@" > "$out" 2>&1
-    echo "$(date '+%F %T') end $out (rc $?)"
+    rc=$?
+    # $? is read on its own line. Inside the echo below it would be the
+    # status of the command substitution, always 0, and the committed queue
+    # logs were made with that form: their "rc" is date's, not the run's
+    # (the study's 11; complete.py is the check of the runs instead).
+    echo "$(date '+%F %T') end $out (rc $rc)"
 }
 run pools_run.fp64.out.txt pools_run.py fp64
 run regions_run.fp64-pow.out.txt regions_run.py fp64 pow 400

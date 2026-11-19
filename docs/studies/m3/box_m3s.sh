@@ -13,7 +13,10 @@
 # reads mpf values through _mpf_ and never calls to_man_exp; the stage's
 # transcend_check.py is imported for its pools and loads no library at
 # import), and writes nothing but OUTDIR's files (each run's stdout; -B and
-# the model's own sys.dont_write_bytecode keep __pycache__ out).
+# the model's own sys.dont_write_bytecode keep __pycache__ out). The last
+# line, "done", is not a status: afterwards `python3 -B complete.py OUTDIR`
+# names every output that does not close with its script's last line (a job
+# that failed, its traceback on this script's stderr), with its controls.
 PY=${1:-python3}
 OUT=${2:-box-out}
 JOBS=${3:-8}

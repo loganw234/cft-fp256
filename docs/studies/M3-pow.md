@@ -130,7 +130,9 @@ Nothing in the tree imports the model.
   `box_m3s.sh`'s, for the lead); the language, the compiler and the
   derivative rules of sections 6 and 7 are designed, not run, but for the
   rewrites' equality; the integer-operand functions run on seq.py at six
-  values of n, not every n of the pools.
+  values of n, not every n of the pools; the queue logs' "rc" field is
+  not the runs' status (11), so the runs are held by their outputs'
+  completeness instead (`complete.py`).
 - **Eleven questions for Logan** (section 9), each with a recommendation.
 
 ## 1. What M3 works with
@@ -1830,13 +1832,31 @@ mpmath 1.3.0 on the desktop. Every fragment is built on the tree's
 | `rewrites.py` | section 6's rewrites against transcend.py | `rewrites.fp64.out.txt` |
 | `bits.py`, `tw32_ref.py` | 2.2's table; M1's built fragments' sizes | `bits.out.txt`, `tw32_ref.out.txt` |
 | `tables.py` | the study's tables, made from the outputs | |
-| `queue1.sh`, `queue2.sh`, `queue3.sh` | the desktop's runs in order, one at a time | `queue1.log`, `queue2.log`, `queue3.log` |
+| `complete.py` | that every captured run completed: no traceback, and its script's closing line (below) | `complete.out.txt` |
+| `queue1.sh`, `queue2.sh`, `queue3.sh` | the desktop's runs in order, one at a time | `queue1.log`, `queue2.log`, `queue3.log` (their "rc": below) |
 | `box_m3s.sh` | the larger samples, for the lead on amd-arc-box | none yet |
 
-The model is 20 Python files and 4 shell scripts, 3,029 lines (COUNTED,
-`wc -l` over `*.py` and `*.sh` at the study's commit), with 141 captured
-outputs (`*.out.txt`, `first-b1/` and `second-b1/` among them) and the three
-queue logs: 168 files in all.
+The model is 21 Python files and 4 shell scripts, 3,167 lines
+(COUNTED, `wc -l` over `*.py` and `*.sh` at the study's commit), with 142
+captured outputs (`*.out.txt`, `first-b1/` and `second-b1/` among them) and
+the three queue logs: 170 files in all.
+
+**The queue logs' "rc" is not the runs' status** (found after the study's
+first commit, in a review of the scripts): their wrapper read `$?` inside
+the same `echo` as `$(date ...)`, which sets it, so every end line says
+rc 0 whatever its run did (MEASURED on this desktop's sh: a failing command
+logged through that form reads rc 0). The three scripts now read it on its
+own line (MEASURED: failing commands then log rc 2 and 3), and the logs are
+kept as made, for their times. The runs are held instead by `complete.py`
+(MEASURED, `complete.out.txt`): each of the 141 outputs it reads (all but
+its own) holds no traceback (the queues sent each run's stderr into its
+output, and the runs made by hand were read as they ran) and closes with
+its own script's last line, or, for `poolmarks` and `rewrites`, all its
+rows; 20 of 20 controls (real outputs cut short, emptied or given a
+traceback, in memory) are flagged; and no queue run reached its 900 s
+timeout (the longest took 502 s, by the logs' own times). `box_m3s.sh`'s last line is
+no status either: its outputs are checked the same way, `complete.py
+OUTDIR`.
 
 To rerun a figure: `python -B <script> <args>` from `docs/studies/m3/`, the
 arguments as the queue scripts give them (the first line of each output
