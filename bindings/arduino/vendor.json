@@ -99,6 +99,11 @@
       "sha256": "69724a130b5de6b41ed0e47f66368c521dde9b8ba5a53923c7587f5d28f15039"
     },
     {
+      "source": "host/src/fma128_fixed.h",
+      "dest": "src/cft/src/fma128_fixed.h",
+      "sha256": "0dadf3803c87f080600f8382bcdca0ab69be4245725ec3c7a066e4c66f391c57"
+    },
+    {
       "source": "host/src/fma256_fixed.h",
       "dest": "src/cft/src/fma256_fixed.h",
       "sha256": "54e9bbcb1433d0e190f185d5901d46f90c2b2528ec80dbd8df6d8a11b155674a"

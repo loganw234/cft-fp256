@@ -21,17 +21,18 @@ byte, so a file in DIR that is not exactly this script's is refused by
 name - by `check`, and by every build that writes one.
 
 unit - one translation unit of the tree's bigint.c, softfloat.c,
-augmented.c, fma256_fixed.h and seq_exec.h, as the GPU backend's kernels
-are one (no relocatable device code, nothing linked across units), in
-backend_hip.cpp's order. BLOCK_LANES is 1, a thread a lane.
-CFT_AUG_LANES_ONLY, as in backend_hip.cpp: augmented.c's lane functions
-alone, its entry points being libcft's own (the GPU backend's round 2;
-until then the unit was CFT_NO_AUGMENTED). Four kernels, never launched,
-reach the arithmetic, the executor's per-lane functions, augmented.c's
-lanes and the fixed tier's second implementation of the fp256 FMA (round
-3's G3A: fma256_fixed.h's steering and lane): a device compiler generates
-no code for a static function nothing calls, and a check that compiled
-none would pass whatever it held.
+augmented.c, fma256_fixed.h, fma128_fixed.h and seq_exec.h, as the GPU
+backend's kernels are one (no relocatable device code, nothing linked
+across units), in backend_hip.cpp's order. BLOCK_LANES is 1, a thread a
+lane. CFT_AUG_LANES_ONLY, as in backend_hip.cpp: augmented.c's lane
+functions alone, its entry points being libcft's own (the GPU backend's
+round 2; until then the unit was CFT_NO_AUGMENTED). Five kernels, never
+launched, reach the arithmetic, the executor's per-lane functions,
+augmented.c's lanes and the fixed tier's second implementation of the FMA
+at fp256 (round 3's G3A: fma256_fixed.h's steering and lane) and at fp128
+(round 3's G3A2: fma128_fixed.h's): a device compiler generates no code for
+a static function nothing calls, and a check that compiled none would pass
+whatever it held.
 
 gpua - in place of devcopy.py's devsrc/: src/bigint.c, src/softfloat.c,
 src/seqcore.c (BLOCK_LANES 1, and CFT_SEQ_ALU as the runner's hook
@@ -72,7 +73,8 @@ def unit_text():
             "#define BLOCK_LANES 1\n"
             "#define CFT_AUG_LANES_ONLY 1\n" +
             tree("src/bigint.c") + tree("src/softfloat.c") + tree("src/augmented.c") +
-            tree("src/fma256_fixed.h") + tree("src/seq_exec.h") + """
+            tree("src/fma256_fixed.h") + tree("src/fma128_fixed.h") +
+            tree("src/seq_exec.h") + """
 /* The elementwise path: lane i of a batch through cft_sf_compute, as
  * device.c's software loop runs one element. */
 __global__ void cft_hip_unit_alu(cft_fmt_desc f, int op, int rnd, const cft_bn *a,
@@ -149,6 +151,30 @@ __global__ void cft_hip_unit_fx256(cft_fmt_desc f, int op, int rnd, const uint8_
     else
         fx256_fma_lane(qa, qb, qc, rnd, d + i * 32, &fl[i]);
 }
+
+/* The fixed tier's fp128 element (round 3's G3A2), as the GPU backend's
+ * k_run128 runs it: fma128_fixed.h's descriptor check, steering and lane -
+ * the second implementation at binary128, compiled here so that the check
+ * exercises its text too. */
+__global__ void cft_hip_unit_fx128(cft_fmt_desc f, int op, int rnd, const uint8_t *a,
+                                   const uint8_t *b, const uint8_t *c, uint8_t *d,
+                                   uint8_t *fl, size_t n)
+{
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    uint8_t qa[16], qb[16], qc[16];
+    int k;
+    if (i >= n)
+        return;
+    for (k = 0; k < 16; k++) {
+        qa[k] = a[i * 16 + k];
+        qb[k] = b[i * 16 + k];
+        qc[k] = c[i * 16 + k];
+    }
+    if (!fx128_matches(&f) || fx128_steer(op, qa, qb, qc))
+        fl[i] = 0x80;
+    else
+        fx128_fma_lane(qa, qb, qc, rnd, d + i * 16, &fl[i]);
+}
 """)
 
 
@@ -223,6 +249,11 @@ def selftest():
                                                         lambda s: s[:s.index("/* The sequencer")]),
             "the unit without the fixed kernel": ("u", UNIT,
                                                   lambda s: s[:s.index("/* The fixed tier's")]),
+            # round 3's G3A2: cut at the fp128 kernel's own text, placed after
+            # the fp256 kernel's, so the plant above still cuts both and this
+            # one the fp128 kernel alone
+            "the unit without the fixed fp128 kernel": (
+                "u", UNIT, lambda s: s[:s.index("/* The fixed tier's fp128 element")]),
         }
         for what, (sub, rel, f) in plants.items():
             dd = d / ("p-" + sub)
@@ -252,7 +283,7 @@ def selftest():
               f"{check(d / 'g', 'gpua')} gpua, accepted")
     if bad:
         sys.exit(1)
-    print("selftest: OK, 7 plants refused by name")
+    print("selftest: OK, 8 plants refused by name")
 
 
 def main():

@@ -122,8 +122,8 @@ endif
 # One translation unit for the device, as the backend's kernels will be:
 # tools/hip_unit.py writes gen/hip/cft_hip_unit.hip, which includes the
 # tree's own bigint.c, softfloat.c, augmented.c's lane functions,
-# fma256_fixed.h (the fixed tier's, round 3's G3A) and seq_exec.h (CFT_HD,
-# cft_config.h),
+# fma256_fixed.h (the fixed tier's, round 3's G3A), fma128_fixed.h (its
+# fp128, round 3's G3A2) and seq_exec.h (CFT_HD, cft_config.h),
 # and hipcc compiles it for HIP_ARCH - compute capabilities on nvidia
 # (default 89 120, the RTX 4070 and the RTX 5060 Ti), gfx targets on amd
 # (default gfx1102, the RX 7600). Compiled, not linked or launched; the
@@ -236,7 +236,7 @@ hip-unit:
 	HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc $(HIP_FLAGS) \
 		-O2 -std=c++17 -c gen/hip/cft_hip_unit.hip -o gen/hip/cft_hip_unit-$(HIP_PLATFORM).o \
 		> gen/hip/resource-$(HIP_PLATFORM).log 2>&1 || { cat gen/hip/resource-$(HIP_PLATFORM).log; exit 1; }
-	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes, fma256_fixed.h and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
+	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes, fma256_fixed.h, fma128_fixed.h and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
 else
 hip-unit:
 	@echo "hip-unit: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
@@ -483,14 +483,16 @@ gen/hip/backend-flags: hip-flags-force
 	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
 
 src/backend_hip.o: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c \
-                   src/fma256_fixed.h src/seq_exec.h src/backend.h gen/hip/backend-flags
+                   src/fma256_fixed.h src/fma128_fixed.h src/seq_exec.h src/backend.h \
+                   gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_ARCHDEF) $(HIP_PLANTDEF) -c $< -o $@ > $(HIP_LOG).log 2>&1 \
 		|| { cat $(HIP_LOG).log; exit 1; }
 	@grep -i 'warning' $(HIP_LOG).log || true
 
 src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c \
-                    src/fma256_fixed.h src/seq_exec.h src/backend.h gen/hip/backend-flags
+                    src/fma256_fixed.h src/fma128_fixed.h src/seq_exec.h src/backend.h \
+                    gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_ARCHDEF) $(HIP_PLANTDEF) $(HIP_PICF) $(SHDEF) -c $< -o $@ \
 		> $(HIP_LOG)-pic.log 2>&1 || { cat $(HIP_LOG)-pic.log; exit 1; }
@@ -551,9 +553,11 @@ hip-corpus$(EXE): tests/hip_corpus.c libcft.a
 # lane), one unit, with the tree's sha256.c compiled beside it - not
 # libcft.a, whose backend_hip.o (pulled in by sha256.o's one reference to
 # device.c) would define the unit's C++ bigint and softfloat a second time.
-# HIP=1 only.
+# Round 3's G3A2: --format fp128, on src/fma128_fixed.h and
+# tools/fx128_stream.h (and their four fp128 lane plants). HIP=1 only.
 ifeq ($(HIP),1)
 hip-fmadiff$(EXE): tools/hip_fmadiff.cpp tools/fx256_stream.h src/fma256_fixed.h \
+                   tools/fx128_stream.h src/fma128_fixed.h \
                    src/bigint.c src/softfloat.c src/sha256.c gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_PLANTDEF) -c tools/hip_fmadiff.cpp -o gen/hip/hip_fmadiff.o \
@@ -584,6 +588,22 @@ fma256test: fma256-test$(EXE)
 clean: clean-fma256
 clean-fma256:
 	rm -f fma256-test fma256-test.exe
+
+# round 3's G3A2: fma256test's sibling at binary128 (tests/fma128_test.c),
+# src/fma128_fixed.h and tools/fx128_stream.h on a HOST, built the same way:
+# no GPU, no libcft.a, -Wno-unknown-pragmas. Any HIP setting, any host. Not
+# in `make test` (G3D's to wire, with fma256test).
+fma128-test$(EXE): tests/fma128_test.c src/fma128_fixed.h tools/fx128_stream.h \
+                   src/bigint.c src/softfloat.c src/sha256.c $(HDRS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) -Wno-unknown-pragmas $(INC) tests/fma128_test.c -o $@
+
+.PHONY: fma128test clean-fma128
+fma128test: fma128-test$(EXE)
+	./fma128-test$(EXE)
+
+clean: clean-fma128
+clean-fma128:
+	rm -f fma128-test fma128-test.exe
 
 # Outside the ifeq, as clean-resident is: a HIP=0 clean removes what a
 # HIP=1 build left.
