@@ -182,7 +182,9 @@ added `mask_bits.h` and its neighbour; 32 from 2026-09-25, when
 `build_id.c`, whose GENERATED header lives in `host/gen/` because
 `sync.py` would vendor it from `host/src` or `host/include`; 35 from
 2026-10-03, when revision 8's seam added `caps_decode.h` and ABI 0.18
-`xclbin_clock.h`). A NEW `.c` or `.h` in
+`xclbin_clock.h`; 36 from 2026-11-11, GPU round 1's `seq_exec.h`, a
+count this entry missed until G3A's report; 37 from 2026-11-20, GPU
+round 3's `fma256_fixed.h`). A NEW `.c` or `.h` in
 `host/src` fails it too, as unvendored, until `sync.py` is re-run (it
 vendors those two extensions only). Any edit to a vendored host
 source fails it until `sync.py` is re-run - which is the gate doing its
