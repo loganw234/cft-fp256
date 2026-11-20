@@ -2576,8 +2576,9 @@ side. One predicate in one place (backend_hip.cpp's `fixed_covers`) decides
 which calls take the fixed kernel; every other format and opcode on a
 fixed-tier handle runs the generic kernel, and so do the reduction's ADD
 nodes, programs (the executor's lane ALU), the augmented calls and the
-divide and the root - `cft_dot` and the other compositions take the fixed
-path only for their `cft_run` MUL. A call the fixed kernel does not cover
+divide and the root - a composition takes the fixed path only for its own
+`cft_run` calls (the multiply pass of `cft_reduce`'s `CFT_DOT` and
+`CFT_SUMSQ` is a `cft_run` MUL). A call the fixed kernel does not cover
 reaching its branch is refused by name, `CFT_ERR_INTERNAL` ("the fixed tier
 was handed ..."), and a lane whose construction invariant fails is an
 internal error naming the tier. Staging, chunks, resident windows, the
