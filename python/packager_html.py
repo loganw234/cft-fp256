@@ -152,16 +152,23 @@ def render(md):
 
 # ------------------------------------------------------------------------------------------------ the check
 def md_words(md):
-    """The words of the Markdown with its syntax taken off, by a pass that shares nothing with the renderer."""
+    """The words of the Markdown with its syntax taken off, by a pass that shares nothing with the renderer.
+
+    A pipe is syntax only in a table row, a line that begins with one once the quotation's markers are off. Anywhere
+    else, in a heading, a paragraph or a bullet, it is a character of the text, and the page shows it: the ledger's
+    heading for M3's study, quoted as a bullet, writes `t = Y log2|X|` (2026-11-19, when this pass still took every pipe
+    off and so refused a page that said what the Markdown says)."""
     out = []
     for ln in md.split("\n"):
         ln = re.sub(r"^(?:>\s?)+", "", ln)
         s = ln.strip()
         if re.fullmatch(r"\|[\s|:-]+\|", s) or PICTURE.fullmatch(s):
             continue
+        row = ln.startswith("|")
         ln = re.sub(r"^#{1,6} ", "", ln)
         ln = re.sub(r"^- ", "", ln)
-        ln = ln.replace("|", " ")
+        if row:
+            ln = ln.replace("|", " ")
         ln = LINK.sub(r"\1", ln)
         ln = ln.replace("`", "").replace("**", "")
         ln = re.sub(r"</?sub>", "", ln)

@@ -190,21 +190,25 @@ def html_plants():
     is named."""
     problems, report = [], []
     md = ("# Title\n\nA paragraph with `code`, **bold** and a [link](a.md).\n\n| a | b |\n|---|---|\n| first | second |\n\n"
-          "> quoted\n> - item one\n\n![alt text](p.png)\n")
+          "> quoted\n> - item one, t = Y log2|X|\n\n![alt text](p.png)\n")
     page = HTML.render(md)
     held = {"a.md", "p.png"}
     clean = HTML.check(md, page, held)
     if clean:
         problems.append("html control: a page rendered from a plain document is refused: %s" % clean[0][1])
     else:
-        report.append("html control: a page rendered from a document of every kind of block says the same words, balances "
-                      "its tags and links to files the archive holds")
+        report.append("html control: a page rendered from a document of every kind of block, with a pipe in a quoted "
+                      "bullet's words as well as in a table, says the same words, balances its tags and links to files the "
+                      "archive holds")
     if HTML.render(md) != page:
         problems.append("html: the renderer is not a pure function of the text")
     plants = [
         ("a word dropped from the page", page.replace("paragraph", "", 1), held, "html-text"),
         ("a word added to the page", page.replace("quoted", "quoted extra", 1), held, "html-text"),
         ("a table cell dropped", page.replace("<td>second</td>", "", 1), held, "html-text"),
+        ("a pipe outside a table dropped from the page", page.replace("log2|X|", "log2 X", 1), held, "html-text"),
+        ("a table row's borders shown as its text",
+         page.replace("<td>first</td><td>second</td>", "<td>| first | second |</td>", 1), held, "html-text"),
         ("a closing tag removed", page.replace("</table>", "", 1), held, "html-malformed"),
         ("a closing tag too many", page.replace("</p>", "</p></p>", 1), held, "html-malformed"),
         ("a page that ends with a tag still open", page.replace("</html>", "", 1), held, "html-malformed"),
