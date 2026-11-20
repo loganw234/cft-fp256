@@ -16,11 +16,13 @@
  *
  * This file is also the device code's only unit (no relocatable device
  * code): it includes the tree's own bigint.c, softfloat.c and seq_exec.h
- * below, which carry CFT_HD (cft_config.h), so every kernel here runs
- * this library's arithmetic and its sequencer's executor as they are -
+ * below, which carry CFT_HD (cft_config.h), so every kernel here but the
+ * fixed tier's k_run256 (below) runs this library's arithmetic and its
+ * sequencer's executor as they are -
  * cft_sf_compute for an element, cft_sf_compute's ADD and MAX for a node
  * of the reduction tree, seq_exec.h's four per-lane functions and
- * seq_run_block for a program lane. Nothing of a run is re-expressed.
+ * seq_run_block for a program lane. Nothing of a run is re-expressed on
+ * the generic tier, the default.
  * The pattern is host/tools/hip_unit.py's unit, which compiles the same
  * three files the same way as a check (make HIP=1 hip-unit).
  *
@@ -75,6 +77,32 @@
  *
  * No device image: cft_get_image_id is refused by name. Resident
  * buffers: yes (CFT_HIP_BUFFERS_RESIDENT 1, backend.h; below).
+ *
+ * ---------------------------------------------------------------
+ * The fixed tier (round 3's G3A)
+ * ---------------------------------------------------------------
+ *
+ * A handle opened with CFT_HIP_TIER=fixed runs cft_run's fp256 FMA, ADD,
+ * SUB and MUL - and nothing else - through k_run256, on fma256_fixed.h: a
+ * SECOND IMPLEMENTATION of the FMA, written for a GPU on fixed-size limbs
+ * (study GPU-A's), not libcft's arithmetic, so its agreement with it is
+ * evidence by test, not a proof. ADD, SUB and MUL are the FMA with steered
+ * operands, libcft's own identities on the encodings (fx256_steer). Unset
+ * or empty, CFT_HIP_TIER is the default, generic: libcft's own code on
+ * every call, as above. "generic" and "fixed" are its only values; any
+ * other is refused at open by name. Which calls take the fixed kernel is
+ * decided in one place, fixed_covers, at run_impl's one launch; everything
+ * else on a fixed-tier handle - the other formats and opcodes, the
+ * reduction's ADD nodes, programs, the augmented calls, the divide and the
+ * root - runs the generic code. k_run256 is a sibling of k_run, not an
+ * edit of it, since a kernel has its own frame; staging, chunks, resident
+ * windows, the pages, the flag OR and the failure path around the launch
+ * are one code path for both kernels. The tier is not a capability
+ * (cft_get_caps says nothing of it: both tiers honour one contract) and
+ * needs no ABI: a certificate's env line records CFT_HIP_TIER where it is
+ * set, and cft_build_id() names the source that fixes what unset means.
+ * CFT_HIP_INFO's line names the tier and the fixed kernel's registers and
+ * local bytes.
  *
  * ---------------------------------------------------------------
  * Staging, chunks, and the time a launch may take
@@ -197,6 +225,20 @@
  *                  so its r and e are left as they were and its flags
  *                  unread; a call of one chunk is untouched, so only a call
  *                  that crosses a chunk boundary can show it (CFT_HIP_CHUNK)
+ *   (round 3's G3A: its plants here, bits 25 to 31; each acts on the fixed
+ *   tier's k_run256 alone, so the generic tier is the control)
+ *   fixed-rmm      attribute 4 (rmm) computed as 0 (rne) before the lane
+ *                  (GPU-A's one-sided plant)
+ *   fixed-flag     underflow dropped from each lane's flags after the lane
+ *   fixed-steer    SUB steered as ADD: c's sign not flipped
+ *   fixed-mulsign  MUL's zero addend always +0, whatever the product's sign
+ *   fixed-scalar   a scalar operand read at element i, not element 0
+ *   fixed-cover    fixed_covers answers 1 for every opcode at fp256, so the
+ *                  fixed branch's own literal test must refuse the rest by
+ *                  name (CFT_ERR_INTERNAL)
+ *   fixed-refuse   CFT_HIP_TIER=fixed honoured at open, and the branch never
+ *                  taking k_run256: every run is k_run's, the same bits, so
+ *                  only the route probe (cfth_plant_tier_probe) can see it
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
@@ -225,6 +267,18 @@
 #include "bigint.c"
 #include "softfloat.c"
 #include "augmented.c"
+/* round 3's G3A: the fixed tier's second implementation of the fp256 FMA
+ * (device-only; it needs softfloat.h's types and includes nothing). Its
+ * loops carry `#pragma unroll`, which nvcc's host pass hands to gcc, which
+ * does not know it: the warning is silenced for this header alone. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#endif
+#include "fma256_fixed.h"
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #ifdef CFT_HIP_PLANT_AUG_HOST
 /* hip-symcheck-plant's unit only: augmented.c whole, entry points and all,
  * has no cft_aug_mul_lane (augmented.c defines it under the guard), so the
@@ -334,6 +388,10 @@ enum : unsigned {
     PL_BANK_MODE = 1u << 21, PL_FULL_FLAG = 1u << 22, PL_FULL_REFUSE = 1u << 23,
     /* round 2's G2D: its plant here, bit 24 */
     PL_CHUNK_TAIL = 1u << 24,
+    /* round 3's G3A: its plants here, bits 25 to 31 */
+    PL_FIXED_RMM = 1u << 25, PL_FIXED_FLAG = 1u << 26, PL_FIXED_STEER = 1u << 27,
+    PL_FIXED_MULSIGN = 1u << 28, PL_FIXED_SCALAR = 1u << 29, PL_FIXED_COVER = 1u << 30,
+    PL_FIXED_REFUSE = 1u << 31,
 };
 #endif
 
@@ -389,6 +447,72 @@ __global__ __launch_bounds__(256) void k_run(cft_fmt_desc f, int op, int rnd,
 #endif
         atomicOr(&acc->flags, w);
     }
+}
+
+/* round 3's G3A: the fixed tier's elementwise run - fp256's FMA, ADD, SUB
+ * and MUL through fma256_fixed.h, a SECOND IMPLEMENTATION of the FMA (not
+ * cft_sf_compute), for the calls run_impl's fixed_covers gives it and no
+ * other. A sibling of k_run, not an edit of it, so that neither kernel's
+ * frame follows the other's: k_run's arguments less the descriptor
+ * (binary256's is the header's own, held to the library's at open), the
+ * operands loaded as k_run loads them (a NULL operand a zero element, a
+ * scalar one element 0 for every i, all read before d is written), ADD,
+ * SUB and MUL steered by fx256_steer, and k_run's failure and flag code: a
+ * lane the header flags 0x80 (a construction invariant failed; its d
+ * zeroed) or an opcode fx256_steer refuses records (first + i) << 8 |
+ * CFT_ERR_INTERNAL by atomicMin, and the five IEEE flags are ORed into the
+ * block's word, then by one thread into acc->flags. No operand is ever
+ * held in a double: bytes, then the header's uint32_t limbs. */
+__global__ __launch_bounds__(256) void k_run256(int op, int rnd, const uint8_t *a,
+                                                const uint8_t *b, const uint8_t *c,
+                                                uint8_t *d, size_t n, unsigned scal,
+                                                size_t first, hacc *acc PLANT_PARAM)
+{
+    __shared__ unsigned int blk;
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadIdx.x == 0)
+        blk = 0;
+    __syncthreads();
+    if (i < n) {
+        uint8_t qa[32], qb[32], qc[32], fl8 = 0;
+        size_t ia = (scal & 1u) ? 0 : i, ib = (scal & 2u) ? 0 : i, ic = (scal & 4u) ? 0 : i;
+        int r = rnd, k, bad;
+#ifdef CFT_HIP_PLANTS
+        if (plant & PL_FIXED_SCALAR)
+            ia = ib = ic = i;
+        if ((plant & PL_FIXED_RMM) && r == CFT_SF_RMM)
+            r = CFT_SF_RNE;
+#endif
+#pragma unroll
+        for (k = 0; k < 32; k++) {
+            qa[k] = a ? a[ia * 32 + k] : (uint8_t)0;
+            qb[k] = b ? b[ib * 32 + k] : (uint8_t)0;
+            qc[k] = c ? c[ic * 32 + k] : (uint8_t)0;
+        }
+        bad = fx256_steer(op, qa, qb, qc);
+#ifdef CFT_HIP_PLANTS
+        if ((plant & PL_FIXED_STEER) && op == CFT_SF_SUB)
+            qc[31] ^= 0x80u;
+        if ((plant & PL_FIXED_MULSIGN) && op == CFT_SF_MUL)
+            qc[31] = 0;
+#endif
+        if (!bad)
+            fx256_fma_lane(qa, qb, qc, r, d + i * 32, &fl8);
+        if (bad || (fl8 & 0x80u)) {
+            atomicMin(&acc->fail, ((unsigned long long)(first + i) << 8) |
+                                      (unsigned long long)CFT_ERR_INTERNAL);
+        } else {
+#ifdef CFT_HIP_PLANTS
+            if (plant & PL_FIXED_FLAG)
+                fl8 &= (uint8_t)~(unsigned)CFT_SF_UNDERFLOW;
+#endif
+            if (fl8)
+                atomicOr(&blk, (unsigned int)fl8);
+        }
+    }
+    __syncthreads();
+    if (threadIdx.x == 0 && blk)
+        atomicOr(&acc->flags, blk);
 }
 
 /* One level of the reduction tree, over nseg segments of m elements each
@@ -598,6 +722,9 @@ constexpr unsigned long long NO_FAIL = ~0ull;
 
 struct HBuf;
 
+/* round 3's G3A: a handle's tier for cft_run (CFT_HIP_TIER, read at open) */
+enum { TIER_GENERIC = 0, TIER_FIXED = 1 };
+
 struct Dev {
     int ordinal = 0;
     std::string label;            /* "hip:1 (NVIDIA GeForce RTX 5060 Ti)" */
@@ -614,6 +741,10 @@ struct Dev {
     size_t free_at_open = 0, total = 0;
     size_t prog_chunk = PROG_CHUNK_START;
     hipFuncAttributes fa_run, fa_level, fa_seq, fa_aug;
+    /* round 3's G3A: the element path's tier, and k_run256's attributes,
+     * read at open beside the four */
+    int tier = TIER_GENERIC;
+    hipFuncAttributes fa_run256;
     bool poisoned = false;
     std::string poison_why;
     size_t page = PAGE_BYTES;     /* CFT_HIP_PAGE in a plant build */
@@ -624,6 +755,8 @@ struct Dev {
     size_t chunk = 0;             /* CFT_HIP_CHUNK, or 0 */
     bool fail_fired = false;
     bool fail_fill = false;       /* CFT_HIP_UPLOAD=fail-fill, this call */
+    /* round 3's G3A: the route probe's counts, launches since open */
+    uint64_t launches_run = 0, launches_run256 = 0;
 #endif
 };
 
@@ -1239,6 +1372,30 @@ void call_end(Dev &D, int st, const Role *R, int nr) noexcept
 
 /* ==== the elementwise run =============================================== */
 
+/* round 3's G3A: what the fixed tier covers, decided here and nowhere
+ * else - fp256 (format 3) and the opcodes FMA, ADD, SUB and MUL (0 to 3).
+ * Every other call on a fixed-tier handle runs k_run. */
+bool fixed_covers(int fmt, int op PLANT_PARAM)
+{
+#ifdef CFT_HIP_PLANTS
+    if ((plant & PL_FIXED_COVER) && fmt == 3)
+        return true;
+#endif
+    return fmt == 3 && op >= 0 && op <= 3;
+}
+
+#ifdef CFT_HIP_PLANTS
+/* round 3's G3A: a plant build's route instrument (no plant needs to be
+ * set), read by cfth_plant_tier_probe after a cft_run: the kernel the last
+ * run's branch chose (0 k_run, 1 k_run256), its opcode, format and n, the
+ * handle's tier, and that handle's launches of each kernel since open. A
+ * default build has none of it. */
+struct TierProbe {
+    uint64_t kernel, op, fmt, n, tier, launches_run, launches_run256;
+};
+TierProbe g_tier_probe;
+#endif
+
 /* R[0..3] are a, b, c and d as bind_call decided them: a resident one is
  * read or written at its device window, the rest staged as before. The
  * chunk is the staged run's whatever is resident, so no launch is longer
@@ -1282,6 +1439,25 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
     if (D.chunk && D.chunk < k)
         k = D.chunk;
 #endif
+    /* round 3's G3A: the fixed tier's kernel where its cover holds, and
+     * k_run everywhere else; the branch's own test of what the fixed
+     * kernel covers is written out, not fixed_covers', so that a defect in
+     * the one cannot hide behind the other, and refuses by name before
+     * anything is staged */
+    bool fx = D.tier == TIER_FIXED && fixed_covers(fmt, op PLANT_ARG(D));
+#ifdef CFT_HIP_PLANTS
+    if (D.plant & PL_FIXED_REFUSE)
+        fx = false;
+    g_tier_probe = TierProbe{fx ? 1u : 0u, (uint64_t)op, (uint64_t)fmt, (uint64_t)n,
+                             (uint64_t)D.tier, D.launches_run, D.launches_run256};
+#endif
+    if (fx && (fmt != 3 || (unsigned)op > 3u)) {
+        set_err(fmt_str("%s: the fixed tier was handed %s %s (opcode %d), which it does not "
+                        "cover (fp256 FMA, ADD, SUB and MUL only) - a defect in libcft, not "
+                        "in the call", who, cft_format_name((cft_format)fmt),
+                        cft_op_name((cft_op)op), op));
+        return CFT_ERR_INTERNAL;
+    }
     for (s = 0; s < n; s += k) {
         const size_t m = n - s < k ? n - s : k;
         const uint8_t *dv[3];
@@ -1306,16 +1482,41 @@ int run_impl(Dev &D, int op, int fmt, int rnd, const void *a, const void *b,
         od = al(oacc + sizeof(hacc));
         if ((st = h2d(D, who, 0, oacc + sizeof(hacc))) != CFT_OK)
             return st;
-        k_run<<<grid_for(m), BLOCK, 0, D.stream>>>(
-            f, op, rnd, dv[0], dv[1], dv[2], R[3].resident ? R[3].dp + s * esz : D.dev + od,
-            m, scal, s, (hacc *)(D.dev + oacc) PLANT_ARG(D));
-        if ((st = check_launch(D, who, "the elementwise kernel", D.fa_run)) != CFT_OK)
-            return st;
+        if (fx) {
+            k_run256<<<grid_for(m), BLOCK, 0, D.stream>>>(
+                op, rnd, dv[0], dv[1], dv[2], R[3].resident ? R[3].dp + s * esz : D.dev + od,
+                m, scal, s, (hacc *)(D.dev + oacc) PLANT_ARG(D));
+            if ((st = check_launch(D, who, "the fixed tier's elementwise kernel",
+                                   D.fa_run256)) != CFT_OK)
+                return st;
+#ifdef CFT_HIP_PLANTS
+            g_tier_probe.launches_run256 = ++D.launches_run256;
+#endif
+        } else {
+            k_run<<<grid_for(m), BLOCK, 0, D.stream>>>(
+                f, op, rnd, dv[0], dv[1], dv[2], R[3].resident ? R[3].dp + s * esz : D.dev + od,
+                m, scal, s, (hacc *)(D.dev + oacc) PLANT_ARG(D));
+            if ((st = check_launch(D, who, "the elementwise kernel", D.fa_run)) != CFT_OK)
+                return st;
+#ifdef CFT_HIP_PLANTS
+            g_tier_probe.launches_run = ++D.launches_run;
+#endif
+        }
         if ((st = d2h(D, who, oacc, R[3].resident ? sizeof(hacc)
                                                   : od - oacc + m * esz)) != CFT_OK ||
             (st = finish(D, who)) != CFT_OK)
             return st;
         const hacc h = acc_read(D, oacc);
+        if (h.fail != NO_FAIL && fx) {
+            set_err(fmt_str("%s: the fixed tier's lane refused an invariant at element %llu "
+                            "(%s %s on %s) - a defect in libcft's fixed tier "
+                            "(fma256_fixed.h), not in the call; CFT_HIP_TIER=generic "
+                            "computes it with libcft's own arithmetic", who,
+                            (unsigned long long)(h.fail >> 8),
+                            cft_format_name((cft_format)fmt), cft_op_name((cft_op)op),
+                            D.label.c_str()));
+            return CFT_ERR_INTERNAL;
+        }
         if (h.fail != NO_FAIL) {
             set_err(fmt_str("%s: the GPU backend's compute step refused opcode %d "
                             "(%s) at element %llu on %s - a defect in libcft, not "
@@ -2091,6 +2292,14 @@ const struct {
     {"full-refuse", PL_FULL_REFUSE},
     /* round 2's G2D: its plant here, bit 24 */
     {"chunk-tail", PL_CHUNK_TAIL},
+    /* round 3's G3A: its plants here, bits 25 to 31 */
+    {"fixed-rmm", PL_FIXED_RMM},
+    {"fixed-flag", PL_FIXED_FLAG},
+    {"fixed-steer", PL_FIXED_STEER},
+    {"fixed-mulsign", PL_FIXED_MULSIGN},
+    {"fixed-scalar", PL_FIXED_SCALAR},
+    {"fixed-cover", PL_FIXED_COVER},
+    {"fixed-refuse", PL_FIXED_REFUSE},
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not
@@ -2257,14 +2466,21 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
     const hipError_t e2 = hipFuncGetAttributes(&D->fa_level, (const void *)k_level);
     const hipError_t e3 = hipFuncGetAttributes(&D->fa_seq, (const void *)k_seq);
     const hipError_t e4 = hipFuncGetAttributes(&D->fa_aug, (const void *)k_aug);
-    if (e1 != hipSuccess || e2 != hipSuccess || e3 != hipSuccess || e4 != hipSuccess) {
+    /* round 3's G3A: the fixed tier's kernel, the fifth */
+    const hipError_t e5 = hipFuncGetAttributes(&D->fa_run256, (const void *)k_run256);
+    if (e1 != hipSuccess || e2 != hipSuccess || e3 != hipSuccess || e4 != hipSuccess ||
+        e5 != hipSuccess) {
         const hipError_t eb = e1 != hipSuccess ? e1 : e2 != hipSuccess ? e2
-                            : e3 != hipSuccess ? e3 : e4;
+                            : e3 != hipSuccess ? e3 : e4 != hipSuccess ? e4 : e5;
+        const bool only5 = e1 == hipSuccess && e2 == hipSuccess && e3 == hipSuccess &&
+                           e4 == hipSuccess;
         set_err(fmt_str("cft_open: %s is %s, and this libcft's GPU code was built for "
-                        "HIP_ARCH %s (%s platform): its kernels do not load there - %s "
+                        "HIP_ARCH %s (%s platform): its kernels do not load there%s - %s "
                         "(%s). Rebuild with HIP_ARCH naming %s",
                         artifact, arch_of(D->prop).c_str(), CFT_HIP_ARCH,
-                        platform_name(), hipGetErrorString(eb), hipGetErrorName(eb),
+                        platform_name(),
+                        only5 ? " (the fixed tier's kernel, k_run256, alone)" : "",
+                        hipGetErrorString(eb), hipGetErrorName(eb),
                         arch_of(D->prop).c_str()));
         (void)hipGetLastError();
         delete D;
@@ -2287,6 +2503,34 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                             "stderr at open) or 0; unset it for none", iv));
             delete D;
             return CFT_ERR_INVALID_ARGUMENT;
+        }
+        /* round 3's G3A: CFT_HIP_TIER, read at open in every build. Unset or
+         * empty is the default, generic; exactly "generic" or "fixed"
+         * chooses; anything else is refused by name - a typo read as the
+         * default would be a check that could not fail. The fixed tier's
+         * header states binary256's constants, held here to the library's
+         * own descriptor (fx256_matches). */
+        const char *tv = std::getenv("CFT_HIP_TIER");
+        if (tv && *tv) {
+            if (!std::strcmp(tv, "fixed")) {
+                D->tier = TIER_FIXED;
+            } else if (std::strcmp(tv, "generic")) {
+                set_err(fmt_str("cft_open: %s: CFT_HIP_TIER=\"%s\": expected generic "
+                                "(libcft's own arithmetic, the default) or fixed (cft_run's "
+                                "fp256 FMA, ADD, SUB and MUL on fma256_fixed.h, a second "
+                                "implementation); unset it, or set it empty, for the "
+                                "default, generic", artifact, tv));
+                delete D;
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
+        if (D->tier == TIER_FIXED && !fx256_matches(&cft_sf_formats[3])) {
+            set_err(fmt_str("cft_open: %s: CFT_HIP_TIER=fixed, and fma256_fixed.h's "
+                            "binary256 constants are not this libcft's format table's "
+                            "(fx256_matches) - a defect in libcft; CFT_HIP_TIER=generic "
+                            "opens it with libcft's own arithmetic", artifact));
+            delete D;
+            return CFT_ERR_INTERNAL;
         }
         D->prog_chunk = PROG_CHUNK_START;
         if ((e = hipMemGetInfo(&D->free_at_open, &D->total)) != hipSuccess) {
@@ -2327,7 +2571,9 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          "%04x:%02x:%02x.0, %zu MiB), HIP platform %s, runtime %d, "
                          "driver %d; of %d visible%s%s%s%s; this libcft: HIP_ARCH %s,"
                          " stage %zu MiB, page %zu bytes, kernels %d/%d/%d/%d registers "
-                         "and %zu/%zu/%zu/%zu bytes local a thread (run/level/seq/aug)%s%s\n",
+                         "and %zu/%zu/%zu/%zu bytes local a thread (run/level/seq/aug)"
+                         "; tier %s, fixed kernel %d registers and %zu bytes local a "
+                         "thread%s%s\n",
                          artifact, D->prop.name, arch_of(D->prop).c_str(),
                          D->prop.multiProcessorCount, (unsigned)D->prop.pciDomainID,
                          (unsigned)D->prop.pciBusID, (unsigned)D->prop.pciDeviceID,
@@ -2340,6 +2586,8 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          (size_t)D->fa_level.localSizeBytes,
                          (size_t)D->fa_seq.localSizeBytes,
                          (size_t)D->fa_aug.localSizeBytes,
+                         D->tier == TIER_FIXED ? "fixed" : "generic",
+                         D->fa_run256.numRegs, (size_t)D->fa_run256.localSizeBytes,
 #ifdef CFT_HIP_PLANTS
                          ", PLANTS COMPILED IN, CFT_HIP_PLANT=", D->plant_name
 #else
@@ -2973,6 +3221,27 @@ extern "C" int cfth_plant_prog_probe(uint64_t *out, int nout)
                           g_probe.lane_out, g_probe.kmax, g_probe.chunk0,
                           g_probe.launches, g_probe.max_launch, g_probe.min_launch,
                           g_probe.src_bytes, g_probe.free_at_open};
+    const int m = (int)(sizeof v / sizeof v[0]);
+    int i;
+    for (i = 0; i < m && i < nout && out; i++)
+        out[i] = v[i];
+    return i;
+}
+
+/* round 3's G3A: a plant build's route instrument, read by hip-test's fixed
+ * leg after a cft_run (no plant needs to be set): the kernel the last run's
+ * branch chose (0 k_run, the generic tier's; 1 k_run256, the fixed tier's),
+ * its opcode, format and n, its handle's tier (0 generic, 1 fixed), and
+ * that handle's launches of k_run and of k_run256 since open - up to `nout`
+ * of them, in that order. Returns how many it wrote. Not in backend.h: as
+ * cfth_plant_prog_probe, nothing in libcft calls it and a default build
+ * defines no such symbol - so a default build cannot prove which kernel ran
+ * (its INFO line names the handle's tier, and the rates differ). */
+extern "C" int cfth_plant_tier_probe(uint64_t *out, int nout)
+{
+    const uint64_t v[] = {g_tier_probe.kernel, g_tier_probe.op, g_tier_probe.fmt,
+                          g_tier_probe.n, g_tier_probe.tier, g_tier_probe.launches_run,
+                          g_tier_probe.launches_run256};
     const int m = (int)(sizeof v / sizeof v[0]);
     int i;
     for (i = 0; i < m && i < nout && out; i++)

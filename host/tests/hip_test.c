@@ -131,6 +131,31 @@
  *             program run says which route ran (its head), a check the
  *             bits cannot make: a refused image falls through to an equal
  *             answer.
+ *   (round 3's G3A: its legs here)
+ *   fixed     the fixed tier (CFT_HIP_TIER): (a) "", generic and fixed open
+ *             and Fixed, FIXED, " fixed", "fixed ", 1, both and gen are
+ *             refused by name with no handle; (b) fp256 FMA, ADD, SUB and
+ *             MUL at every attribute on a fixed-tier handle against the
+ *             software handle, bits and flags - a call a case over a pool
+ *             of every class the FMA's rules part (signed zeros,
+ *             subnormals, the smallest normal, 1, 1 + u, the largest
+ *             finite and half its ulp, infinities, quiet and signalling
+ *             NaNs, exact ties, u/2), then every triple of a larger pool
+ *             in one call and 5,000 random triples in another - and the
+ *             same on a generic-tier handle (the control) and at fp32,
+ *             fp64 and fp128 on the fixed one (which run k_run); (c)
+ *             every other opcode cft_run takes at fp256 on the fixed
+ *             handle; (d) the forms of a call: a scalar a, b or c (all
+ *             seven masks), NULL b and c, d == a in place, n = 0 and
+ *             refusals; (e) a, b, c and d resident: the software
+ *             handle's bits, d left on the device, a second call moving
+ *             no page, an output shifted over its input staged, and with
+ *             plants a failed run's d LOST; (f) in a plant build, the
+ *             ROUTE PROOF: after every call, the plant build's probe of
+ *             the last cft_run says which kernel ran - the fixed one for
+ *             fp256 FMA, ADD, SUB and MUL on the fixed handle, the
+ *             generic one for every other call - a check the bits cannot
+ *             make, since a fall-through gives the same bits.
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
@@ -3338,6 +3363,531 @@ static void leg_divsqrt(const char *artifact, cft_device *hw, cft_device *sw, in
            (double)(clock() - t0) / CLOCKS_PER_SEC, failures - before);
 }
 
+/* round 3's G3A: its leg functions here */
+
+/* ---- the fixed tier (round 3's G3A) ----------------------------------------- */
+
+/* The plant build's route instrument (backend_hip.cpp's cfth_plant_tier_probe):
+ * the kernel the last cft_run's branch chose (0 k_run, 1 k_run256), its op,
+ * format and n, its handle's tier, and that handle's launches of each kernel.
+ * Weak, as cfth_plant_prog_probe is: NULL in a default build. */
+#if defined(__GNUC__) && !defined(_WIN32)
+extern int cfth_plant_tier_probe(uint64_t *out, int nout) __attribute__((weak));
+#define FX_PROBE_FN cfth_plant_tier_probe
+#else
+#define FX_PROBE_FN NULL
+#endif
+
+enum { FX_P = 24, FX_N = FX_P * FX_P * FX_P, FX_BIG = 5000, FX_FORM = 300 };
+static const char *const FXN[4] = {"FMA", "ADD", "SUB", "MUL"};
+static unsigned char fx_pl[FX_P * 32], fx_a[FX_N * 32], fx_b[FX_N * 32], fx_c[FX_N * 32],
+    fx_dh[FX_N * 32], fx_ds[FX_N * 32];
+static int (*fx_probe)(uint64_t *, int);
+static long fx_routes;
+
+static double fx_now(void)
+{
+#ifdef _WIN32
+    return (double)clock() / CLOCKS_PER_SEC;
+#else
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
+#endif
+}
+
+/* an element whose trailing field has its one bit `bit` set */
+static void fx_bit(unsigned char *e, int fmt, int sign, unsigned long exp, int bit)
+{
+    elem(e, fmt, sign, exp, 0);
+    e[bit / 8] |= (unsigned char)(1u << (bit % 8));
+}
+
+/* The leg's pool at one format: every class the FMA's rules part - signed
+ * zeros, the smallest subnormal, the smallest normal, 1 and -1, 1 + u, 0.5,
+ * the largest finite and half its ulp, +infinity, a quiet NaN and a negative
+ * signalling one (payloads), T1 = 1 + 2^-k1 and T2 = 1 + 2^-k2 with k1 + k2 =
+ * p (T1*T2 ends at half an ulp of 1, an exact tie; T1 + u/2 another), u/2:
+ * the first 16, the per-case pool - then the largest subnormal, the largest
+ * value below 1, 2, the largest finite negated, -infinity, -u/2 and two
+ * random finite values. With them come the overflow threshold (the largest
+ * finite plus half its ulp, and times 1 + u), underflow (the smallest
+ * subnormal times 0.5, a tie), exact cancellation (1*1 - 1) and subnormal
+ * results (the smallest normal times 0.5). */
+static void fx_pool(unsigned char *p, int fmt)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const int mw = (int)esz * 8 - 1 - EXPW[fmt], k1 = (mw + 1) / 2, k2 = mw + 1 - k1;
+    const unsigned long bias = (1ul << (EXPW[fmt] - 1)) - 1, top = (1ul << EXPW[fmt]) - 1;
+    const struct { int s; unsigned long x; int m; } v[FX_P] = {
+        {0, 0, 0}, {1, 0, 0}, {0, 0, 1}, {0, 1, 0},           /* +0 -0 minsub minnorm */
+        {0, bias, 0}, {1, bias, 0}, {0, bias, 1}, {0, bias - 1, 0},   /* 1 -1 1+u 0.5 */
+        {0, top - 1, 2}, {0, top - 2 - (unsigned long)mw, 0},   /* max, half its ulp */
+        {0, top, 0}, {0, top, 5}, {1, top, 6},                /* +inf qNaN -sNaN */
+        {0, bias, 9}, {0, bias, 10},                          /* T1 T2, below */
+        {0, bias - (unsigned long)mw - 1, 0},                 /* u/2 */
+        {0, 0, 2}, {0, bias - 1, 2}, {0, bias + 1, 0},        /* maxsub, below 1, 2 */
+        {1, top - 1, 2}, {1, top, 0}, {1, bias - (unsigned long)mw - 1, 0},
+        {0, bias - 3, 4}, {1, bias + 5, 4}};
+    int i;
+    for (i = 0; i < FX_P; i++) {
+        unsigned char *e = p + (size_t)i * esz;
+        if (v[i].m == 9)
+            fx_bit(e, fmt, 0, bias, mw - k1);
+        else if (v[i].m == 10)
+            fx_bit(e, fmt, 0, bias, mw - k2);
+        else
+            aug_put(e, fmt, v[i].s, v[i].x, v[i].m);
+    }
+}
+
+/* The route (a plant build's probe): the last cft_run's branch chose the
+ * fixed kernel exactly when `want` says so, for this op, format and n. */
+static void fx_route(int want, int op, int fmt, size_t n, const char *who)
+{
+    uint64_t v[7] = {0, 0, 0, 0, 0, 0, 0};
+    if (!fx_probe)
+        return;
+    fx_routes++;
+    CHECK(fx_probe(v, 7) == 7 && v[0] == (uint64_t)want && v[1] == (uint64_t)op &&
+          v[2] == (uint64_t)fmt && v[3] == (uint64_t)n,
+          "the route: %s %s %s n=%lu - the probe says kernel %llu (opcode %llu, format "
+          "%llu, n %llu, tier %llu), the %s kernel wanted", who,
+          cft_format_name((cft_format)fmt), op < 4 ? FXN[op] : "op", (unsigned long)n,
+          (unsigned long long)v[0], (unsigned long long)v[1], (unsigned long long)v[2],
+          (unsigned long long)v[3], (unsigned long long)v[4], want ? "fixed" : "generic");
+}
+
+/* one cft_run on h and on sw, held: the same status, and if CFT_OK the same
+ * bits element by element and the same flag word; the route checked */
+static void fx_held(cft_device *h, cft_device *sw, int fixed, int op, int fmt, int rnd,
+                    const unsigned char *a, const unsigned char *b, const unsigned char *c,
+                    size_t n, const char *who)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    uint32_t fh = 0, fs = 0;
+    cft_status sh, ss;
+    char eh[200] = "";
+    size_t i = 0;
+    sh = cft_run(h, (cft_op)op, (cft_format)fmt, (cft_round)rnd, a, b, c, fx_dh, n, &fh, NULL);
+    if (sh != CFT_OK)
+        snprintf(eh, sizeof eh, "%s", cft_last_error());
+    ss = cft_run(sw, (cft_op)op, (cft_format)fmt, (cft_round)rnd, a, b, c, fx_ds, n, &fs, NULL);
+    if (sh == CFT_OK && ss == CFT_OK)
+        while (i < n && same(fx_dh + i * esz, fx_ds + i * esz, esz))
+            i++;
+    if (sh != ss || (sh == CFT_OK && (i < n || fh != fs))) {
+        char x1[70] = "", x2[70] = "", x3[70] = "", x4[70] = "", x5[70] = "";
+        if (sh == CFT_OK && ss == CFT_OK && (i < n || n == 1)) {
+            const size_t j = i < n ? i : 0;   /* a flag alone differing at n = 1: the case */
+            hex(x1, a + j * esz, esz);
+            if (b) hex(x2, b + j * esz, esz);
+            if (c) hex(x3, c + j * esz, esz);
+            hex(x4, fx_dh + j * esz, esz);
+            hex(x5, fx_ds + j * esz, esz);
+        }
+        CHECK(0, "%s %s %s %s n=%lu: GPU %s%s%s flags 0x%02x, software %s flags 0x%02x; "
+              "first element differing %lu: a %s b %s c %s, GPU %s, software %s", who,
+              cft_format_name((cft_format)fmt), op < 4 ? FXN[op] : cft_op_name((cft_op)op),
+              RND[rnd % 5], (unsigned long)n, cft_strerror(sh), eh[0] ? " - " : "", eh,
+              (unsigned)fh, cft_strerror(ss), (unsigned)fs, (unsigned long)i, x1, x2, x3,
+              x4, x5);
+    } else {
+        checks++;
+    }
+    if (sh == CFT_OK && n)
+        fx_route(fixed && fmt == CFT_FP256 && op >= 0 && op <= 3, op, fmt, n, who);
+}
+
+/* every triple of the pool, in fx_a, fx_b and fx_c */
+static void fx_triples(int fmt)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    size_t t;
+    for (t = 0; t < (size_t)FX_N; t++) {
+        memcpy(fx_a + t * esz, fx_pl + (t / (FX_P * FX_P)) * esz, esz);
+        memcpy(fx_b + t * esz, fx_pl + ((t / FX_P) % FX_P) * esz, esz);
+        memcpy(fx_c + t * esz, fx_pl + (t % FX_P) * esz, esz);
+    }
+}
+
+/* (b): the class at one format on handle h - a call a case over the first
+ * `core` of the pool (every triple at FMA, every pair at ADD, SUB and MUL),
+ * then every triple of the whole pool in one call, then FX_BIG random
+ * triples in one call, at every attribute and the four operations */
+static void fx_class(cft_device *h, cft_device *sw, int fixed, int fmt, int core,
+                     const char *who)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const int before = failures, c0 = checks;
+    const double t0 = fx_now();
+    long calls = 0;
+    int rnd, op, i, j, k;
+    size_t t;
+    fx_pool(fx_pl, fmt);
+    fx_triples(fmt);
+    for (rnd = 0; rnd < 5; rnd++)
+        for (op = 0; op < 4; op++) {
+            for (i = 0; i < core; i++)
+                for (j = 0; j < core; j++)
+                    for (k = 0; k < (op == 0 ? core : 1); k++) {
+                        const unsigned char *pa = fx_pl + (size_t)i * esz;
+                        const unsigned char *pb = fx_pl + (size_t)(op == 3 ? j : k) * esz;
+                        const unsigned char *pc = fx_pl + (size_t)(op == 3 ? k : j) * esz;
+                        if (op == 0)
+                            pc = fx_pl + (size_t)k * esz, pb = fx_pl + (size_t)j * esz;
+                        fx_held(h, sw, fixed, op, fmt, rnd, pa, pb, pc, 1, who);
+                        calls++;
+                    }
+            fx_held(h, sw, fixed, op, fmt, rnd, fx_a, fx_b, fx_c, FX_N, who);
+            calls++;
+        }
+    /* FX_BIG random triples, one in four from the pool */
+    for (op = 0; op < 3; op++) {
+        unsigned char *x = op == 0 ? fx_a : op == 1 ? fx_b : fx_c;
+        fill(x, FX_BIG, fmt, K_RANDOM);
+        for (t = 0; t < (size_t)FX_BIG; t++)
+            if (rnd64() % 4 == 0)
+                memcpy(x + t * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+    }
+    for (rnd = 0; rnd < 5; rnd++)
+        for (op = 0; op < 4; op++) {
+            fx_held(h, sw, fixed, op, fmt, rnd, fx_a, fx_b, fx_c, FX_BIG, who);
+            calls++;
+        }
+    printf("  (b) %s, %s: %ld calls (%d x %d per case, %d triples a call, %d random), "
+           "%d checks, %.1f s, %d failed\n", who, cft_format_name((cft_format)fmt), calls,
+           core, core, FX_N, FX_BIG, checks - c0, fx_now() - t0, failures - before);
+}
+
+/* (c): every other opcode cft_run takes at fp256, on the fixed handle: held
+ * to the software handle (it runs k_run there), and those the software
+ * handle refuses refused alike */
+static void fx_others(cft_device *hf, cft_device *sw)
+{
+    const int before = failures, c0 = checks;
+    int op, rnd, ran = 0, refused = 0;
+    char first[600] = "";
+    fx_pool(fx_pl, CFT_FP256);
+    fx_triples(CFT_FP256);
+    for (op = 4; op < 64; op++) {
+        uint32_t fs = 0, fh = 0;
+        const cft_status ss = cft_run(sw, (cft_op)op, CFT_FP256, CFT_RNE, fx_a, fx_b, fx_c,
+                                      fx_ds, 64, &fs, NULL);
+        if (ss != CFT_OK) {
+            const cft_status sh = cft_run(hf, (cft_op)op, CFT_FP256, CFT_RNE, fx_a, fx_b,
+                                          fx_c, fx_dh, 64, &fh, NULL);
+            CHECK(sh == ss, "opcode %d at fp256: the software handle %s, the fixed handle %s",
+                  op, cft_strerror(ss), cft_strerror(sh));
+            refused++;
+            continue;
+        }
+        ran++;
+        for (rnd = 0; rnd < 5; rnd++) {
+            uint32_t f1 = 0;
+            const cft_status sh = cft_run(hf, (cft_op)op, CFT_FP256, (cft_round)rnd, fx_a, fx_b,
+                                          fx_c, fx_dh, FX_N, &f1, NULL);
+            if (sh != CFT_OK && !first[0])
+                snprintf(first, sizeof first, "%s at fp256: %s - %s", cft_op_name((cft_op)op),
+                         cft_strerror(sh), cft_last_error());
+            fx_held(hf, sw, 1, op, CFT_FP256, rnd, fx_a, fx_b, fx_c, FX_N, "the fixed handle");
+        }
+    }
+    if (first[0])
+        printf("  (c) the fixed handle refused: %s\n", first);
+    printf("  (c) the other opcodes at fp256 on the fixed handle: %d taken by cft_run, each "
+           "at five attributes over %d triples; %d refused by both alike; %d checks, %d "
+           "failed\n", ran, FX_N, refused, checks - c0, failures - before);
+}
+
+/* (d): the forms of a call, on the fixed handle, against the software handle */
+static void fx_forms(cft_device *hf, cft_device *sw)
+{
+    const size_t esz = 32, n = FX_FORM;
+    const int before = failures, c0 = checks;
+    static unsigned char ia[FX_FORM * 32], ib[FX_FORM * 32], ic[FX_FORM * 32],
+        dh[FX_FORM * 32], ds[FX_FORM * 32];
+    int op, mask, rnd, r;
+    size_t t;
+    fx_pool(fx_pl, CFT_FP256);
+    for (t = 0; t < n; t++) {
+        memcpy(ia + t * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+        memcpy(ib + t * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+        memcpy(ic + t * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+    }
+    /* a scalar operand on each of a, b and c: all seven masks */
+    for (op = 0; op < 4; op++)
+        for (mask = 1; mask < 8; mask++)
+            for (rnd = 0; rnd < 5; rnd += 4) {
+                cft_elem_args E;
+                uint32_t fh = 0, fs = 0;
+                cft_status sh = CFT_OK, ss = CFT_OK;
+                for (r = 0; r < 2; r++) {
+                    memset(&E, 0, sizeof E);
+                    E.struct_size = sizeof E;
+                    E.a = ia;
+                    E.b = ib;
+                    E.c = ic;
+                    E.d = r ? ds : dh;
+                    E.n = n;
+                    E.scalar_mask = (uint32_t)mask;
+                    E.flags_out = r ? &fs : &fh;
+                    if (r)
+                        ss = cft_run_ex(sw, (cft_op)op, CFT_FP256, (cft_round)rnd, &E);
+                    else
+                        sh = cft_run_ex(hf, (cft_op)op, CFT_FP256, (cft_round)rnd, &E);
+                }
+                CHECK(sh == CFT_OK && ss == CFT_OK && same(dh, ds, n * esz) && fh == fs,
+                      "cft_run_ex %s %s, scalar mask %d: GPU %s (%s), software %s; bits %s, "
+                      "flags 0x%02x / 0x%02x", FXN[op], RND[rnd], mask, cft_strerror(sh),
+                      sh ? cft_last_error() : "", cft_strerror(ss),
+                      same(dh, ds, n * esz) ? "alike" : "DIFFER", (unsigned)fh, (unsigned)fs);
+                if (sh == CFT_OK)
+                    fx_route(1, op, CFT_FP256, n, "a scalar operand");
+            }
+    /* NULL operands: a zero element (ADD and SUB with no b, MUL and FMA with no c) */
+    for (op = 0; op < 4; op++)
+        for (rnd = 0; rnd < 5; rnd++)
+            fx_held(hf, sw, 1, op, CFT_FP256, rnd, ia, op == 1 || op == 2 ? NULL : ib,
+                    op == 0 || op == 3 ? NULL : ic, n, "a NULL operand");
+    /* d == a in place */
+    for (op = 0; op < 4; op++) {
+        uint32_t fh = 0, fs = 0;
+        cft_status sh, ss;
+        memcpy(dh, ia, n * esz);
+        memcpy(ds, ia, n * esz);
+        sh = cft_run(hf, (cft_op)op, CFT_FP256, CFT_RMM, dh, ib, ic, dh, n, &fh, NULL);
+        if (sh == CFT_OK)
+            fx_route(1, op, CFT_FP256, n, "d == a in place");
+        ss = cft_run(sw, (cft_op)op, CFT_FP256, CFT_RMM, ds, ib, ic, ds, n, &fs, NULL);
+        CHECK(sh == CFT_OK && ss == CFT_OK && same(dh, ds, n * esz) && fh == fs,
+              "%s with d == a in place: GPU %s, software %s, bits %s", FXN[op],
+              cft_strerror(sh), cft_strerror(ss), same(dh, ds, n * esz) ? "alike" : "DIFFER");
+    }
+    /* n = 0, a bad format, a bad attribute and a bad opcode: as the software handle */
+    {
+        static const struct { int op, fmt, rnd; size_t n; } q[] = {
+            {0, CFT_FP256, 0, 0}, {1, 4, 0, 4}, {3, 99, 0, 4}, {0, -1, 0, 4},
+            {2, CFT_FP256, 5, 4}, {200, CFT_FP256, 0, 4}, {-1, CFT_FP256, 0, 4}};
+        size_t k;
+        for (k = 0; k < sizeof q / sizeof q[0]; k++) {
+            uint32_t fh = 0x55, fs = 0x55;
+            const cft_status sh = cft_run(hf, (cft_op)q[k].op, (cft_format)q[k].fmt,
+                                          (cft_round)q[k].rnd, ia, ib, ic, dh, q[k].n, &fh, NULL);
+            const cft_status ss = cft_run(sw, (cft_op)q[k].op, (cft_format)q[k].fmt,
+                                          (cft_round)q[k].rnd, ia, ib, ic, ds, q[k].n, &fs, NULL);
+            CHECK(sh == ss && (sh != CFT_OK || fh == fs), "opcode %d, format %d, attribute "
+                  "%d, n %lu: GPU %s, software %s", q[k].op, q[k].fmt, q[k].rnd,
+                  (unsigned long)q[k].n, cft_strerror(sh), cft_strerror(ss));
+        }
+    }
+    printf("  (d) the forms of a call on the fixed handle: seven scalar masks at the four "
+           "operations (rne, rmm), NULL b and c, d == a in place, n = 0 and four refusals; "
+           "%d checks, %d failed\n", checks - c0, failures - before);
+}
+
+/* (e): a, b, c and d resident on the fixed handle */
+static void fx_resident(const char *artifact, cft_device *hf, cft_device *sw, int plant_build)
+{
+    const size_t esz = 32, n = 2000, bytes = n * esz;
+    const int before = failures, c0 = checks;
+    static unsigned char x[2000 * 32], y[2000 * 32], z[2000 * 32], want[2001 * 32];
+    struct rb A, B, C, D;
+    struct rb *all[4];
+    cft_buffer_info i0[4], i1[4];
+    uint32_t fh = 0, fs = 0;
+    int op, k, still = 1;
+    size_t t;
+    A.b = B.b = C.b = D.b = NULL;
+    all[0] = &A; all[1] = &B; all[2] = &C; all[3] = &D;
+    fx_pool(fx_pl, CFT_FP256);
+    fill(x, n, CFT_FP256, K_RANDOM);
+    fill(y, n, CFT_FP256, K_RANDOM);
+    fill(z, n, CFT_FP256, K_RANDOM);
+    for (t = 0; t < n; t += 3)
+        memcpy(z + t * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+    CHECK(rb_alloc(hf, &A, bytes) && rb_alloc(hf, &B, bytes) && rb_alloc(hf, &C, bytes) &&
+          rb_alloc(hf, &D, bytes), "cft_alloc: %s", cft_last_error());
+    if (!A.b || !B.b || !C.b || !D.b)
+        goto out;
+    CHECK(rb_put(&A, x, bytes) && rb_put(&B, y, bytes) && rb_put(&C, z, bytes),
+          "publishing: %s", cft_last_error());
+    for (op = 0; op < 4; op++) {
+        cft_status sh;
+        sh = cft_run(hf, (cft_op)op, CFT_FP256, CFT_RNE, A.p, B.p, C.p, D.p, n, &fh, NULL);
+        if (sh == CFT_OK)
+            fx_route(1, op, CFT_FP256, n, "resident");
+        CHECK(sh == CFT_OK && rb_info(&D).device_authority == 1, "%s resident: %s, d's "
+              "authority %d", FXN[op], cft_strerror(sh), rb_info(&D).device_authority);
+        CHECK(cft_buffer_from_device(D.b) == CFT_OK, "the read-back: %s", cft_last_error());
+        CHECK(cft_run(sw, (cft_op)op, CFT_FP256, CFT_RNE, x, y, z, want, n, &fs, NULL) ==
+              CFT_OK && same(D.p, want, bytes) && fh == fs, "%s resident: bits %s, flags "
+              "0x%02x / 0x%02x", FXN[op], same(D.p, want, bytes) ? "alike" : "DIFFER",
+              (unsigned)fh, (unsigned)fs);
+        for (k = 0; k < 4; k++)
+            i0[k] = rb_info(all[k]);
+        sh = cft_run(hf, (cft_op)op, CFT_FP256, CFT_RNE, A.p, B.p, C.p, D.p, n, &fh, NULL);
+        for (k = 0; k < 4; k++)
+            i1[k] = rb_info(all[k]);
+        for (k = 0; k < 4; k++)
+            still &= i1[k].resident_binds == i0[k].resident_binds + 1 &&
+                     i1[k].staged_binds == i0[k].staged_binds;
+        CHECK(sh == CFT_OK && still, "%s: the second resident call moved pages (d %llu/%llu "
+              "binds resident/staged; \"%s\")", FXN[op],
+              (unsigned long long)i1[3].resident_binds, (unsigned long long)i1[3].staged_binds,
+              i1[3].staged_why);
+        CHECK(cft_buffer_from_device(D.b) == CFT_OK && same(D.p, want, bytes) && fh == fs,
+              "%s resident, the second call: bits %s", FXN[op],
+              same(D.p, want, bytes) ? "alike" : "DIFFER");
+    }
+    rb_free(&A);
+    /* an output shifted one element over its own input: staged, the snapshot rule */
+    CHECK(rb_alloc(hf, &A, bytes + esz), "cft_alloc: %s", cft_last_error());
+    if (A.b) {
+        cft_buffer_info ia;
+        memcpy(want, x, esz);
+        CHECK(cft_run(sw, CFT_FMA, CFT_FP256, CFT_RNE, x, y, z, want + esz, n, &fs, NULL) ==
+              CFT_OK, "software");
+        memcpy(A.p, x, bytes);
+        CHECK(cft_buffer_to_device(A.b) == CFT_OK && cft_run(hf, CFT_FMA, CFT_FP256, CFT_RNE,
+              A.p, y, z, A.p + esz, n, &fh, NULL) == CFT_OK &&
+              cft_buffer_from_device(A.b) == CFT_OK, "the shifted run: %s", cft_last_error());
+        fx_route(1, 0, CFT_FP256, n, "an output shifted over its input");
+        ia = rb_info(&A);
+        CHECK(same(A.p, want, bytes + esz) && fh == fs && strstr(ia.staged_why, "overlaps an output"),
+              "an output shifted over its input: %s, \"%s\"",
+              same(A.p, want, bytes + esz) ? "the snapshot rule" : "NOT the snapshot rule",
+              ia.staged_why);
+    }
+    printf("  (e) resident a, b, c and d on the fixed handle, the four operations: the "
+           "software handle's bits, d left on the device, the second call moving no page%s; "
+           "an output shifted over its input staged by the snapshot rule\n",
+           still ? "" : " - NOT HELD");
+    if (!plant_build) {
+        nrun("  (e) a failed run's resident outputs LOST", "this libcft is a default build, "
+             "which has no CFT_HIP_PLANT=fail-launch; build with HIP_PLANTS=1");
+    } else {
+        cft_device *h = NULL;
+        cft_status st;
+        rb_free(&A); rb_free(&B); rb_free(&C); rb_free(&D);
+        put_env("CFT_HIP_PLANT", "fail-launch");
+        put_env("CFT_HIP_TIER", "fixed");
+        st = cft_open(artifact, 0, &h);
+        put_env("CFT_HIP_PLANT", NULL);
+        put_env("CFT_HIP_TIER", NULL);
+        CHECK(st == CFT_OK, "open with fail-launch under the fixed tier: %s", cft_last_error());
+        if (h && rb_alloc(h, &A, bytes) && rb_alloc(h, &B, bytes) && rb_alloc(h, &C, bytes) &&
+            rb_alloc(h, &D, bytes)) {
+            cft_buffer_info id;
+            CHECK(rb_put(&A, x, bytes) && rb_put(&B, y, bytes) && rb_put(&C, z, bytes),
+                  "publishing");
+            char msg[300];
+            st = cft_run(h, CFT_FMA, CFT_FP256, CFT_RNE, A.p, B.p, C.p, D.p, n, &fh, NULL);
+            snprintf(msg, sizeof msg, "%s", cft_last_error());
+            fx_route(1, 0, CFT_FP256, n, "the failed run");
+            id = rb_info(&D);
+            CHECK(st == CFT_ERR_INTERNAL && strstr(msg, "fail-launch") &&
+                  !strncmp(id.staged_why, "LOST:", 5),
+                  "the failed resident run under the fixed tier: %s, \"%s\"; d's why \"%s\"",
+                  cft_strerror(st), msg, id.staged_why);
+            printf("  (e) a failed run under the fixed tier: %s; d %s\n", cft_strerror(st),
+                   id.staged_why);
+        }
+        rb_free(&A); rb_free(&B); rb_free(&C); rb_free(&D);
+        cft_close(h);
+    }
+out:
+    rb_free(&A); rb_free(&B); rb_free(&C); rb_free(&D);
+    printf("  (e) %d checks, %d failed\n", checks - c0, failures - before);
+}
+
+static void leg_fixed(const char *artifact, cft_device *sw, int only_fmt)
+{
+    static const char *const ok[3] = {"", "generic", "fixed"};
+    static const char *const bad[7] = {"Fixed", "FIXED", " fixed", "fixed ", "1", "both", "gen"};
+    const char *was = getenv("CFT_HIP_TIER"), *wp = getenv("CFT_HIP_PLANT");
+    char keep[64] = "", keepp[64] = "";
+    const int before = failures, c0 = checks;
+    const double t0 = fx_now();
+    cft_device *hg = NULL, *hf = NULL, *h = NULL;
+    int k, f, plant_build;
+    printf("fixed\n");
+    if (was)
+        snprintf(keep, sizeof keep, "%s", was);
+    if (wp)
+        snprintf(keepp, sizeof keepp, "%s", wp);
+    fx_probe = FX_PROBE_FN;
+    fx_routes = 0;
+    put_env("CFT_HIP_PLANT", "bogus");
+    plant_build = cft_open(artifact, 0, &h) != CFT_OK;
+    put_env("CFT_HIP_PLANT", keepp[0] ? keepp : NULL);
+    cft_close(h);
+    h = NULL;
+    CHECK(plant_build == (fx_probe != NULL), "a %s build %s the plant build's tier probe",
+          plant_build ? "plant" : "default", fx_probe ? "has" : "lacks");
+    printf("  a %s build; the route probe %s; CFT_HIP_PLANT %s; CFT_HIP_TIER of the caller %s\n",
+           plant_build ? "plant" : "default", fx_probe ? "present" : "absent",
+           keepp[0] ? keepp : "unset", was ? keep : "unset");
+    /* (a) the grammar: three spellings open, seven are refused by name */
+    for (k = 0; k < 3; k++) {
+        put_env("CFT_HIP_TIER", ok[k]);
+        CHECK(cft_open(artifact, 0, &h) == CFT_OK, "CFT_HIP_TIER=\"%s\": %s", ok[k],
+              cft_last_error());
+        cft_close(h);
+        h = NULL;
+    }
+    for (k = 0; k < 7; k++) {
+        cft_status st;
+        put_env("CFT_HIP_TIER", bad[k]);
+        st = cft_open(artifact, 0, &h);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT && h == NULL &&
+              strstr(cft_last_error(), "CFT_HIP_TIER") != NULL,
+              "CFT_HIP_TIER=\"%s\": %s, \"%s\" - refused by name, with no handle, wanted",
+              bad[k], cft_strerror(st), cft_last_error());
+        if (k == 0)
+            printf("  (a) CFT_HIP_TIER=\"%s\": %s - %s\n", bad[k], cft_strerror(st),
+                   cft_last_error());
+        cft_close(h);
+        h = NULL;
+    }
+    put_env("CFT_HIP_TIER", "generic");
+    CHECK(cft_open(artifact, 0, &hg) == CFT_OK, "the generic handle: %s", cft_last_error());
+    put_env("CFT_HIP_TIER", "fixed");
+    CHECK(cft_open(artifact, 0, &hf) == CFT_OK, "the fixed handle: %s", cft_last_error());
+    put_env("CFT_HIP_TIER", was ? keep : NULL);
+    printf("  (a) \"\", generic and fixed open; Fixed, FIXED, \" fixed\", \"fixed \", 1, both "
+           "and gen are refused by name, no handle left\n");
+    if (hg && hf) {
+        /* (b) the class, and its controls */
+        if (only_fmt < 0 || only_fmt == CFT_FP256) {
+            fx_class(hf, sw, 1, CFT_FP256, 16, "the fixed handle");
+            fx_class(hg, sw, 0, CFT_FP256, 16, "the generic handle");
+        }
+        for (f = 0; f < 3; f++)
+            if (only_fmt < 0 || only_fmt == f)
+                fx_class(hf, sw, 1, f, 8, "the fixed handle");
+        if (only_fmt < 0 || only_fmt == CFT_FP256) {
+            fx_others(hf, sw);
+            fx_forms(hf, sw);
+            fx_resident(artifact, hf, sw, plant_build);
+        }
+    }
+    if (!fx_probe)
+        nrun("  (f) the route proof", "this libcft is a default build, which defines no "
+             "cfth_plant_tier_probe (the plant build's probe of the last cft_run's kernel); "
+             "build with HIP_PLANTS=1 - the bits above hold every call, but a fall-through to "
+             "the generic kernel gives the same bits, so only the probe says which kernel ran "
+             "(a default build's INFO line names the handle's tier, and its rate differs)");
+    else
+        printf("  (f) the route proof: %ld calls' kernel read from the probe - the fixed kernel "
+               "for fp256 FMA, ADD, SUB and MUL on the fixed handle, the generic for every other\n",
+               fx_routes);
+    cft_close(hg);
+    cft_close(hf);
+    printf("  fixed: %d checks, %.1f s, %d failed\n", checks - c0, fx_now() - t0,
+           failures - before);
+}
+
 int main(int argc, char **argv)
 {
     const char *artifact = NULL,
@@ -3349,6 +3899,8 @@ int main(int argc, char **argv)
                        ",depth"
                        /* round 2's G2C: its legs here, each a line ",name" */
                        ",divsqrt"
+                       /* round 3's G3A: its legs here, each a line ",name" */
+                       ",fixed"
                        ;
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
@@ -3387,6 +3939,8 @@ int main(int argc, char **argv)
                     ",depth"
                     /* round 2's G2C: its legs here, each a line ",name" */
                     ",divsqrt"
+                    /* round 3's G3A: its legs here, each a line ",name" */
+                    ",fixed"
                     "] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
@@ -3453,6 +4007,9 @@ int main(int argc, char **argv)
     /* round 2's G2C: its legs' dispatch here */
     if (strstr(legs, "divsqrt"))
         leg_divsqrt(artifact, hw, sw, only_fmt);
+    /* round 3's G3A: its legs' dispatch here */
+    if (strstr(legs, "fixed"))
+        leg_fixed(artifact, sw, only_fmt);
     cft_close(hw);
     cft_close(sw);
     if (shown > 60)

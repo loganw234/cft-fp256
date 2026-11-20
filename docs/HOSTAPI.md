@@ -2265,7 +2265,9 @@ sentence saying `HIP=1` builds it.
 translation unit that includes the tree's own `bigint.c`, `softfloat.c`
 and `seq_exec.h` (G1A made them compile for a GPU as they are), and since
 round 2 `augmented.c`'s lane functions (G2A, below): an
-element is `cft_sf_compute`, as the software loop runs it; a reduction is
+element is `cft_sf_compute`, as the software loop runs it (on the generic
+tier, the default; the fixed tier, at the end of this section, runs fp256's
+FMA, ADD, SUB and MUL on a second implementation); a reduction is
 softfloat.c's tree run one level a launch - neighbours paired, a trailing
 odd element carried up unchanged, the result `cft_reduce`'s bit for bit
 because every left child of that tree is a perfect aligned subtree - and
@@ -2554,6 +2556,61 @@ with a, b and its deposits resident: 5.0e7 divides a second at fp64,
 3.2e7 at fp128 and 1.4e7 at fp256 on the 5060 Ti, 2.6e7, 1.7e7 and 8.5e6
 on the RX 7600 - about six times the staged call's rate at fp64, the
 4,096-element chunk holding each staged run to one launch of 4,096 lanes.
+
+**The fixed tier (round 3, G3A, 2026-11-20).** A handle opened with
+`CFT_HIP_TIER=fixed` runs `cft_run`'s fp256 FMA, ADD, SUB and MUL - those
+four at that one format, and nothing else - through a SECOND IMPLEMENTATION
+of the FMA, `host/src/fma256_fixed.h` (study GPU-A's second kernel, moved
+into the tree with its names prefixed): fixed-size limbs that stay in
+registers, sf_fma's unpacking and special cases in its order, a 512-bit
+window with a sticky bit, and sf_round_pack's rounding step for step. It is
+not libcft's arithmetic, and its agreement with it is evidence by test, not
+a proof. ADD, SUB and MUL are the FMA with steered operands, libcft's own
+identities (softfloat.c's `sf_steer`) written on the encodings
+(`fx256_steer`). The tier is chosen at open: unset or empty is the default,
+`generic` - libcft's own code on every call, as above - and the exact
+strings `generic` and `fixed` choose; any other value (`Fixed`, `" fixed"`,
+`1`, `both`) is `CFT_ERR_INVALID_ARGUMENT` at open, naming the variable, and
+leaves no handle. Two handles of one process may run the two tiers side by
+side. One predicate in one place (backend_hip.cpp's `fixed_covers`) decides
+which calls take the fixed kernel; every other format and opcode on a
+fixed-tier handle runs the generic kernel, and so do the reduction's ADD
+nodes, programs (the executor's lane ALU), the augmented calls and the
+divide and the root - `cft_dot` and the other compositions take the fixed
+path only for their `cft_run` MUL. A call the fixed kernel does not cover
+reaching its branch is refused by name, `CFT_ERR_INTERNAL` ("the fixed tier
+was handed ..."), and a lane whose construction invariant fails is an
+internal error naming the tier. Staging, chunks, resident windows, the
+pages and the flag OR are the generic kernel's code path: only the launch
+differs. Nothing published changes: `cft_get_caps` says nothing of the
+tier, since both honour one contract; no ABI moves. A certificate records
+the tier where `CFT_HIP_TIER` is set (its `env` line: the variable is on
+cert2's writer's list), and `cft_build_id()` names the source that fixes
+what unset means - generic, until the overnight proof of round 3 has passed
+on both vendors and Logan moves the default. `CFT_HIP_INFO=1`'s line names
+the handle's tier and the fixed kernel's registers and local bytes
+(`; tier fixed, fixed kernel 134 registers and 0 bytes local a thread` on
+the RTX 5060 Ti; 71 and 272 on the RX 7600). It is held to the generic tier
+by `hip-fmadiff` (the two lanes on a counter-based stream, GPU-A's nine
+families and five edge classes after them; GPU-A's first-chunk sums
+reproduced), by `fma256test` on any host with no GPU, by a golden-checked
+corpus of the edge classes (`host/tests/fma_edge_corpus.py`, through
+`hip-corpus`), by hip-test's `fixed` leg, and by seven plants
+(`fixed-rmm` to `fixed-refuse`), of which `fixed-refuse` - the tier honoured
+at open and never taken - only the plant build's route probe can see.
+**Its rates** (through the API, docs/VALIDATION.md, G3A's entry: a
+generic-tier and a fixed-tier handle of one device alternated call by call
+in one process, 5 rounds of 10 calls, each figure the median of the round
+medians beside their range): resident, the fixed tier's fp256 FMA is 2.70
+times the generic tier's at 2^20 elements and 2.87 at 2^22 on the RTX 5060
+Ti (1.72 against 4.65 ms, 6.09 against 17.50 ms) and 2.74 and 2.89 at 2^20
+and 2^21 on the RX 7600, and ADD, SUB and MUL 1.84 to 5.28 times; staged,
+where the copies set the time, 1.06 to 1.28 times. Resident at 2^22 on the
+5060 Ti that is 6.9e8 FMAs a second: 1.6 times the quad's 427 M, about 230
+one-core libcft FMAs and 54 MPFR ones. By the rule fixed before the
+measurement the fixed tier was faster in all eight cases (two GPUs, four
+operations): the speed leg of the acceptance Logan set for round 3 is met,
+and the default still waits for the overnight proof.
 
 ## The device's on-chip capacities, published (2026-09-07)
 

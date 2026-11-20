@@ -121,8 +121,9 @@ endif
 #
 # One translation unit for the device, as the backend's kernels will be:
 # tools/hip_unit.py writes gen/hip/cft_hip_unit.hip, which includes the
-# tree's own bigint.c, softfloat.c, augmented.c's lane functions and
-# seq_exec.h (CFT_HD, cft_config.h),
+# tree's own bigint.c, softfloat.c, augmented.c's lane functions,
+# fma256_fixed.h (the fixed tier's, round 3's G3A) and seq_exec.h (CFT_HD,
+# cft_config.h),
 # and hipcc compiles it for HIP_ARCH - compute capabilities on nvidia
 # (default 89 120, the RTX 4070 and the RTX 5060 Ti), gfx targets on amd
 # (default gfx1102, the RX 7600). Compiled, not linked or launched; the
@@ -235,7 +236,7 @@ hip-unit:
 	HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc $(HIP_FLAGS) \
 		-O2 -std=c++17 -c gen/hip/cft_hip_unit.hip -o gen/hip/cft_hip_unit-$(HIP_PLATFORM).o \
 		> gen/hip/resource-$(HIP_PLATFORM).log 2>&1 || { cat gen/hip/resource-$(HIP_PLATFORM).log; exit 1; }
-	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
+	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes, fma256_fixed.h and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
 else
 hip-unit:
 	@echo "hip-unit: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
@@ -481,13 +482,15 @@ gen/hip/backend-flags: hip-flags-force
 	@echo '$(HIP_PLATFORM) $(HIP_ROOT) $(HIP_ARCH) $(CFLAGS) $(XRTDEF) $(HIP_PLANTDEF)' > $@.new
 	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
 
-src/backend_hip.o: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c gen/hip/backend-flags
+src/backend_hip.o: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c \
+                   src/fma256_fixed.h src/seq_exec.h src/backend.h gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_ARCHDEF) $(HIP_PLANTDEF) -c $< -o $@ > $(HIP_LOG).log 2>&1 \
 		|| { cat $(HIP_LOG).log; exit 1; }
 	@grep -i 'warning' $(HIP_LOG).log || true
 
-src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c gen/hip/backend-flags
+src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augmented.c \
+                    src/fma256_fixed.h src/seq_exec.h src/backend.h gen/hip/backend-flags
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
 		$(HIP_ARCHDEF) $(HIP_PLANTDEF) $(HIP_PICF) $(SHDEF) -c $< -o $@ \
 		> $(HIP_LOG)-pic.log 2>&1 || { cat $(HIP_LOG)-pic.log; exit 1; }
@@ -540,12 +543,55 @@ hip-test$(EXE): tests/hip_test.c libcft.a
 hip-corpus$(EXE): tests/hip_corpus.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
+# round 3's G3A: the fixed tier's differential stream on a GPU (tools/
+# hip_fmadiff.cpp, study GPU-A's `cft_fma diff` moved in): the tree's
+# bigint.c, softfloat.c, src/fma256_fixed.h and tools/fx256_stream.h, in
+# backend_hip.cpp's order and under its flags (HIP_FLAGS, HIP_WARN, C++17,
+# HIP_PLANTDEF: a HIP_PLANTS=1 build carries the four plants of the fixed
+# lane), one unit, with the tree's sha256.c compiled beside it - not
+# libcft.a, whose backend_hip.o (pulled in by sha256.o's one reference to
+# device.c) would define the unit's C++ bigint and softfloat a second time.
+# HIP=1 only.
+ifeq ($(HIP),1)
+hip-fmadiff$(EXE): tools/hip_fmadiff.cpp tools/fx256_stream.h src/fma256_fixed.h \
+                   src/bigint.c src/softfloat.c src/sha256.c gen/hip/backend-flags
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
+		$(HIP_PLANTDEF) -c tools/hip_fmadiff.cpp -o gen/hip/hip_fmadiff.o \
+		> gen/hip/hip_fmadiff-$(HIP_PLATFORM).log 2>&1 \
+		|| { cat gen/hip/hip_fmadiff-$(HIP_PLATFORM).log; exit 1; }
+	@grep -i 'warning' gen/hip/hip_fmadiff-$(HIP_PLATFORM).log || true
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -c src/sha256.c -o gen/hip/hip_fmadiff_sha256.o
+	$(CC) gen/hip/hip_fmadiff.o gen/hip/hip_fmadiff_sha256.o -o $@ $(XRTLIBS)
+else
+hip-fmadiff$(EXE):
+	@echo "hip-fmadiff: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
+endif
+
+# round 3's G3A: the fixed tier's arithmetic on a HOST, no GPU and no
+# libcft.a (tests/fma256_test.c): src/fma256_fixed.h and tools/fx256_stream.h
+# with the tree's bigint.c, softfloat.c and sha256.c included and compiled
+# with libcft's own C flags, so the generic lane is libcft's cft_sf_compute;
+# -Wno-unknown-pragmas because gcc does not know the header's `#pragma
+# unroll`. Any HIP setting, any host. Not in `make test` (G3D's to wire).
+fma256-test$(EXE): tests/fma256_test.c src/fma256_fixed.h tools/fx256_stream.h \
+                   src/bigint.c src/softfloat.c src/sha256.c $(HDRS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) -Wno-unknown-pragmas $(INC) tests/fma256_test.c -o $@
+
+.PHONY: fma256test clean-fma256
+fma256test: fma256-test$(EXE)
+	./fma256-test$(EXE)
+
+clean: clean-fma256
+clean-fma256:
+	rm -f fma256-test fma256-test.exe
+
 # Outside the ifeq, as clean-resident is: a HIP=0 clean removes what a
 # HIP=1 build left.
 clean: clean-hip
 clean-hip:
 	rm -f src/backend_hip.o src/backend_hip.lo hip-test hip-test.exe \
-	      hip-corpus hip-corpus.exe
+	      hip-corpus hip-corpus.exe hip-fmadiff hip-fmadiff.exe \
+	      gen/hip/hip_fmadiff.o gen/hip/hip_fmadiff_sha256.o
 
 cft-selftest$(EXE): tools/cft_selftest.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
