@@ -218,12 +218,17 @@ pow_core (M1's log2 planned at a larger guard GL, the product, M1's exp2 with a
 double-word argument, the exact power of two, the rule beside 1 and the
 screens); parcel M3G1 builds the core, pow and powr, parcel M3G2 pown, rootn and
 compound on the same core at its anchor, parcel M3F1 the triple word at fp32 at
-the second. The public names are POW_NAMES, POW_FORMATS, POW_LIVE_CAP,
-POW_PLANTS, plan_pow, pow_core, build_pow_core and check_pow_constants
-(`--check --only pow`), and the `n` of build() and fragment(). They are public
-module attributes and NOT in `__all__`: test_mathlib_inv_asin.py:142 pins
-`tuple(__all__)` to M4G1's base, as M4F1's names are not (test_mathlib_inv_tw.py
-:118). A lane of pow or powr is a tuple (x, y) in the build's inputs' order.
+the second; pown, rootn and compound at fp32 are parcel M3F2's, refused by
+name. The public names are POW_NAMES, POW_FORMATS, POW_LIVE_CAP, POW_PLANTS,
+plan_pow, pow_core, build_pow_core and check_pow_constants (`--check --only
+pow`), and the `n` of build() and fragment(); parcel M3G2's POW_INT_NAMES,
+pow_n, POW_CHECK_NS, pow_check_ns, pow_check_attrs and check_pow_n_constants
+(`--check --only pow-n`); and parcel M3F1's check_pow_tw_constants (`--check
+--only pow-tw`). They are public module attributes and NOT in `__all__`:
+test_mathlib_inv_asin.py:142 pins `tuple(__all__)` to M4G1's base, as M4F1's
+names are not (test_mathlib_inv_tw.py:118). A lane of pow or powr is a tuple
+(x, y) in the build's inputs' order; a lane of pown, rootn or compound is x
+alone, n a constant of the fragment.
 The design is docs/studies/M3-pow.md and Logan's answers of 2026-11-19
 (docs/ROADMAP.md, "Logan's answers on M3's study"); the construction IS the
 study's model (docs/studies/m3/m3pow.py), ported, and nothing here imports it.
@@ -2797,8 +2802,10 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
     pow and powr (parcel M3G1; POW_NAMES) are the double word at fp64, fp128 and
     fp256: sign 2^t, t = Y log2 |X| (the section "pow and powr"). A lane is a
     tuple (x, y) in Build.inputs' order, ("a", "b"). pown, rootn and compound
-    are parcel M3G2's and any of the five at fp32 parcel M3F1's: each is refused
-    by name, saying whose it is. `n` is the integer operand of the three that
+    (parcel M3G2) are built on the same core at those formats, keyed by n; a
+    lane of theirs is x alone, ("a",). At fp32, pow and powr are the triple
+    word (parcel M3F1), and pown, rootn and compound are parcel M3F2's,
+    refused by name. `n` is the integer operand of the three that
     take one: given to pow, powr or any other name it is a ValueError by name
     ("pow takes no integer operand"). `plant` is one of POW_PLANTS (a fault
     the build cannot reach is refused by name); `guard` and `bound_shift` as
@@ -7700,8 +7707,9 @@ POW_LIVE_CAP = {
     "compound": {"fp64": 22, "fp128": 22, "fp256": 22},
 }
 
-# who builds what: a name of POW_NAMES not in _POW_BUILDERS is refused by name,
-# saying whose it is
+# who builds what: a name of POW_NAMES in neither _POW_BUILDERS nor
+# _POW_N_BUILDERS is refused by name, saying whose it is (at fp64, fp128 and
+# fp256 all five are built, since parcel M3G2)
 _POW_PARCEL = {"pow": "M3G1", "powr": "M3G1", "pown": "M3G2",
                "rootn": "M3G2", "compound": "M3G2"}
 
@@ -8474,17 +8482,18 @@ def _build_powr(b: Build, x, y):
     return _powr_specials(b, k_, cl, yc, core.bits, core.fl)
 
 
-# the builders by function: M3G2 assigns pown, rootn and compound at its anchor.
-# Each is builder(b, x, y) -> (result, flag word), given a Build with its meta
-# set and its inputs named (_build_pow_family); M3G2's take the integer operand
+# the builders by function, pow's and powr's: each is builder(b, x, y) ->
+# (result, flag word), given a Build with its meta set and its inputs named
+# (_build_pow_family). M3G2's pown, rootn and compound are in a table of their
+# own, _POW_N_BUILDERS, at its anchor below: builder(b, x), the integer operand
 # from b.meta["n"].
 _POW_BUILDERS = {"pow": _build_pow, "powr": _build_powr}
 
 # ---- pown, rootn and compound: parcel M3G2 builds here ----
 
-# (M3G2's builders, plants and role checks go at this anchor, the section's
-# end, well apart from M3F1's below: assign into _POW_BUILDERS, POW_PLANTS and
-# _POW_ROLE_CHECKS, never edit their literals.)
+# (M3G2's builders, plants and role checks are at this anchor, the section's
+# end, apart from M3F1's below: its own table _POW_N_BUILDERS, and
+# POW_PLANTS.update and _POW_ROLE_CHECKS.update, their literals unedited.)
 #
 # pown(x, n), rootn(x, n) and compound(x, n) on the one core (pow_core), n a
 # CONSTANT of the fragment (the language checks it to int64's range and cftc
@@ -8776,13 +8785,15 @@ POW_PLANTS.update({
 
 
 def _pow_refuse(name, fmt, n):
-    """The refusals by name: fp32 (the triple word, parcel M3F1's), a name not
-    built (saying whose it is), an integer operand given to pow or powr, and,
-    for pown, rootn and compound (parcel M3G2), n missing or not an int64
-    (pow_n's)."""
+    """The refusals by name of the double word's paths: fp32 (the double
+    word's core is not built there; pow and powr at fp32 are the triple word,
+    parcel M3F1's, through build), a name not built (saying whose it is), an
+    integer operand given to pow or powr, and, for pown, rootn and compound
+    (parcel M3G2), n missing or not an int64 (pow_n's)."""
     if fmt.name == "fp32":
-        raise ValueError(f"{name} at fp32 is not built: fp32 is the triple "
-                         f"word, parcel M3F1's")
+        raise ValueError(f"{name} at fp32 is not built on the double word's "
+                         f"core: pow and powr at fp32 are the triple word, "
+                         f"parcel M3F1's (build)")
     built = tuple(_POW_BUILDERS) + tuple(_POW_N_BUILDERS)
     if name not in built:
         raise ValueError(f"{name!r} is not built yet: it is parcel "
@@ -8837,7 +8848,9 @@ def _pow_setup(name, fmt, rnd, G, shift, plant, n=None):
 
 def _build_pow_family(name, fmt, rnd, G, shift, plant, n=None):
     """One of POW_NAMES, built: a Build with its inputs named (("a", "b") = (x,
-    y) for pow and powr), its meta set, its front end (_POW_BUILDERS[name])
+    y) for pow and powr, ("a",) = x for pown, rootn and compound), its meta
+    set, its front end (_POW_BUILDERS[name], or _POW_N_BUILDERS[name]: parcel
+    M3G2's, n a constant, n = 0 and 1 the small fragments with no core)
     called with the input refs, and the Build finished."""
     if name in _POW_N_BUILDERS and n in (0, 1):
         # parcel M3G2: the small fragments have no core and no plant
@@ -10738,11 +10751,12 @@ def fragment(name, fmt: FpFormat, rnd: int, n=None):
     one of INV_NAMES (INV_LIVE_CAP's cap; those not built yet are refused by
     name); any other is refused by name. The fragment is built once and shared.
 
-    One of POW_NAMES is held to its own row, POW_LIVE_CAP's (pow and powr are
-    built, parcel M3G1: fp64, fp128 and fp256; the other three are parcel
-    M3G2's and fp32 is parcel M3F1's, each refused by name). `n` is the integer
-    operand of pown, rootn and compound (M3G2's, refused by name until it sets
-    the key); given to any other name it is a ValueError by name, and it is part
+    One of POW_NAMES is held to its own row, POW_LIVE_CAP's (pow and powr,
+    parcel M3G1, and pown, rootn and compound, parcel M3G2, at fp64, fp128 and
+    fp256; pow and powr at fp32, the triple word, parcel M3F1; pown, rootn and
+    compound at fp32 are parcel M3F2's, refused by name). `n` is the integer
+    operand of pown, rootn and compound, required for them (parcel M3G2's
+    key); given to any other name it is a ValueError by name, and it is part
     of the cache's key."""
     if name not in NAMES and name not in TRIG_NAMES             and name not in INV_NAMES and name not in POW_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "

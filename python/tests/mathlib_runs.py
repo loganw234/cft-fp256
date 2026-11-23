@@ -1388,7 +1388,8 @@ def cmd_pow_pools(a):
     transcend.py: a failure is an unmarked lane that differs in bits or flag
     word, and the pools' marks are counted against the model's.
 
-    MEASURED by parcel M3G1 at full size (`pow-pools`, all defaults), one
+    MEASURED by parcel M3G1 at full size (`pow-pools`, all defaults at its
+    tree, whose --fn was pow and powr: `--fn pow,powr` since M3G2), one
     process, unniced, the desktop shared with other parcels and the GPU round
     (their load not measured): 207.5 s, peak memory 64 MB, RESULT: ok, 0
     findings. The whole pools of pow and powr at the three formats under the
@@ -1411,8 +1412,9 @@ def cmd_pow_pools(a):
     default) the checks are the harness's _tw ones (the model's pool sizes and
     marks pinned: 794 and 823 lanes, 57, 55, 55, 55, 57 and 34, 33, 33, 33,
     34) and a region has 300 lanes (the model's): MEASURED at full size
-    (`pow-pools --fn pow,powr --formats fp32`, one process, unniced, the desktop shared with
-    parcel M3G2 and the GPU round, their load not measured): 271.3 s, peak
+    (`pow-pools --fn pow,powr --formats fp32`, one process, unniced, the
+    desktop shared with parcel M3G2 and the GPU round, their load not
+    measured): 271.3 s, peak
     memory 68 MB, RESULT: ok, 0 findings."""
     P = _pow_harness()
     open_out(a.out)
@@ -1471,7 +1473,8 @@ def cmd_pow_bound(a):
     the study's budget is parcel M3G3's, this is the direct error.
 
     MEASURED by parcel M3G1 at full size (the defaults: 3,000 points a region
-    at fp64, 1,000 at fp128 and fp256, seed 121, rne), one process a format,
+    at fp64, 1,000 at fp128 and fp256, seed 121, rne; --fn pow and powr, the
+    default at its tree: `--fn pow,powr` since M3G2), one process a format,
     unniced, the desktop shared (load not measured), run apart because all
     three together would pass the ten minutes a run may take: `--formats fp64`
     380.5 s, `fp128` 153.2 s, `fp256` 227.1 s, each peak memory 64 to 65 MB,
@@ -1496,8 +1499,8 @@ def cmd_pow_bound(a):
     At --formats fp32 (the triple word, parcel M3F1; pow and powr only, never
     a default) a region has 1,000 points and the check is the harness's
     check_bound_tw (V = V0 + V1 + V2): MEASURED at full size (`pow-bound
-    --fn pow,powr --formats fp32`, one process, unniced, the desktop shared, load not
-    measured): 250.6 s, peak memory 67 MB, RESULT: ok, 0 findings; the largest
+    --fn pow,powr --formats fp32`, one process, unniced, the desktop shared,
+    load not measured): 250.6 s, peak memory 67 MB, RESULT: ok, 0 findings; the largest
     |V - f| / Bv over the regions (sampled lower bounds) is pow 2^-4.68 (zone),
     powr 2^-4.10 (zone); 22 regions measured, and powr's negint and negedge
     (no lane: the function has none) are printed NOT MEASURED, outside the
