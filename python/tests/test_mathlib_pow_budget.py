@@ -677,3 +677,214 @@ def test_every_row_lists_every_check_and_the_assertion_refuses_a_bad_one():
         assert_row("zone_bound_off", real, {"shape", "constants", "budget",
                                             "rate"})
     assert set(P.CHECKS) | {"budget", "rate", "family"} == set(CHECKS12)
+
+
+# =====================================================================
+# the mark-rate law (mathlib_pow_rate): Bernoulli, each lane's own p
+# =====================================================================
+
+def test_the_studys_cells_are_reproduced_and_judged_in_both_statistics():
+    """The model's rate.py on the harness's lanes (600 lanes at fp64, seed 3,
+    G' = 8: shift 36): the study's 3.4 counts exactly (436 of 600 marked,
+    456.6 predicted, z -0.96: rne; 309, 320.3, -0.63: rtz), and the same
+    cell under the statistic marks obey: 312 of the 600 lanes are at p = 1,
+    and the Bernoulli z is -3.00 (rne) and -1.19 (rtz), where the Poisson form
+    said -0.96 and -0.63."""
+    r = PR.model_cell(FP64, "pow", "wide", 600, 3, RNE, 36)
+    assert (r["used"], r["marks"], r["capped"]) == (600, 436, 312)
+    assert abs(r["expected"] - 456.6) < 0.05
+    assert round(r["z_poisson"], 2) == -0.96
+    assert round(r["z_bernoulli"], 2) == -3.00
+    assert r["pmax"] == 1.0 and r["p_one"] == 312
+    r = PR.model_cell(FP64, "pow", "wide", 600, 3, RTZ, 36)
+    assert (r["used"], r["marks"], r["capped"]) == (600, 309, 68)
+    assert abs(r["expected"] - 320.3) < 0.05
+    assert round(r["z_poisson"], 2) == -0.63
+    assert round(r["z_bernoulli"], 2) == -1.19
+    r = PR.model_cell(FP128, "pow", "wide", 300, 3, RNE, 44)
+    assert (r["used"], r["marks"], r["capped"]) == (300, 202, 0)
+    assert round(r["z_poisson"], 2) == -0.97
+    assert round(r["z_bernoulli"], 2) == -1.95
+
+
+def _synthetic(ps, marks, capped=(), marked_capped=True, wrong=(),
+               tool_plant=None):
+    """judge_cell on a cell of our own: len(ps) lanes of the given
+    probabilities, `marks` of them marked, `capped` lanes at the cap."""
+    lanes = list(range(len(ps)))
+    mk = [i < marks for i in lanes]
+    cap = [("c", i) for i in range(capped)]
+    marks_of = {("c", i): marked_capped for i in range(capped)}
+    st = {"shift": 10, "lanes": len(ps) + capped}
+    return PR.judge_cell(FP64, "pow", RNE, "wide", st, list(ps), mk, cap,
+                         marks_of, [], list(wrong), [], [], 1, PR.RATE_ALPHA,
+                         tool_plant)
+
+
+def test_each_leg_of_the_law_fails_alone_on_a_doctored_cell_of_its_own():
+    ps = [0.3] * 200
+    out, st = _synthetic(ps, 60)
+    assert out == [] and st["status"] == "judged"
+    assert abs(st["z"]) < 1e-9 and st["marks"] == 60
+    # law: the count 20 of 60 expected: the exact two-sided tail
+    out, _ = _synthetic(ps, 40)
+    assert {PR.leg_of(f) for f in out} == {"law"}
+    out, _ = _synthetic(ps, 80)
+    assert {PR.leg_of(f) for f in out} == {"law"}
+    # probability: a p over 1 (cap_dropped's)
+    out, _ = _synthetic([0.3] * 199 + [1.4], 60)
+    assert {PR.leg_of(f) for f in out} >= {"probability"}
+    # variance: the Poisson form's, which is not sum p (1 - p)
+    out, st = _synthetic(ps, 60, tool_plant="poisson_variance")
+    assert {PR.leg_of(f) for f in out} == {"variance"}
+    assert abs(st["var"] - 60.0) < 1e-9
+    # cap: a lane at the cap that is not marked; marked it is green
+    out, st = _synthetic(ps, 60, capped=3, marked_capped=False)
+    assert {PR.leg_of(f) for f in out} == {"cap"} and st["status"] == "CAPPED"
+    assert len(st["capped_unmarked"]) == 3
+    out, st = _synthetic(ps, 60, capped=3, marked_capped=True)
+    assert out == [] and st["status"] == "CAPPED"
+    # a cell with lanes at the cap is not judged by the law: 40 of 60 would
+    # flag an uncapped cell and does not here
+    out, st = _synthetic(ps, 40, capped=3, marked_capped=True)
+    assert out == [] and st["status"] == "CAPPED"
+    # wrong: an unmarked lane that differs from transcend.py
+    out, _ = _synthetic(ps, 60, wrong=[(1, 2)])
+    assert {PR.leg_of(f) for f in out} == {"wrong"}
+
+
+def test_the_bernoulli_variance_is_smaller_than_the_poisson_where_p_is_large():
+    ps = [0.9] * 100
+    out, st = _synthetic(ps, 90)
+    assert out == [] and abs(st["var"] - 9.0) < 1e-9       # not 90
+    assert abs(st["z_poisson"]) < 1e-9
+    out, st = _synthetic(ps, 80)
+    assert round(st["z"], 2) == round((80 - 90) / 3.0, 2)
+    assert round(st["z_poisson"], 2) == round((80 - 90) / math.sqrt(90), 2)
+    assert abs(st["z"]) > abs(st["z_poisson"])
+
+
+def test_a_forty_percent_silencing_is_red_at_this_many_lanes():
+    """The exact tail's sensitivity: lanes of the mean p of the study's fp64
+    cell at the rule's shift (0.135) and of fp128's (0.365); a silencing of
+    every mark (mark_silenced) is red at a handful of lanes."""
+    for p in (0.135, 0.365):
+        n40 = PR.lanes_to_see(0.4, p)
+        n100 = PR.lanes_to_see(1.0, p)
+        assert n40 and n100 and n100 < n40 < 2000, (p, n40, n100)
+        law = PR.Law([p] * n40)
+        lo, hi = law.tails(int((1 - 0.4) * n40 * p))
+        assert min(1.0, 2 * min(lo, hi)) < PR.RATE_ALPHA
+        # and the count at a quarter of those lanes is not
+        m = max(2, n40 // 4)
+        law = PR.Law([p] * m)
+        lo, hi = law.tails(int((1 - 0.4) * m * p))
+        assert min(1.0, 2 * min(lo, hi)) >= PR.RATE_ALPHA
+
+
+@functools.lru_cache(maxsize=None)
+def _wide(fmt_name, count):
+    fmt = P.BY_NAME[fmt_name]
+    return tuple(PR.main_lanes(fmt, "pow", "wide", count, 3))
+
+
+def test_the_rule_chooses_the_inflation_and_no_lane_is_at_the_cap():
+    for fmt, count in ((FP64, 300), (FP128, 150)):
+        out, st = PR.run_cell(fmt, "pow", "wide", count, 3, RNE,
+                              lanes=list(_wide(fmt.name, count)))
+        assert out == [] and st["status"] == "judged"
+        assert st["capped"] == 0 and st["pmax"] < PR.MAX_P + 1e-9
+        assert st["expected"] >= PR.MIN_MARKS and st["rule"]
+        assert st["excluded"] == 0 or st["used"] + st["excluded"] == \
+            st["lanes"]
+    assert st["shift"] == 43       # fp128 under rne: p of the largest lane 0.499
+
+
+def test_a_cell_that_cannot_reach_thirty_expected_marks_is_not_measured():
+    """compound's int at fp64 (600 lanes): the rule's largest shift expects 14.7
+    marks (MEASURED, `pow-rate`): NOT MEASURED, no finding, outside the pass
+    count."""
+    out, st = PR.run_cell(FP64, "compound", "int", 120, 3, RNE)
+    assert out == [] and st["status"] == "NOT MEASURED"
+    assert st["expected"] < PR.MIN_MARKS and "marks" not in st
+
+
+def test_a_cell_at_the_cap_is_capped_its_lanes_counted_and_each_marked():
+    """The study's own shift (36) at fp64: 147 of 293 lanes of this sample are
+    at p = 1; they are counted apart, the cell is CAPPED and not judged by the
+    law, and the cap leg holds (each of them is marked)."""
+    out, st = PR.run_cell(FP64, "pow", "wide", 300, 3, RNE, shift=36,
+                          lanes=list(_wide("fp64", 300)))
+    assert out == [] and st["status"] == "CAPPED"
+    assert st["capped"] == 147 and st["capped_unmarked"] == []
+    assert st["used"] == 146 and st["pmax"] < 1.0
+
+
+def test_the_five_attributes_are_two_statistics():
+    lanes = list(_wide("fp128", 150))
+    res = {}
+    for rnd in sf.RND_MODES:
+        _o, st = PR.run_cell(FP128, "pow", "wide", 150, 3, rnd, shift=40,
+                             lanes=lanes)
+        res[rnd] = st["marks"]
+    assert res[sf.RND_RTZ] == res[sf.RND_RDN] == res[sf.RND_RUP]
+    assert res[sf.RND_RNE] == res[sf.RND_RMM]
+    assert res[sf.RND_RNE] > res[sf.RND_RTZ]
+    assert H.rate_statistics(("pow",), (FP128,), sf.RND_MODES) == 2
+
+
+def test_the_tool_plants_of_the_law_are_red_in_their_legs():
+    lanes = list(_wide("fp64", 300))
+    want = {"nominal_bound": {"law"}, "poisson_variance": {"variance"}}
+    for tp, legs in want.items():
+        out, st = PR.run_cell(FP64, "pow", "wide", 300, 3, RNE,
+                              tool_plant=tp, lanes=lanes)
+        assert {PR.leg_of(f) for f in out} == legs, (tp, out)
+    # nominal_bound is green at fp128, where Bv has no |t| and |Y k| terms
+    out, _ = PR.run_cell(FP128, "pow", "wide", 150, 3, RNE,
+                         tool_plant="nominal_bound",
+                         lanes=list(_wide("fp128", 150)))
+    assert out == []
+    # cap_dropped: red where 2 Bv / s is over 1 (the study's shift at fp64)
+    out, st = PR.run_cell(FP64, "pow", "wide", 300, 3, RNE, shift=36,
+                          tool_plant="cap_dropped", lanes=lanes)
+    assert {PR.leg_of(f) for f in out} >= {"probability"}
+    assert st["pmax"] > 2
+    with pytest.raises(ValueError, match="unknown tool plant 'nope'"):
+        PR.run_cell(FP64, "pow", "wide", 10, 3, RNE, tool_plant="nope")
+
+
+@pytest.mark.parametrize("plant,fmt,count,red", [
+    ("mark_silenced", FP64, 300, True), ("bound_loose", FP64, 300, True),
+    ("bound_tight", FP64, 300, True), ("zone_bound_off", FP64, 300, False),
+    ("mark_silenced", FP128, 150, True), ("bound_loose", FP128, 150, True)])
+def test_the_fragment_plants_that_turn_the_law_red(plant, fmt, count, red):
+    out, st = PR.run_cell(fmt, "pow", "wide", count, 3, RNE, plant=plant,
+                          lanes=list(_wide(fmt.name, count)))
+    if red:
+        assert {PR.leg_of(f) for f in out} == {"law"}, (plant, out)
+        assert st["marks"] == 0 and st["expected"] > 30
+    else:
+        assert out == []
+
+
+def test_pow_rate_quick_and_a_doctored_job_exits_non_zero(capsys, monkeypatch):
+    rc, out = _run(["pow-rate", "--quick", "--fn", "pow", "--attrs", "rne",
+                    "--n", "150"],
+                   capsys)
+    assert rc == 0 and "pow-rate pow fp128 rne wide seed 3: judged" in out
+    assert "1 cells judged (the pass count), 0 CAPPED and 0 NOT MEASURED" in out
+    real = PR.judge_cell
+
+    def doctored(*a, **k):
+        o, st = real(*a, **k)
+        return o + ["rate: a doctored finding"], st
+    monkeypatch.setattr(PR, "judge_cell", doctored)
+    rc, out = _run(["pow-rate", "--quick", "--fn", "pow", "--attrs", "rne",
+                    "--n", "150"],
+                   capsys)
+    assert rc == 1 and "RESULT: 1 findings" in out
+    monkeypatch.undo()
+    rc, out = _run(["pow-rate", "--quick", "--fn", "compound", "--attrs",
+                    "rne", "--regions", "int", "--n", "30"], capsys)
+    assert rc == 0 and "NOT MEASURED" in out
