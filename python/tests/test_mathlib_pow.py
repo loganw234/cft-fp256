@@ -552,11 +552,13 @@ def test_bound(fmt, fn):
         assert len(xs) == 48
         out, (w, m, n) = P.check_bound(b, xs, region)
         assert out == [] and n == 48, (region, out)
-        worst, lanes, main = max(worst, w), lanes + n, main + m
         if region in P.BOUND_NO_MAIN:
-            assert m == 0 and w < -1e8          # nothing measured, and said
-        else:
-            assert m >= 40, (region, m)
+            # nothing measured: kept out of the tally (the run's own line says
+            # NOT MEASURED: test_the_pow_commands_...)
+            assert m == 0 and w < -1e8
+            continue
+        assert m >= 40, (region, m)
+        worst, lanes, main = max(worst, w), lanes + n, main + m
     # the largest is a SAMPLED lower bound (48 points a region, seed 11): the
     # direct error is under 1 Bv with room (MEASURED: 2^-4.5 to 2^-3.9; the
     # floor is the loose side of the in-lane bound)
@@ -630,9 +632,47 @@ def test_constants_as_a_program():
     r = _run_module("--only", "pow")           # the listing, not the check
     assert r.returncode == 0, r.stderr
     rows = [ln for ln in r.stdout.splitlines() if ln.startswith("pow")]
-    assert len(rows) == 2 * 3 * 5 and all(
-        ln.split()[-1] == str(ml.POW_LIVE_CAP[ln.split()[0]][ln.split()[1]])
-        for ln in rows)
+    assert len(rows) == 2 * 3 * 5
+    assert _check_listing(rows) == []
+    assert r.stdout.splitlines()[0].split()[-3:] == ["words", "live", "cap"]
+    # shown red where a column is doctored: the live column one more and one
+    # fewer, the cap column, the instruction count
+    for i, fix in ((0, lambda p: p[:-2] + [str(int(p[-2]) + 1), p[-1]]),
+                   (3, lambda p: p[:-2] + [str(int(p[-2]) - 1), p[-1]]),
+                   (7, lambda p: p[:-1] + [str(int(p[-1]) + 1)]),
+                   (11, lambda p: p[:3] + [str(int(p[3]) + 1)] + p[4:])):
+        bad = list(rows)
+        bad[i] = " ".join(fix(bad[i].split()))
+        found = _check_listing(bad)
+        assert len(found) >= 1 and all(s.startswith("listing: ")
+                                       for s in found), (i, found)
+    # live past the cap is its own finding (pow fp64 rne: 31 against 30)
+    p = rows[0].split()
+    over = [" ".join(p[:-2] + [str(int(p[-2]) + 1), p[-1]])] + rows[1:]
+    assert any("live past its cap" in s for s in _check_listing(over))
+
+
+def _check_listing(rows):
+    """[finding]: listing. Each row of `--only pow`'s listing (routine, format,
+    attribute, instructions, words, live, cap) against the fragment itself: the
+    instructions, words and live columns the fragment's own counts, the cap
+    column POW_LIVE_CAP's (a table's, which the listing prints), and live not
+    past the cap."""
+    out = []
+    names = {sf.RND_NAMES[r]: r for r in RND}
+    for ln in rows:
+        fn, fm, rn, ins, wds, live, cap = ln.split()
+        f = fragment_of(fn, BY_NAME[fm], names[rn])
+        if (int(ins), int(wds), int(live)) != (len(f), len(f.words),
+                                               f.live_max()):
+            out.append(f"listing: {ln!r}: the fragment has {len(f)}, "
+                       f"{len(f.words)}, {f.live_max()}")
+        if int(cap) != ml.POW_LIVE_CAP[fn][fm]:
+            out.append(f"listing: {ln!r}: the cap is "
+                       f"{ml.POW_LIVE_CAP[fn][fm]}")
+        if int(live) > int(cap):
+            out.append(f"listing: {ln!r}: live past its cap")
+    return out
 
 
 def test_check_prints_pow_lines_only_under_only_and_exits_1_on_a_difference(
@@ -1514,8 +1554,11 @@ def test_the_pow_commands_run_at_small_sizes_and_refuse_an_existing_out(
     shown = capsys.readouterr().out
     assert "pow-bound pow fp64 rne wide seed 121: 12 lanes" in shown
     assert "a sampled lower bound" in shown and "RESULT: ok" in shown
-    assert "pow-bound pow fp64 rne hugey" in shown \
-        and "no main-path lane: the screens answer them all" in shown
+    assert "pow-bound pow fp64 rne hugey seed 129: NOT MEASURED (0 " \
+        "main-path lanes of 12" in shown
+    assert "11 regions measured (the pass count), 1 NOT MEASURED (0 " \
+        "main-path lanes), outside it" in shown        # pow has 12 regions
+    assert "pow-bound pow fp64 rne wide seed 121: 12 lanes" in shown
     with pytest.raises(SystemExit, match="the file exists"):
         R.main(["pow-bound", "--quick", "--out", str(out2)])
     R.OUT = None

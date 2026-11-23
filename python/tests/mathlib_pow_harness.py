@@ -1160,8 +1160,11 @@ def bound_log2(b, lane, signed=True):
 
 # the regions in which no lane reaches the main path (every lane is a special
 # row or a screened one: |y| from 2^p up makes |t| huge, so the screens answer
-# it): the bound check measures nothing there and says so, rather than count
-# a measured 0 as a pass
+# it): check_bound is not asked to find a main-path lane there, and returns 0
+# main-path lanes for it (at 48 points; a larger sample may reach a few). It
+# does not say NOT MEASURED itself: a CALLER does (mathlib_runs.py's pow-bound
+# prints a line naming the region NOT MEASURED, 0 main-path lanes, and keeps it
+# out of its tally), and a caller keeps such a region out of any pass count
 BOUND_NO_MAIN = {"hugey"}
 
 

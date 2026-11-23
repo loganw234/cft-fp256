@@ -1374,6 +1374,7 @@ def cmd_pow_bound(a):
     fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
                         [f.name for f in P.FORMATS])
     rnds = attrs_of(a.attrs) if a.attrs else [P.RNE]
+    measured = unmeasured = 0
     for fmt in fmts:
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
         for fn in fns:
@@ -1386,13 +1387,24 @@ def cmd_pow_bound(a):
                     out, (worst, main, total) = P.check_bound(
                         b, lanes, f"{region} seed {a.seed + k}")
                     note(out)
-                    where = ("no main-path lane: the screens answer them all"
-                             if not main else
-                             f"largest |V - f| / Bv = 2^{worst:+.2f} (a "
-                             f"sampled lower bound)")
+                    if not main:
+                        # a region with no lane on the main path measured
+                        # nothing: it is named, and is outside the pass count
+                        unmeasured += 1
+                        say(f"pow-bound {fn} {fmt.name} "
+                            f"{sf.RND_NAMES[rnd]} {region} seed "
+                            f"{a.seed + k}: NOT MEASURED (0 main-path lanes "
+                            f"of {total}: the screens or the special rows "
+                            f"answer them all), {len(out)} findings")
+                        continue
+                    measured += 1
                     say(f"pow-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
                         f"{region} seed {a.seed + k}: {total} lanes, "
-                        f"{main} main-path, {where}, {len(out)} findings")
+                        f"{main} main-path, largest |V - f| / Bv = "
+                        f"2^{worst:+.2f} (a sampled lower bound), "
+                        f"{len(out)} findings")
+    say(f"pow-bound: {measured} regions measured (the pass count), "
+        f"{unmeasured} NOT MEASURED (0 main-path lanes), outside it")
     say(f"pow-bound: {_memory_line()}")
 
 

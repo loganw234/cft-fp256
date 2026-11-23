@@ -7704,13 +7704,16 @@ _POW_PARCEL = {"pow": "M3G1", "powr": "M3G1", "pown": "M3G2",
 
 # Faults, for the tests: build("pow", fmt, rnd, plant=name) and
 # build_pow_core(fmt, plant=name). {name: what it is}. The study's table is
-# docs/studies/m3/plants.py's (section 8); the last five are this parcel's own
-# (a fault each of the constants' check, of seq's, and of the shape). A plant
+# docs/studies/m3/plants.py's (section 8); the last six are this parcel's own
+# (a fault each of the constants' check, of seq's, and of the shape, and
+# log_short, which the study lists with its budget plants and which the direct
+# bound sees). A plant
 # the build never reaches (a fault of powr's in pow) is refused by name,
 # _check_pow_plant_fired. The harness (python/tests/mathlib_pow_harness.py) and
 # test_mathlib_pow.py's PLANTED say which check each is red in. M3G2 assigns its
-# own keys at its anchor, below; the budget's three (bound_tight, zone_bound_off,
-# log_short) are parcel M3G3's.
+# own keys at its anchor, below; the budget's two (bound_tight, zone_bound_off)
+# are parcel M3G3's: they are red in the first-order budget alone. log_short is
+# in this table and tested here.
 POW_PLANTS = {
     "exact_unmarked": "the RNE/RMM 'may be exact' test removed: an exact "
                       "representable result is left to the enclosure",
