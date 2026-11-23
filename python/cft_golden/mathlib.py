@@ -10763,6 +10763,11 @@ def fragment(name, fmt: FpFormat, rnd: int, n=None):
         raise ValueError(f"{name!r} is not a math-library routine built "
                          f"so far: "
                          f"{', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS) + tuple(_POW_N_BUILDERS))}")
+    if name in POW_INT_NAMES and n is not None:
+        # checked before the cache (the lead, wave 2's merge): the cache is a
+        # dict, which takes True and 1.0 for 1, so a bool or float n found
+        # the n = 1 fragment and was never refused
+        n = pow_n(name, n)
     key = (name, fmt, rnd, n)
     if key not in _CACHE:
         f = build(name, fmt, rnd, n=n).fragment()

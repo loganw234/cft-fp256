@@ -29139,3 +29139,19 @@ VM3W2R found the rest of the lead's work as described:
 - the hand resolutions each a union of the two parcels' sides, the merged VALIDATION the base plus the two branches' blocks;
 - the rewrite's code token for token unchanged; the seven public names; the probes of every rewritten refusal;
 - the default `--check` byte for byte main's; `--only pow-n` and `--only pow-tw` their parcels'; 7,836 tests collected.
+
+**Wave 2's box gate at 40824407** (box/gate-m3w2, 2026-11-23 14:19 to 16:08) failed in golden: 2 failed, 7,831 passed, 3 skipped, in 6,287.56 s (wave 1's gate: 5,955 s).
+- The pow family's four runs beside it were all RESULT ok:
+  - pow-pools and pow-bound at the merged default (the five names at fp64 to fp256), 956 s and 1,757 s;
+  - both with `--fn pow,powr --formats fp32`, 274 s and 286 s.
+- docs, generated and seq passed.
+- One failure is VM3W2R's (a), above.
+- **The other was new: test_mathlib_pow_n.py's `test_pow_n_refuses_by_name[True-n = True is not an integer]`,** "DID NOT RAISE" at `fragment("compound", FP128, RNE, n=True)`.
+  - `fragment`'s cache is a dict keyed (name, fmt, rnd, n), and a dict takes True and 1.0 for 1: equal, with the same hash.
+  - `build`, which checks n through `pow_n`, runs only on a miss. So once an earlier test had cached compound's n = 1 fragment at fp128, n = True returned it unrefused.
+  - The golden stage runs every test in one process. Run alone, the file starts with an empty cache and passed, at M3G2's runs, at both of VM3G2's passes and at VM3W2R's.
+  - **The fix, the lead's:** `fragment` checks n by `pow_n` before the cache, for pown, rootn and compound alone. A valid int n is unchanged.
+  - **A new test**, `test_a_bool_or_float_n_is_refused_after_n_1_is_cached`, caches n = 1 first, then requires True and 1.0 refused for the three, so the order of the files cannot decide it. MEASURED by the lead:
+    - red on 351e9db1's code with only the test added (DID NOT RAISE, 1 failed in 2.09 s);
+    - green with the fix, beside `test_pow_n_refuses_by_name` (6 passed in 1.46 s).
+  - The defect was M3G2's n key, which no run could show until the files ran in one process. The re-gate at the fixed tip is the proof of the stage.

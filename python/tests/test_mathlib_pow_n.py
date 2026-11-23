@@ -926,3 +926,18 @@ def test_pow_and_powr_are_untouched_by_the_integer_operand():
             for rnd in RND:
                 got = ml.dag_digest(P.fragment_of(fn, fmt, rnd))[:32]
                 assert got == T.DIGESTS[f"{fn}/{fmt.name}/{rid(rnd)}"]
+
+
+def test_a_bool_or_float_n_is_refused_after_n_1_is_cached():
+    # the lead, wave 2's merge: the golden stage on the box found
+    # test_pow_n_refuses_by_name red for compound at fp128, because an earlier
+    # test had cached compound's n = 1 fragment and the cache, a dict, takes
+    # True and 1.0 for 1. This test caches n = 1 first, so the order of the
+    # files does not decide it
+    for name in ("pown", "rootn", "compound"):
+        f1 = ml.fragment(name, FP128, RNE, n=1)
+        for bad, match in ((True, "n = True is not an integer"),
+                           (1.0, "n = 1.0 is not an integer")):
+            with pytest.raises(ValueError, match=match):
+                ml.fragment(name, FP128, RNE, n=bad)
+        assert ml.fragment(name, FP128, RNE, n=1) is f1
