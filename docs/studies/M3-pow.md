@@ -12,6 +12,36 @@ build. This file, the model under `docs/studies/m3/`, this file's row in
 docs/README.md with the counts it and docs/VERIFICATION.md state, and its
 VALIDATION entry are the only changes the study made.
 
+**2026-11-23, parcel M3G1 (M3's build, wave 1): the core, pow and powr are
+built** in `python/cft_golden/mathlib.py` (the section "pow and powr"), at
+fp64, fp128 and fp256, under all five attributes: `pow_core`, `plan_pow`,
+`build_pow_core`, `POW_NAMES`, `POW_LIVE_CAP`, `POW_PLANTS` (23) and
+`check_pow_constants` (`--check --only pow`). The construction is section
+2's model (`docs/studies/m3/m3pow.py`) ported instruction for instruction and
+in its order, and is held to it at the 30 configurations (VALIDATION, the
+entry of the same date). pown, rootn and compound are parcel M3G2's; fp32,
+the triple word, parcel M3F1's; the budget, the rate law, the families and
+the exact-case rule against golden's own, parcel M3G3's; cftc, the language
+and the card, later parcels'. What differs from this study, in the order a
+reader of its section 2 would meet it:
+- the study's "the sum is exactly sign |X|^Y" is, in the code, V = V_h + V_l =
+  sign |X|^Y 2^-s in the scaled domain (s = floor(n/8), n the value of the
+  probe `nf`), the two multiplications by 2^k1 and 2^k2 coming after V; the
+  bound Bv is relative to |V_h|, as the study has it;
+- `pow_core` takes `up` as a ref or as a function that makes it, called where
+  the rule beside 1 is built, so that the body is emitted in the model's
+  order; the front end for pown and rootn may pass either;
+- `log_short`, one of the study's three budget plants, is in the table: the
+  direct bound sees it at fp128 and fp256 over the region `rhoedge` (3.6, item
+  8), and not at fp64, where B1 and B2 carry the shortfall;
+- the names are public attributes of mathlib and are not in `__all__`:
+  test_mathlib_inv_asin.py:142 pins `tuple(__all__)` to M4G1's base (the
+  lead's word, 2026-11-23);
+- three statements of the study about the tree hold and are noted: "mathlib's
+  `evaluate` already takes a tuple" is M4G1's change and holds; "pow and powr
+  are the second and third routines of two inputs" holds after atan2; and
+  section 6's "MATH holds the thirteen" is the language's, untouched here.
+
 M4's study (docs/studies/M4-invtrig.md) is its nearest model of form,
 section for section, and M1's design (docs/studies/M1-exp-log.md) is its
 foundation: pow is built from M1's logarithm and M1's exponential. Where

@@ -209,6 +209,24 @@ and Logan's answers of 2026-10-23 (docs/ROADMAP.md, "Logan's answers on M4's
 study"); the construction below IS the study's model (docs/studies/m4/
 m4inv.py), ported, and nothing here imports it. A change to a public name is
 the lead's to approve.
+
+pow and powr (parcel M3G1, M3's build, wave 1) are beside all of these:
+POW_NAMES = ("pow", "powr", "pown", "rootn", "compound") is a fourth tuple, and
+NAMES, TRIG_NAMES and INV_NAMES stay as they were. Every function is sign 2^t,
+t = Y log2 |X|, carried as a double word at fp64, fp128 and fp256 on ONE core,
+pow_core (M1's log2 planned at a larger guard GL, the product, M1's exp2 with a
+double-word argument, the exact power of two, the rule beside 1 and the
+screens); parcel M3G1 builds the core, pow and powr, parcel M3G2 pown, rootn and
+compound on the same core at its anchor, parcel M3F1 the triple word at fp32 at
+the second. The public names are POW_NAMES, POW_FORMATS, POW_LIVE_CAP,
+POW_PLANTS, plan_pow, pow_core, build_pow_core and check_pow_constants
+(`--check --only pow`), and the `n` of build() and fragment(). They are public
+module attributes and NOT in `__all__`: test_mathlib_inv_asin.py:142 pins
+`tuple(__all__)` to M4G1's base, as M4F1's names are not (test_mathlib_inv_tw.py
+:118). A lane of pow or powr is a tuple (x, y) in the build's inputs' order.
+The design is docs/studies/M3-pow.md and Logan's answers of 2026-11-19
+(docs/ROADMAP.md, "Logan's answers on M3's study"); the construction IS the
+study's model (docs/studies/m3/m3pow.py), ported, and nothing here imports it.
 """
 
 import argparse
@@ -259,6 +277,11 @@ TRIG_NAMES = ("sin", "cos", "tan")     # the radian routines (parcel M2G2a)
 # acos, M4G3 atan2): beside NAMES and TRIG_NAMES, not in them, for the same
 # reason as TRIG_NAMES
 INV_NAMES = ("atan", "asin", "acos", "atan2")
+# the pow family (parcel M3G1 builds the core, pow and powr; M3G2 pown, rootn
+# and compound): beside NAMES, TRIG_NAMES and INV_NAMES, not in them, for the
+# same reason. POW_FORMATS and the rest of its interface are in the section
+# "pow and powr" below
+POW_NAMES = ("pow", "powr", "pown", "rootn", "compound")
 FORMATS = (FP32, FP64, FP128, FP256)
 RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
@@ -1202,7 +1225,14 @@ def schedule_order(f, phases):
     25, 25 and 31 values live for atan, asin, acos and atan2, where the
     design's order keeps 26, 26, 26 and 33 (atan2's 33 does not fit the 32
     registers: routines.program places it nowhere) and the ranked order 38,
-    37, 36 and 51 (MEASURED)."""
+    37, 36 and 51 (MEASURED).
+
+    pow and powr (parcel M3G1) add no phase: PHASE_ORDER holds every phase
+    their builds use, and nothing here changed. They take the depth-first
+    order, the lowest of the three: 30 values live for pow and 23, 22 and 22
+    for powr at fp64, fp128 and fp256 under rne (the ranked order keeps 34, 32,
+    32 and 26, 24, 24, the design's 40, 39, 39 and 37, 36, 36: MEASURED at the
+    commit of parcel M3G1's entry)."""
     best = None
     for order in (_ranked_order(f, phases), _dfs_order(f),
                   list(range(len(f.body)))):
@@ -2734,7 +2764,7 @@ def _build_log_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
 
 
 def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
-          plant=None) -> Build:
+          plant=None, n=None) -> Build:
     """`name` (one of NAMES, or of TRIG_NAMES) at `fmt` under the program's
     attribute `rnd`, instrumented (Build.fragment() is the routine). `guard`
     overrides the guard G (GUARD's, by default); `bound_shift` makes the
@@ -2763,6 +2793,24 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
                index's magic-number FMA, ("index", its value), which M4G4's
                budget freezes
     A lane is an encoding, or for atan2 a tuple (y, x) in Build.inputs' order.
+
+    pow and powr (parcel M3G1; POW_NAMES) are the double word at fp64, fp128 and
+    fp256: sign 2^t, t = Y log2 |X| (the section "pow and powr"). A lane is a
+    tuple (x, y) in Build.inputs' order, ("a", "b"). pown, rootn and compound
+    are parcel M3G2's and any of the five at fp32 parcel M3F1's: each is refused
+    by name, saying whose it is. `n` is the integer operand of the three that
+    take one: given to pow, powr or any other name it is a ValueError by name
+    ("pow takes no integer operand"). `plant` is one of POW_PLANTS (a fault
+    the build cannot reach is refused by name); `guard` and `bound_shift` as
+    above. The Build keeps:
+      probes   Vh, Vl, Bv, R, R1, R2, mk, th0, th, tl, ex, tinyt, FIN, r, Lh,
+               Ll, tq, rp, rh, nrl (pow_core's)
+      phases   every instruction's, Build.phase_of: classify, front, reduce,
+               table, tail, head, head2, Z, lookup, scale, recon, final,
+               fixed-grid, special
+      meta     fn, G, GL, GE, KL, DL, KE, DE, B1, B2 (Fractions: plan_pow's),
+               n (None), N, OFF, shift, plant, family ("double word"), the
+               Fast2Sum and TwoSum counts
 
     sin, cos and tan at fp32 (parcel M2F2; Logan, 2026-10-27) are the TRIPLE
     word at G = 40: V = V0 + V1 + V2, built by _build_trig_tw on parcel M2F1's
@@ -2793,6 +2841,11 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
                reduction_mid
     A plant that cannot act at that function or format is refused by name
     ("does not apply")."""
+    if n is not None and name not in POW_NAMES:
+        raise ValueError(f"{name} takes no integer operand (n = {n!r})")
+    if name in POW_NAMES:
+        G = _pow_args(name, fmt, rnd, plant, guard, n)
+        return _build_pow_family(name, fmt, rnd, G, bound_shift, plant, n)
     if name in INV_NAMES:
         G = _inv_args(name, fmt, rnd, plant, guard)
         if fmt.name == "fp32":
@@ -2822,7 +2875,7 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
         return _build_trig(name, fmt, rnd, G, bound_shift, plant)
     if name not in NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built so "
-                         f"far: {', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS))}")
+                         f"far: {', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS))}")
     if fmt not in FORMATS:
         raise ValueError(f"{fmt!r} is not one of the four formats")
     if rnd not in sf.RND_NAMES:
@@ -7603,6 +7656,1282 @@ def _check_inv_tw_constants(builder=None, attrs=sf.RND_MODES, names=None):
 
 
 
+# ---- pow and powr: the core of the pow family (parcel M3G1) -------------------
+#
+# M3's design is docs/studies/M3-pow.md and Logan's answers of 2026-11-19
+# (docs/ROADMAP.md, "Logan's answers on M3's study"). Every function of the
+# family is
+#
+#     result = sign 2^t,    t = Y log2 |X|,
+#
+# carried as a double word at fp64, fp128 and fp256: the logarithm is M1's log2
+# (_log_reduce, _table, the polynomial, 1/ln 2 in two words) planned at a larger
+# guard GL, t = Y L is TwoProd and two FMAs, and 2^t is M1's exp2 with a
+# double-word argument (_table, _scale, the polynomial). pow and powr differ
+# from each other only in the sign, the integrality of y and their tables of
+# specials. This parcel builds the one core (pow_core) and with it pow and powr,
+# the first two whole functions; parcel M3G2 (pown, rootn, compound) builds its
+# front ends on the same core at the anchor below, parcel M3F1 (fp32, the triple
+# word) its own section at the second. The construction IS the study's model
+# (docs/studies/m3/m3pow.py :239 to :730), ported instruction for instruction
+# and in its order; nothing here imports it, and the port is held to it in the
+# parcel's VALIDATION entry.
+#
+# No phase is new: PHASE_ORDER holds every phase the model uses.
+
+# the pow family's formats: fp32 is the triple word, parcel M3F1's
+POW_FORMATS = (FP64, FP128, FP256)
+
+# The most values a pow-family routine may keep live at once, by function and
+# format (the plan's values; the study's 5.1): pow 30; powr 23 at fp64, 22 at
+# fp128 and fp256; pown 21, rootn 19, compound 22. One row each: invariants()
+# holds a pow-family fragment to its own row and falls back to no other. A dict
+# of its own, as M4 kept INV_LIVE_CAP's before M4C moved the rows to
+# routines.py: routines.LIVE_CAP names exactly the fifteen routines cftc knows,
+# and parcel M3C moves these.
+POW_LIVE_CAP = {
+    "pow": {"fp64": 30, "fp128": 30, "fp256": 30},
+    "powr": {"fp64": 23, "fp128": 22, "fp256": 22},
+    "pown": {"fp64": 21, "fp128": 21, "fp256": 21},
+    "rootn": {"fp64": 19, "fp128": 19, "fp256": 19},
+    "compound": {"fp64": 22, "fp128": 22, "fp256": 22},
+}
+
+# who builds what: a name of POW_NAMES not in _POW_BUILDERS is refused by name,
+# saying whose it is
+_POW_PARCEL = {"pow": "M3G1", "powr": "M3G1", "pown": "M3G2",
+               "rootn": "M3G2", "compound": "M3G2"}
+
+# Faults, for the tests: build("pow", fmt, rnd, plant=name) and
+# build_pow_core(fmt, plant=name). {name: what it is}. The study's table is
+# docs/studies/m3/plants.py's (section 8); the last six are this parcel's own
+# (a fault each of the constants' check, of seq's, and of the shape, and
+# log_short, which the study lists with its budget plants and which the direct
+# bound sees). A plant
+# the build never reaches (a fault of powr's in pow) is refused by name,
+# _check_pow_plant_fired. The harness (python/tests/mathlib_pow_harness.py) and
+# test_mathlib_pow.py's PLANTED say which check each is red in. M3G2 assigns its
+# own keys at its anchor, below; the budget's two (bound_tight, zone_bound_off)
+# are parcel M3G3's: they are red in the first-order budget alone. log_short is
+# in this table and tested here.
+POW_PLANTS = {
+    "exact_unmarked": "the RNE/RMM 'may be exact' test removed: an exact "
+                      "representable result is left to the enclosure",
+    "exact_rule_off": "the in-lane power-of-two rule removed: 2^n and "
+                      "x = 2^E lanes are left to the test",
+    "exact_rule_no_tl": "the power-of-two rule without t_l = 0, as rootn's: "
+                        "pow wrongly calls 2^(k + f) exact",
+    "midpoint_unmarked": "the fixed grid's midpoint test dropped (redundant "
+                         "by design: equal to the control)",
+    "pow_zero_nan": "pow(qNaN, +-0) answered NaN, not 1",
+    "pow_one_nan": "pow(1, qNaN) answered NaN, not 1",
+    "sign_even": "the parity of y read from the wrong bit: an even y taken "
+                 "as odd",
+    "integrality_wide": "the first design: MAGIC's band for y's integrality "
+                        "taken up to 2^(p-1), not 2^(p-2)",
+    "sign_odd_lost": "an odd y's sign dropped (the result's sign forced +)",
+    "powr_neg_ok": "powr's x < 0 row removed (negative x goes to the core)",
+    "powr_zero_zero": "powr(0, 0) answered 1, not invalid",
+    "near_one_gate_off": "the inseparable-from-1 gate removed: lanes with "
+                         "|t| below 2^-(p+3) left to the test",
+    "side_rule_off": "the first design: beside 1 the mark is cleared and V's "
+                     "own rounding answers, t_h having underflowed for a "
+                     "subnormal y",
+    "screen_low": "the overflow screen at emax + 1, not emax + 2",
+    "mark_silenced": "the mark never set in the flag word",
+    "bound_loose": "the in-lane bound 2^40 times too small (M1's plant): a "
+                   "midpoint is decided by V's side",
+    "zero_sign_lost": "the first design: a negative result rounding to zero "
+                      "on the subnormal grid answered +0",
+    # this parcel's own
+    "log_table_entry": "the logarithm's table entry log(16/11), the high "
+                       "word one ulp off (M1's table_entry)",
+    "il2h_ulp": "1/ln 2's high word one ulp off (M1's il2h_ulp)",
+    "screen_ulp": "the overflow screen's word one ulp below emax + 2",
+    "y_one_loud": "the y = 1 row's flag word left inexact: x itself "
+                  "answered with a flag raised",
+    "two_sum_all": "every Fast2Sum built as a TwoSum: the same values, 3 more "
+                   "instructions each (a fault of the shape alone)",
+    "log_short": "the logarithm planned at G, not GL (the study's 3.6, item "
+                 "8; the one of its three budget plants that the direct "
+                 "bound sees: red over the region rhoedge at fp128 and "
+                 "fp256, where GL is what holds the bound)",
+}
+# the plants whose fault is in the constants M1's generators derive
+_POW_CONST_PLANT = {"log_table_entry": "table_entry", "il2h_ulp": "il2h_ulp"}
+
+
+def _pow_t_reach(fmt):
+    """T_f: the largest |t| the main path sees: the screens answer t_h >=
+    emax + 2 and t_h <= emin - p - 2, so |t| < max(emax + 2, p - emin + 2)."""
+    return max(fmt.emax + 2, fmt.prec - fmt.emin + 2)
+
+
+def plan_pow(fmt: FpFormat, G=None) -> types.SimpleNamespace:
+    """The pow family's plan at `fmt` (fp64, fp128 or fp256; anything else is
+    refused by name): SimpleNamespace(G, GL, GE, KL, DL, KE, DE, B1, B2).
+    G is the in-lane guard (GUARD's unless given); GL the logarithm's guard,
+    G + ceil(log2 T_f) + 2 where plan_log accepts it (T_f = max(emax + 2,
+    p - emin + 2), the largest |t| the main path sees), else the largest GL
+    below it that plan_log accepts (its double-word floor 12 u^2), stepped
+    down one at a time; GE = G + 2 the exponential's; (KL, DL) = plan_log(GL)
+    and (KE, DE) = plan_exp(GE); B1 and B2 the bound's coefficients of |t_h| and
+    |Y_h k|, exact Fractions: 2^-(2p-6) and 2^-(2p-5) where GL fell short of its
+    target (fp64: 2^-100 and 2^-101), both 0 where it reached it (fp128 and
+    fp256). A ValueError names the proof if GL falls to G and plan_log refuses
+    G itself."""
+    if fmt not in POW_FORMATS:
+        raise ValueError(f"plan_pow: {fmt.name} is not one of "
+                         f"{', '.join(f.name for f in POW_FORMATS)}"
+                         + (" (fp32 is the triple word, parcel M3F1's)"
+                            if fmt.name == "fp32" else ""))
+    p = fmt.prec
+    G = GUARD[fmt.name] if G is None else G
+    extra = (_pow_t_reach(fmt) - 1).bit_length()       # ceil(log2 T_f)
+    want = G + extra + 2
+    GL = want
+    while GL > G:
+        try:
+            plan_log(fmt, GL)
+            break
+        except ValueError:
+            GL -= 1
+    if GL == G:
+        try:
+            plan_log(fmt, G)
+        except ValueError as e:
+            raise ValueError(
+                f"plan_pow: the logarithm cannot be planned at {fmt.name} "
+                f"even at G = {G}, where the in-lane bound needs it (target "
+                f"GL = {want}): {e}")
+    GE = G + 2
+    KL, DL = plan_log(fmt, GL)
+    KE, DE = plan_exp(fmt, GE)
+    short = GL != want
+    B1 = Fraction(1, 2 ** (2 * p - 6)) if short else Fraction(0)
+    B2 = Fraction(1, 2 ** (2 * p - 5)) if short else Fraction(0)
+    return types.SimpleNamespace(G=G, GL=GL, GE=GE, KL=KL, DL=DL, KE=KE,
+                                 DE=DE, B1=B1, B2=B2)
+
+
+@functools.lru_cache(maxsize=None)
+def _pow_constants(fmt, GL, KL, DL, GE, KE, DE, cplant):
+    """(log constants at GL, exp2's at GE): M1's generators, called as the
+    study's model calls them (shift 0), the logarithm's under `cplant`, a plant
+    of _log_constants (table_entry, il2h_ulp) or None."""
+    return (_log_constants("log2", fmt, GL, KL, DL, 0, cplant),
+            _dw_constants("exp2", fmt, GE, KE, DE, 0, None))
+
+
+def _pow_words(b: Build):
+    """_words_common(b) with every word a ROLE: its `ib` registers the role it
+    is named for (or I<v> for an unnamed integer), so that M1's helpers, which
+    take `ib` from the namespace, give the constants' check every word of the
+    fragment to hold to account. Returns the namespace."""
+    fmt = b.fmt
+    k_ = _words_common(b)
+    full = (1 << fmt.width) - 1
+
+    def ib(v, name=None):
+        v &= full
+        return b.const(name or f"I{v}", v)
+    k_["ib"] = ib
+    mw = fmt.man_w
+    for role, bits in (("ZERO", 0), ("ONE", sf.one_bits(fmt)),
+                       ("INT1", 1), ("ABSM", full ^ fmt.sign_mask),
+                       ("INF", sf.inf_bits(fmt)),
+                       ("QBIT", 1 << (mw - 1)), ("QNAN", sf.qnan_bits(fmt)),
+                       ("FL_INEXACT", sf.FLAG_INEXACT),
+                       ("FL_UNDER_INEXACT",
+                        sf.FLAG_INEXACT | sf.FLAG_UNDERFLOW),
+                       ("FL_OVER_INEXACT",
+                        sf.FLAG_OVERFLOW | sf.FLAG_INEXACT),
+                       ("FL_INVALID", sf.FLAG_INVALID),
+                       ("FL_MARK", MARK)):
+        b.const(role, bits)
+    return k_
+
+
+def _pow_classify_y(b: Build, k_, name="b"):
+    """NaN, signalling NaN, infinity, zero, the sign bit and |v| of the input
+    `name`, as _classify_common does for x (that one is "a"). Returns a
+    namespace; x is the input's ref."""
+    fmt = b.fmt
+    ib, ZERO, INF = k_["ib"], k_["ZERO"], k_["INF"]
+    v = ("in", name)
+    c = types.SimpleNamespace(x=v)
+    c.ax = b.iand(v, k_["ABSM"])
+    c.isnan = b.icmplt(INF, c.ax)
+    c.issnan = b.sel(ZERO, c.isnan, b.iand(v, k_["QBIT"]))
+    c.isinf = b.cmpeq(c.ax, INF)
+    c.iszero = b.icmplt(c.ax, k_["INT1"])
+    c.neg = b.ishr(v, ib(fmt.width - 1, "SIGN_SHIFT"))
+    return c
+
+
+def _pow_integrality(b: Build, k_, yc):
+    """(isint, odd) of y, in-lane: below 2^(p-2) by MAGIC (y + MAGIC rounds y
+    to an integer, exactly when y is one, and its encoding's low bit is the
+    integer's parity, MAGIC's value 3 2^(p-2) being even); from 2^(p-2) to
+    2^(p-1) the encoding's bit 0 is the halves and bit 1 the units; from 2^(p-1)
+    to 2^p every y is an integer and bit 0 is its parity; from 2^p up every y is
+    an even integer, up to 2^262143 at fp256. Fifteen instructions. The plants
+    integrality_wide (MAGIC's band taken to 2^(p-1)) and sign_even (the parity
+    from bit 1)."""
+    fmt = b.fmt
+    p = fmt.prec
+    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
+    MAGIC = b.const("MAGIC", _enc_exact(fmt, Fraction(3, 2) * 2 ** (p - 1)))
+    if _act(b, "integrality_wide"):
+        small = b.icmplt(yc.ax, b.const("P2PM1", _pow2(fmt, p - 1)))
+        yi = b.add(yc.ax, MAGIC)
+        isint_s = b.cmpeq(b.sub(yi, MAGIC), yc.ax)
+        par_s = b.iand(yi, INT1)
+        below_p = b.icmplt(yc.ax, b.const("P2P_Y", _pow2(fmt, p)))
+        odd_b = b.sel(b.iand(yc.ax, INT1), ZERO, below_p)
+        return (b.sel(isint_s, ONE, small),
+                b.sel(b.sel(par_s, ZERO, isint_s), odd_b, small))
+    small = b.icmplt(yc.ax, b.const("P2PM2", _pow2(fmt, p - 2)))
+    yi = b.add(yc.ax, MAGIC)
+    isint_s = b.cmpeq(b.sub(yi, MAGIC), yc.ax)
+    par_s = b.iand(yi, INT1)
+    if _act(b, "sign_even"):
+        par_s = b.iand(yi, ib(2, "I2"))
+    mid = b.icmplt(yc.ax, b.const("P2PM1", _pow2(fmt, p - 1)))
+    b0 = b.iand(yc.ax, INT1)
+    isint_m = b.sel(ZERO, ONE, b0)
+    odd_m = b.sel(ZERO, b.iand(yc.ax, ib(2, "I2")), b0)
+    below_p = b.icmplt(yc.ax, b.const("P2P_Y", _pow2(fmt, p)))
+    odd_b = b.sel(b0, ZERO, below_p)
+    isint = b.sel(isint_s, b.sel(isint_m, ONE, mid), small)
+    odd = b.sel(b.sel(par_s, ZERO, isint_s), b.sel(odd_m, odd_b, mid), small)
+    return isint, odd
+
+
+def _pow_logarithm(b: Build, k_, cl, cl_):
+    """L = log2 |X| as a double word: M1's log2 (_log_reduce on |X|, the
+    table, the polynomial's tail and head, the sum with 1/ln 2 in two words
+    and k) at the logarithm's guard. Returns (r, kf, Lh, Ll); the phases
+    reduce, table, tail, head, Z and recon."""
+    fmt = b.fmt
+    ZERO = k_["ZERO"]
+    KL, DL = b.meta["KL"], b.meta["DL"]
+    b.phase = "reduce"
+    clx = types.SimpleNamespace(x=cl.ax, ax=cl.ax)
+    red = _log_reduce(b, "log2", cl_, k_, clx, None)
+    r, kf = red.r, red.kf
+    b.phase = "table"
+    Lh, Ll = _table(b, cl_, red.tc, k_,
+                    (lambda j: f"LH{j}", lambda j: f"LL{j}"))
+    # parcel M3G2: m3pow.py lines 323 to 340 (compound's low-word block: u_l's
+    # share of r, the correction, and the SMALL path's selects over r, kf, Lh,
+    # Ll and corr)
+    b.phase = "tail"
+    nr = b.neg(r)
+    yv = b.const(f"LY{DL}", cl_[f"Y{DL}"])
+    for i in range(DL - 1, KL - 1, -1):
+        yv = b.fma(yv, r, b.const(f"LY{i}", cl_[f"Y{i}"]))
+    b.phase = "head"
+    yh, yl = yv, None
+    for i in range(KL - 1, -1, -1):
+        CH = b.const(f"LCH{i}", cl_[f"CH{i}"])
+        pp = b.mul(yh, r)
+        ne = b.fma(yh, nr, pp)
+        nl = b.fma(yl, nr, ne) if yl is not None else ne
+        s, e = b.fast_two_sum(CH, pp)
+        tt = b.sub(e, nl)
+        if cl_[f"CL{i}"]:
+            yl = b.add(tt, b.const(f"LCL{i}", cl_[f"CL{i}"]))
+        else:
+            yl = tt
+        yh = s
+    b.phase = "Z"
+    lph = b.mul(yh, r)
+    nlpe = b.fma(yh, nr, lph)
+    nlpl = b.fma(yl, nr, nlpe)
+    b.phase = "recon"
+    il2h = b.const("IL2H", cl_["IL2H"])
+    nil2h = b.const("NIL2H", cl_["NIL2H"])
+    nil2l = b.const("NIL2L", cl_["NIL2L"])
+    F, fe = b.fast_two_sum(Lh, lph)
+    Fl = b.sub(b.add(fe, Ll), nlpl)
+    gh = b.mul(F, il2h)
+    nge = b.fma(F, nil2h, gh)
+    ngl = b.fma(F, nil2l, nge)
+    ngl = b.fma(Fl, nil2h, ngl)
+    S, e = b.fast_two_sum(kf, gh)
+    lo = b.sub(e, ngl)
+    Lh2, Ll2 = b.fast_two_sum(S, lo)
+    b.probes.update(r=r, Lh=Lh2, Ll=Ll2)
+    return r, kf, Lh2, Ll2
+
+
+def _pow_product(b: Build, k_, Yh, Yl, Lh, Ll, kf, ybound):
+    """t = Y L as a double word (TwoProd of Y_h and L_h, two FMAs for the
+    rest), the screens on the rounded product, and the bound's coefficient w
+    (Bv = |V_h| w at the test) made here so that t_h's last use is the
+    exponential's reduction. Returns (th0, th, tl, ovs, uns, wB); wB is the
+    BREL word alone where B1 and B2 are 0 (the test then multiplies by it
+    without upward rounding)."""
+    fmt = b.fmt
+    p = fmt.prec
+    m = b.meta
+    G, B1, B2 = m["G"], m["B1"], m["B2"]
+    shift = m["shift"]
+    b.phase = "head2"
+    NLh = b.neg(Lh)
+    th0 = b.mul(Yh, Lh)
+    ne = b.fma(Yh, NLh, th0)                  # th0 - Y_h L_h: exact
+    ne = b.fma(Yh, b.neg(Ll), ne)
+    if Yl is not None:
+        ne = b.fma(Yl, NLh, ne)
+    th, tl = b.fast_two_sum(th0, b.neg(ne))   # |th0| >= |tl| or th0 = 0
+    b.probes.update(th0=th0, th=th, tl=tl)
+    hi_t = fmt.emax + (1 if _act(b, "screen_low") else 2)
+    tovf = _enc_exact(fmt, hi_t)
+    if _act(b, "screen_ulp"):
+        tovf = sf.next_down(fmt, tovf)[0]
+    ovs = b.cmple(b.const("TOVF", tovf), th0)
+    uns = b.cmple(th0, b.const("TUNF", _enc_exact(fmt, fmt.emin - p - 2)))
+    if _act(b, "bound_loose"):
+        shift -= 40
+    wB = None
+    if B1 or B2:
+        b.phase = "head2"
+        wB = b.const("BREL", _pow2(fmt, -(p + G) + shift))
+        if B1:
+            wB = b.fma(b.fabs(th), b.const("B1", _enc(fmt, B1 * 2 ** shift)),
+                       wB, RUP)
+        if B2:
+            akf = b.fabs(kf)
+            if isinstance(ybound, Fraction):
+                # parcel M3G2's |n| or 1/|n|: a word, not a product
+                wB = b.fma(akf, b.const("YB2", _enc(
+                    fmt, ybound * B2 * 2 ** shift, RUP)), wB, RUP)
+            else:
+                yk = b.mul(akf, ybound, RUP)
+                wB = b.fma(yk, b.const("B2", _enc(fmt, B2 * 2 ** shift,
+                                                  RUP)), wB, RUP)
+    return th0, th, tl, ovs, uns, wB, shift
+
+
+def _pow_exp(b: Build, k_, ce, rnd, th, tl):
+    """2^t: M1's exp2 with a double-word argument: n = round(8 t_h), r' = (t_h
+    - n/8) + t_l by Fast2Sum, r = r' ln 2 in two words, the table, the scale
+    words, the polynomial and V = T (1 + Z). Returns a namespace of tq, rp, rh,
+    nrl, sc (_scale's), Vh, Vl, r (the reduced argument's high word is rh)."""
+    fmt = b.fmt
+    ib, ONE = k_["ib"], k_["ONE"]
+    KE, DE, GE = b.meta["KE"], b.meta["DE"], b.meta["GE"]
+    b.phase = "reduce"
+    MAGIC = b.const("MAGIC", ce["MAGIC"])
+    tq = b.fma(th, b.const("EIGHT", ce["EIGHT"]), MAGIC)
+    nf = b.sub(tq, MAGIC)
+    rp = b.fma(nf, b.const("NINV8", ce["NINV8"]), th)      # th - n/8: exact
+    rh1, rl1 = b.fast_two_sum(rp, tl)
+    LN2H = b.const("LN2H", ce["LN2H"])
+    NLN2H = b.const("NLN2H", ce["NLN2H"])
+    rh = b.mul(rh1, LN2H)
+    nre = b.fma(rh1, NLN2H, rh)
+    nrl = b.fma(rh1, b.const("NLN2L", ce["NLN2L"]), nre)
+    nrl = b.fma(rl1, NLN2H, nrl)
+    nrE = b.neg(rh)
+    b.probes.update(tq=tq, rp=rp, rh=rh, nrl=nrl)
+    b.phase = "lookup"
+    Th, Tl = _table(b, ce, tq, k_, (lambda j: f"TH{j}", lambda j: f"TL{j}"))
+    b.probes.update(nf=nf, Th=Th, Tl=Tl)
+    b.phase = "scale"
+    sc = _scale(b, "exp2", rnd, tq, ce, GE, None, k_)
+    b.phase = "tail"
+    yv = b.const(f"EY{DE}", ce[f"Y{DE}"])
+    for i in range(DE - 1, KE - 1, -1):
+        yv = b.fma(yv, rh, b.const(f"EY{i}", ce[f"Y{i}"]))
+    b.phase = "head"
+    yh, yl = yv, None
+    for i in range(KE - 1, -1, -1):
+        CH = b.const(f"ECH{i}", ce[f"CH{i}"])
+        pp = b.mul(yh, rh)
+        ne2 = b.fma(yh, nrE, pp)
+        nl = b.fma(yl, nrE, ne2) if yl is not None else ne2
+        s, e = b.fast_two_sum(CH, pp)
+        tt = b.sub(e, nl)
+        if ce[f"CL{i}"]:
+            yl = b.add(tt, b.const(f"ECL{i}", ce[f"CL{i}"]))
+        else:
+            yl = tt
+        yh = s
+    b.phase = "Z"
+    zp = b.mul(yh, rh)
+    nze = b.fma(yh, nrE, zp)
+    nzl = b.fma(yl, nrE, nze)
+    eh = b.add(ONE, zp)
+    nZl = b.fma(eh, nrl, nzl)
+    b.phase = "recon"
+    P = b.mul(Th, zp)
+    nPe = b.fma(Th, b.neg(zp), P)
+    Sx, e2 = b.fast_two_sum(Th, P)
+    a1 = b.fma(Th, nZl, nPe)
+    a2 = b.fma(Tl, zp, Tl)
+    lo = b.add(b.sub(e2, a1), a2)
+    Vh, Vl = b.fast_two_sum(Sx, lo)
+    return types.SimpleNamespace(tq=tq, rp=rp, rh=rh, nrl=nrl, sc=sc, Vh=Vh,
+                                 Vl=Vl)
+
+
+def pow_core(b: Build, k_, cl, Yh, Yl, ybound, *, negres, sgnw, up,
+             exact_tl=True) -> types.SimpleNamespace:
+    """The core of the pow family, appended to the Build `b` (whose meta holds
+    fn, G, GL, GE, KL, DL, KE, DE, B1, B2, shift, plant: _build_pow_family and
+    build_pow_core set them): sign |X|^Y as a double word and its one rounding,
+    in the study's model's order (docs/studies/m3/m3pow.py :309 to :599).
+
+    Takes
+      k_       _pow_words(b)'s namespace (_words_common's, its `ib` giving every
+               word a role);
+      cl       _classify_common(b, k_)'s namespace of X (X = x for pow and powr:
+               parcel M3G2 passes the same shape for compound);
+      Yh, Yl   refs, Y = Yh + Yl; Yl None for a single word;
+      ybound   the term of the bound's |Y k| B2: a ref to |y| (pow, powr), or a
+               Fraction (parcel M3G2's |n| or 1/|n|, taken as one word);
+      negres   a SELECT condition word that is set where the result is
+               negative, or None; sgnw the sign word (the sign bit on a
+               negative result, 0 else) or None;
+      up       the ref of "1's neighbour in the result's direction is above 1"
+               for the rule beside 1 or a function of no arguments that makes
+               it (called where the rule is built, in phase "final", so that a
+               front making it there emits what the model does; not called
+               under the plants side_rule_off and near_one_gate_off, which
+               build no such rule);
+      exact_tl False for rootn's form of the exact rule (no t_l = 0 test; also
+               what the plant exact_rule_no_tl does).
+    Requires nothing of a special lane (a NaN, an infinity, a zero, a negative
+    x with a non-integer y): the front's SELECTs own those lanes. On every lane
+    the screens do not take, |X| is finite, normal or subnormal, and nonzero.
+    Emits the phases reduce, table, tail, head, head2, Z, lookup, scale, recon,
+    final, fixed-grid and special's first lines (the screens).
+    Guarantees, on every such lane: V = Vh + Vl is sign |X|^Y 2^-s to within
+    Bv = |Vh| (2^-(p+G) + |t_h| B1 + |Y_h k| B2), the coefficient rounded upward
+    (the study's 2.2 and 3.1; k is the logarithm's integer, the probe kf; B1 and
+    B2 are 0 where the logarithm's guard GL reached its target), where s =
+    floor(n/8) and n is the value of the probe nf, n = round(8 t_h): V is the
+    result in the SCALED domain, before the two multiplications by 2^k1 and 2^k2
+    (k1 + k2 = s) that make `bits` (the harness's bound_log2 takes the 2^-s off
+    the true value); the mark is set where [V - Bv, V + Bv] holds a boundary of the
+    attribute, and, under rne and rmm, a grid point, and cleared where the lane
+    is decided exactly (the exact power of two) or beside 1 (|t_h| under
+    2^-(p+3), where the result is the neighbour of 1 on the side the operands'
+    signs give).
+    Returns a namespace: bits and fl, the main path's answer and flag word after
+    the rule beside 1 and the screens, for the front's specials to select over,
+    lowest priority first; and Vh, Vl, Bv, R, R1, R2, mk, th0, th, tl, ex,
+    tinyt, FIN, r, Lh, Ll, tq, rp, rh, nrl, all of them Build probes too.
+    Private: the Newton and polynomial steps, the table's tree, _pow_logarithm,
+    _pow_product, _pow_exp, and every word's name but the roles the constants'
+    check names."""
+    fmt = b.fmt
+    p, mw = fmt.prec, fmt.man_w
+    m = b.meta
+    rnd = b.rnd
+    G, GL, GE = m["G"], m["GL"], m["GE"]
+    cl_, ce = _pow_constants(fmt, GL, m["KL"], m["DL"], GE, m["KE"], m["DE"],
+                             _POW_CONST_PLANT.get(m.get("plant")))
+    if m.get("plant") in _POW_CONST_PLANT:
+        b._fired.add(m["plant"])
+    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
+    INF, INX = k_["INF"], k_["INX"]
+    INXUNF, OVFINX = k_["INXUNF"], k_["OVFINX"]
+    MARKW = k_["MARKW"]
+
+    # ---- the logarithm: L = log2 |X| as a double word (M1's log2) ----------
+    r, kf, Lh, Ll = _pow_logarithm(b, k_, cl, cl_)
+
+    # ---- t = Y L as a double word, the screens, the bound's coefficient ----
+    th0, th, tl, ovs, uns, wB, shift = _pow_product(b, k_, Yh, Yl, Lh, Ll, kf,
+                                                    ybound)
+
+    # ---- 2^t: M1's exp2 with a double-word argument -------------------------
+    ex_ = _pow_exp(b, k_, ce, rnd, th, tl)
+    sc, Vh, Vl, rp, tq = ex_.sc, ex_.Vh, ex_.Vl, ex_.rp, ex_.tq
+
+    # ---- the exact power of two, in-lane ------------------------------------
+    b.phase = "final"
+    jz = b.icmplt(b.iand(tq, ib(N - 1)), INT1)
+    ex = b.sel(b.cmpeq(rp, ZERO), ZERO, jz)
+    no_tl = _act(b, "exact_rule_no_tl")
+    if exact_tl and not no_tl:
+        ex = b.sel(b.cmpeq(tl, ZERO), ZERO, ex)
+    ex = b.sel(b.cmpeq(r, ZERO), ZERO, ex)
+    # parcel M3G2: m3pow.py lines 471 to 472 (compound's extra condition,
+    # u_l = 0)
+    if _act(b, "exact_rule_off"):
+        ex = ZERO
+    # parcel M3G2: m3pow.py lines 475 to 476 (rootn's V = 1 where exact)
+    if sgnw is not None:
+        Vh, Vl = b.ixor(Vh, sgnw), b.ixor(Vl, sgnw)
+    b.probes.update(Vh=Vh, Vl=Vl, ex=ex)
+
+    # ---- the final rounding and the in-lane test ----------------------------
+    R = b.add(Vh, Vl, rnd)
+    aVh = b.fabs(Vh)
+    ath = b.fabs(th)
+    if wB is not None:
+        Bv = b.mul(aVh, wB, RUP)
+    else:
+        Bv = b.mul(aVh, b.const("BREL", _pow2(fmt, -(p + G) + shift)))
+    lo_dn = b.sub(Vl, Bv, RDN)
+    lo_up = b.add(Vl, Bv, RUP)
+    R1 = b.add(Vh, lo_dn, rnd)
+    R2 = b.add(Vh, lo_up, rnd)
+    mk = b.ixor(R1, R2)
+    if rnd in (RNE, RMM) and not _act(b, "exact_unmarked"):
+        g1 = b.add(Vh, lo_dn, RUP)
+        g2 = b.add(Vh, lo_up, RDN)
+        mk = b.sel(ONE, mk, b.cmple(g1, g2))
+    b.probes.update(R=R, R1=R1, R2=R2, Bv=Bv)
+
+    # ---- the fixed grid: a result that may be subnormal ---------------------
+    b.phase = "fixed-grid"
+    Cu = sc.Cu if sgnw is None else b.ixor(sc.Cu, sgnw)
+    Z0 = b.add(Cu, Vh)
+    W0 = b.sub(Z0, Cu)
+    zr = b.sub(Vh, W0)
+    s_ = b.add(zr, Vl, RTZ)
+    eqv = b.cmpeq(b.sub(s_, zr), Vl)
+    ro = b.sel(s_, b.ior(s_, INT1), eqv)
+    Ws = b.sub(b.add(Z0, ro, rnd), Cu)
+    if sgnw is not None and not _act(b, "zero_sign_lost"):
+        # a negative result that rounds to zero on the subnormal grid: the
+        # offset's subtraction gives +0 (x - x is +0 but under rdn), and the
+        # answer is -0 (the first design lost it: the study's 3.6, item 7)
+        Ws = b.ior(Ws, sgnw)
+    if sc.hu is not None:
+        c1 = b.cmpeq(b.fabs(zr), sc.hu)
+        if _act(b, "midpoint_unmarked"):
+            c1 = ZERO
+        if not _act(b, "exact_unmarked"):
+            c1 = b.sel(ONE, c1, b.cmpeq(zr, ZERO))
+    else:
+        c1 = b.cmpeq(zr, ZERO)
+    smallo = b.cmple(b.fabs(Vl), Bv)
+    msub = b.sel(smallo, ZERO, c1)
+    Wsel = b.sel(Ws, R, sc.sub_p)
+    mk = b.sel(ONE, mk, b.sel(msub, ZERO, sc.sub_p))
+    tn = b.sel(ONE, b.cmplt(b.fabs(R), ONE), sc.klt)
+    tinyu = b.sel(tn, ZERO, sc.sub_p)
+
+    # ---- the scaling, the flag word, the mark -------------------------------
+    b.phase = "final"
+    Y1 = b.mul(Wsel, sc.S1)
+    FIN = b.mul(Y1, sc.S2, rnd)
+    ovf = b.cmpeq(b.mul(b.fabs(Y1), sc.S2, RUP), INF)
+    fl = b.sel(OVFINX, b.sel(INXUNF, INX, tinyu), ovf)
+    tinyt = b.icmplt(ath, b.const("TINYT", _pow2(fmt, -(p + 3))))
+    if not _act(b, "near_one_gate_off"):
+        mk = b.sel(ZERO, mk, tinyt)
+    mk = b.sel(ZERO, mk, ex)
+    if not _act(b, "mark_silenced"):
+        fl = b.ior(fl, b.sel(MARKW, ZERO, mk))
+    OFF = m["OFF"]
+    lowk = b.icmplt(sc.Ek, ib(fmt.emin - p + 1 + fmt.bias + OFF, "K_SUBMIN"))
+    exrep = b.sel(b.sel(ZERO, b.sel(ZERO, ONE, lowk), ovf), ZERO, ex)
+    fl = b.sel(ZERO, fl, exrep)
+    bits = FIN
+
+    # ---- the rule beside 1, transcend.py's own -------------------------------
+    # |t_h| below 2^-(p+3) puts the value strictly inside the half gap next to
+    # 1, on the side the operands' signs give, whatever t_h's own value: it
+    # may have underflowed to 0 (y down to the least subnormal). The first
+    # design only cleared the mark there and let V's rounding answer, which
+    # gave 1 under rup for pow(1.2, minSub) (the study's 3.6; the plant
+    # side_rule_off). An exact lane (x = -1 with an integer y: t = 0) is not
+    # beside 1 but on it, and keeps its exact answer.
+    side_off = _act(b, "side_rule_off")
+    gate_off = b.meta.get("plant") == "near_one_gate_off"
+    if not side_off and not gate_off:
+        b.phase = "final"
+        upref = up() if callable(up) else up
+        one_m = 1 << (p - 1)
+
+        def nbr(sign, away):
+            return b.const(f"NB{sign}{int(away)}", sf.round_pack(
+                fmt, sign, 8 * one_m + (1 if away else -1), -(p - 1) - 3,
+                rnd)[0])
+        nb = b.sel(nbr(0, True), nbr(0, False), upref)
+        if negres is not None:
+            nb = b.sel(b.sel(nbr(1, True), nbr(1, False), upref), nb, negres)
+        side = b.sel(ZERO, tinyt, ex)
+        bits = b.sel(nb, bits, side)
+        fl = b.sel(INX, fl, side)
+    b.probes.update(FIN=FIN, mk=mk, tinyt=tinyt)
+
+    # ---- the screens ---------------------------------------------------------
+    b.phase = "special"
+
+    def signed_pair(role, pos, neg):
+        if negres is None:
+            return b.const(role + "_P", pos)
+        return b.sel(b.const(role + "_N", neg), b.const(role + "_P", pos),
+                     negres)
+    ovfb = signed_pair("OVFB", sf.round_pack(fmt, 0, 3, fmt.emax, rnd)[0],
+                       sf.round_pack(fmt, 1, 3, fmt.emax, rnd)[0])
+    unfb = signed_pair("UNFB", sf.round_pack(fmt, 0, 1, fmt.emin - mw - 2,
+                                             rnd)[0],
+                       sf.round_pack(fmt, 1, 1, fmt.emin - mw - 2, rnd)[0])
+    bits = b.sel(ovfb, bits, ovs)
+    fl = b.sel(OVFINX, fl, ovs)
+    bits = b.sel(unfb, bits, uns)
+    fl = b.sel(INXUNF, fl, uns)
+    return types.SimpleNamespace(
+        bits=bits, fl=fl, Vh=Vh, Vl=Vl, Bv=Bv, R=R, R1=R1, R2=R2, mk=mk,
+        th0=th0, th=th, tl=tl, ex=ex, tinyt=tinyt, FIN=FIN, r=r, Lh=Lh, Ll=Ll,
+        tq=tq, rp=rp, rh=ex_.rh, nrl=ex_.nrl)
+
+
+def _pow_specials(b: Build, k_, cl, yc, isint, sgnw, bits, fl):
+    """pow's rows of 9.2.1, lowest priority first (transcend.pow's order
+    reversed): y = 1 (x itself, exact), x < 0 with y not an integer, x = +-inf,
+    x = +-0, y = +-inf, a NaN, y = +-0 or x = +1, a sNaN. Each row's SELECT
+    follows the row below it, so the order of the SELECTs is the rows'
+    priority."""
+    ZERO, ONE, INF, QNAN = k_["ZERO"], k_["ONE"], k_["INF"], k_["QNAN"]
+    INVALID, INX = k_["INVALID"], k_["INX"]
+    DIVZ = k_["ib"](sf.FLAG_DIVZERO, "FL_DIVZERO")
+    x, y = cl.x, yc.x
+
+    def sgn(v):
+        return v if sgnw is None else b.ixor(v, sgnw)
+    y1 = b.cmpeq(y, ONE)
+    bits = b.sel(x, bits, y1)
+    fl = b.sel(INX if _act(b, "y_one_loud") else ZERO, fl, y1)
+    bad = b.sel(b.sel(ZERO, ONE, isint), ZERO, cl.neg)   # x < 0, y not int
+    bits = b.sel(QNAN, bits, bad)
+    fl = b.sel(INVALID, fl, bad)
+    bits = b.sel(sgn(b.sel(ZERO, INF, yc.neg)), bits, cl.isinf)
+    fl = b.sel(ZERO, fl, cl.isinf)
+    bits = b.sel(sgn(b.sel(INF, ZERO, yc.neg)), bits, cl.iszero)
+    fl = b.sel(b.sel(DIVZ, ZERO, yc.neg), fl, cl.iszero)
+    gt1 = b.icmplt(ONE, cl.ax)                           # |x| > 1
+    big = b.sel(b.sel(ZERO, INF, yc.neg), b.sel(INF, ZERO, yc.neg), gt1)
+    yinf = b.sel(ONE, big, b.cmpeq(cl.ax, ONE))          # pow(-1, +-inf) = 1
+    bits = b.sel(yinf, bits, yc.isinf)
+    fl = b.sel(ZERO, fl, yc.isinf)
+    anynan = b.sel(ONE, cl.isnan, yc.isnan)
+    bits = b.sel(QNAN, bits, anynan)
+    fl = b.sel(ZERO, fl, anynan)
+    one_ = ZERO
+    if not _act(b, "pow_zero_nan"):
+        one_ = yc.iszero
+    if not _act(b, "pow_one_nan"):
+        one_ = b.sel(ONE, one_, b.cmpeq(x, ONE))
+    bits = b.sel(ONE, bits, one_)
+    fl = b.sel(ZERO, fl, one_)
+    snan = b.sel(ONE, cl.issnan, yc.issnan)
+    bits = b.sel(QNAN, bits, snan)
+    fl = b.sel(INVALID, fl, snan)
+    return bits, fl
+
+
+def _powr_specials(b: Build, k_, cl, yc, bits, fl):
+    """powr's rows (transcend.powr's docstring table), lowest priority first:
+    y = 1, y = +-inf, y = +-0, x = +1, x = +inf, x = +-0, a NaN, x < 0 (before
+    a quiet NaN exponent), a sNaN."""
+    ZERO, ONE, INF, QNAN = k_["ZERO"], k_["ONE"], k_["INF"], k_["QNAN"]
+    INVALID, INX = k_["INVALID"], k_["INX"]
+    DIVZ = k_["ib"](sf.FLAG_DIVZERO, "FL_DIVZERO")
+    x, y = cl.x, yc.x
+    y1 = b.cmpeq(y, ONE)
+    bits = b.sel(x, bits, y1)
+    fl = b.sel(INX if _act(b, "y_one_loud") else ZERO, fl, y1)
+    gt1 = b.icmplt(ONE, cl.ax)
+    big = b.sel(b.sel(ZERO, INF, yc.neg), b.sel(INF, ZERO, yc.neg), gt1)
+    bits = b.sel(big, bits, yc.isinf)
+    fl = b.sel(ZERO, fl, yc.isinf)
+    bits = b.sel(ONE, bits, yc.iszero)
+    fl = b.sel(ZERO, fl, yc.iszero)
+    xone = b.cmpeq(x, ONE)
+    bits = b.sel(b.sel(QNAN, ONE, yc.isinf), bits, xone)
+    fl = b.sel(b.sel(INVALID, ZERO, yc.isinf), fl, xone)
+    zero_zero = _act(b, "powr_zero_zero")
+    zz = ZERO if zero_zero else yc.iszero
+    infr = b.sel(QNAN, b.sel(ZERO, INF, yc.neg), yc.iszero)
+    bits = b.sel(infr, bits, cl.isinf)
+    fl = b.sel(b.sel(INVALID, ZERO, yc.iszero), fl, cl.isinf)
+    zres = b.sel(QNAN, b.sel(INF, ZERO, yc.neg), zz)
+    zfl = b.sel(INVALID, b.sel(b.sel(ZERO, DIVZ, yc.isinf), ZERO, yc.neg), zz)
+    if zero_zero:
+        zres = b.sel(ONE, zres, yc.iszero)
+        zfl = b.sel(ZERO, zfl, yc.iszero)
+    bits = b.sel(zres, bits, cl.iszero)
+    fl = b.sel(zfl, fl, cl.iszero)
+    anynan = b.sel(ONE, cl.isnan, yc.isnan)
+    bits = b.sel(QNAN, bits, anynan)
+    fl = b.sel(ZERO, fl, anynan)
+    if not _act(b, "powr_neg_ok"):
+        negx = b.sel(ZERO, b.sel(ZERO, cl.neg, cl.iszero), cl.isnan)
+        bits = b.sel(QNAN, bits, negx)
+        fl = b.sel(INVALID, fl, negx)
+    snan = b.sel(ONE, cl.issnan, yc.issnan)
+    bits = b.sel(QNAN, bits, snan)
+    fl = b.sel(INVALID, fl, snan)
+    return bits, fl
+
+
+def _build_pow(b: Build, x, y):
+    """pow(x, y): the front end the others copy. Classify x and y, y's
+    integrality and parity (_pow_integrality), the sign word (negative where x
+    is negative and y an odd integer), pow_core on |x| and y, then pow's rows
+    (_pow_specials). Returns (result, flag word): _build_pow_family finishes."""
+    fmt = b.fmt
+    k_ = _pow_words(b)
+    ib, ZERO, ONE = k_["ib"], k_["ZERO"], k_["ONE"]
+    SIGN = b.const("SIGN", fmt.sign_mask)
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    yc = _pow_classify_y(b, k_)
+    b.phase = "front"
+    isint, odd = _pow_integrality(b, k_, yc)
+    negres = b.sel(odd, ZERO, cl.neg)
+    if _act(b, "sign_odd_lost"):
+        negres = None
+    sgnw = None if negres is None else b.sel(SIGN, ZERO, negres)
+
+    def up():
+        gt1 = b.icmplt(ONE, cl.ax)                    # |x| > 1
+        return b.sel(b.sel(ZERO, ONE, yc.neg), yc.neg, gt1)
+    core = pow_core(b, k_, cl, yc.x, None, yc.ax, negres=negres, sgnw=sgnw,
+                    up=up)
+    b.phase = "special"
+    return _pow_specials(b, k_, cl, yc, isint, sgnw, core.bits, core.fl)
+
+
+def _build_powr(b: Build, x, y):
+    """powr(x, y): as _build_pow, but x < 0 is invalid whatever y, so the result
+    is never negative (no sign word) and y's integrality is not needed; powr's
+    rows (_powr_specials). Returns (result, flag word)."""
+    k_ = _pow_words(b)
+    ZERO, ONE = k_["ZERO"], k_["ONE"]
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    yc = _pow_classify_y(b, k_)
+    b.phase = "front"
+
+    def up():
+        gt1 = b.icmplt(ONE, cl.ax)
+        return b.sel(b.sel(ZERO, ONE, yc.neg), yc.neg, gt1)
+    core = pow_core(b, k_, cl, yc.x, None, yc.ax, negres=None, sgnw=None,
+                    up=up)
+    b.phase = "special"
+    return _powr_specials(b, k_, cl, yc, core.bits, core.fl)
+
+
+# the builders by function: M3G2 assigns pown, rootn and compound at its anchor.
+# Each is builder(b, x, y) -> (result, flag word), given a Build with its meta
+# set and its inputs named (_build_pow_family); M3G2's take the integer operand
+# from b.meta["n"].
+_POW_BUILDERS = {"pow": _build_pow, "powr": _build_powr}
+
+# ---- pown, rootn and compound: parcel M3G2 builds here ----
+
+# (M3G2's builders, plants and role checks go at this anchor, the section's
+# end, well apart from M3F1's below: assign into _POW_BUILDERS, POW_PLANTS and
+# _POW_ROLE_CHECKS, never edit their literals.)
+
+# ---- fp32: the triple word, pow and powr (parcel M3F1) builds here ----
+
+
+def _pow_refuse(name, fmt, n):
+    """The refusals by name: fp32 (the triple word, parcel M3F1's), a name not
+    yet built (saying whose it is), and an integer operand given to pow or
+    powr."""
+    if fmt.name == "fp32":
+        raise ValueError(f"{name} at fp32 is not built: fp32 is the triple "
+                         f"word, parcel M3F1's")
+    if name not in _POW_BUILDERS:
+        raise ValueError(f"{name!r} is not built yet: it is parcel "
+                         f"{_POW_PARCEL[name]}'s ({', '.join(_POW_BUILDERS)} "
+                         f"{'is' if len(_POW_BUILDERS) == 1 else 'are'} "
+                         f"built)")
+    if n is not None:
+        raise ValueError(f"{name} takes no integer operand (n = {n!r}): "
+                         f"its second operand is an input")
+
+
+def _check_pow_plant_fired(b: Build):
+    """A plant of POW_PLANTS whose fault the build never reached is refused by
+    name (a fault of powr's in pow): _check_inv_plant_fired's rule."""
+    plant = b.meta.get("plant")
+    if plant == "two_sum_all" and b._eft["two_sum"]:
+        b._fired.add(plant)          # Build.fast_two_sum acts on it itself
+    if plant in POW_PLANTS and plant not in b._fired:
+        raise ValueError(f"plant {plant!r} does not apply to "
+                         f"{b.meta['fn']} at {b.fmt.name}: the fault is not "
+                         f"reached")
+
+
+def _pow_args(name, fmt, rnd, plant, guard, n):
+    if fmt not in FORMATS:
+        raise ValueError(f"{fmt!r} is not one of the four formats")
+    if rnd not in sf.RND_NAMES:
+        raise ValueError(f"rounding attribute {rnd!r} is not one of the five")
+    _pow_refuse(name, fmt, n)
+    if plant is not None and plant not in POW_PLANTS:
+        raise ValueError(f"unknown plant {plant!r}: {', '.join(POW_PLANTS)}")
+    return GUARD[fmt.name] if guard is None else guard
+
+
+def _pow_setup(name, fmt, rnd, G, shift, plant, n=None):
+    P = plan_pow(fmt, G)
+    b = Build(fmt, rnd, f"{name}-{fmt.name}-{sf.RND_NAMES[rnd]}")
+    if plant == "log_short":
+        P.GL = P.G
+        P.KL, P.DL = plan_log(fmt, P.G)
+        b._fired.add(plant)          # the plan is where the fault is
+    b.meta.update(fn=name, G=P.G, GL=P.GL, GE=P.GE, KL=P.KL, DL=P.DL, KE=P.KE,
+                  DE=P.DE, B1=P.B1, B2=P.B2, shift=shift, plant=plant,
+                  family="double word", N=N, n=n)
+    return b
+
+
+def _build_pow_family(name, fmt, rnd, G, shift, plant, n=None):
+    """One of POW_NAMES, built: a Build with its inputs named (("a", "b") = (x,
+    y) for pow and powr), its meta set, its front end (_POW_BUILDERS[name])
+    called with the input refs, and the Build finished."""
+    b = _pow_setup(name, fmt, rnd, G, shift, plant, n)
+    b.inputs = ("a", "b")
+    bits, fl = _POW_BUILDERS[name](b, *[("in", i) for i in b.inputs])
+    b.finish(bits, fl)
+    _check_pow_plant_fired(b)
+    return b
+
+
+def build_pow_core(fmt: FpFormat, rnd: int = RNE, *, G=None, plant=None,
+                   double=False) -> Build:
+    """The core alone, as build_inv_core() is M4's: a Build whose inputs are
+    ("a", "b") = (x, y), or ("a", "b", "c") = (x, y_h, y_l) with double=True (Y
+    a double word: the path pown at fp64 takes, parcel M3G2's), whose result is
+    V_h and whose flags are V_l (so nothing compiles it, and Build.run() reads
+    it; a lane is a tuple in inputs order). It is pow_core on |x| with no front
+    end: no sign word, and the rule beside 1 on the side of |x| > 1 alone, as
+    y's sign is the front's; x must be a finite nonzero lane the screens do not
+    take, which the core requires. `G` overrides the guard, `plant` is one of
+    the faults pow_core acts on (the exact_*, bound_loose, midpoint_unmarked,
+    mark_silenced, near_one_gate_off, side_rule_off, screen_low, screen_ulp,
+    log_table_entry, il2h_ulp, log_short and two_sum_all); any other of POW_PLANTS is
+    refused by name. Meta fn is "pow_core"."""
+    G = _pow_args("pow", fmt, rnd, plant, G, None)
+    b = _pow_setup("pow_core", fmt, rnd, G, 0, plant)
+    b.inputs = ("a", "b", "c") if double else ("a", "b")
+    k_ = _pow_words(b)
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    yh = ("in", "b")
+    yl = ("in", "c") if double else None
+    ybound = b.iand(yh, k_["ABSM"])
+
+    def up():
+        return b.icmplt(k_["ONE"], cl.ax)
+    core = pow_core(b, k_, cl, yh, yl, ybound, negres=None, sgnw=None, up=up)
+    _check_pow_plant_fired(b)
+    return b.finish(core.Vh, core.Vl)
+
+
+# ---- pow and powr: the constants, checked -------------------------------------
+#
+# check_pow_constants asks the BUILT fragment's words, by role, of enclosures
+# that share nothing with the generator or with mpmath (the rules of the six's
+# check, _why_not, and the shapes of M4's):
+#
+#   the logarithm (GL)   log(16/C_j) in two words from the atanh series in
+#                        integers (_check_log16), the tail's and head's
+#                        coefficients (-1)^i/(i+1), 1/ln 2 in two words
+#                        (_check_inv_ln2) and its negations, the reduction's
+#                        words (16, 1/16, -MAGIC/16, 1/2, -1, the smallest
+#                        normal, 2^p, MAGIC)
+#   the exponential (GE) ln 2 in two words (_check_ln2) and its negations,
+#                        2^(j/8) in two words (_check_two_to_eighth), the
+#                        coefficients 1/(i+1)! of (e^r - 1)/r, 8, -1/8, 2^-4
+#   the plan             GL = G + ceil(log2 T_f) + 2 stepped down to what the
+#                        polynomial reaches, T_f = max(emax + 2, p - emin + 2),
+#                        and (KL, DL, KE, DE), again from exact rationals; B1
+#                        and B2 from whether GL reached its target
+#   the bound            B1 (2^-(2p-6)), B2 (the upward rounding of 2^-(2p-5)),
+#                        BREL 2^-(p+G)
+#   the rest             the screens (emax + 2 and emin - p - 2), 2^-(p+3), the
+#                        neighbours of 1 under each attribute, the overflow and
+#                        underflow responses, the integrality's words, the
+#                        flag words, and every integer word from the IEEE
+#                        fields (the reduction's and the scale's offsets) - these
+#                        also where they act, on lanes pow(2, n/8) (the scale
+#                        is _check_pow_scale's: parcel M1's _check_scale reads
+#                        a one-input exp2 and does not fit a two-input build)
+#
+# A role the check does not ask for is a finding ("derived but not checked"),
+# and so is a word the fragment holds that has none.
+
+_POW_FLAG_WORDS = {"FL_INVALID": 0x01, "FL_DIVZERO": 0x02,
+                   "FL_INEXACT": 0x10, "FL_UNDER_INEXACT": 0x18,
+                   "FL_OVER_INEXACT": 0x14, "FL_MARK": 0x80}
+# the small integers: I<v> roles, and why each is held
+_POW_SMALL_INTS = (1, 2, 3, 4, 7)    # INT1; bit 1 (the integrality's parity,
+                                     # the table's); T_BITS; the table's bit 2;
+                                     # N - 1 (the exact rule's j = 0 test)
+
+
+def _check_pow_plan(fmt, G):
+    """(want, GL, (KL, DL), (KE, DE), B1, B2): the plan again, from exact
+    rationals and the IEEE fields: T_f from emax and emin read off the exponent
+    width, GL the first of want, want - 1, ... that the double word's floor
+    (12 u^2 under 2^-(p+GL+2)) lets the polynomial reach, down to G; the
+    exponential's from _check_plan (the independent ln 2)."""
+    p = fmt.prec
+    ew, _mw = _TRIG_FIELDS[fmt.name]
+    emax, emin = 2 ** (ew - 1) - 1, 2 - 2 ** (ew - 1)
+    tf = max(emax + 2, p - emin + 2)
+    extra = 0
+    while 2 ** extra < tf:
+        extra += 1
+    want = G + extra + 2
+    GL = want
+    u = Fraction(1, 2 ** p)
+    while GL > G and 12 * u * u >= Fraction(1, 2 ** (p + GL + 2)):
+        GL -= 1
+    KD = _check_plan_log(fmt, "double word", GL)
+    KDe = _check_plan(fmt, "double word", G + 2, _check_ln2()[1])
+    short = GL != want
+    B1 = Fraction(1, 2 ** (2 * p - 6)) if short else Fraction(0)
+    B2 = Fraction(1, 2 ** (2 * p - 5)) if short else Fraction(0)
+    return want, GL, KD, KDe, B1, B2
+
+
+def _check_pow_neighbour(rnd, sign, away, p):
+    """The value (a Fraction) that 1 +- 2^-(p+2) (above 1 where `away`),
+    negated where `sign`, rounds to under `rnd` into the format's neighbours
+    of 1 (1 - 2^-p, 1, 1 + 2^-(p-1)), by the rules alone."""
+    below, up = 1 - Fraction(1, 2 ** p), 1 + Fraction(1, 2 ** (p - 1))
+    if rnd in (RNE, RMM):
+        mag = Fraction(1)
+    else:
+        # the magnitude's direction: toward zero keeps it down, away from zero
+        # up; rdn and rup are one or the other by the sign
+        toward_zero = rnd == RTZ or (rnd == RDN and not sign) \
+            or (rnd == RUP and sign)
+        if toward_zero:
+            mag = Fraction(1) if away else below
+        else:
+            mag = up if away else Fraction(1)
+    return -mag if sign else mag
+
+
+def _check_pow_responses(fmt, rnd, sign):
+    """(overflow response, underflow response) as encodings for a result of
+    sign `sign` (3 2^emax, and 2^(emin - mw - 2): a quarter of the least
+    subnormal), by the rules alone and the IEEE fields."""
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    S = 1 << (ew + mw)
+    inf = ((1 << ew) - 1) << mw
+    mx = (((1 << ew) - 2) << mw) | ((1 << mw) - 1)
+    sg = S if sign else 0
+    if rnd in (RNE, RMM):
+        ovf, unf = inf | sg, sg
+    elif rnd == RTZ:
+        ovf, unf = mx | sg, sg
+    elif rnd == RDN:
+        ovf = (inf | sg) if sign else mx
+        unf = (S | 1) if sign else 0
+    else:
+        ovf = mx | sg if sign else inf
+        unf = sg if sign else 1
+    return ovf, unf
+
+
+def _check_pow_scale(b: Build, findings):
+    """The scale offsets, the fixed grid's words and the table's wiring,
+    where they act: lanes pow(2, n/8) (x = 2 and y = n/8 exact, so t = n/8
+    exactly) over the range of k, each run through the unpruned body, its
+    probes against exact values. -> lanes run."""
+    fmt, p, mw = b.fmt, b.fmt.prec, b.fmt.man_w
+    ew, _mw = _TRIG_FIELDS[fmt.name]
+    emin = 2 - 2 ** (ew - 1)
+    emax = 2 ** (ew - 1) - 1
+    bias = emax
+    OFF = b.meta["OFF"]
+    two = (bias + 1) << mw
+    ks = [emin - p - 2, emin - 2, emin - 1, emin, emin + 1, emin + p, -2, -1,
+          0, 1, 2, emax - 1, emax, emax + 1]
+    ns = [8 * k + j for k in ks for j in (0, 3, 5, 7)]
+    ns += [8 * k + 1 for k in range(-9, 10, 3)]
+    tag = f"{b.meta['fn']} {fmt.name} {sf.RND_NAMES[b.rnd]}"
+    ran = 0
+    for n in ns:
+        if abs(n) >= 2 ** (p - 1):
+            continue
+        y = _enc_exact(fmt, Fraction(n, 8))
+        _res, _fl, pr = b.run((two, y), ("nf", "th", "tl", "Ek", "S1", "S2",
+                                         "rp", "sub_p", "klt", "Cu", "hu",
+                                         "Th", "Tl"))
+        t = _dec(fmt, pr["th"]) + _dec(fmt, pr["tl"])
+        if t != Fraction(n, 8):
+            findings.append(f"{tag} n = {n}: t = {t} for x = 2, y = n/8: the "
+                            f"logarithm of 2 is not exactly 1")
+            continue
+        got_n = _dec(fmt, pr["nf"])
+        if got_n != n:
+            findings.append(f"{tag}: n = {n} was reduced to {got_n}")
+            continue
+        k, j = n // 8, n % 8
+        ran += 1
+        where = f"{tag} n = {n} (k = {k})"
+        if pr["Ek"] != k + bias + OFF:
+            findings.append(f"{where}: Ek = {pr['Ek']}, want "
+                            f"{k + bias + OFF}")
+        for nm, kk in (("S1", k // 2), ("S2", k - k // 2)):
+            u = sf.unpack(fmt, pr[nm])
+            if (u.kind != sf.NORM or u.sign or u.m != 1 << mw
+                    or u.e + mw != kk):
+                findings.append(f"{where}: {nm} = {pr[nm]:#x} is not 2^{kk}")
+        if pr["rp"] != 0:
+            findings.append(f"{where}: t = n/8, and the remainder is "
+                            f"{pr['rp']:#x}, not 0")
+        for nm, truth in (("sub_p", k <= emin), ("klt", k < emin)):
+            if (pr[nm] == sf.one_bits(fmt)) != truth or pr[nm] not in (
+                    0, sf.one_bits(fmt)):
+                findings.append(f"{where}: {nm} = {pr[nm]:#x}, want {truth}")
+        if k <= emin:
+            cu = Fraction(2) ** (emin - k) if k < emin else Fraction(1, 16)
+            if _dec(fmt, pr["Cu"]) != cu:
+                findings.append(f"{where}: Cu is not {cu}")
+            if "hu" in pr and _dec(fmt, pr["hu"]) != \
+                    Fraction(2) ** (emin - p - k):
+                findings.append(f"{where}: u/2 is not 2^{emin - p - k}")
+        for nm, role in (("Th", f"TH{j}"), ("Tl", f"TL{j}")):
+            if pr[nm] != b.words[b.roles[role][1]]:
+                findings.append(f"{where}: the table read for j = {j} is not "
+                                f"{role}")
+    return ran
+
+
+def _check_pow_build(b: Build, findings, scale=True):
+    """Every derived constant of one built pow-family routine (or core) against
+    its independent derivation, by role, and, with `scale`, the scale words
+    where they act. -> (constants checked, lanes run)."""
+    fmt, p, W = b.fmt, b.fmt.prec, b.fmt.width
+    fn, G = b.meta["fn"], b.meta["G"]
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    emax, emin = 2 ** (ew - 1) - 1, 2 - 2 ** (ew - 1)
+    bias = emax
+    tag, verify, point, seen, count = _verifier(b, findings)
+
+    def bits_are(role, want):
+        seen.add(role)
+        if role not in b.roles:
+            findings.append(f"{tag}: the fragment has no constant {role}")
+            return
+        count[0] += 1
+        got = b.words[b.roles[role][1]]
+        if got != want:
+            findings.append(f"{tag} {role}: {got:#x} is not {want:#x}")
+
+    def held_only_if(role, cond, why):
+        seen.add(role)
+        if (role in b.roles) != cond:
+            findings.append(f"{tag}: {role} is {'held' if not cond else 'not held'}"
+                            f", {why}")
+
+    # ---- the plan, from exact rationals ----
+    want, GL, (KL, DL), (KE, DE), B1, B2 = _check_pow_plan(fmt, G)
+    m = b.meta
+    if (m["GL"], m["GE"]) != (GL, G + 2):
+        findings.append(f"{tag}: (GL, GE) = {(m['GL'], m['GE'])} is not the "
+                        f"re-derived {(GL, G + 2)}")
+    if (m["KL"], m["DL"], m["KE"], m["DE"]) != (KL, DL, KE, DE):
+        findings.append(f"{tag}: the plan {(m['KL'], m['DL'], m['KE'], m['DE'])}"
+                        f" is not the re-derived {(KL, DL, KE, DE)}")
+    if (m["B1"], m["B2"]) != (B1, B2):
+        findings.append(f"{tag}: (B1, B2) = {(m['B1'], m['B2'])} is not the "
+                        f"re-derived {(B1, B2)}")
+    shift = m["shift"]
+    # ---- the logarithm's words (GL) ----
+    magic_bits = ((bias + p - 1) << mw) | (1 << (mw - 1))
+    magic = Fraction(3, 2) * 2 ** (p - 1)
+    point("MAGIC", magic)
+    point("SIXTEEN", 16)
+    point("SIXTEENTH", Fraction(1, 16))
+    point("NMAGIC16", -magic / 16)
+    point("HALF", Fraction(1, 2))
+    point("NEGONE", -1)
+    point("MINN", Fraction(2) ** emin)
+    point("P2P", Fraction(2) ** p)
+    for j in range(N):
+        lo, hi = _check_log16(16 if j == 0 else 8 + j)
+        w = verify(f"LH{j}", "rn", lo, hi)
+        verify(f"LL{j}", "rn", lo - w, hi - w)
+    for i in range(KL, DL + 1):
+        c = Fraction((-1) ** i, i + 1)     # the log1p series, again
+        verify(f"LY{i}", "rn", c, c)
+    for i in range(KL):
+        rest = Fraction((-1) ** i, i + 1)
+        w = verify(f"LCH{i}", "rn", rest, rest)
+        rest -= w
+        role = f"LCL{i}"
+        if rest != 0:
+            verify(role, "rn", rest, rest)
+        else:
+            held_only_if(role, False, "but the coefficient is exact in one "
+                                      "word")
+    lo, hi = _check_inv_ln2()
+    w0 = verify("IL2H", "rn", lo, hi)
+    point("NIL2H", w0, negated=True)
+    verify("NIL2L", "rn", lo - w0, hi - w0, negated=True)
+    # ---- the exponential's (GE) ----
+    point("EIGHT", 8)
+    point("NINV8", Fraction(-1, 8))
+    l2lo, l2hi = _check_ln2()
+    w0 = verify("LN2H", "rn", l2lo, l2hi)
+    point("NLN2H", w0, negated=True)
+    verify("NLN2L", "rn", l2lo - w0, l2hi - w0, negated=True)
+    for j in range(N):
+        lo, hi = _check_two_to_eighth(j)
+        w = verify(f"TH{j}", "rn", lo, hi)
+        verify(f"TL{j}", "rn", lo - w, hi - w)
+    for i in range(KE, DE + 1):
+        c = Fraction(1, math.factorial(i + 1))
+        verify(f"EY{i}", "rn", c, c)
+    for i in range(KE):
+        rest = Fraction(1, math.factorial(i + 1))
+        w = verify(f"ECH{i}", "rn", rest, rest)
+        rest -= w
+        if rest != 0:
+            verify(f"ECL{i}", "rn", rest, rest)
+        else:
+            held_only_if(f"ECL{i}", False, "but the coefficient is exact in "
+                                           "one word")
+    point("C0", Fraction(1, 16))
+    # ---- the bound ----
+    point("BREL", Fraction(2) ** (-(p + G) + shift))
+    held_only_if("B1", bool(B1), "B1 is 0 where GL reached its target")
+    held_only_if("B2", bool(B2), "B2 is 0 where GL reached its target")
+    if B1:
+        verify("B1", "rn", B1 * 2 ** shift, B1 * 2 ** shift)
+    if B2:
+        verify("B2", "ru", B2 * 2 ** shift, B2 * 2 ** shift)
+    # ---- the screens, the gate, the neighbours of 1, the responses ----
+    point("TOVF", emax + 2)
+    point("TUNF", emin - p - 2)
+    point("TINYT", Fraction(1, 2 ** (p + 3)))
+    neg_result = fn == "pow"
+    for sign in ((0, 1) if neg_result else (0,)):
+        for away in (0, 1):
+            role = f"NB{sign}{away}"
+            point(role, _check_pow_neighbour(b.rnd, sign, away, p))
+    for sign, tail in ((0, "_P"), (1, "_N")):
+        ovf, unf = _check_pow_responses(fmt, b.rnd, sign)
+        if sign == 0 or neg_result:
+            bits_are("OVFB" + tail, ovf)
+            bits_are("UNFB" + tail, unf)
+    # ---- the words every routine has, from the IEEE fields ----
+    full = (1 << W) - 1
+    point("ZERO", 0)
+    point("ONE", 1)
+    bits_are("INT1", 1)
+    bits_are("ABSM", full ^ (1 << (W - 1)))
+    bits_are("INF", ((1 << ew) - 1) << mw)
+    bits_are("QNAN", (((1 << ew) - 1) << mw) | (1 << (mw - 1)))
+    bits_are("QBIT", 1 << (mw - 1))
+    bits_are("SIGN_SHIFT", W - 1)
+    bits_are("MANTISSA_WIDTH", mw)
+    bits_are("MANTISSA_MASK", (1 << mw) - 1)
+    if neg_result:
+        bits_are("SIGN", 1 << (W - 1))
+    for role, v in _POW_FLAG_WORDS.items():
+        if role in b.roles or (role == "FL_DIVZERO" and fn != "pow_core"):
+            bits_are(role, v)
+    for v in _POW_SMALL_INTS:
+        if f"I{v}" in b.roles:
+            bits_are(f"I{v}", v)
+    # the reduction's and the scale's offsets, from MAGIC's encoding
+    bits_are("K_OFFSET", magic_bits - bias)
+    bits_are("K_OFFSET_SUB", magic_bits - bias - p)
+    bits_are("C_WRAP", magic_bits + 9)
+    OFF = p + 8
+    if (bias + OFF) % 2:
+        OFF += 1
+    if m.get("OFF") != OFF:
+        findings.append(f"{tag}: OFF = {m.get('OFF')} is not the re-derived "
+                        f"{OFF}")
+    bits_are("KOFFSET", magic_bits - 8 * (bias + OFF))
+    bits_are("KBIAS1", bias - (bias + OFF) // 2)
+    bits_are("K_EMIN_P1", emin + bias + OFF + 1)
+    bits_are("K_EMIN", emin + bias + OFF)
+    kd = emin + 2 * bias + OFF
+    bits_are("K_KD", kd)
+    if b.rnd in (RNE, RMM):
+        bits_are("K_KD_P", kd - p)        # the half grid: nearest attributes
+    else:
+        held_only_if("K_KD_P", False, "the half grid is the nearest "
+                                      "attributes'")
+    bits_are("K_SUBMIN", emin - p + 1 + bias + OFF)
+    if fn == "pow":
+        point("P2PM2", Fraction(2) ** (p - 2))
+        point("P2PM1", Fraction(2) ** (p - 1))
+        point("P2P_Y", Fraction(2) ** p)
+    if fn in _POW_ROLE_CHECKS:
+        _POW_ROLE_CHECKS[fn](b, tag, verify, point, bits_are)
+    unchecked = sorted(set(b.roles) - seen)
+    if unchecked:
+        findings.append(f"{tag}: derived but not checked: {unchecked}")
+    used = {s[1] for i in b.live_indices() for s in b.body[i][2]
+            if s[0] == "w"}
+    nameless = sorted(n for n in used - {ref[1] for ref in b.roles.values()})
+    if nameless:
+        findings.append(f"{tag}: words the fragment holds with no role: "
+                        f"{[(n, hex(b.words[n])) for n in nameless]}")
+    lanes = _check_pow_scale(b, findings) if scale and fn in ("pow", "powr") \
+        else 0
+    return count[0], lanes
+
+
+# the role checks of each function beyond the common ones: _POW_ROLE_CHECKS[fn]
+# (b, tag, verify, point, bits_are); parcel M3G2 assigns its own at its anchor
+_POW_ROLE_CHECKS = {}
+
+
+def check_pow_constants(builder=None, formats=POW_FORMATS,
+                        attrs=sf.RND_MODES, names=None):
+    """(lines, findings): re-derive every derived constant of every built
+    pow-family routine at each of `formats` and `attrs` (the section's comment
+    above) and compare, by role: the logarithm's and the exponential's words,
+    the plan, the bound's coefficients, the screens, the neighbours of 1, the
+    responses and the integer words; and the scale words where they act, on
+    lanes pow(2, n/8). `names` default to the builders' (_POW_BUILDERS);
+    `builder(name, fmt, rnd)` is build, or a faulted one for a test. `lines`
+    say what was checked; `findings` are the differences, named by fragment and
+    word, empty when none."""
+    builder = builder or build
+    names = tuple(_POW_BUILDERS) if names is None else tuple(names)
+    lines, findings = [], []
+    for name in names:
+        for fmt in formats:
+            n_const = n_lanes = 0
+            for rnd in attrs:
+                b = builder(name, fmt, rnd)
+                c, ln = _check_pow_build(b, findings, rnd == attrs[0])
+                n_const += c
+                n_lanes += ln
+            m = b.meta
+            lines.append(
+                f"{name} {fmt.name}: G = {m['G']}, GL = {m['GL']}, GE = "
+                f"{m['GE']}, plan (KL, DL, KE, DE) = "
+                f"{(m['KL'], m['DL'], m['KE'], m['DE'])}, B1 "
+                f"{'0' if not m['B1'] else '2^-%d' % (m['B1'].denominator.bit_length() - 1)}: "
+                f"{n_const} derived constants in {len(attrs)} fragments, "
+                f"each the rounding its rule gives for an enclosure of the "
+                f"true number (the atanh series, the integer 8th root), the "
+                f"plan re-derived in exact rationals, the integers from the "
+                f"IEEE fields; {n_lanes} lanes pow(2, n/8) of the scale "
+                f"words")
+    return lines, findings
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the
@@ -7696,7 +9025,16 @@ def invariants(f, live_cap=_BY_FORMAT):
     root's still, admit RNE and RTZ only, cap the live count at 16 and allow
     no mark, which is how the study measured them failing these."""
     if live_cap is _BY_FORMAT:
-        if f.op in INV_LIVE_CAP:
+        if f.op in POW_LIVE_CAP:
+            # a pow-family fragment is held to its own row: no fallback to the
+            # six's cap (parcel M3G1), and a format it has no row for is
+            # refused, not capped by another's
+            if f.fmt.name not in POW_LIVE_CAP[f.op]:
+                raise ValueError(f"{f.op} has no live cap at {f.fmt.name}: "
+                                 f"POW_LIVE_CAP holds "
+                                 f"{', '.join(POW_LIVE_CAP[f.op])}")
+            live_cap = POW_LIVE_CAP[f.op][f.fmt.name]
+        elif f.op in INV_LIVE_CAP:
             # an inverse fragment is held to its own row: no fallback to the
             # six's cap (parcel M4G1)
             live_cap = INV_LIVE_CAP[f.op][f.fmt.name]
@@ -7712,20 +9050,27 @@ def invariants(f, live_cap=_BY_FORMAT):
 _CACHE = {}
 
 
-def fragment(name, fmt: FpFormat, rnd: int):
+def fragment(name, fmt: FpFormat, rnd: int, n=None):
     """The specialised routines.Fragment of `name` at `fmt` under the
     program's attribute `rnd`, held to invariants(): as routines.fragment()
     returns a division's. `name` is one of NAMES, or one of TRIG_NAMES (held to
     its own cap, TRIG_LIVE_CAP: fp32's is the triple word's, parcel M2F2), or
     one of INV_NAMES (INV_LIVE_CAP's cap; those not built yet are refused by
-    name); any other is refused by name. The fragment is built once and shared."""
-    if name not in NAMES and name not in TRIG_NAMES             and name not in INV_NAMES:
+    name); any other is refused by name. The fragment is built once and shared.
+
+    One of POW_NAMES is held to its own row, POW_LIVE_CAP's (pow and powr are
+    built, parcel M3G1: fp64, fp128 and fp256; the other three are parcel
+    M3G2's and fp32 is parcel M3F1's, each refused by name). `n` is the integer
+    operand of pown, rootn and compound (M3G2's, refused by name until it sets
+    the key); given to any other name it is a ValueError by name, and it is part
+    of the cache's key."""
+    if name not in NAMES and name not in TRIG_NAMES             and name not in INV_NAMES and name not in POW_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "
                          f"so far: "
-                         f"{', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS))}")
-    key = (name, fmt, rnd)
+                         f"{', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS))}")
+    key = (name, fmt, rnd, n)
     if key not in _CACHE:
-        f = build(name, fmt, rnd).fragment()
+        f = build(name, fmt, rnd, n=n).fragment()
         bad = invariants(f)
         if bad:
             raise AssertionError(f"{name} at {fmt.name}, rnd {rnd}: "
@@ -9070,15 +10415,16 @@ def main(argv=None):
     only = tuple(n for n in args.only.split(",") if n)
     for n in only:
         if n not in NAMES and n not in ("reduction", "reduction-tw", "trig",
-                                        "inv", "inv-tw"):
+                                        "inv", "inv-tw", "pow"):
             ap.error(f"--only {n!r}: one of {', '.join(NAMES)}, reduction, "
-                     f"reduction-tw, trig, inv, inv-tw")
+                     f"reduction-tw, trig, inv, inv-tw, pow")
     names = tuple(n for n in only if n in NAMES) or (() if only else NAMES)
     reduction = not only or "reduction" in only
     reduction_tw = not only or "reduction-tw" in only
     trig = not only or "trig" in only
     inv = not only or "inv" in only
     inv_tw = not only or "inv-tw" in only
+    pow_ = not only or "pow" in only
     if args.check:
         failed = False
         if names:
@@ -9154,6 +10500,21 @@ def main(argv=None):
                       f"{len(_INV_TW_BUILDERS)} routines, 1 format, "
                       f"{len(findings)} differences")
             failed = failed or bool(findings)
+        if pow_:
+            # parcel M3G1: pow and powr (and, as they are built, pown, rootn
+            # and compound). As inv above, the default run prints only its
+            # differences: the lines are `--only pow`'s
+            lines, findings = check_pow_constants()
+            if "pow" in only:
+                for ln in lines:
+                    print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            if "pow" in only:
+                print(f"mathlib --check (pow): {len(_POW_BUILDERS)} routines, "
+                      f"{len(POW_FORMATS)} formats, "
+                      f"{len(findings)} differences")
+            failed = failed or bool(findings)
         return 1 if failed else 0
     if names:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
@@ -9183,6 +10544,16 @@ def main(argv=None):
         print(f"reduction fp32 (triple word): G = {P.G}, b = {P.b}, "
               f"L = {P.L}, {P.K} words, {len(b.body)} instructions by "
               f"phase {by}")
+    if "pow" in only:
+        print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
+              f"{'words':>6s} {'live':>5s}  cap")
+        for name in _POW_BUILDERS:
+            for fmt in POW_FORMATS:
+                for rnd in sf.RND_MODES:
+                    f = fragment(name, fmt, rnd)
+                    print(f"{name:8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "
+                          f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
+                          f"{POW_LIVE_CAP[name][fmt.name]}")
     if "trig" in only:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
               f"{'words':>6s} {'live':>5s}  cap")
