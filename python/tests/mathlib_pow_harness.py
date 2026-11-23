@@ -1650,7 +1650,8 @@ SPECIAL_MARKS_TW = {
             "subnormal operands": 5},
     "powr": {"subnormal operands": 5}}
 # the highest register routines.program uses, the model's `live` mode (r31 and
-# r28) and the registers left a caller: 30 less the cap (M4C's rule)
+# r28) and M4C's first-spill rule over the 29 registers r3 to r31: 30 less
+# the cap, -2 for pow and +1 for powr
 REG_TOP_TW = {"pow": 31, "powr": 28}
 
 SHAPE_TW = {

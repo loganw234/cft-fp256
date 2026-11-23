@@ -318,7 +318,8 @@ def test_shape_and_registers(fn):
         prog, _bank = routines.program(f)
         assert P.highest_register(prog) == P.REG_TOP_TW[fn]
     assert P.REG_TOP_TW == {"pow": 31, "powr": 28}
-    # the cap is the measured maximum; 30 less the cap is -2 and +1 (M4C)
+    # the cap is the measured maximum; M4C's first-spill rule over the 29
+    # registers r3 to r31 (regalloc.REGS) gives 30 less the cap = -2 and +1
     caps = {fn_: ml.POW_LIVE_CAP[fn_]["fp32"] for fn_ in FNS}
     assert (30 - caps["pow"], 30 - caps["powr"]) == (-2, 1)
     worst = max(frags.values(), key=lambda f: f.live_max())
@@ -615,27 +616,47 @@ def test_the_control_is_green_in_every_check():
     assert {k: v for k, v in red.items() if v} == {}
 
 
+def assert_row(plant, red, want):
+    """The assertion every plant row is held to: the row lists EVERY check
+    (red or green), exactly `want` are red, and each finding begins with the
+    name of the check that made it."""
+    assert set(red) == set(P.CHECKS_TW), (plant, "the row omits or adds a "
+                                          "check", set(red) ^ set(P.CHECKS_TW))
+    assert {k for k, v in red.items() if v} == want, plant
+    for name, found in red.items():
+        assert all(s.startswith(name + ":") for s in found), (name, found[:1])
+
+
 @pytest.mark.parametrize("row", PLANTED, ids=lambda r: r[0])
 def test_each_plant_is_red_where_the_table_says_and_green_elsewhere(row):
     plant, fn, want, step = row
-    red = red_of(plant, fn, step)
-    assert set(red) == set(P.CHECKS_TW)          # a row lists every check
-    assert {k for k, v in red.items() if v} == want
-    for name, found in red.items():
-        assert all(s.startswith(name + ":") for s in found), (name, found[:1])
+    assert_row(plant, red_of(plant, fn, step), want)
 
 
 def test_every_check_has_a_plant_red_in_it_and_the_rows_list_every_check():
     seen = set()
     for plant, fn, want, step in PLANTED:
         seen |= want
-        red = red_of(plant, fn, step)
-        assert set(red) == set(P.CHECKS_TW)
+        assert_row(plant, red_of(plant, fn, step), want)     # green: real rows
     assert seen == set(P.CHECKS_TW)
-    # a doctored row that omits a check is refused by the same assertion
-    row = dict(red_of("two_sum_all", "pow", 4))
-    del row["bound"]
-    assert set(row) != set(P.CHECKS_TW)
+    # the same helper, red on a doctored row: one that omits a check, one that
+    # adds a name, one with a check turned red that the table says is green,
+    # one with a finding that does not begin with its check's name
+    real = red_of("two_sum_all", "pow", 4)
+    omit = dict(real)
+    del omit["bound"]
+    with pytest.raises(AssertionError, match="omits or adds"):
+        assert_row("two_sum_all", omit, {"shape"})
+    extra = dict(real, bogus=[])
+    with pytest.raises(AssertionError, match="omits or adds"):
+        assert_row("two_sum_all", extra, {"shape"})
+    wrong = dict(real, bound=["bound: a finding"])
+    with pytest.raises(AssertionError):
+        assert_row("two_sum_all", wrong, {"shape"})
+    named = dict(real, shape=["pools: not the shape's"])
+    with pytest.raises(AssertionError):
+        assert_row("two_sum_all", named, {"shape"})
+    assert_row("two_sum_all", real, {"shape"})
 
 
 def test_the_table_has_every_plant_of_the_triple_word():

@@ -8954,10 +8954,15 @@ def check_pow_constants(builder=None, formats=POW_FORMATS,
 #
 # The registers, which are Logan's accepted cost: pow reaches r31 with 32
 # values live, powr r28 with 29 (MEASURED by the model's `live` mode and again
-# by this build's shape check). "30 less the cap" (M4C's rule, docs/studies/
-# M4-invtrig.md, the note of 2026-11-11 at M4C) is what is left a caller beside
-# a call, of the 30 registers r3 to r31 the allocator has: pow -2 (a caller
-# spills beside the call, as M4's atan2 does), powr +1. cftc's allocator is not
+# by this build's shape check). The allocator has the 29 registers r3 to r31
+# beside a call (regalloc.REGS); "30 less the cap" is M4C's first-spill rule
+# (docs/studies/M4-invtrig.md, the note of 2026-11-11 at M4C; the arithmetic is
+# docs/VALIDATION.md's, "fp32's 23 live leave 6 of the 29 registers beside a
+# call: the 7th other value is the first spilled"): the other value a caller
+# keeps across the call that is the first spilled is the (30 - cap)th. For pow
+# that is -2 (the routine's own 32 live values leave no register, so a caller
+# spills at once, as M4's atan2 does), for powr +1 (29 live fill the 29
+# registers: the 1st other value is the first spilled). cftc's allocator is not
 # run here; the first spill is parcel M3C's measurement.
 #
 # Faults of the triple word: _POW_TW_PLANTS, a table of its own (POW_PLANTS is
@@ -9602,9 +9607,11 @@ def _build_pow_tw_family(name, fmt, rnd, guard, shift, plant, n):
                TwoSum counts
     A lane is a tuple (x, y) of encodings. Registers: pow keeps 32 values live
     and reaches r31, powr 29 and r28 (POW_LIVE_CAP["pow"]["fp32"] = 32,
-    ["powr"]["fp32"] = 29; MEASURED): 30 less the cap is -2 and +1, so a
-    caller spills beside a pow call, as M4's atan2 does; cftc's allocator is
-    not run here."""
+    ["powr"]["fp32"] = 29; MEASURED): M4C's first-spill rule (the allocator
+    has the 29 registers r3 to r31) gives 30 less the cap = -2 for pow and +1
+    for powr, so a caller spills at once beside a pow call, as M4's atan2
+    does, and from its first other value beside a powr call; cftc's
+    allocator is not run here."""
     if name not in _POW_TW_BUILDERS:
         raise ValueError(f"{name} at fp32 is not built: parcel M3F2's (pow and "
                          f"powr are the triple word, parcel M3F1's)")
