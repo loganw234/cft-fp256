@@ -123,7 +123,9 @@ endif
 # tools/hip_unit.py writes gen/hip/cft_hip_unit.hip, which includes the
 # tree's own bigint.c, softfloat.c, augmented.c's lane functions,
 # fma256_fixed.h (the fixed tier's, round 3's G3A), fma128_fixed.h (its
-# fp128, round 3's G3A2) and seq_exec.h (CFT_HD, cft_config.h),
+# fp128, round 3's G3A2), seq_alu_fixed.h (its lane ALU for programs,
+# round 3's G3B) and seq_exec.h (CFT_HD, cft_config.h) - the last also
+# twice more inside namespaces, the executor on the fixed tier's ALU -
 # and hipcc compiles it for HIP_ARCH - compute capabilities on nvidia
 # (default 89 120, the RTX 4070 and the RTX 5060 Ti), gfx targets on amd
 # (default gfx1102, the RX 7600). Compiled, not linked or launched; the
@@ -211,6 +213,14 @@ HIP_ARCHDEF = -DCFT_HIP_ARCH_TOKENS=$(subst $(HIP_SPACE),_,$(strip $(HIP_ARCH)))
 # augmented.c and seq_exec.h itself, so it is not in SRC (print-src, the
 # WebAssembly module's sources) and its rules are its own, below. Every
 # link line ends in $(XRTLIBS), so the GPU runtime's libraries ride in it.
+# Since round 3's G3B there is a SECOND such unit, backend_hip_fx.cpp: the
+# fixed tier's two program kernels, k_seq_fx and k_seq_fx128, on its own
+# copy of bigint.c and softfloat.c, every definition of which is internal.
+# Compiled in backend_hip.cpp's unit they moved k_seq's code - 9 of 16
+# programs 1.6 % to 3.6 % slower on the RTX 5060 Ti with k_seq's text
+# unchanged (docs/VALIDATION.md, G3B's entry) - so that unit keeps its
+# device code as it was and calls the other's two host entries. Neither
+# uses relocatable device code; no device function crosses them.
 #
 # HIP_PLANTS=1 compiles the backend's plants in (CFT_HIP_PLANTS, chosen
 # at run time by CFT_HIP_PLANT; backend_hip.cpp lists them). Build it in
@@ -224,6 +234,9 @@ ifeq ($(HIP),1)
   XRTLIBS := $(HIPLIBS)
   OBJ     += src/backend_hip.o
   PICOBJ  += src/backend_hip.lo
+  # round 3's G3B: the second device unit
+  OBJ     += src/backend_hip_fx.o
+  PICOBJ  += src/backend_hip_fx.lo
   HIP_PLANTDEF := $(if $(filter 1,$(HIP_PLANTS)),-DCFT_HIP_PLANTS,)
 endif
 .PHONY: hip-unit
@@ -236,7 +249,7 @@ hip-unit:
 	HIP_PLATFORM=$(HIP_PLATFORM) HIP_PATH=$(HIP_ROOT) $(HIP_ROOT)/bin/hipcc $(HIP_FLAGS) \
 		-O2 -std=c++17 -c gen/hip/cft_hip_unit.hip -o gen/hip/cft_hip_unit-$(HIP_PLATFORM).o \
 		> gen/hip/resource-$(HIP_PLATFORM).log 2>&1 || { cat gen/hip/resource-$(HIP_PLATFORM).log; exit 1; }
-	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes, fma256_fixed.h, fma128_fixed.h and seq_exec.h compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
+	@echo "hip-unit: bigint.c, softfloat.c, augmented.c's lanes, fma256_fixed.h, fma128_fixed.h, seq_alu_fixed.h and seq_exec.h (three times, two inside namespaces) compiled as one unit for $(HIP_PLATFORM) $(HIP_ARCH): gen/hip/cft_hip_unit-$(HIP_PLATFORM).o"
 else
 hip-unit:
 	@echo "hip-unit: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
@@ -456,8 +469,8 @@ $(SHLIB): $(PICOBJ)
 .PHONY: hip-flags-force hip-symcheck hip-symcheck-plant clean-hip
 hip-flags-force:
 HIP_LOG = gen/hip/backend_hip-$(HIP_PLATFORM)
-HIP_OTHER_OBJ   = $(filter-out src/backend_hip.o,$(OBJ))
-HIP_OTHER_PICOBJ = $(filter-out src/backend_hip.lo,$(PICOBJ))
+HIP_OTHER_OBJ   = $(filter-out src/backend_hip.o src/backend_hip_fx.o,$(OBJ))
+HIP_OTHER_PICOBJ = $(filter-out src/backend_hip.lo src/backend_hip_fx.lo,$(PICOBJ))
 # $(call hip_symcheck,UNIT OBJECT,HOST OBJECTS,TAG): one shell command
 # that fails naming every symbol defined in both, and fails too if nm
 # saw neither side's sentinel (cfth_open, cft_open): an empty listing
@@ -474,6 +487,29 @@ hip_symcheck = LC_ALL=C nm -g --defined-only $(1) | awk 'NF >= 3 { print $$3 }' 
 	else \
 	  echo "hip-symcheck: $$(wc -l < gen/hip/$(3)-unit.txt) symbols defined in $(1)," \
 	       "$$(wc -l < gen/hip/$(3)-host.txt) in the $(words $(2)) host objects, none in both"; \
+	fi
+# round 3's G3B: the second device unit (backend_hip_fx.cpp) defines its
+# bigint, softfloat and executor copies inside an anonymous namespace, so
+# besides its two entries (cfthfx_*) it defines only that namespace's names,
+# which nvcc emits global with the file's hash and clang keeps local (clang
+# adds the unit's __hip_cuid_). $(call hip_symcheck_fx,
+# FX OBJECT,OTHER OBJECTS,TAG,WHAT): no symbol defined in both, the fx
+# object's sentinel (an entry named cfthfx_seq_launch) seen, and the other
+# side not empty - against the host objects, and pairwise against
+# backend_hip.o (.lo), whose plant (-DCFT_HIP_PLANT_FX_COLLIDE, one symbol
+# defined in both units) must turn the pairwise check red.
+hip_symcheck_fx = LC_ALL=C nm -g --defined-only $(1) | awk 'NF >= 3 { print $$3 }' | \
+	  LC_ALL=C sort -u > gen/hip/$(3)-unit.txt && \
+	LC_ALL=C nm -g --defined-only $(2) | awk 'NF >= 3 { print $$3 }' | \
+	  LC_ALL=C sort -u > gen/hip/$(3)-host.txt && \
+	grep -q cfthfx_seq_launch gen/hip/$(3)-unit.txt && [ -s gen/hip/$(3)-host.txt ] && \
+	LC_ALL=C comm -12 gen/hip/$(3)-unit.txt gen/hip/$(3)-host.txt > gen/hip/$(3)-both.txt && \
+	if [ -s gen/hip/$(3)-both.txt ]; then \
+	  echo "hip-symcheck: FAILED - defined in $(1) and in $(4):" \
+	       "$$(tr '\n' ' ' < gen/hip/$(3)-both.txt)"; exit 1; \
+	else \
+	  echo "hip-symcheck: $$(wc -l < gen/hip/$(3)-unit.txt) symbols defined in $(1)," \
+	       "$$(wc -l < gen/hip/$(3)-host.txt) in $(4), none in both"; \
 	fi
 
 ifeq ($(HIP),1)
@@ -498,17 +534,45 @@ src/backend_hip.lo: src/backend_hip.cpp src/bigint.c src/softfloat.c src/augment
 		> $(HIP_LOG)-pic.log 2>&1 || { cat $(HIP_LOG)-pic.log; exit 1; }
 	@grep -i 'warning' $(HIP_LOG)-pic.log || true
 
+# round 3's G3B: the second device unit, the same compiler and flags
+HIP_FX_LOG = gen/hip/backend_hip_fx-$(HIP_PLATFORM)
+src/backend_hip_fx.o: src/backend_hip_fx.cpp src/bigint.c src/softfloat.c src/fma256_fixed.h \
+                      src/fma128_fixed.h src/seq_alu_fixed.h src/seq_exec.h gen/hip/backend-flags
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
+		$(HIP_ARCHDEF) $(HIP_PLANTDEF) -c $< -o $@ > $(HIP_FX_LOG).log 2>&1 \
+		|| { cat $(HIP_FX_LOG).log; exit 1; }
+	@grep -i 'warning' $(HIP_FX_LOG).log || true
+
+src/backend_hip_fx.lo: src/backend_hip_fx.cpp src/bigint.c src/softfloat.c src/fma256_fixed.h \
+                       src/fma128_fixed.h src/seq_alu_fixed.h src/seq_exec.h gen/hip/backend-flags
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(HIP_WARN) $(INC) $(XRTDEF) \
+		$(HIP_ARCHDEF) $(HIP_PLANTDEF) $(HIP_PICF) $(SHDEF) -c $< -o $@ \
+		> $(HIP_FX_LOG)-pic.log 2>&1 || { cat $(HIP_FX_LOG)-pic.log; exit 1; }
+	@grep -i 'warning' $(HIP_FX_LOG)-pic.log || true
+
 gen/hip/symcheck.ok: src/backend_hip.o $(HIP_OTHER_OBJ)
 	@$(call hip_symcheck,src/backend_hip.o,$(HIP_OTHER_OBJ),sym)
 	@touch $@
 gen/hip/symcheck-pic.ok: src/backend_hip.lo $(HIP_OTHER_PICOBJ)
 	@$(call hip_symcheck,src/backend_hip.lo,$(HIP_OTHER_PICOBJ),sympic)
 	@touch $@
-libcft.a: | gen/hip/symcheck.ok
-$(SHLIB): | gen/hip/symcheck-pic.ok
-hip-symcheck: gen/hip/symcheck.ok gen/hip/symcheck-pic.ok
+# round 3's G3B: the second unit against the host objects, and the two
+# device units against each other
+gen/hip/symcheck-fx.ok: src/backend_hip_fx.o src/backend_hip.o $(HIP_OTHER_OBJ)
+	@$(call hip_symcheck_fx,src/backend_hip_fx.o,$(HIP_OTHER_OBJ),symfx,the $(words $(HIP_OTHER_OBJ)) host objects)
+	@$(call hip_symcheck_fx,src/backend_hip_fx.o,src/backend_hip.o,sympair,src/backend_hip.o)
+	@touch $@
+gen/hip/symcheck-fx-pic.ok: src/backend_hip_fx.lo src/backend_hip.lo $(HIP_OTHER_PICOBJ)
+	@$(call hip_symcheck_fx,src/backend_hip_fx.lo,$(HIP_OTHER_PICOBJ),symfxpic,the $(words $(HIP_OTHER_PICOBJ)) host objects)
+	@$(call hip_symcheck_fx,src/backend_hip_fx.lo,src/backend_hip.lo,sympairpic,src/backend_hip.lo)
+	@touch $@
+libcft.a: | gen/hip/symcheck.ok gen/hip/symcheck-fx.ok
+$(SHLIB): | gen/hip/symcheck-pic.ok gen/hip/symcheck-fx-pic.ok
+hip-symcheck: gen/hip/symcheck.ok gen/hip/symcheck-pic.ok gen/hip/symcheck-fx.ok \
+              gen/hip/symcheck-fx-pic.ok
 
-hip-symcheck-plant: src/backend_hip.cpp src/augmented.c gen/hip/backend-flags $(HIP_OTHER_OBJ)
+hip-symcheck-plant: src/backend_hip.cpp src/backend_hip_fx.cpp src/augmented.c \
+                    gen/hip/backend-flags $(HIP_OTHER_OBJ)
 	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(INC) $(XRTDEF) $(HIP_ARCHDEF) \
 		-DCFT_HIP_PLANT_COLLIDE -c $< -o gen/hip/symplant.o > gen/hip/symplant.log 2>&1 \
 		|| { cat gen/hip/symplant.log; exit 1; }
@@ -531,6 +595,20 @@ hip-symcheck-plant: src/backend_hip.cpp src/augmented.c gen/hip/backend-flags $(
 	  echo "hip-symcheck-plant: the check failed, but not on cft_augmented_add"; exit 1; }; \
 	echo "hip-symcheck-plant: RED, as it must be - the unit with augmented.c's entry points defines" \
 	     "$$(tr '\n' ' ' < gen/hip/symplantaug-both.txt)beside the host objects"
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(INC) $(XRTDEF) $(HIP_ARCHDEF) \
+		-DCFT_HIP_PLANT_FX_COLLIDE -c src/backend_hip.cpp -o gen/hip/symplant-fx-a.o \
+		> gen/hip/symplant-fx-a.log 2>&1 || { cat gen/hip/symplant-fx-a.log; exit 1; }
+	$(HIP_CC) $(HIP_FLAGS) -std=c++17 $(CFLAGS) $(INC) $(XRTDEF) $(HIP_ARCHDEF) \
+		-DCFT_HIP_PLANT_FX_COLLIDE -c src/backend_hip_fx.cpp -o gen/hip/symplant-fx-b.o \
+		> gen/hip/symplant-fx-b.log 2>&1 || { cat gen/hip/symplant-fx-b.log; exit 1; }
+	@if ( $(call hip_symcheck_fx,gen/hip/symplant-fx-b.o,gen/hip/symplant-fx-a.o,symplantfx,gen/hip/symplant-fx-a.o) ); then \
+	  echo "hip-symcheck-plant: the pairwise check PASSED two units that both define a symbol - it cannot fail"; \
+	  exit 1; \
+	fi; \
+	grep -qx cfth_plant_fx_collide gen/hip/symplantfx-both.txt || { \
+	  echo "hip-symcheck-plant: the pairwise check failed, but not on cfth_plant_fx_collide"; exit 1; }; \
+	echo "hip-symcheck-plant: RED, as it must be - the two device units both define" \
+	     "$$(tr '\n' ' ' < gen/hip/symplantfx-both.txt)"
 else
 hip-symcheck hip-symcheck-plant:
 	@echo "$@: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
@@ -571,13 +649,34 @@ hip-fmadiff$(EXE):
 	@echo "hip-fmadiff: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
 endif
 
+# round 3's G3B: the program-level differential (tools/hip_progdiff.c), the
+# fixed tier's program kernels held to the generic tier's - and, for a
+# prefix, to the software handle - through the public API, one program a
+# run on two handles of one device: a C tool linking libcft.a as hip-test
+# does, its lanes drawn on the host by tools/fx256_stream.h's and
+# tools/fx128_stream.h's generators (whose reference lane is libcft.a's
+# own cft_sf_compute). It prints its build time. HIP=1 only.
+ifeq ($(HIP),1)
+hip-progdiff$(EXE): tools/hip_progdiff.c tools/fx256_stream.h tools/fx128_stream.h \
+                    src/fma256_fixed.h src/fma128_fixed.h libcft.a
+	@t0=$$(date +%s); $(CC) $(CSTD) $(CFLAGS) $(WARN) -Wno-unknown-pragmas $(INC) \
+		tools/hip_progdiff.c libcft.a -o $@ $(XRTLIBS) && \
+		echo "hip-progdiff: built in $$(( $$(date +%s) - t0 )) s"
+else
+hip-progdiff$(EXE):
+	@echo "hip-progdiff: needs HIP=1 (HIP ?= 0, so that libcft builds with no GPU toolchain)"; exit 1
+endif
+
 # round 3's G3A: the fixed tier's arithmetic on a HOST, no GPU and no
 # libcft.a (tests/fma256_test.c): src/fma256_fixed.h and tools/fx256_stream.h
 # with the tree's bigint.c, softfloat.c and sha256.c included and compiled
 # with libcft's own C flags, so the generic lane is libcft's cft_sf_compute;
 # -Wno-unknown-pragmas because gcc does not know the header's `#pragma
 # unroll`. Any HIP setting, any host. Not in `make test` (G3D's to wire).
+# Round 3's G3B: it holds the executor's lane ALU (src/seq_alu_fixed.h)
+# too, which needs src/fma128_fixed.h beside src/fma256_fixed.h.
 fma256-test$(EXE): tests/fma256_test.c src/fma256_fixed.h tools/fx256_stream.h \
+                   src/fma128_fixed.h src/seq_alu_fixed.h \
                    src/bigint.c src/softfloat.c src/sha256.c $(HDRS)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) -Wno-unknown-pragmas $(INC) tests/fma256_test.c -o $@
 
@@ -592,8 +691,10 @@ clean-fma256:
 # round 3's G3A2: fma256test's sibling at binary128 (tests/fma128_test.c),
 # src/fma128_fixed.h and tools/fx128_stream.h on a HOST, built the same way:
 # no GPU, no libcft.a, -Wno-unknown-pragmas. Any HIP setting, any host. Not
-# in `make test` (G3D's to wire, with fma256test).
+# in `make test` (G3D's to wire, with fma256test). Round 3's G3B: it holds
+# fxalu128_compute (src/seq_alu_fixed.h), which needs src/fma256_fixed.h.
 fma128-test$(EXE): tests/fma128_test.c src/fma128_fixed.h tools/fx128_stream.h \
+                   src/fma256_fixed.h src/seq_alu_fixed.h \
                    src/bigint.c src/softfloat.c src/sha256.c $(HDRS)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) -Wno-unknown-pragmas $(INC) tests/fma128_test.c -o $@
 
@@ -609,9 +710,11 @@ clean-fma128:
 # HIP=1 build left.
 clean: clean-hip
 clean-hip:
-	rm -f src/backend_hip.o src/backend_hip.lo hip-test hip-test.exe \
+	rm -f src/backend_hip.o src/backend_hip.lo src/backend_hip_fx.o src/backend_hip_fx.lo \
+	      hip-test hip-test.exe \
 	      hip-corpus hip-corpus.exe hip-fmadiff hip-fmadiff.exe \
-	      gen/hip/hip_fmadiff.o gen/hip/hip_fmadiff_sha256.o
+	      gen/hip/hip_fmadiff.o gen/hip/hip_fmadiff_sha256.o \
+	      hip-progdiff hip-progdiff.exe
 
 cft-selftest$(EXE): tools/cft_selftest.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)

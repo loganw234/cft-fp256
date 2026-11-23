@@ -2261,13 +2261,16 @@ its kernels do not load there - and so is a runtime that finds no GPU. A
 build without the backend answers `hip:0` with `CFT_ERR_NO_DEVICE` and a
 sentence saying `HIP=1` builds it.
 
-**What runs on the GPU is this library.** `backend_hip.cpp` is one device
-translation unit that includes the tree's own `bigint.c`, `softfloat.c`
+**What runs on the GPU is this library.** `backend_hip.cpp` is a device
+translation unit (since round 3's G3B one of two: `backend_hip_fx.cpp`
+holds the fixed tier's program kernels, at the end of this section) that
+includes the tree's own `bigint.c`, `softfloat.c`
 and `seq_exec.h` (G1A made them compile for a GPU as they are), and since
 round 2 `augmented.c`'s lane functions (G2A, below): an
 element is `cft_sf_compute`, as the software loop runs it (on the generic
 tier, the default; the fixed tier, at the end of this section, runs fp256's
-and fp128's FMA, ADD, SUB and MUL on a second implementation); a reduction is
+and fp128's FMA, ADD, SUB and MUL on a second implementation, in `cft_run`
+and, since G3B, inside programs); a reduction is
 softfloat.c's tree run one level a launch - neighbours paired, a trailing
 odd element carried up unchanged, the result `cft_reduce`'s bit for bit
 because every left child of that tree is a perfect aligned subtree - and
@@ -2576,10 +2579,12 @@ leaves no handle. Two handles of one process may run the two tiers side by
 side. One predicate in one place (backend_hip.cpp's `fixed_covers`) decides
 which calls take a fixed kernel; every other format and opcode on a
 fixed-tier handle runs the generic kernel, and so do the reduction's ADD
-nodes, programs (the executor's lane ALU), the augmented calls and the
-divide and the root - a composition takes the fixed path only for its own
-`cft_run` calls (the multiply pass of `cft_reduce`'s `CFT_DOT` and
-`CFT_SUMSQ` is a `cft_run` MUL). A call the fixed kernels do not cover
+nodes and the augmented calls - a composition takes the fixed path only for
+its own `cft_run` calls (the multiply pass of `cft_reduce`'s `CFT_DOT` and
+`CFT_SUMSQ` is a `cft_run` MUL) and, since G3B (below), for its programs at
+fp256 and fp128 without an augmented half; until G3B, programs (the
+executor's lane ALU), and with them the divide and the root, ran the generic
+code on a fixed-tier handle too. A call the fixed kernels do not cover
 reaching its branch is refused by name, `CFT_ERR_INTERNAL` ("the fixed tier
 was handed ..."), and a lane whose construction invariant fails is an
 internal error naming the tier. Staging, chunks, resident windows, the
@@ -2631,8 +2636,9 @@ fp128 FMA, ADD, SUB and MUL only) ..."). ADD, SUB and MUL are steered on the
 16-byte encodings (`fx128_steer`), and the open holds the header's typed-in
 constants to the library's descriptor (`fx128_matches`), refusing the tier
 by name where they differ. What stays generic at fp128 is what stays generic
-at fp256: fp32 and fp64, every other opcode, the reduction's ADD nodes,
-programs, the augmented calls, the divide and the root. One switch for the
+at fp256: fp32 and fp64, every other opcode, the reduction's ADD nodes and
+the augmented calls (and, until G3B below, programs, and with them the
+divide and the root). One switch for the
 class means one record: a certificate's `env CFT_HIP_TIER fixed` line is the
 same text for G3A's coverage (fp256) and this one's (fp256 and fp128), and
 `cft_build_id()` dates which. It is held to the generic tier by
@@ -2658,6 +2664,73 @@ fp128 FMAs and 150 MPFR ones. By the rule fixed before the measurement the
 fixed tier at fp128 was faster in all eight cases (two GPUs, four
 operations): the speed leg is met at fp128 too, and the default still
 waits for the overnight proof.
+
+**The fixed tier inside programs (round 3, G3B, 2026-11-23).** The same
+switch, `CFT_HIP_TIER=fixed`, also reaches programs: on a fixed-tier handle
+a program at fp256 or fp128 with no AUGADD or AUGERR in it runs on a kernel
+of its own, `k_seq_fx` or `k_seq_fx128`, whose lane ALU sends FMA, ADD, SUB
+and MUL at that format to the second implementations above
+(`fma256_fixed.h`, `fma128_fixed.h`) through a wrapper with
+`cft_sf_compute`'s signature (`host/src/seq_alu_fixed.h`: `fxalu_compute`
+and `fxalu128_compute`), and every other instruction - the other opcodes,
+the controls, anything outside the width or the five attributes - to
+`cft_sf_compute`, unchanged. The executor is libcft's own `seq_exec.h`,
+unedited, compiled again inside a namespace with its one ALU hook naming
+the wrapper; `k_seq` is not edited. A lane the second implementation
+refuses is an internal error, as any ALU refusal is. What stays generic:
+fp32 and fp64 programs, every program with an augmented half, and every
+program on a generic-tier handle, which run `k_seq` as before - the generic
+route is the base's. The divide and the root take the fixed tier at fp256
+and fp128 where they run as programs, which have no augmented half. One
+predicate in one place (backend_hip.cpp's `seq_route`, read once a run)
+chooses the kernel, and before anything is staged a literal test of the
+program's own words refuses by name, `CFT_ERR_INTERNAL` ("... the fixed
+tier's executor (k_seq_fx) was handed fp128, which it does not cover (fp256
+and fp128 programs without augmentedAddition only, each on its own
+kernel) - a defect in libcft, not in the call"), anything else reaching a
+fixed kernel. The two kernels are a SECOND DEVICE UNIT,
+`host/src/backend_hip_fx.cpp`, on its own copy of bigint.c and softfloat.c:
+compiled into backend_hip.cpp's unit they moved `k_seq`'s code, its text
+unchanged (ptxas's spills 80/76 to 88/88 bytes on sm_120, and 9 of 16
+programs 1.6 % to 3.6 % slower on the RTX 5060 Ti), so that unit keeps its
+device code as it was - built so, its six kernels' SASS and gfx1102 code are
+the base's line for line - and calls the other's two host entries; no device
+function crosses them and neither uses relocatable device code.
+`CFT_HIP_INFO=1`'s line adds the program kernels' frames after the fixed
+kernels': `; program kernels: fixed 80/64 registers and 14192/12672 bytes
+local a thread (fp256/fp128)` on the RTX 5060 Ti, 94/71 and 13860/13764 on
+the RX 7600. Nothing published changes, and a certificate's `env
+CFT_HIP_TIER fixed` line is the same text as G3A's: one switch, so a
+certificate cannot say whether the fixed tier ran programs too; only
+`cft_build_id()` dates it. It is held to the generic tier by `hip-progdiff`
+(one instruction and a sixteen-instruction chain on hip-fmadiff's streams,
+lane by lane on two handles of one device, staged and resident, a prefix on
+the software handle and the one-instruction lanes on the host's fixed
+lane), by `fma256test` and `fma128test` (the wrappers against
+`cft_sf_compute` on any host), by every corpus under both tiers, seq_check,
+hip-test's `progtier` leg, and thirteen plants (`seqfx-rmm` to
+`seqfx128-refuse`, bits 39 to 51), of which the two refuse plants only the
+plant build's route probe can see. **Its rates** (G3B's entry in
+docs/VALIDATION.md: a generic-tier and a fixed-tier handle of one device
+alternated call by call in one process, five rounds of ten calls after a
+warm-up, each figure the median of the rounds' medians beside their range;
+exp's six at rne, the stand-alone shape, on typical arguments, every call
+held to the software handle): resident, the fixed tier runs exp at fp256 at
+2.1e7 lane-programs a second on the RTX 5060 Ti, 5.69 times the generic
+tier (12.33 against 70.18 ms at 262,144 lanes), and the six 5.6 to 6.5
+times at 262,144 and 1,048,576; 3.0 to 3.3 times on the RX 7600 (exp 6.2e6
+a second); at fp128 6.9 to 9.0 times on the 5060 Ti (exp 6.6e7 a second)
+and 3.0 to 3.6 times on the RX 7600 (exp 1.4e7 a second); staged, where the
+copies take their share, 3.0 to 6.3 times on the 5060 Ti and 2.3 to 4.6 on
+the RX 7600 at either format. The 5060 Ti's fixed exp at fp256 is about 790
+one-core libcft lanes (2.7e4 a second on this desktop) and 33 one-core MPFR
+elements at 237 bits (6.5e5), at fp128 about 1,800 and 68 (MPFR at 113
+bits). By the rule fixed before the measurement the fixed tier was faster
+in all twelve cells at fp256 and all twelve at fp128 (six routines, two
+GPUs: faster beyond the spread resident at 262,144 and 1,048,576, nowhere
+slower staged or at small n), on the typical arguments and on the corpus's
+own lanes alike: the speed leg of plan answer 3 is met for programs at both
+formats, and the default still waits for the overnight proof.
 
 ## The device's on-chip capacities, published (2026-09-07)
 

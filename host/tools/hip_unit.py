@@ -21,18 +21,25 @@ byte, so a file in DIR that is not exactly this script's is refused by
 name - by `check`, and by every build that writes one.
 
 unit - one translation unit of the tree's bigint.c, softfloat.c,
-augmented.c, fma256_fixed.h, fma128_fixed.h and seq_exec.h, as the GPU
-backend's kernels are one (no relocatable device code, nothing linked
-across units), in backend_hip.cpp's order. BLOCK_LANES is 1, a thread a
-lane. CFT_AUG_LANES_ONLY, as in backend_hip.cpp: augmented.c's lane
-functions alone, its entry points being libcft's own (the GPU backend's
-round 2; until then the unit was CFT_NO_AUGMENTED). Five kernels, never
-launched, reach the arithmetic, the executor's per-lane functions,
-augmented.c's lanes and the fixed tier's second implementation of the FMA
-at fp256 (round 3's G3A: fma256_fixed.h's steering and lane) and at fp128
-(round 3's G3A2: fma128_fixed.h's): a device compiler generates no code for
-a static function nothing calls, and a check that compiled none would pass
-whatever it held.
+augmented.c, fma256_fixed.h, fma128_fixed.h, seq_alu_fixed.h and
+seq_exec.h, in backend_hip.cpp's order (no relocatable device code,
+nothing linked across units). It is ONE COMPILE CHECK OF BOTH DEVICE UNITS'
+TEXTS TOGETHER, not the build's structure: since round 3's G3B the GPU
+backend is two device units - backend_hip.cpp, and backend_hip_fx.cpp with
+the fixed tier's program kernels, apart because compiled with backend_hip.cpp
+they moved k_seq's code (docs/VALIDATION.md, G3B's entry) - and this unit
+compiles every text either reaches, the namespaced executors on the file
+scope's arithmetic, once. BLOCK_LANES is 1, a thread a lane. CFT_AUG_LANES_ONLY, as in backend_hip.cpp:
+augmented.c's lane functions alone, its entry points being libcft's own
+(the GPU backend's round 2; until then the unit was CFT_NO_AUGMENTED).
+Seven kernels, never launched, reach the arithmetic, the executor's
+per-lane functions, augmented.c's lanes, the fixed tier's second
+implementation of the FMA at fp256 (round 3's G3A: fma256_fixed.h's
+steering and lane) and at fp128 (round 3's G3A2: fma128_fixed.h's), and
+(round 3's G3B) the executor compiled twice more inside namespaces with its
+ALU call on seq_alu_fixed.h's wrappers: a device compiler generates no code
+for a static function nothing calls, and a check that compiled none would
+pass whatever it held.
 
 gpua - in place of devcopy.py's devsrc/: src/bigint.c, src/softfloat.c,
 src/seqcore.c (BLOCK_LANES 1, and CFT_SEQ_ALU as the runner's hook
@@ -74,7 +81,7 @@ def unit_text():
             "#define CFT_AUG_LANES_ONLY 1\n" +
             tree("src/bigint.c") + tree("src/softfloat.c") + tree("src/augmented.c") +
             tree("src/fma256_fixed.h") + tree("src/fma128_fixed.h") +
-            tree("src/seq_exec.h") + """
+            tree("src/seq_alu_fixed.h") + tree("src/seq_exec.h") + """
 /* The elementwise path: lane i of a batch through cft_sf_compute, as
  * device.c's software loop runs one element. */
 __global__ void cft_hip_unit_alu(cft_fmt_desc f, int op, int rnd, const cft_bn *a,
@@ -175,6 +182,82 @@ __global__ void cft_hip_unit_fx128(cft_fmt_desc f, int op, int rnd, const uint8_
     else
         fx128_fma_lane(qa, qb, qc, rnd, d + i * 16, &fl[i]);
 }
+
+/* The program tier (round 3's G3B), as the GPU backend's k_seq_fx and
+ * k_seq_fx128 run a lane: seq_exec.h compiled again inside a namespace with
+ * its one ALU call naming seq_alu_fixed.h's wrapper (fxalu_compute at
+ * fp256, fxalu128_compute at fp128), augmented.c's lane calls mapped to a
+ * stub that refuses, and seq_load_in renamed (its arguments are all the
+ * file scope's types, so argument-dependent lookup would find both copies)
+ * - the executor's text, unedited, a second and a third time. */
+CFT_HD static int cft_hip_unit_no_aug(const cft_fmt_desc *, const cft_bn *, const cft_bn *,
+                                      cft_bn *, cft_bn *, uint32_t *)
+{
+    return 1;
+}
+#undef CFT_SEQ_EXEC_H
+#undef CFT_SEQ_ALU
+#define CFT_SEQ_ALU fxalu_compute
+#define cft_aug_add_lane cft_hip_unit_no_aug
+#define cft_aug_mul_lane cft_hip_unit_no_aug
+#define seq_load_in fxseq_load_in
+namespace fxseq {
+""" + tree("src/seq_exec.h") + """}
+
+__global__ void cft_hip_unit_seqfx(fxseq::cft_program P, cft_fmt_desc f, const cft_bn *konst,
+                                   cft_run_args A, cft_bn *scratch, uint32_t *acc)
+{
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t esz = (size_t)f.width / 8;
+    const uint32_t reach = fxseq::seq_scratch_reach(&P, P.scratch_depth);
+    uint32_t fl = 0, st = 0;
+    cft_status rc;
+    fxseq::seq_block B;
+    if (i >= A.n)
+        return;
+    P.f = &f;
+    B.depth = P.scratch_depth;
+    B.scratch = scratch ? scratch + i * reach : NULL;
+    fxseq::seq_lanes_deposits(&P, &A, i, 1, esz);
+    fxseq::seq_lanes_in(&P, &A, &B, i, 1, esz, reach);
+    rc = fxseq::seq_run_block(&P, konst, &B, 1, (uint8_t *)A.deposits, i, esz, &fl, &st);
+    if (rc == CFT_OK)
+        fxseq::seq_lanes_out(&P, &A, &B, i, 1, esz);
+    acc[i] = fl | st << 8 | (uint32_t)rc << 16;
+}
+
+/* The program tier's fp128 kernel: the third copy, on fxalu128_compute. */
+#undef CFT_SEQ_EXEC_H
+#undef CFT_SEQ_ALU
+#define CFT_SEQ_ALU fxalu128_compute
+namespace fxseq128 {
+""" + tree("src/seq_exec.h") + """}
+#undef seq_load_in
+#undef cft_aug_add_lane
+#undef cft_aug_mul_lane
+
+__global__ void cft_hip_unit_seqfx128(fxseq128::cft_program P, cft_fmt_desc f,
+                                      const cft_bn *konst, cft_run_args A, cft_bn *scratch,
+                                      uint32_t *acc)
+{
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t esz = (size_t)f.width / 8;
+    const uint32_t reach = fxseq128::seq_scratch_reach(&P, P.scratch_depth);
+    uint32_t fl = 0, st = 0;
+    cft_status rc;
+    fxseq128::seq_block B;
+    if (i >= A.n)
+        return;
+    P.f = &f;
+    B.depth = P.scratch_depth;
+    B.scratch = scratch ? scratch + i * reach : NULL;
+    fxseq128::seq_lanes_deposits(&P, &A, i, 1, esz);
+    fxseq128::seq_lanes_in(&P, &A, &B, i, 1, esz, reach);
+    rc = fxseq128::seq_run_block(&P, konst, &B, 1, (uint8_t *)A.deposits, i, esz, &fl, &st);
+    if (rc == CFT_OK)
+        fxseq128::seq_lanes_out(&P, &A, &B, i, 1, esz);
+    acc[i] = fl | st << 8 | (uint32_t)rc << 16;
+}
 """)
 
 
@@ -254,6 +337,13 @@ def selftest():
             # one the fp128 kernel alone
             "the unit without the fixed fp128 kernel": (
                 "u", UNIT, lambda s: s[:s.index("/* The fixed tier's fp128 element")]),
+            # round 3's G3B: cut at the program tier's own texts, placed after
+            # the fp128 element's kernel, so each plant above still cuts all
+            # it cut and these two the program kernels (both, then fp128's)
+            "the unit without the program tier's kernel": (
+                "u", UNIT, lambda s: s[:s.index("/* The program tier (round 3's G3B)")]),
+            "the unit without the program tier's fp128 kernel": (
+                "u", UNIT, lambda s: s[:s.index("/* The program tier's fp128 kernel")]),
         }
         for what, (sub, rel, f) in plants.items():
             dd = d / ("p-" + sub)
@@ -283,7 +373,7 @@ def selftest():
               f"{check(d / 'g', 'gpua')} gpua, accepted")
     if bad:
         sys.exit(1)
-    print("selftest: OK, 8 plants refused by name")
+    print("selftest: OK, 10 plants refused by name")
 
 
 def main():
