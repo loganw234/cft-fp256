@@ -1,0 +1,2 @@
+job made to fail (a scratch copy of pw32_box.sh with an unknown mode and an unknown region): script status 123
+done 2026-11-23 08:18:39 xargs status 123 (AT LEAST ONE JOB FAILED: read OUTDIR and the run log)

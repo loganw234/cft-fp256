@@ -1,0 +1,183 @@
+fp32 pow region wide: 281 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 314
+  M max 0.008072 Bv; capacities 0.640566 Bv; BOUND 0.648638 Bv (2^-0.62)
+  measured worst 0.061225 Bv at x=0x4d9f8abf y=0xbf920e65
+  residual (second order, measured) 6.649e-05 Bv; bound + residual 0.648704 Bv
+    log-sum      capacity 0.390616  observed 0.205365
+    product      capacity 0.213093  observed 0.126041
+    exp-recon    capacity 0.023900  observed 0.013318
+    exp-head2    capacity 0.008226  observed 0.006589
+    log-head3    capacity 0.002218  observed 0.000809
+    exp-Z        capacity 0.001170  observed 0.000770
+    log-Z        capacity 0.000615  observed 0.000509
+    exp-reduce   capacity 0.000425  observed 0.000245
+  15 s
+fp32 pow region near1: 280 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 287
+  M max 0.005510 Bv; capacities 1.155975 Bv; BOUND 1.161484 Bv (2^0.22)
+  measured worst 0.135024 Bv at x=0x3f7ff4a2 y=0xc83f684e
+  residual (second order, measured) 3.350e-05 Bv; bound + residual 1.161518 Bv
+    log-sum      capacity 0.699829  observed 0.514077
+    product      capacity 0.274030  observed 0.219263
+    exp-recon    capacity 0.071117  observed 0.035785
+    log-head3    capacity 0.060531  observed 0.050453
+    log-Z        capacity 0.039998  observed 0.030037
+    exp-head2    capacity 0.008455  observed 0.007810
+    exp-Z        capacity 0.001382  observed 0.000677
+    exp-reduce   capacity 0.000338  observed 0.000235
+  12 s
+fp32 pow region edge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 314
+  M max 0.005117 Bv; capacities 0.570265 Bv; BOUND 0.575383 Bv (2^-0.80)
+  measured worst 0.089129 Bv at x=0x3ce19836 y=0x41e95576
+  residual (second order, measured) 2.030e-05 Bv; bound + residual 0.575403 Bv
+    log-sum      capacity 0.357366  observed 0.191990
+    product      capacity 0.196856  observed 0.125776
+    exp-recon    capacity 0.009115  observed 0.006541
+    exp-head2    capacity 0.003571  observed 0.002784
+    log-head3    capacity 0.001856  observed 0.000965
+    log-Z        capacity 0.001008  observed 0.000592
+    exp-Z        capacity 0.000252  observed 0.000194
+    exp-reduce   capacity 0.000117  observed 0.000078
+  14 s
+fp32 pow region redb: 300 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 321
+  M max 0.008295 Bv; capacities 0.767341 Bv; BOUND 0.775637 Bv (2^-0.37)
+  measured worst 0.085690 Bv at x=0x3fdfbe6a y=0x41f83aeb
+  residual (second order, measured) 3.706e-05 Bv; bound + residual 0.775674 Bv
+    log-sum      capacity 0.623673  observed 0.334702
+    product      capacity 0.071875  observed 0.064177
+    exp-recon    capacity 0.038602  observed 0.021671
+    exp-head2    capacity 0.013970  observed 0.010548
+    log-head3    capacity 0.010702  observed 0.001151
+    log-Z        capacity 0.006142  observed 0.002051
+    exp-Z        capacity 0.001265  observed 0.000922
+    exp-reduce   capacity 0.000674  observed 0.000447
+  14 s
+fp32 pow region small: 300 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 304
+  M max 0.001451 Bv; capacities 0.006749 Bv; BOUND 0.008200 Bv (2^-6.93)
+  measured worst 0.003706 Bv at x=0x61a1822b y=0x3a41d343
+  residual (second order, measured) 9.862e-06 Bv; bound + residual 0.008210 Bv
+    exp-head2    capacity 0.004599  observed 0.003593
+    exp-recon    capacity 0.000977  observed 0.000934
+    exp-Z        capacity 0.000396  observed 0.000314
+    exp-reduce   capacity 0.000348  observed 0.000183
+    log-sum      capacity 0.000126  observed 0.000078
+    product      capacity 0.000106  observed 0.000063
+    exp-head3    capacity 0.000103  observed 0.000038
+    exp-tail     capacity 0.000094  observed 0.000047
+  13 s
+fp32 pow region negint: 285 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 316
+  M max 0.021956 Bv; capacities 2.325885 Bv; BOUND 2.347841 Bv (2^1.23)
+  measured worst 0.369148 Bv at x=0xbf6ef161 y=0x44604000
+  residual (second order, measured) 2.921e-05 Bv; bound + residual 2.347870 Bv
+    log-sum      capacity 1.941493  observed 1.377719
+    product      capacity 0.255090  observed 0.153728
+    log-head3    capacity 0.060992  observed 0.045719
+    log-Z        capacity 0.044952  observed 0.038280
+    exp-recon    capacity 0.015768  observed 0.012098
+    exp-head2    capacity 0.005773  observed 0.004616
+    exp-Z        capacity 0.000985  observed 0.000598
+    exp-reduce   capacity 0.000301  observed 0.000209
+  12 s
+fp32 pow region sub: 281 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 311
+  M max 0.001983 Bv; capacities 0.378208 Bv; BOUND 0.380191 Bv (2^-1.40)
+  measured worst 0.080985 Bv at x=0x344 y=0x3f757131
+  residual (second order, measured) 4.262e-05 Bv; bound + residual 0.380234 Bv
+    product      capacity 0.187382  observed 0.122983
+    log-sum      capacity 0.146435  observed 0.107744
+    exp-recon    capacity 0.034422  observed 0.018313
+    exp-head2    capacity 0.008373  observed 0.005525
+    exp-Z        capacity 0.000923  observed 0.000667
+    exp-reduce   capacity 0.000337  observed 0.000158
+    exp-head3    capacity 0.000152  observed 0.000106
+    exp-tail     capacity 0.000146  observed 0.000091
+  11 s
+fp32 pow region tinyy: 300 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 322
+  M max 0.000000 Bv; capacities 0.053887 Bv; BOUND 0.053887 Bv (2^-4.21)
+  measured worst 0.000967 Bv at x=0x1383 y=0xafc22664
+  residual (second order, measured) 6.193e-10 Bv; bound + residual 0.053887 Bv
+    exp-reduce   capacity 0.031250  observed 0.000000
+    product      capacity 0.021661  observed 0.000000
+    exp-recon    capacity 0.000977  observed 0.000967
+    exp-head3    capacity 0.000000  observed 0.000000
+    exp-Z        capacity 0.000000  observed 0.000000
+    log-sum      capacity 0.000000  observed 0.000000
+    log-head3    capacity 0.000000  observed 0.000000
+    log-Z        capacity 0.000000  observed 0.000000
+  11 s
+fp32 pow region hugey: 13 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 272
+  M max 0.004172 Bv; capacities 0.393700 Bv; BOUND 0.397872 Bv (2^-1.33)
+  measured worst 0.087639 Bv at x=0x3f7ffffd y=0x4da29585
+  residual (second order, measured) 8.487e-05 Bv; bound + residual 0.397957 Bv
+    log-sum      capacity 0.225948  observed 0.074205
+    product      capacity 0.097613  observed 0.081793
+    log-head3    capacity 0.037382  observed 0.006230
+    log-Z        capacity 0.018691  observed 0.000000
+    exp-recon    capacity 0.008301  observed 0.007072
+    exp-head2    capacity 0.004893  observed 0.004536
+    exp-Z        capacity 0.000532  observed 0.000333
+    exp-reduce   capacity 0.000204  observed 0.000106
+  2 s
+fp32 pow region negedge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 315
+  M max 0.018510 Bv; capacities 2.719841 Bv; BOUND 2.738352 Bv (2^1.45)
+  measured worst 0.434377 Bv at x=0xbf67afc2 y=0x4482e000
+  residual (second order, measured) 2.076e-05 Bv; bound + residual 2.738373 Bv
+    log-sum      capacity 2.339827  observed 1.975837
+    product      capacity 0.259756  observed 0.215789
+    log-head3    capacity 0.063025  observed 0.053403
+    log-Z        capacity 0.039576  observed 0.034269
+    exp-recon    capacity 0.013202  observed 0.010685
+    exp-head2    capacity 0.003031  observed 0.002892
+    log-head2    capacity 0.000553  observed 0.000194
+    exp-Z        capacity 0.000418  observed 0.000269
+  12 s
+fp32 pow region rhoedge: 280 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 309
+  M max 0.006639 Bv; capacities 1.505556 Bv; BOUND 1.512195 Bv (2^0.60)
+  measured worst 0.135832 Bv at x=0x3f738cb1 y=0x44c5034b
+  residual (second order, measured) 3.933e-05 Bv; bound + residual 1.512235 Bv
+    log-sum      capacity 1.124838  observed 0.744422
+    product      capacity 0.201793  observed 0.174009
+    log-head3    capacity 0.101552  observed 0.069356
+    log-Z        capacity 0.041681  observed 0.031887
+    exp-recon    capacity 0.025539  observed 0.015489
+    exp-head2    capacity 0.008303  observed 0.005190
+    exp-Z        capacity 0.000638  observed 0.000479
+    exp-reduce   capacity 0.000448  observed 0.000242
+  12 s
+fp32 pow region zone: 286 main-path lanes of 300, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 315
+  M max 0.010038 Bv; capacities 2.519171 Bv; BOUND 2.529209 Bv (2^1.34)
+  measured worst 0.527357 Bv at x=0xbf70b0cc y=0xc4ac8000
+  residual (second order, measured) 3.574e-05 Bv; bound + residual 2.529245 Bv
+    log-sum      capacity 2.274296  observed 2.040415
+    product      capacity 0.145223  observed 0.102702
+    log-head3    capacity 0.058428  observed 0.020300
+    log-Z        capacity 0.017103  observed 0.012769
+    exp-recon    capacity 0.015733  observed 0.009825
+    exp-head2    capacity 0.006851  observed 0.005167
+    exp-Z        capacity 0.000530  observed 0.000378
+    log-head2    capacity 0.000327  observed 0.000229
+  11 s
+
+SUMMARY fp32 pow, 300 lanes a region, seed 1, rne, B1 2^70, B2 2^71:
+  wide     lanes  281  bound 0.648638 + residual 6.65e-05 = 0.648704 Bv (under 1); margin 0.62 bits; measured worst 0.061225
+  near1    lanes  280  bound 1.161484 + residual 3.35e-05 = 1.161518 Bv (OVER 1); margin -0.22 bits; measured worst 0.135024
+  edge     lanes  300  bound 0.575383 + residual 2.03e-05 = 0.575403 Bv (under 1); margin 0.80 bits; measured worst 0.089129
+  redb     lanes  300  bound 0.775637 + residual 3.71e-05 = 0.775674 Bv (under 1); margin 0.37 bits; measured worst 0.085690
+  small    lanes  300  bound 0.008200 + residual 9.86e-06 = 0.008210 Bv (under 1); margin 6.93 bits; measured worst 0.003706
+  negint   lanes  285  bound 2.347841 + residual 2.92e-05 = 2.347870 Bv (OVER 1); margin -1.23 bits; measured worst 0.369148
+  sub      lanes  281  bound 0.380191 + residual 4.26e-05 = 0.380234 Bv (under 1); margin 1.40 bits; measured worst 0.080985
+  tinyy    lanes  300  bound 0.053887 + residual 6.19e-10 = 0.053887 Bv (under 1); margin 4.21 bits; measured worst 0.000967
+  hugey    lanes   13  bound 0.397872 + residual 8.49e-05 = 0.397957 Bv (under 1); margin 1.33 bits; measured worst 0.087639
+  negedge  lanes  300  bound 2.738352 + residual 2.08e-05 = 2.738373 Bv (OVER 1); margin -1.45 bits; measured worst 0.434377
+  rhoedge  lanes  280  bound 1.512195 + residual 3.93e-05 = 1.512235 Bv (OVER 1); margin -0.60 bits; measured worst 0.135832
+  zone     lanes  286  bound 2.529209 + residual 3.57e-05 = 2.529245 Bv (OVER 1); margin -1.34 bits; measured worst 0.527357
+  worst region bound 2.738373 Bv, margin -1.45 bits; 139 s

@@ -1,0 +1,13 @@
+seq fp32 powr  region wide    : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region near1   : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region edge    : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region redb    : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region small   : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region negint  : 0 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region sub     : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region tinyy   : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region hugey   : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region negedge : 0 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region rhoedge : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+seq fp32 powr  region zone    : 300 lanes x 5 attributes, marked 0/0/0/0/0 (rne/rtz/rdn/rup/rmm), differing from the model 0/0/0/0/0, WRONG UNMARKED 0
+regions: 0 wrong unmarked lanes in all; 154 s

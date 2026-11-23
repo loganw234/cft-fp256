@@ -72,6 +72,8 @@ core is those pieces put together with what is new, so the model
 (`python/tests/mathlib_inv_budget.py`, M4G4's port), taken by subclass.
 Nothing in the tree imports the model.
 
+**A note of 2026-11-23, at parcel M3X** (fp32's pow and powr built in the model; the study's text stays as written). 2.8's ESTIMATE is measured: pow at fp32 as a triple word at G = 40 is **925 instructions** under rne (the estimate was 800 to 1,150) with **32 values live** scheduled, reaching r31 (the estimate 28 to 34), and powr 903 and 29; the budget bound of every region of pow is under 1 Bv at the sketch's own B1 = 2^-66 and B2 = 2^-67, worst 0.198 Bv, margin 2.33 bits, and the pools are 0 wrong unmarked on the model and on seq.py. Question 5's option (b), the double word at fp32, builds in the model up to G = 16, not the 12 this section computes (527 instructions, 117 marked of pow's 794 pool lanes against the triple word's 57). All five of the build's conditions hold, so the measurement recommends the triple word; the choice is Logan's. The entry is docs/VALIDATION.md's of 2026-11-23, "M3X"; the model is `docs/studies/m3/pw32*.py` with its outputs.
+
 ## Contents
 
 0. In brief

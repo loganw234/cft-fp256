@@ -1,0 +1,35 @@
+phase map (label -> PHASE_ORDER name):
+    classify     classify
+    front        front
+    log-reduce   reduce
+    log-table    table
+    log-tail     tail
+    log-head2    head2
+    log-head3    head3
+    log-Z        Z
+    log-sum      recon
+    product      reduce
+    exp-reduce   reduce
+    exp-table    lookup
+    exp-scale    scale
+    exp-tail     tail
+    exp-head2    head2
+    exp-head3    head3
+    exp-Z        Z
+    exp-recon    recon
+    exact        final
+    test         final
+    fixed-grid   fixed-grid
+    final        final
+    beside-1     final
+    special      special
+fp32 pow rne: live scheduled 32 (by phase 35, depth first 32, design order 51); dag_digest equal to the design order's: True; routines.program accepted (928 words of program, 143 bank words); highest register r31; the allocator beside a call: 30 less the cap = -2 other values
+fp32 pow rtz: live scheduled 32 (by phase 34, depth first 32, design order 50); dag_digest equal to the design order's: True; routines.program accepted (923 words of program, 145 bank words); highest register r31; the allocator beside a call: 30 less the cap = -2 other values
+fp32 pow rdn: live scheduled 32 (by phase 34, depth first 32, design order 50); dag_digest equal to the design order's: True; routines.program accepted (924 words of program, 146 bank words); highest register r31; the allocator beside a call: 30 less the cap = -2 other values
+fp32 pow rup: live scheduled 32 (by phase 34, depth first 32, design order 50); dag_digest equal to the design order's: True; routines.program accepted (924 words of program, 144 bank words); highest register r31; the allocator beside a call: 30 less the cap = -2 other values
+fp32 pow rmm: live scheduled 32 (by phase 35, depth first 32, design order 51); dag_digest equal to the design order's: True; routines.program accepted (928 words of program, 143 bank words); highest register r31; the allocator beside a call: 30 less the cap = -2 other values
+fp32 powr rne: live scheduled 29 (by phase 29, depth first 31, design order 48); dag_digest equal to the design order's: True; routines.program accepted (906 words of program, 139 bank words); highest register r28; the allocator beside a call: 30 less the cap = 1 other values
+fp32 powr rtz: live scheduled 29 (by phase 29, depth first 31, design order 47); dag_digest equal to the design order's: True; routines.program accepted (900 words of program, 140 bank words); highest register r28; the allocator beside a call: 30 less the cap = 1 other values
+fp32 powr rdn: live scheduled 29 (by phase 29, depth first 31, design order 47); dag_digest equal to the design order's: True; routines.program accepted (900 words of program, 140 bank words); highest register r28; the allocator beside a call: 30 less the cap = 1 other values
+fp32 powr rup: live scheduled 29 (by phase 29, depth first 31, design order 47); dag_digest equal to the design order's: True; routines.program accepted (900 words of program, 139 bank words); highest register r28; the allocator beside a call: 30 less the cap = 1 other values
+fp32 powr rmm: live scheduled 29 (by phase 29, depth first 31, design order 48); dag_digest equal to the design order's: True; routines.program accepted (906 words of program, 139 bank words); highest register r28; the allocator beside a call: 30 less the cap = 1 other values
