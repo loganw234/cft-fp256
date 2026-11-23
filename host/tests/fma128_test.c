@@ -24,6 +24,24 @@
  *      outputs' sha256 equal to the prototype's, measured on both GPUs;
  *   4. both streams, FMA and the three steered operations, N cases each:
  *      0 lanes differing.
+ *   5. (round 3's G3B) the executor's lane ALU of the fixed tier at fp128,
+ *      fxalu128_compute (src/seq_alu_fixed.h), against cft_sf_compute on
+ *      cft_bn operands, as fma256test's part 4 holds fxalu_compute: both
+ *      streams and the four operations (each case at its own attribute),
+ *      the integer opcodes' results as operands (each held first to carry
+ *      nothing above bit 127), garbage deliberately above the width (the
+ *      low 128 bits and the flags equal, each difference above them the
+ *      generic's copy of c), outside the condition (attributes past 4,
+ *      every other opcode, fp32, fp64 and fp256: the wrapper IS
+ *      cft_sf_compute), and its two refusal paths through a TEST DOUBLE.
+ *
+ * The test double and the real wrapper are kept apart by name, as in
+ * fma256_test.c: the header is included twice, first as it is (the real
+ * fx128_fma_lane, which every comparison with cft_sf_compute runs on), then
+ * with its guard undefined and fxalu_compute, fxalu128_compute,
+ * fx256_fma_lane and fx128_fma_lane renamed by macro (td_*), a second copy
+ * that calls the doubles and that only the refusal checks call. The doubles
+ * live in this file alone; neither libcft nor any device build sees them.
  *
  * bigint.c, softfloat.c and sha256.c are the tree's own text, included and
  * compiled with libcft's C flags, so the generic lane IS libcft's
@@ -42,6 +60,43 @@
 #include "../src/fma128_fixed.h"
 #include "../tools/fx128_stream.h"
 #include "../src/sha256.c"
+/* round 3's G3B: the executor's lane ALU, which needs both fixed headers */
+#include "../src/fma256_fixed.h"
+#include "../src/seq_alu_fixed.h"
+
+/* round 3's G3B: the TEST DOUBLES of the two lanes, for the wrappers' two
+ * refusal paths alone (fma256_test.c's; the head says how they are kept
+ * apart): the real lane, then its byte forced to 0x80 (td_mode 1) or given
+ * bits above the five IEEE flags (td_mode 2). */
+static int td_mode;
+static void td_fx256_lane(const uint8_t *pa, const uint8_t *pb, const uint8_t *pc, int rnd,
+                          uint8_t *pd, uint8_t *pflags)
+{
+    fx256_fma_lane(pa, pb, pc, rnd, pd, pflags);
+    if (td_mode == 1)
+        *pflags = 0x80;
+    else if (td_mode == 2)
+        *pflags |= 0x60;
+}
+static void td_fx128_lane(const uint8_t *pa, const uint8_t *pb, const uint8_t *pc, int rnd,
+                          uint8_t *pd, uint8_t *pflags)
+{
+    fx128_fma_lane(pa, pb, pc, rnd, pd, pflags);
+    if (td_mode == 1)
+        *pflags = 0x80;
+    else if (td_mode == 2)
+        *pflags |= 0x60;
+}
+#undef CFT_SEQ_ALU_FIXED_H
+#define fxalu_compute td_fxalu_compute
+#define fxalu128_compute td_fxalu128_compute
+#define fx256_fma_lane td_fx256_lane
+#define fx128_fma_lane td_fx128_lane
+#include "../src/seq_alu_fixed.h"
+#undef fxalu_compute
+#undef fxalu128_compute
+#undef fx256_fma_lane
+#undef fx128_fma_lane
 
 /* sha256.c's public one-shot cft_sha256 (which this test does not call)
  * clears libcft's error slot first, device.c's cft_clear_error; no libcft.a
@@ -240,6 +295,266 @@ static void test_stream(int stream, int op, long total, uint64_t seed, const cha
     free(in); free(o1); free(o2);
 }
 
+/* ---- 5. (round 3's G3B) the executor's lane ALU at fp128 --------------- */
+
+/* The two calls on one triple of cft_bn, held: the return, the flags and
+ * the result (the whole cft_bn) equal. Returns 1 when they are. */
+static int alu_same(const cft_fmt_desc *f, int op, int rnd, const cft_bn *a, const cft_bn *b,
+                    const cft_bn *c)
+{
+    cft_bn o1, o2;
+    uint32_t f1 = 0xDEADu, f2 = 0xBEEFu;
+    int r1, r2;
+    cft_bn_zero(&o1);
+    cft_bn_zero(&o2);
+    r1 = cft_sf_compute(f, op, rnd, a, b, c, &o1, &f1);
+    r2 = fxalu128_compute(f, op, rnd, a, b, c, &o2, &f2);
+    return r1 == r2 && f1 == f2 && (r1 || cft_bn_cmp(&o1, &o2) == 0);
+}
+
+static void alu_load(cft_bn *x, const uint8_t *p)
+{
+    cft_bn_zero(x);
+    cft_bn_load(x, p, 16);
+}
+
+/* (a) the streams: each case at its own attribute, the four operations */
+static void test_alu_stream(int stream, long total, uint64_t seed)
+{
+    static const char *const OPN[4] = {"fma", "add", "sub", "mul"};
+    const cft_fmt_desc *f = &cft_sf_formats[2];
+    clock_t t0 = clock();
+    long i, bad[4] = {0, 0, 0, 0};
+    int op;
+    for (op = 0; op < 4; op++)
+        for (i = 0; i < total; i++) {
+            uint8_t a[16], b[16], c[16], r;
+            cft_bn ba, bb, bc;
+            fxs128_gen_case(f, stream, seed, (int64_t)i, a, b, c, &r);
+            fxs128_prep_case(f, op, a, b, c);
+            alu_load(&ba, a);
+            alu_load(&bb, b);
+            alu_load(&bc, c);
+            if (!alu_same(f, op, r, &ba, &bb, &bc)) {
+                if (bad[op]++ < 3)
+                    CHECK(0, "fxalu128_compute, %s stream, %s, case %ld (attribute %d): not "
+                          "cft_sf_compute's return, flags and result",
+                          stream == FXS128_EDGE ? "edge" : "study", OPN[op], i, r);
+                else
+                    failures++, checks++;
+                continue;
+            }
+            checks++;
+        }
+    printf("  fxalu128_compute, %-5s stream: %ld cases a operation (seed %llu), FMA %ld, ADD "
+           "%ld, SUB %ld, MUL %ld differ from cft_sf_compute; %.2f s\n",
+           stream == FXS128_EDGE ? "edge" : "study", total, (unsigned long long)seed, bad[0],
+           bad[1], bad[2], bad[3], secs(t0));
+}
+
+/* (b) operands the integer opcodes made at fp128: each result held to carry
+ * nothing above bit 127, then put in each position of each operation at
+ * each attribute */
+static void test_alu_ints(void)
+{
+    static const int IOP[9] = {CFT_SF_IAND, CFT_SF_IOR, CFT_SF_IXOR, CFT_SF_IADD, CFT_SF_ISUB,
+                               CFT_SF_ISHL, CFT_SF_ISHR, CFT_SF_ICMPLT, CFT_SF_IMUL};
+    const cft_fmt_desc *f = &cft_sf_formats[2];
+    long made = 0, above = 0, n = 0, bad = 0, before = failures;
+    int k, j, op, rnd, pos;
+    for (k = 0; k < 9; k++)
+        for (j = 0; j < 200; j++) {
+            uint8_t a[16], b[16], c[16], r;
+            cft_bn x, y, z, io;
+            uint32_t fl = 0;
+            fxs128_gen_case(f, j % 2 ? FXS128_EDGE : FXS128_STUDY, 77, (int64_t)(k * 1000 + j),
+                            a, b, c, &r);
+            if (j % 5 == 0) {              /* every bit set, the top ones too */
+                memset(a, 0xFF, 16);
+                memset(b, j % 10 ? 0xFF : 0x01, 16);
+            }
+            alu_load(&x, a);
+            alu_load(&y, b);
+            alu_load(&z, c);
+            CHECK(!cft_sf_compute(f, IOP[k], 0, &x, &y, &z, &io, &fl), "integer opcode %d "
+                  "refused", IOP[k]);
+            made++;
+            above += cft_bn_bitlen(&io) > 128;
+            CHECK(cft_bn_bitlen(&io) <= 128, "integer opcode %d left a bit above 127 (bit "
+                  "length %d)", IOP[k], cft_bn_bitlen(&io));
+            for (op = 0; op < 4; op++)
+                for (rnd = 0; rnd < 5; rnd++)
+                    for (pos = 0; pos < 3; pos++) {
+                        const cft_bn *pa = pos == 0 ? &io : &x, *pb = pos == 1 ? &io : &y,
+                                     *pc = pos == 2 ? &io : &z;
+                        n++;
+                        if (!alu_same(f, op, rnd, pa, pb, pc)) {
+                            bad++;
+                            if (bad <= 3)
+                                CHECK(0, "fxalu128_compute on integer opcode %d's result in "
+                                      "position %d, op %d, attribute %d: not cft_sf_compute's",
+                                      IOP[k], pos, op, rnd);
+                            else
+                                failures++, checks++;
+                        } else {
+                            checks++;
+                        }
+                    }
+        }
+    printf("  integer opcodes' results as operands: %ld results of the nine (IAND to IMUL), %ld "
+           "with a bit above 127; %ld calls (each position, operation and attribute), %ld "
+           "differ; %ld failed\n", made, above, n, bad, failures - before);
+}
+
+/* (c) operands with garbage deliberately above the width (bit 200 and limb
+ * 5 set): the low 128 bits, the flags and the return agree; how many differ
+ * above them is counted, each the generic's copy of c */
+static void test_alu_garbage(long total)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[2];
+    long i, n = 0, low_bad = 0, high = 0, high_copy = 0, before = failures;
+    int op, pos;
+    for (op = 0; op < 4; op++)
+        for (i = 0; i < total; i++) {
+            uint8_t a[16], b[16], c[16], r, s1[32], s2[32];
+            cft_bn x[3], o1, o2;
+            uint32_t f1 = 0, f2 = 0;
+            int r1, r2;
+            fxs128_gen_case(f, i % 2 ? FXS128_EDGE : FXS128_STUDY, 91, (int64_t)i, a, b, c, &r);
+            if (i % 7 == 0)
+                memset(a, 0, 16);          /* a zero product: the copy path */
+            alu_load(&x[0], a);
+            alu_load(&x[1], b);
+            alu_load(&x[2], c);
+            pos = (int)(i % 3);
+            cft_bn_setbit(&x[pos], 200);
+            cft_bn_setbit(&x[pos], 5 * 32 + 3);
+            cft_bn_zero(&o1);
+            cft_bn_zero(&o2);
+            r1 = cft_sf_compute(f, op, r, &x[0], &x[1], &x[2], &o1, &f1);
+            r2 = fxalu128_compute(f, op, r, &x[0], &x[1], &x[2], &o2, &f2);
+            cft_bn_store(&o1, s1, 32);
+            cft_bn_store(&o2, s2, 32);
+            n++;
+            if (r1 != r2 || f1 != f2 || memcmp(s1, s2, 16)) {
+                low_bad++;
+                CHECK(0, "garbage above the width, op %d, case %ld: the low 128 bits, the "
+                      "flags or the return differ", op, i);
+                continue;
+            }
+            checks++;
+            if (memcmp(s1 + 16, s2 + 16, 16) || cft_bn_cmp(&o1, &o2)) {
+                cft_bn ma, mb;
+                high++;
+                cft_bn_copy(&ma, &x[0]);
+                cft_bn_mask(&ma, 127);
+                cft_bn_copy(&mb, &x[1]);
+                cft_bn_mask(&mb, 127);
+                if ((op == CFT_SF_FMA || op == CFT_SF_ADD || op == CFT_SF_SUB) && pos == 2 &&
+                    (cft_bn_is_zero(&ma) || (op == CFT_SF_FMA && cft_bn_is_zero(&mb))))
+                    high_copy++;
+            }
+        }
+    CHECK(high == high_copy, "garbage above the width: %ld results differ above bit 127, %ld of "
+          "them the generic's copy of c", high, high_copy);
+    printf("  garbage above the width (bit 200 and limb 5 in one operand; no program reaches "
+           "this): %ld calls, the low 128 bits, flags and return equal in %ld; %ld differ above "
+           "bit 127, every one (%ld) the generic's copy of c (0*b + c is c), which a deposit "
+           "(16 bytes) cannot see; %ld failed\n", n, n - low_bad, high, high_copy,
+           failures - before);
+}
+
+/* (d) outside the wrapper's condition it IS cft_sf_compute */
+static void test_alu_outside(void)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[2];
+    static const int BADR[5] = {5, 6, 7, -1, 99};
+    static const int OTHER[3] = {0, 1, 3};
+    long n = 0, before = failures;
+    int op, k, fm, j;
+    for (j = 0; j < 64; j++) {
+        uint8_t a[16], b[16], c[16], r, w[32];
+        cft_bn x, y, z;
+        fxs128_gen_case(f, j % 2 ? FXS128_EDGE : FXS128_STUDY, 5, (int64_t)j, a, b, c, &r);
+        alu_load(&x, a);
+        alu_load(&y, b);
+        alu_load(&z, c);
+        for (op = 0; op < 4; op++)
+            for (k = 0; k < 5; k++, n++)
+                CHECK(alu_same(f, op, BADR[k], &x, &y, &z), "attribute %d, op %d: not "
+                      "cft_sf_compute's", BADR[k], op);
+        for (op = 4; op < 64; op++, n++)
+            CHECK(alu_same(f, op, (int)r, &x, &y, &z), "opcode %d at fp128: not "
+                  "cft_sf_compute's", op);
+        for (fm = 0; fm < 3; fm++) {
+            const cft_fmt_desc *g = &cft_sf_formats[OTHER[fm]];
+            memcpy(w, a, 16);              /* an operand of that format: 32 bytes for fp256 */
+            memcpy(w + 16, c, 16);
+            cft_bn_zero(&x);
+            cft_bn_load(&x, w, g->width / 8);
+            memcpy(w, b, 16);
+            memcpy(w + 16, a, 16);
+            cft_bn_zero(&y);
+            cft_bn_load(&y, w, g->width / 8);
+            memcpy(w, c, 16);
+            memcpy(w + 16, b, 16);
+            cft_bn_zero(&z);
+            cft_bn_load(&z, w, g->width / 8);
+            for (op = 0; op < 4; op++)
+                for (k = 0; k < 5; k++, n++)
+                    CHECK(alu_same(g, op, k, &x, &y, &z), "%s op %d attribute %d: not "
+                          "cft_sf_compute's", g->name, op, k);
+        }
+    }
+    printf("  outside the condition (attributes 5, 6, 7, -1 and 99; opcodes 4 to 63 at fp128; "
+           "fp32, fp64 and fp256): %ld calls, each cft_sf_compute's; %ld failed\n", n,
+           failures - before);
+}
+
+/* (e) the refusal paths through the test doubles (the head) */
+static void test_alu_double(void)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[2];
+    long n = 0, before = failures;
+    int op, j;
+    for (j = 0; j < 40; j++) {
+        uint8_t a[16], b[16], c[16], r;
+        cft_bn x, y, z, out, keep, o1;
+        uint32_t fl, f1;
+        int rc, r1;
+        fxs128_gen_case(f, j % 2 ? FXS128_EDGE : FXS128_STUDY, 13, (int64_t)j, a, b, c, &r);
+        alu_load(&x, a);
+        alu_load(&y, b);
+        alu_load(&z, c);
+        for (op = 0; op < 4; op++) {
+            cft_bn_set_u32(&keep, 0x5A5A5A5Au);
+            cft_bn_setbit(&keep, 100);
+            cft_bn_copy(&out, &keep);
+            fl = 0xDEADu;
+            td_mode = 1;
+            rc = td_fxalu128_compute(f, op, r, &x, &y, &z, &out, &fl);
+            td_mode = 0;
+            n++;
+            CHECK(rc == 1 && fl == 0 && cft_bn_cmp(&out, &keep) == 0, "a lane flagged 0x80, op "
+                  "%d: return %d, flags 0x%x, result %s - wanted 1, 0, untouched", op, rc,
+                  (unsigned)fl, cft_bn_cmp(&out, &keep) ? "WRITTEN" : "untouched");
+            fl = 0xDEADu;
+            f1 = 0xBEEFu;
+            td_mode = 2;
+            rc = td_fxalu128_compute(f, op, r, &x, &y, &z, &out, &fl);
+            td_mode = 0;
+            r1 = cft_sf_compute(f, op, r, &x, &y, &z, &o1, &f1);
+            n++;
+            CHECK(rc == 0 && r1 == 0 && fl == f1 && cft_bn_cmp(&out, &o1) == 0, "a lane byte "
+                  "with bits above the five flags, op %d: flags 0x%x, cft_sf_compute's 0x%x",
+                  op, (unsigned)fl, (unsigned)f1);
+        }
+    }
+    printf("  the refusal paths through the test doubles: %ld calls (0x80: return 1, flags 0, "
+           "result untouched; stray bits: the five flags alone); %ld failed\n", n,
+           failures - before);
+}
+
 int main(int argc, char **argv)
 {
     /* G3A's fp128 prototype (fma128_proto.hip, sha256 393612af...), its
@@ -270,6 +585,15 @@ int main(int argc, char **argv)
         test_stream(FXS128_STUDY, op, total, seed, NULL, NULL);
     for (op = 0; op < 4; op++)
         test_stream(FXS128_EDGE, op, total, seed, NULL, NULL);
+    /* round 3's G3B: the executor's lane ALU at fp128, fxalu128_compute */
+    printf("fxalu128_compute (src/seq_alu_fixed.h) against cft_sf_compute on cft_bn "
+           "operands:\n");
+    test_alu_stream(FXS128_STUDY, total, seed);
+    test_alu_stream(FXS128_EDGE, total, seed);
+    test_alu_ints();
+    test_alu_garbage(total < 20000 ? total : 20000);
+    test_alu_outside();
+    test_alu_double();
     printf("\n%ld checks, %ld failed, %.1f s\n", checks, failures, secs(t0));
     return failures ? 1 : 0;
 }

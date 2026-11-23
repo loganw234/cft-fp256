@@ -159,6 +159,11 @@
       "sha256": "5f364d5cfc5147e431e94fd518084a594272838b94ff3e4679dcf946f87eb75a"
     },
     {
+      "source": "host/src/seq_alu_fixed.h",
+      "dest": "src/cft/src/seq_alu_fixed.h",
+      "sha256": "d9d9430347599ca3a319e0c88b85cbce135c780b443e584f68616bf8d6959f71"
+    },
+    {
       "source": "host/src/seq_exec.h",
       "dest": "src/cft/src/seq_exec.h",
       "sha256": "bae00d10cff57392a12c76dcec2471c5792663c0fc06d7cfe315fe9877878785"

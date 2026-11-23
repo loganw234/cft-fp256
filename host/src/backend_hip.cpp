@@ -14,11 +14,14 @@
  * One translation unit, and whose code runs
  * ---------------------------------------------------------------
  *
- * This file is also the device code's only unit (no relocatable device
- * code): it includes the tree's own bigint.c, softfloat.c and seq_exec.h
- * below, which carry CFT_HD (cft_config.h), so every kernel here but the
- * fixed tier's k_run256 and k_run128 (below) runs this library's arithmetic
- * and its sequencer's executor as they are -
+ * This file is also the device code's unit (no relocatable device code) -
+ * since round 3's G3B one of two: backend_hip_fx.cpp holds the fixed tier's
+ * two program kernels, k_seq_fx and k_seq_fx128, because compiled here they
+ * moved k_seq's code (below, "The fixed tier") - and it includes the tree's
+ * own bigint.c, softfloat.c and seq_exec.h below, which carry CFT_HD
+ * (cft_config.h), so every kernel here but the fixed tier's k_run256 and
+ * k_run128 (below) runs this library's arithmetic and its sequencer's
+ * executor as they are -
  * cft_sf_compute for an element, cft_sf_compute's ADD and MAX for a node
  * of the reduction tree, seq_exec.h's four per-lane functions and
  * seq_run_block for a program lane. Nothing of a run is re-expressed on
@@ -93,8 +96,10 @@
  * other is refused at open by name. Which calls take the fixed kernel is
  * decided in one place, fixed_covers, at run_impl's one launch; everything
  * else on a fixed-tier handle - the other formats and opcodes, the
- * reduction's ADD nodes, programs, the augmented calls, the divide and the
- * root - runs the generic code. k_run256 is a sibling of k_run, not an
+ * reduction's ADD nodes, the augmented calls - runs the generic code; since
+ * round 3's G3B, programs at fp256 and fp128 with no augmented half (the
+ * divide's and the root's among them) take the fixed tier through kernels
+ * of their own, below. k_run256 is a sibling of k_run, not an
  * edit of it, since a kernel has its own frame; staging, chunks, resident
  * windows, the pages, the flag OR and the failure path around the launch
  * are one code path for both kernels. The tier is not a capability
@@ -113,6 +118,25 @@
  * test refuses by name anything else; fp32, fp64 and every other opcode run
  * k_run, as before. The INFO line names both fixed kernels' registers and
  * local bytes.
+ *
+ * Round 3's G3B takes the same tier inside programs: on a fixed-tier handle
+ * a program at fp256 or fp128 with no AUGADD or AUGERR runs k_seq_fx or
+ * k_seq_fx128 - k_seq's text over seq_exec.h compiled again inside a
+ * namespace (fxseq, fxseq128), its one ALU call naming seq_alu_fixed.h's
+ * wrapper, so FMA, ADD, SUB and MUL at that format run fma256_fixed.h or
+ * fma128_fixed.h and every other instruction cft_sf_compute; the executor is
+ * libcft's own text, unedited, and k_seq is not edited. Those two kernels
+ * are a SECOND DEVICE UNIT, backend_hip_fx.cpp, with its own copy of bigint
+ * and softfloat: compiled in this one they moved k_seq's code (9 of 16
+ * programs 1.6 % to 3.6 % slower on the RTX 5060 Ti, beyond the spread), so
+ * this unit keeps its device code as it was (its six kernels' SASS and
+ * gfx1102 code the base's, line for line; both measured, G3B's VALIDATION
+ * entry) and reaches them through two host entries. seq_route decides in
+ * one place, once a run;
+ * prog_impl's literal test refuses by name a program a fixed kernel does not
+ * cover; every other program - the generic tier, fp32 and fp64, any with an
+ * augmented half - runs k_seq, as before. The same switch; the INFO line
+ * names the program kernels' registers and local bytes too.
  *
  * ---------------------------------------------------------------
  * Staging, chunks, and the time a launch may take
@@ -262,6 +286,26 @@
  *   fixed128-refuse   the tier honoured at open, and the branch never taking
  *                     k_run128 for fp128: those runs are k_run's, the same
  *                     bits, so only the route probe can see it
+ *   (round 3's G3B: its plants here, bits 39 to 51; each acts on the fixed
+ *   tier's program kernels, their wrapper or their route, alone, so k_seq
+ *   and the generic tier are the controls)
+ *   seqfx-rmm         in k_seq_fx's ALU, attribute 4 (rmm) computed as rne
+ *   seqfx-flag        underflow dropped from the fp256 fixed ALU's flags
+ *   seqfx-steer       SUB steered as ADD in the fp256 fixed ALU
+ *   seqfx-mulsign     MUL's zero addend always +0 in the fp256 fixed ALU
+ *   seqfx-cover       seq_route answers k_seq_fx at every format, so the
+ *                     launch's literal test must refuse the rest by name
+ *   seqna-aug         seq_route's scan answers "no AUGADD" always, so the
+ *                     literal test must refuse an augmented program by name
+ *   seqfx-refuse      CFT_HIP_TIER=fixed honoured at open, and no program
+ *                     ever taking a fixed kernel: k_seq's bits, so only the
+ *                     route probe can see it
+ *   seqfx128-rmm      in k_seq_fx128's ALU, rmm computed as rne
+ *   seqfx128-flag     underflow dropped from the fp128 fixed ALU's flags
+ *   seqfx128-steer    SUB steered as ADD in the fp128 fixed ALU
+ *   seqfx128-mulsign  MUL's zero addend always +0 in the fp128 fixed ALU
+ *   seqfx128-cover    seq_route answers k_seq_fx128 at every format
+ *   seqfx128-refuse   no fp128 program taking k_seq_fx128: the probe alone
  *
  * CFT_HIP_CHUNK=<n> (a multiple of 8, 8 to 2^30) fixes the chunk: n
  * elements a run, the largest power of two not above n a reduction's
@@ -423,6 +467,13 @@ enum : uint64_t {
     PL_FIXED128_STEER = 1ull << 34, PL_FIXED128_MULSIGN = 1ull << 35,
     PL_FIXED128_SCALAR = 1ull << 36, PL_FIXED128_COVER = 1ull << 37,
     PL_FIXED128_REFUSE = 1ull << 38,
+    /* round 3's G3B: its plants here, bits 39 and up */
+    PL_SEQFX_RMM = 1ull << 39, PL_SEQFX_FLAG = 1ull << 40, PL_SEQFX_STEER = 1ull << 41,
+    PL_SEQFX_MULSIGN = 1ull << 42, PL_SEQFX_COVER = 1ull << 43, PL_SEQNA_AUG = 1ull << 44,
+    PL_SEQFX_REFUSE = 1ull << 45,
+    PL_SEQFX128_RMM = 1ull << 46, PL_SEQFX128_FLAG = 1ull << 47,
+    PL_SEQFX128_STEER = 1ull << 48, PL_SEQFX128_MULSIGN = 1ull << 49,
+    PL_SEQFX128_COVER = 1ull << 50, PL_SEQFX128_REFUSE = 1ull << 51,
 };
 #endif
 
@@ -807,6 +858,44 @@ __global__ __launch_bounds__(256) void k_aug(cft_fmt_desc f, int op, const uint8
     }
 }
 
+/* ==== round 3's G3B: the fixed tier's program kernels =================
+ *
+ * k_seq_fx (binary256) and k_seq_fx128 (binary128) are compiled in a
+ * device unit of their own, backend_hip_fx.cpp: seq_exec.h compiled twice
+ * more there, inside namespaces, its one ALU call on seq_alu_fixed.h's
+ * wrappers, beside that unit's own copy of bigint and softfloat. Here, in
+ * the generic tier's unit, the device code is the base's: compiled in this
+ * unit those kernels moved k_seq's code on sm_120 (ptxas's spills 80/76
+ * bytes to 88/88, its programs 1.6 % to 3.6 % slower on the RTX 5060 Ti),
+ * even with no function shared between them (G3B's ledger and
+ * docs/VALIDATION.md). This unit routes (seq_route, below), refuses by name
+ * what the fixed kernels do not cover, and launches them through the two
+ * host entries of that unit; no device function crosses the units, and
+ * neither uses relocatable device code.
+ *
+ * The entries' C++ names carry their parameter types, so a signature that
+ * drifts in either file fails the link. A launch takes this unit's hacc (its
+ * layout held below and there to the same four numbers) and, in a plant
+ * build, this unit's plant word with the masks of the bits that unit acts
+ * on - seq-mask and seq-deposit as k_seq applies them, and the four wrapper
+ * plants of the kernel's format - so no plant bit is written twice. */
+static_assert(sizeof(hacc) == 16 && offsetof(hacc, flags) == 0 &&
+              offsetof(hacc, status) == 4 && offsetof(hacc, fail) == 8,
+              "hacc is not the layout backend_hip_fx.cpp's fx_hacc holds");
+
+} /* namespace */
+
+/* backend_hip_fx.cpp's two entries */
+void cfthfx_seq_attributes(hipFuncAttributes *fa256, hipError_t *e256,
+                           hipFuncAttributes *fa128, hipError_t *e128);
+void cfthfx_seq_launch(int which, unsigned grid, unsigned block, hipStream_t stream,
+                       const cft_program &P, const cft_fmt_desc &f, const cft_bn *konst,
+                       const cft_run_args &A, cft_bn *pool, uint32_t reach, size_t first,
+                       void *acc, uint64_t plant, uint64_t m_mask, uint64_t m_deposit,
+                       uint64_t m_rmm, uint64_t m_flag, uint64_t m_steer, uint64_t m_mulsign);
+
+namespace {
+
 /* ==== the handle ======================================================== */
 
 constexpr size_t STAGE_MAX = (size_t)64 << 20;    /* bytes, each side */
@@ -845,6 +934,9 @@ struct Dev {
     hipFuncAttributes fa_run256;
     /* round 3's G3A2: k_run128's attributes, read at open beside the five */
     hipFuncAttributes fa_run128;
+    /* round 3's G3B: the fixed tier's program kernels' attributes, k_seq_fx's
+     * and k_seq_fx128's, read at open beside the six */
+    hipFuncAttributes fa_seq_fx, fa_seq_fx128;
     bool poisoned = false;
     std::string poison_why;
     size_t page = PAGE_BYTES;     /* CFT_HIP_PAGE in a plant build */
@@ -859,6 +951,8 @@ struct Dev {
     uint64_t launches_run = 0, launches_run256 = 0;
     /* round 3's G3A2: and k_run128's */
     uint64_t launches_run128 = 0;
+    /* round 3's G3B: the program route probe's counts, launches since open */
+    uint64_t launches_seq = 0, launches_seq_fx = 0, launches_seq_fx128 = 0;
 #endif
 };
 
@@ -1882,6 +1976,54 @@ bool plant_whole(const cft_program &p, bool two_deposits)
 }
 #endif
 
+/* round 3's G3B: the program route - which kernel runs a program on this
+ * handle, decided here and nowhere else, once a run, on the host, before
+ * anything is staged: 2 (k_seq_fx) iff the handle's tier is fixed, the
+ * format fp256 (3) and the program has no AUGADD or AUGERR; 3 (k_seq_fx128)
+ * iff the same at fp128 (2); 0 (k_seq) otherwise - the generic tier, every
+ * other format, any program with AUGADD or AUGERR. 1 is kept free (G2A's
+ * candidate fix, k_seq_na, measured in G3B's scratch and not in the tree).
+ * *aug says whether the program has either augmented half: a scan of its
+ * instructions by the executor's own decoder. prog_impl launches from the
+ * value alone, after its own literal test of what the two fixed kernels
+ * cover. */
+int seq_route(const Dev &D, int fmt, const cft_program &prog, bool *aug)
+{
+    bool has = false;
+    for (uint32_t j = 0; j < prog.n_insns && !has; j++) {
+        seq_insn d;
+        seq_decode(prog.insns[j], &d);
+        has = d.ctrl && (d.op == SEQ_AUGADD || d.op == SEQ_AUGERR);
+    }
+#ifdef CFT_HIP_PLANTS
+    if (D.plant & PL_SEQNA_AUG)            /* seqna-aug: "no AUGADD", always */
+        has = false;
+#endif
+    *aug = has;
+    if (D.tier != TIER_FIXED || has)
+        return 0;
+#ifdef CFT_HIP_PLANTS
+    if (D.plant & PL_SEQFX_COVER)          /* seqfx-cover: k_seq_fx at any format */
+        return 2;
+    if (D.plant & PL_SEQFX128_COVER)       /* seqfx128-cover: k_seq_fx128 at any */
+        return 3;
+#endif
+    return fmt == 3 ? 2 : fmt == 2 ? 3 : 0;
+}
+
+#ifdef CFT_HIP_PLANTS
+/* round 3's G3B: a plant build's program route instrument (no plant needs to
+ * be set), read by cfth_plant_tier_probe after its first eight values: the
+ * kernel the last program run's branch chose (0 k_seq, 1 kept free, 2
+ * k_seq_fx, 3 k_seq_fx128), its format, n and whether it had AUGADD or
+ * AUGERR, and that handle's launches of k_seq, k_seq_fx and k_seq_fx128
+ * since open. A default build has none of it. */
+struct SeqTierProbe {
+    uint64_t kernel, fmt, n, aug, launches_seq, launches_seq_fx, launches_seq_fx128;
+};
+SeqTierProbe g_seq_tier_probe;
+#endif
+
 /* One staged indexed source, WHOLE, into the handle's source buffer: a
  * piece the stage's size at a time through the pinned block, each piece
  * finished before the next, so the block is free again when the head goes
@@ -1999,6 +2141,46 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
     *bus = 0;
     if (n == 0)
         return CFT_OK;
+
+    /* round 3's G3B: WHICH kernel runs this program, chosen here once by
+     * seq_route - 0 k_seq, 2 k_seq_fx (fp256), 3 k_seq_fx128 (fp128) - and
+     * launched below from this value alone, so that no kernel is handed
+     * another format's lanes. Then the branch's own test of what the two
+     * fixed kernels cover, written out on the raw words and the program's
+     * format and not seq_route's or its scan's, so that a defect in the one
+     * cannot hide behind the other: an augmented half (control bit 31, the
+     * control codes 10 and 11, SEQ_AUGADD and SEQ_AUGERR counted from
+     * SEQ_HALT's 0) or a format the kernel is not for is refused by name,
+     * before anything is staged. */
+    bool sk_aug = false;
+    const int sk_route = seq_route(D, fmt, prog, &sk_aug);
+#ifdef CFT_HIP_PLANTS
+    /* seqfx-refuse: no fixed kernel at all; seqfx128-refuse: none at fp128 */
+    const int sk = (D.plant & PL_SEQFX_REFUSE) ? 0
+                 : ((D.plant & PL_SEQFX128_REFUSE) && sk_route == 3) ? 0 : sk_route;
+    g_seq_tier_probe = SeqTierProbe{(uint64_t)sk, (uint64_t)fmt, (uint64_t)n,
+                                    (uint64_t)(sk_aug ? 1 : 0), D.launches_seq,
+                                    D.launches_seq_fx, D.launches_seq_fx128};
+#else
+    const int sk = sk_route;               /* const from here to the launch */
+#endif
+    if (sk == 2 || sk == 3) {
+        bool raw_aug = false;
+        for (uint32_t j = 0; j < prog.n_insns; j++) {
+            const uint64_t w = prog.insns[j];
+            if (((w >> 31) & 1u) && ((w & 0xFFu) == 10u || (w & 0xFFu) == 11u))
+                raw_aug = true;
+        }
+        if (raw_aug || (sk == 2 && prog.fmt_code != 3) || (sk == 3 && prog.fmt_code != 2)) {
+            set_err(fmt_str("%s: the fixed tier's executor (%s) was handed %s, which it does "
+                            "not cover (fp256 and fp128 programs without augmentedAddition "
+                            "only, each on its own kernel) - a defect in libcft, not in the "
+                            "call", who, sk == 2 ? "k_seq_fx" : "k_seq_fx128",
+                            raw_aug ? "a program with AUGADD or AUGERR"
+                                    : cft_format_name((cft_format)prog.fmt_code)));
+            return CFT_ERR_INTERNAL;
+        }
+    }
 
     const cft_fmt_desc f = cft_sf_formats[fmt];
     const size_t esz = (size_t)f.width / 8;
@@ -2302,12 +2484,49 @@ int prog_impl(Dev &D, int fmt, const cft_seq_run_io *io, uint32_t max_deposits,
         A.lane_flags_bytes = lflags ? k : 0;
 
         const auto t0 = std::chrono::steady_clock::now();
-        k_seq<<<grid_for(k), BLOCK, 0, D.stream>>>(
-            P, f, nk ? (const cft_bn *)(D.dev + o_kon) : nullptr, A,
-            lane_pool ? D.pool : nullptr, reach, first, (hacc *)(D.dev + o_acc)
-            PLANT_ARG(D));
-        if ((st = check_launch(D, who, "the sequencer's kernel", D.fa_seq)) != CFT_OK)
-            return st;
+        if (sk == 2 || sk == 3) {      /* round 3's G3B: the fixed executors, the
+                                        * other unit's (k_seq_fx, k_seq_fx128) */
+#ifdef CFT_HIP_PLANTS
+            const uint64_t pw = D.plant;
+            const bool w256 = sk == 2;
+#else
+            const uint64_t pw = 0;
+#endif
+            cfthfx_seq_launch(sk, grid_for(k), BLOCK, D.stream, P, f,
+                              nk ? (const cft_bn *)(D.dev + o_kon) : nullptr, A,
+                              lane_pool ? D.pool : nullptr, reach, first,
+                              (void *)(D.dev + o_acc), pw,
+#ifdef CFT_HIP_PLANTS
+                              PL_SEQ_MASK, PL_SEQ_DEPOSIT,
+                              w256 ? PL_SEQFX_RMM : PL_SEQFX128_RMM,
+                              w256 ? PL_SEQFX_FLAG : PL_SEQFX128_FLAG,
+                              w256 ? PL_SEQFX_STEER : PL_SEQFX128_STEER,
+                              w256 ? PL_SEQFX_MULSIGN : PL_SEQFX128_MULSIGN
+#else
+                              0, 0, 0, 0, 0, 0
+#endif
+                              );
+            if ((st = check_launch(D, who, sk == 2 ? "the fixed tier's program kernel"
+                                                   : "the fixed tier's fp128 program kernel",
+                                   sk == 2 ? D.fa_seq_fx : D.fa_seq_fx128)) != CFT_OK)
+                return st;
+#ifdef CFT_HIP_PLANTS
+            if (sk == 2)
+                g_seq_tier_probe.launches_seq_fx = ++D.launches_seq_fx;
+            else
+                g_seq_tier_probe.launches_seq_fx128 = ++D.launches_seq_fx128;
+#endif
+        } else {
+            k_seq<<<grid_for(k), BLOCK, 0, D.stream>>>(
+                P, f, nk ? (const cft_bn *)(D.dev + o_kon) : nullptr, A,
+                lane_pool ? D.pool : nullptr, reach, first, (hacc *)(D.dev + o_acc)
+                PLANT_ARG(D));
+            if ((st = check_launch(D, who, "the sequencer's kernel", D.fa_seq)) != CFT_OK)
+                return st;
+#ifdef CFT_HIP_PLANTS
+            g_seq_tier_probe.launches_seq = ++D.launches_seq;
+#endif
+        }
         if ((st = d2h(D, who, o_acc, end - o_acc)) != CFT_OK || (st = finish(D, who)) != CFT_OK)
             return st;
         const double ms = std::chrono::duration<double, std::milli>(
@@ -2438,6 +2657,20 @@ const struct {
     {"fixed128-scalar", PL_FIXED128_SCALAR},
     {"fixed128-cover", PL_FIXED128_COVER},
     {"fixed128-refuse", PL_FIXED128_REFUSE},
+    /* round 3's G3B: its plants here, bits 39 and up */
+    {"seqfx-rmm", PL_SEQFX_RMM},
+    {"seqfx-flag", PL_SEQFX_FLAG},
+    {"seqfx-steer", PL_SEQFX_STEER},
+    {"seqfx-mulsign", PL_SEQFX_MULSIGN},
+    {"seqfx-cover", PL_SEQFX_COVER},
+    {"seqna-aug", PL_SEQNA_AUG},
+    {"seqfx-refuse", PL_SEQFX_REFUSE},
+    {"seqfx128-rmm", PL_SEQFX128_RMM},
+    {"seqfx128-flag", PL_SEQFX128_FLAG},
+    {"seqfx128-steer", PL_SEQFX128_STEER},
+    {"seqfx128-mulsign", PL_SEQFX128_MULSIGN},
+    {"seqfx128-cover", PL_SEQFX128_COVER},
+    {"seqfx128-refuse", PL_SEQFX128_REFUSE},
 };
 
 /* CFT_HIP_PLANT and CFT_HIP_CHUNK, read at open; a value that is not
@@ -2608,22 +2841,39 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
     const hipError_t e5 = hipFuncGetAttributes(&D->fa_run256, (const void *)k_run256);
     /* round 3's G3A2: its fp128 kernel, the sixth */
     const hipError_t e6 = hipFuncGetAttributes(&D->fa_run128, (const void *)k_run128);
+    /* round 3's G3B: its program kernels, k_seq_fx and k_seq_fx128, the
+     * seventh and eighth (backend_hip_fx.cpp's unit) */
+    hipError_t e7 = hipSuccess, e8 = hipSuccess;
+    cfthfx_seq_attributes(&D->fa_seq_fx, &e7, &D->fa_seq_fx128, &e8);
     if (e1 != hipSuccess || e2 != hipSuccess || e3 != hipSuccess || e4 != hipSuccess ||
-        e5 != hipSuccess || e6 != hipSuccess) {
+        e5 != hipSuccess || e6 != hipSuccess || e7 != hipSuccess || e8 != hipSuccess) {
         const hipError_t eb = e1 != hipSuccess ? e1 : e2 != hipSuccess ? e2
                             : e3 != hipSuccess ? e3 : e4 != hipSuccess ? e4
-                            : e5 != hipSuccess ? e5 : e6;
+                            : e5 != hipSuccess ? e5 : e6 != hipSuccess ? e6
+                            : e7 != hipSuccess ? e7 : e8;
         const bool first4 = e1 == hipSuccess && e2 == hipSuccess && e3 == hipSuccess &&
                             e4 == hipSuccess;
-        const bool only5 = first4 && e6 == hipSuccess, only6 = first4 && e5 == hipSuccess;
+        /* round 3's G3B: the fixed tier's kernels that do not load, named,
+         * when the generic four do (G3A2's three cases, over four kernels) */
+        std::string which;
+        if (first4) {
+            const hipError_t fe[4] = {e5, e6, e7, e8};
+            static const char *const fk[4] = {"k_run256", "k_run128", "k_seq_fx", "k_seq_fx128"};
+            int nf = 0, q;
+            for (q = 0; q < 4; q++)
+                nf += fe[q] != hipSuccess;
+            for (q = 0; q < 4; q++)
+                if (fe[q] != hipSuccess)
+                    which += std::string(which.empty() ? (nf == 1 ? " (the fixed tier's kernel, "
+                                                                  : " (the fixed tier's kernels, ")
+                                         : ", ") + fk[q];
+            which += nf == 1 ? ", alone)" : ")";
+        }
         set_err(fmt_str("cft_open: %s is %s, and this libcft's GPU code was built for "
                         "HIP_ARCH %s (%s platform): its kernels do not load there%s - %s "
                         "(%s). Rebuild with HIP_ARCH naming %s",
                         artifact, arch_of(D->prop).c_str(), CFT_HIP_ARCH,
-                        platform_name(),
-                        only5 ? " (the fixed tier's kernel, k_run256, alone)"
-                        : only6 ? " (the fixed tier's fp128 kernel, k_run128, alone)"
-                        : first4 ? " (the fixed tier's kernels, k_run256 and k_run128)" : "",
+                        platform_name(), which.c_str(),
                         hipGetErrorString(eb), hipGetErrorName(eb),
                         arch_of(D->prop).c_str()));
         (void)hipGetLastError();
@@ -2662,7 +2912,8 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
             } else if (std::strcmp(tv, "generic")) {
                 set_err(fmt_str("cft_open: %s: CFT_HIP_TIER=\"%s\": expected generic "
                                 "(libcft's own arithmetic, the default) or fixed (cft_run's "
-                                "fp256 and fp128 FMA, ADD, SUB and MUL on fma256_fixed.h and "
+                                "and, through the executor's lane ALU, programs' fp256 and "
+                                "fp128 FMA, ADD, SUB and MUL on fma256_fixed.h and "
                                 "fma128_fixed.h, a second implementation); unset it, or set "
                                 "it empty, for the default, generic", artifact, tv));
                 delete D;
@@ -2726,7 +2977,8 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          " stage %zu MiB, page %zu bytes, kernels %d/%d/%d/%d registers "
                          "and %zu/%zu/%zu/%zu bytes local a thread (run/level/seq/aug)"
                          "; tier %s, fixed kernels %d/%d registers and %zu/%zu bytes "
-                         "local a thread (fp256/fp128)%s%s\n",
+                         "local a thread (fp256/fp128); program kernels: fixed %d/%d "
+                         "registers and %zu/%zu bytes local a thread (fp256/fp128)%s%s\n",
                          artifact, D->prop.name, arch_of(D->prop).c_str(),
                          D->prop.multiProcessorCount, (unsigned)D->prop.pciDomainID,
                          (unsigned)D->prop.pciBusID, (unsigned)D->prop.pciDeviceID,
@@ -2743,6 +2995,9 @@ int open_impl(const char *artifact, int index, void **out, uint32_t *format_mask
                          D->fa_run256.numRegs, D->fa_run128.numRegs,
                          (size_t)D->fa_run256.localSizeBytes,
                          (size_t)D->fa_run128.localSizeBytes,
+                         D->fa_seq_fx.numRegs, D->fa_seq_fx128.numRegs,
+                         (size_t)D->fa_seq_fx.localSizeBytes,
+                         (size_t)D->fa_seq_fx128.localSizeBytes,
 #ifdef CFT_HIP_PLANTS
                          ", PLANTS COMPILED IN, CFT_HIP_PLANT=", D->plant_name
 #else
@@ -3393,16 +3648,36 @@ extern "C" int cfth_plant_prog_probe(uint64_t *out, int nout)
  * backend.h: as cfth_plant_prog_probe, nothing in libcft calls it and a
  * default build defines no such symbol - so a default build cannot prove
  * which kernel ran (its INFO line names the handle's tier, and the rates
- * differ). */
+ * differ). Round 3's G3B appends, from the ninth value on and never
+ * reordering the eight before them, the PROGRAM route's: the kernel the
+ * last program run's branch chose (0 k_seq, 1 kept free, 2 k_seq_fx, 3
+ * k_seq_fx128), its format, n and whether it had AUGADD or AUGERR, and that
+ * handle's launches of k_seq, k_seq_fx and k_seq_fx128 since open - the one
+ * place that says which kernel ran a program. */
 extern "C" int cfth_plant_tier_probe(uint64_t *out, int nout)
 {
     const uint64_t v[] = {g_tier_probe.kernel, g_tier_probe.op, g_tier_probe.fmt,
                           g_tier_probe.n, g_tier_probe.tier, g_tier_probe.launches_run,
-                          g_tier_probe.launches_run256, g_tier_probe.launches_run128};
+                          g_tier_probe.launches_run256, g_tier_probe.launches_run128,
+                          /* round 3's G3B: the ninth on */
+                          g_seq_tier_probe.kernel, g_seq_tier_probe.fmt, g_seq_tier_probe.n,
+                          g_seq_tier_probe.aug, g_seq_tier_probe.launches_seq,
+                          g_seq_tier_probe.launches_seq_fx, g_seq_tier_probe.launches_seq_fx128};
     const int m = (int)(sizeof v / sizeof v[0]);
     int i;
     for (i = 0; i < m && i < nout && out; i++)
         out[i] = v[i];
     return i;
+}
+#endif
+
+#ifdef CFT_HIP_PLANT_FX_COLLIDE
+/* hip-symcheck-plant's third plant (round 3's G3B, host/Makefile): one
+ * symbol defined in both device units, which the pairwise check of
+ * backend_hip.o and backend_hip_fx.o must name - a build that links never
+ * defines it */
+extern "C" int cfth_plant_fx_collide(void)
+{
+    return 1;
 }
 #endif

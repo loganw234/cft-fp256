@@ -164,6 +164,34 @@
  *             failures are counted by format at the end; and a default
  *             build with CFT_HIP_PLANT set is refused by name, exit 2,
  *             no check counted (it has no plants to apply).
+ *   (round 3's G3B: its legs here)
+ *   progtier  the fixed tier inside programs, on a handle opened with
+ *             CFT_HIP_TIER=fixed and one with generic, each against the
+ *             software handle (prog_pair: deposits, counts, lane bytes,
+ *             scratch-out, flags and STATUS): (a) a one-instruction program
+ *             at FMA, ADD, SUB and MUL and every attribute over every
+ *             triple of the fixed leg's pool in one run (each lane's flags
+ *             in its lane byte) and 5,000 random triples; (b) a 16-
+ *             instruction chain mixing the four with MIN, MAX, ABS, NEG,
+ *             COPYSIGN, SELECT, IMUL and CMPLT, and a program at each field
+ *             the executor reads - a lane mask, the scratch (STL, LDL, STX,
+ *             LDX and a post-step) plain and strict, a quiet region, RAISE
+ *             and a deposit overflow, a REPEAT, constants by field, by kx
+ *             and from a bank, a scratch-in and scratch-out block, the four
+ *             index tables - and cft_run_ex with tables and a scalar
+ *             (device.c's program); each at fp256 and fp128; (c) the
+ *             one-instruction programs and the chain at fp32 and fp64, and
+ *             an AUGADD/AUGERR program at every format, on both handles;
+ *             (d) resident a, b, c and deposits on the fixed handle (DIRTY,
+ *             a second run moving no page), and with plants a failed run's
+ *             deposits LOST under the fixed tier and CFT_HIP_CHUNK=64; (e)
+ *             in a plant build, the PROGRAM ROUTE PROOF after every run, the
+ *             probe's ninth value on - k_seq_fx for fp256 and k_seq_fx128
+ *             for fp128 programs without AUGADD or AUGERR on the fixed
+ *             handle, k_seq for every other run, by the leg's own pt_want,
+ *             never the library's seq_route; failures counted by format;
+ *             and (f) a default build with CFT_HIP_PLANT set refused by
+ *             name, exit 2, no check counted.
  *
  * Every check counts; a NOT RUN line names what did not run and why; the
  * last line says how many checks failed. Exit 0 only when none did.
@@ -3963,6 +3991,685 @@ static void leg_fixed(const char *artifact, cft_device *sw, int only_fmt)
            failures - before);
 }
 
+/* round 3's G3B: its leg functions here */
+
+/* ---- the fixed tier inside programs (round 3's G3B) ------------------------- */
+
+enum { PT_N = FX_N, PT_MD = 4, PT_SO = 2 };
+static unsigned char pt_dep[PT_N * PT_MD * 32], pt_so[PT_N * PT_SO * 32], pt_lf[PT_N],
+    pt_mask[PT_N / 8 + 1], pt_k[16 * 32], pt_si[PT_N * 2 * 32];
+static uint32_t pt_cnt[PT_N], pt_tab[3][PT_N];
+static long pt_routes;
+/* the route proof's own failures, so that a plant red at the route alone
+ * (seqfx-refuse, seqfx128-refuse) is read beside every other check's count */
+static long pt_route_bad;
+/* the leg's failures counted by the format of the part that failed (fp32
+ * to fp256; [4] the rest), as the fixed leg's are */
+static int pt_failed[5];
+#define PT_AT(fmt_, call_)                                                \
+    do {                                                                  \
+        const int f0_ = failures;                                         \
+        call_;                                                            \
+        pt_failed[(fmt_)] += failures - f0_;                              \
+    } while (0)
+
+/* an ALU word with its attribute, constant bits and kx immediate */
+static uint64_t pt_alu(unsigned op, unsigned rd, unsigned ra, unsigned rb, unsigned rc,
+                       unsigned rnd, unsigned kbits, uint32_t imm)
+{
+    return (uint64_t)op | ((uint64_t)rd << 8) | ((uint64_t)ra << 12) | ((uint64_t)rb << 16) |
+           ((uint64_t)rc << 20) | ((uint64_t)rnd << 24) | ((uint64_t)kbits << 27) |
+           ((uint64_t)imm << 32);
+}
+
+/* the kernel the PROGRAM route must name, written here and NOT the library's
+ * seq_route (a route claim held by the code it checks could not fail): on a
+ * fixed handle 2 (k_seq_fx) for an fp256 program, 3 (k_seq_fx128) for an
+ * fp128 one, each without AUGADD or AUGERR; 0 (k_seq) for every other
+ * program and on any generic handle */
+static int pt_want(int fixed, int fmt, int aug)
+{
+    if (!fixed || aug)
+        return 0;
+    return fmt == CFT_FP256 ? 2 : fmt == CFT_FP128 ? 3 : 0;
+}
+
+/* The route (a plant build's probe, values 9 to 15): the last program run's
+ * branch chose the kernel `want` names, for this format, n and augmented
+ * half; n = 0 runs nothing and is not read */
+static void pt_route(int want, int fmt, size_t n, int aug, const char *who)
+{
+    static const char *const KN[4] = {"k_seq", "(1, kept free)", "k_seq_fx", "k_seq_fx128"};
+    uint64_t v[15];
+    int ok;
+    if (!fx_probe || !n)
+        return;
+    memset(v, 0, sizeof v);
+    pt_routes++;
+    ok = fx_probe(v, 15) == 15 && v[8] == (uint64_t)want && v[9] == (uint64_t)fmt &&
+         v[10] == (uint64_t)n && v[11] == (uint64_t)aug;
+    pt_route_bad += !ok;
+    CHECK(ok,
+          "the program route: %s %s n=%lu - the probe says kernel %llu (format %llu, n %llu, "
+          "augmented %llu), %s wanted", who, cft_format_name((cft_format)fmt), (unsigned long)n,
+          (unsigned long long)v[8], (unsigned long long)v[9], (unsigned long long)v[10],
+          (unsigned long long)v[11], KN[want]);
+}
+
+/* one image on handle h (fixed or not) against the software handle - all of
+ * prog_pair's comparisons - then the route */
+static void pt_run(cft_device *h, cft_device *sw, int fixed, int fmt, const unsigned char *img,
+                   size_t bytes, cft_run_args *H, uint32_t md, uint32_t nso, int aug,
+                   const char *what)
+{
+    const cft_status st = prog_pair(h, sw, fmt, img, bytes, H, md, nso, what);
+    if (st == CFT_OK)
+        pt_route(pt_want(fixed, fmt, aug), fmt, H->n, aug, what);
+}
+
+/* op r3, r0, r1, r2 at rnd; deposit r3; halt */
+static size_t pt_one(unsigned char *img, int fmt, int op, int rnd)
+{
+    const uint64_t ins[3] = {pt_alu((unsigned)op, 3, 0, 1, 2, (unsigned)rnd, 0, 0),
+                             sq_ctrl(3, 3, 0), sq_ctrl(0, 0, 0)};
+    return sq_image(img, fmt, ins, 3, NULL, 0, 1, 0, 0, 0);
+}
+
+/* the 16-instruction chain: the op, then FMA, ADD, SUB and MUL on its
+ * results, MIN, MAX, ABS, NEG, COPYSIGN, SELECT, IMUL, CMPLT, three
+ * deposits and a halt - the other opcodes run cft_sf_compute inside a fixed
+ * kernel */
+static size_t pt_chain(unsigned char *img, int fmt, int op, int rnd)
+{
+    const unsigned o = (unsigned)op, r = (unsigned)rnd;
+    const uint64_t ins[16] = {
+        pt_alu(o, 3, 0, 1, 2, r, 0, 0),               /* the op */
+        pt_alu(CFT_FMA, 4, 0, 1, 3, r, 0, 0),         /* a*b + r3 */
+        pt_alu(CFT_ADD, 5, 3, 1, 2, r, 0, 0),         /* r3 + c */
+        pt_alu(CFT_SUB, 6, 4, 1, 5, r, 0, 0),         /* r4 - r5 */
+        pt_alu(CFT_MUL, 7, 6, 0, 2, r, 0, 0),         /* r6 * a */
+        pt_alu(CFT_MIN, 8, 7, 3, 0, 0, 0, 0),
+        pt_alu(CFT_MAX, 9, 6, 4, 0, 0, 0, 0),
+        pt_alu(CFT_ABS, 10, 8, 0, 0, 0, 0, 0),
+        pt_alu(CFT_NEG, 11, 9, 0, 0, 0, 0, 0),
+        pt_alu(CFT_COPYSIGN, 12, 10, 11, 0, 0, 0, 0),
+        pt_alu(CFT_SELECT, 13, 12, 11, 7, 0, 0, 0),   /* r7 != 0 ? r12 : r11 */
+        pt_alu(CFT_IMUL, 14, 3, 0, 0, 0, 0, 0),
+        pt_alu(CFT_CMPLT, 15, 13, 14, 0, 0, 0, 0),
+        sq_ctrl(3, 3, 0), sq_ctrl(3, 13, 0), sq_ctrl(0, 0, 0)};
+    return sq_image(img, fmt, ins, 16, NULL, 0, 2, 0, 0, 0);
+}
+
+static void pt_args(cft_run_args *H, const unsigned char *a, const unsigned char *b,
+                    const unsigned char *c, size_t n, size_t md, size_t esz)
+{
+    memset(H, 0, sizeof *H);
+    H->struct_size = sizeof *H;
+    H->a = a;
+    H->b = b;
+    H->c = c;
+    H->n = n;
+    H->deposits = pt_dep;
+    H->counts = pt_cnt;
+    H->lane_flags = pt_lf;
+    H->lane_flags_bytes = n;
+    memset(pt_dep, 0x5A, n * md * esz);
+    memset(pt_cnt, 0x77, n * 4);
+    memset(pt_lf, 0xEE, n);
+}
+
+/* (a) the class: a one-instruction program at each operation and attribute
+ * over every triple of the fixed leg's pool in one run (each lane's own flags
+ * in its lane byte), then FX_BIG random triples, one in four from the pool */
+static void pt_class(cft_device *h, cft_device *sw, int fixed, int fmt, const char *who)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const int before = failures, c0 = checks;
+    const double t0 = fx_now();
+    unsigned char img[64];
+    char what[160];
+    cft_run_args H;
+    int op, rnd, part;
+    size_t t;
+    for (part = 0; part < 2; part++) {
+        const size_t n = part ? (size_t)FX_BIG : (size_t)FX_N;
+        fx_pool(fx_pl, fmt);
+        if (!part) {
+            fx_triples(fmt);
+        } else {
+            for (op = 0; op < 3; op++) {
+                unsigned char *x = op == 0 ? fx_a : op == 1 ? fx_b : fx_c;
+                fill(x, FX_BIG, fmt, K_RANDOM);
+                for (t = 0; t < (size_t)FX_BIG; t++)
+                    if (rnd64() % 4 == 0)
+                        memcpy(x + t * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+            }
+        }
+        for (op = 0; op < 4; op++)
+            for (rnd = 0; rnd < 5; rnd++) {
+                const size_t bytes = pt_one(img, fmt, op, rnd);
+                snprintf(what, sizeof what, "(a) %s, %s %s %s, %s", who,
+                         cft_format_name((cft_format)fmt), FXN[op], RND[rnd],
+                         part ? "5,000 random triples" : "every triple of the pool");
+                pt_args(&H, fx_a, fx_b, fx_c, n, 1, esz);
+                pt_run(h, sw, fixed, fmt, img, bytes, &H, 1, 0, 0, what);
+            }
+    }
+    printf("  (a) %s, %s: 40 one-instruction programs (four operations, five attributes; %d "
+           "triples, then %d random), %d checks, %.1f s, %d failed\n", who,
+           cft_format_name((cft_format)fmt), FX_N, FX_BIG, checks - c0, fx_now() - t0,
+           failures - before);
+}
+
+/* (b) programs: the chain at each operation and attribute, and a program at
+ * each field the executor reads - a lane mask (R17); the scratch (STL/LDL,
+ * STX/LDX and the post-step; scratch_active, scratch_used, scratch_depth and
+ * its log2); strict scratch (the flags word, STATUS and the lane bytes); a
+ * quiet region and RAISE; deposit overflow (max_deposits); a REPEAT;
+ * constants by register field, by kx and from a bank (n_consts, BANK_EXT);
+ * a scratch-in and scratch-out block (n_scratch_in, n_scratch_out); and the
+ * four index tables - each against the software handle */
+static void pt_programs(cft_device *h, cft_device *sw, int fixed, int fmt, const char *who)
+{
+    const size_t esz = cft_format_size((cft_format)fmt), n = 1000;
+    const int before = failures, c0 = checks;
+    const double t0 = fx_now();
+    unsigned char img[32 + 16 * 32 + 32 * 8];
+    char what[200];
+    cft_run_args H;
+    uint64_t ins[32];
+    int op, rnd, v;
+    size_t bytes, i;
+    fx_pool(fx_pl, fmt);
+    fill(fx_a, n, fmt, K_RANDOM);
+    fill(fx_b, n, fmt, K_NAN);
+    fill(fx_c, n, fmt, K_RANDOM);
+    for (i = 0; i < n; i += 3)
+        memcpy(fx_c + i * esz, fx_pl + (rnd64() % FX_P) * esz, esz);
+    for (i = 0; i < 16; i++)
+        memcpy(pt_k + i * esz, fx_pl + ((i * 5 + 3) % FX_P) * esz, esz);
+    for (op = 0; op < 4; op++)
+        for (rnd = 0; rnd < 5; rnd++) {
+            bytes = pt_chain(img, fmt, op, rnd);
+            snprintf(what, sizeof what, "(b) %s, %s the chain from %s at %s", who,
+                     cft_format_name((cft_format)fmt), FXN[op], RND[rnd]);
+            pt_args(&H, fx_a, fx_b, fx_c, n, 2, esz);
+            pt_run(h, sw, fixed, fmt, img, bytes, &H, 2, 0, 0, what);
+        }
+    /* a lane mask: the chain with three lanes in ten cleared */
+    for (i = 0; i < (n + 7) / 8; i++)
+        pt_mask[i] = (unsigned char)(rnd64() | rnd64());
+    bytes = pt_chain(img, fmt, CFT_FMA, CFT_RNE);
+    pt_args(&H, fx_a, fx_b, fx_c, n, 2, esz);
+    H.lane_mask = pt_mask;
+    H.lane_mask_bytes = (n + 7) / 8;
+    snprintf(what, sizeof what, "(b) %s, %s the chain under a lane mask", who,
+             cft_format_name((cft_format)fmt));
+    pt_run(h, sw, fixed, fmt, img, bytes, &H, 2, 0, 0, what);
+    /* the scratch: STL, LDL, STX and LDX with a post-step, plain and strict */
+    for (v = 0; v < 2; v++) {
+        unsigned ni = 0;
+        ins[ni++] = sq_scr(6, 0, 0, 0, 3);                         /* STL a -> 3 */
+        ins[ni++] = pt_alu(CFT_FMA, 4, 0, 1, 2, CFT_RNE, 0, 0);
+        ins[ni++] = sq_scr(7, 5, 0, 0, 3);                         /* LDL r5 <- 3 */
+        ins[ni++] = sq_scr(8, 0, 4, 2, 0) | ((uint64_t)5 << 32);   /* STX r4 -> [c], c += 5 */
+        ins[ni++] = sq_scr(9, 6, 0, 2, 0) | ((uint64_t)0xFFB << 32); /* LDX r6 <- [c], c -= 5 */
+        ins[ni++] = pt_alu(CFT_SUB, 7, 5, 0, 6, CFT_RUP, 0, 0);    /* r5 - r6 */
+        ins[ni++] = pt_alu(CFT_MUL, 8, 7, 4, 0, CFT_RDN, 0, 0);
+        ins[ni++] = sq_ctrl(3, 8, 0);
+        ins[ni++] = sq_ctrl(3, 2, 0);                              /* the stepped index */
+        ins[ni++] = sq_ctrl(0, 0, 0);
+        bytes = sq_image(img, fmt, ins, ni, NULL, 0, 2, v ? CFT_PROG_FLAG_SCRATCH_STRICT : 0u,
+                         0, 0);
+        pt_args(&H, fx_a, fx_b, fx_c, n, 2, esz);
+        snprintf(what, sizeof what, "(b) %s, %s the scratch (STL, LDL, STX and LDX, a post-step)%s",
+                 who, cft_format_name((cft_format)fmt), v ? ", strict" : "");
+        pt_run(h, sw, fixed, fmt, img, bytes, &H, 2, 0, 0, what);
+    }
+    /* a quiet region and RAISE, and deposit overflow (max_deposits 1, two
+     * deposits), and a REPEAT of eight */
+    {
+        unsigned ni = 0;
+        ins[ni++] = sq_ctrl(12, 0, 0);                             /* QUIET */
+        ins[ni++] = pt_alu(CFT_FMA, 3, 0, 1, 2, CFT_RNE, 0, 0);
+        ins[ni++] = sq_ctrl(13, 0, 0);                             /* ENDQUIET */
+        ins[ni++] = pt_alu(CFT_ADD, 4, 3, 1, 2, CFT_RTZ, 0, 0);
+        ins[ni++] = sq_ctrl(14, 2, 0);                             /* RAISE c's low byte */
+        ins[ni++] = sq_ctrl(3, 3, 0);
+        ins[ni++] = sq_ctrl(3, 4, 0);                              /* past max_deposits */
+        ins[ni++] = sq_ctrl(0, 0, 0);
+        bytes = sq_image(img, fmt, ins, ni, NULL, 0, 1, 0, 0, 0);
+        pt_args(&H, fx_a, fx_b, fx_c, n, 1, esz);
+        snprintf(what, sizeof what, "(b) %s, %s a quiet region, RAISE and a deposit overflow",
+                 who, cft_format_name((cft_format)fmt));
+        pt_run(h, sw, fixed, fmt, img, bytes, &H, 1, 0, 0, what);
+        ni = 0;
+        ins[ni++] = sq_ctrl(1, 0, 8);                              /* REPEAT 8 */
+        ins[ni++] = pt_alu(CFT_FMA, 3, 0, 3, 2, CFT_RMM, 0, 0);    /* r3 = a*r3 + c */
+        ins[ni++] = pt_alu(CFT_SUB, 4, 3, 1, 0, CFT_RNE, 0, 0);    /* r3 - a */
+        ins[ni++] = sq_ctrl(2, 0, 0);                              /* ENDREP */
+        ins[ni++] = sq_ctrl(3, 3, 0);
+        ins[ni++] = sq_ctrl(3, 4, 0);
+        ins[ni++] = sq_ctrl(0, 0, 0);
+        bytes = sq_image(img, fmt, ins, ni, NULL, 0, 2, 0, 0, 0);
+        pt_args(&H, fx_a, fx_b, fx_c, n, 2, esz);
+        snprintf(what, sizeof what, "(b) %s, %s a REPEAT of eight", who,
+                 cft_format_name((cft_format)fmt));
+        pt_run(h, sw, fixed, fmt, img, bytes, &H, 2, 0, 0, what);
+    }
+    /* constants: by the register field (kb, kc), by kx's indices, and from a
+     * bank (BANK_EXT); then a scratch-in and scratch-out block */
+    for (v = 0; v < 2; v++) {
+        unsigned ni = 0;
+        ins[ni++] = pt_alu(CFT_FMA, 3, 0, 1, 2, CFT_RNE, 6, 0);    /* a*k1 + k2 (kb, kc) */
+        ins[ni++] = pt_alu(CFT_FMA, 4, 0, 1, 0, CFT_RTZ, 13, 9u | (11u << 16)); /* k9*b + k11 */
+        ins[ni++] = pt_alu(CFT_SUB, 5, 3, 0, 4, CFT_RUP, 0, 0);
+        ins[ni++] = pt_alu(CFT_MUL, 6, 5, 7, 0, CFT_RDN, 2, 0);    /* r5 * k7 */
+        ins[ni++] = sq_ctrl(3, 5, 0);
+        ins[ni++] = sq_ctrl(3, 6, 0);
+        ins[ni++] = sq_ctrl(0, 0, 0);
+        bytes = sq_image(img, fmt, ins, ni, pt_k, 12, 2, v ? CFT_PROG_FLAG_BANK_EXT : 0u, 0, 0);
+        pt_args(&H, fx_a, fx_b, fx_c, n, 2, esz);
+        if (v) {
+            H.bank = pt_k;
+            H.bank_bytes = 12 * esz;
+        }
+        snprintf(what, sizeof what, "(b) %s, %s constants by field and kx%s", who,
+                 cft_format_name((cft_format)fmt), v ? ", from a bank (BANK_EXT)" : "");
+        pt_run(h, sw, fixed, fmt, img, bytes, &H, 2, 0, 0, what);
+    }
+    {
+        unsigned ni = 0;
+        fill(pt_si, n * 2, fmt, K_RANDOM);
+        ins[ni++] = sq_scr(7, 4, 0, 0, 0);                         /* LDL r4 <- 0 */
+        ins[ni++] = sq_scr(7, 5, 0, 0, 1);                         /* LDL r5 <- 1 */
+        ins[ni++] = pt_alu(CFT_FMA, 6, 4, 5, 0, CFT_RNE, 0, 0);    /* r4*r5 + a */
+        ins[ni++] = pt_alu(CFT_ADD, 7, 6, 0, 2, CFT_RMM, 0, 0);
+        ins[ni++] = sq_scr(6, 0, 7, 0, 0);                         /* STL r7 -> 0 */
+        ins[ni++] = sq_scr(6, 0, 6, 0, 1);                         /* STL r6 -> 1 */
+        ins[ni++] = sq_ctrl(3, 7, 0);
+        ins[ni++] = sq_ctrl(0, 0, 0);
+        bytes = sq_image(img, fmt, ins, ni, NULL, 0, 1, CFT_PROG_FLAG_SCRATCH_IO, 2, 2);
+        pt_args(&H, fx_a, fx_b, fx_c, n, 1, esz);
+        H.scratch_in = pt_si;
+        H.scratch_in_bytes = n * 2 * esz;
+        H.scratch_out = pt_so;
+        H.scratch_out_bytes = n * 2 * esz;
+        memset(pt_so, 0x5A, n * 2 * esz);
+        snprintf(what, sizeof what, "(b) %s, %s a scratch-in and scratch-out block", who,
+                 cft_format_name((cft_format)fmt));
+        pt_run(h, sw, fixed, fmt, img, bytes, &H, 1, 2, 0, what);
+        /* the four index tables: a, b and c from sources longer than n, and
+         * the scratch block from a pool, one entry in five CFT_IDX_NONE */
+        ix_table(pt_tab[0], n, 3 * n, 0);
+        ix_table(pt_tab[1], n, 3 * n, 1);
+        ix_table(pt_tab[2], n, 3 * n, 2);
+        fill(fx_a + n * esz, 2 * n, fmt, K_RANDOM);
+        fill(fx_b + n * esz, 2 * n, fmt, K_RANDOM);
+        fill(fx_c + n * esz, 2 * n, fmt, K_RANDOM);
+        pt_args(&H, fx_a, fx_b, fx_c, n, 1, esz);
+        H.idx_a = pt_tab[0];
+        H.idx_b = pt_tab[1];
+        H.idx_c = pt_tab[2];
+        H.idx_a_src = H.idx_b_src = H.idx_c_src = 3 * n;
+        H.scratch_in = pt_si;
+        H.scratch_in_bytes = n * 2 * esz;
+        H.scratch_out = pt_so;
+        H.scratch_out_bytes = n * 2 * esz;
+        memset(pt_so, 0x5A, n * 2 * esz);
+        snprintf(what, sizeof what, "(b) %s, %s the same with tables on a, b and c", who,
+                 cft_format_name((cft_format)fmt));
+        pt_run(h, sw, fixed, fmt, img, bytes, &H, 1, 2, 0, what);
+    }
+    printf("  (b) %s, %s: the chain at four operations and five attributes, and the fields - "
+           "a lane mask, the scratch plain and strict, a quiet region and RAISE with a deposit "
+           "overflow, a REPEAT, constants by field, kx and a bank, a scratch block, index "
+           "tables; %d checks, %.1f s, %d failed\n", who, cft_format_name((cft_format)fmt),
+           checks - c0, fx_now() - t0, failures - before);
+}
+
+/* scalar and indexed operands, which device.c composes as a PROGRAM
+ * (cft_run_ex with a table on a, and on c or a scalar beside it - FMA a
+ * table on a and c and a scalar b, ADD and SUB a table on a and a scalar
+ * c, MUL a table on a and a scalar b, each on the operands the opcode
+ * reads): through the fixed kernel at fp256 and fp128 on the fixed handle,
+ * against the software handle's run */
+static void pt_runex(cft_device *h, cft_device *sw, int fixed, int fmt, const char *who)
+{
+    const size_t esz = cft_format_size((cft_format)fmt), n = 1000;
+    const int before = failures, c0 = checks;
+    int op, rnd;
+    ix_table(pt_tab[0], n, 2 * n, 3);
+    ix_table(pt_tab[2], n, 2 * n, 4);
+    fill(fx_a, 2 * n, fmt, K_RANDOM);
+    fill(fx_b, 2 * n, fmt, K_RANDOM);
+    fill(fx_c, 2 * n, fmt, K_NAN);
+    for (op = 0; op < 4; op++)
+        for (rnd = 0; rnd < 5; rnd += 2) {
+            cft_elem_args E;
+            uint32_t fh = 0, fs = 0;
+            cft_status sh, ss;
+            memset(&E, 0, sizeof E);
+            E.struct_size = sizeof E;
+            E.a = fx_a;
+            E.b = op == CFT_ADD || op == CFT_SUB ? NULL : fx_b;
+            E.c = op == CFT_MUL ? NULL : fx_c;
+            E.n = n;
+            E.scalar_mask = op == CFT_ADD || op == CFT_SUB ? 4u : 2u;
+            E.idx_a = pt_tab[0];
+            E.idx_c = op == CFT_FMA ? pt_tab[2] : NULL;
+            E.idx_a_src = 2 * n;
+            E.idx_c_src = op == CFT_FMA ? 2 * n : 0;
+            E.d = fx_dh;
+            E.flags_out = &fh;
+            sh = cft_run_ex(h, (cft_op)op, (cft_format)fmt, (cft_round)rnd, &E);
+            if (sh == CFT_OK)
+                pt_route(pt_want(fixed, fmt, 0), fmt, n, 0, "cft_run_ex with tables");
+            E.d = fx_ds;
+            E.flags_out = &fs;
+            ss = cft_run_ex(sw, (cft_op)op, (cft_format)fmt, (cft_round)rnd, &E);
+            CHECK(sh == ss && (sh != CFT_OK || (same(fx_dh, fx_ds, n * esz) && fh == fs)),
+                  "cft_run_ex %s %s %s with tables and a scalar, %s: GPU %s (%s), software %s; "
+                  "bits %s, flags 0x%02x / 0x%02x", who, cft_format_name((cft_format)fmt),
+                  FXN[op], RND[rnd], cft_strerror(sh), sh ? cft_last_error() : "",
+                  cft_strerror(ss), same(fx_dh, fx_ds, n * esz) ? "alike" : "DIFFER",
+                  (unsigned)fh, (unsigned)fs);
+            CHECK(sh == CFT_OK, "cft_run_ex %s %s %s with tables and a scalar: refused - %s", who,
+                  cft_format_name((cft_format)fmt), FXN[op], cft_last_error());
+        }
+    printf("  (b) %s, %s: cft_run_ex with index tables and a scalar (device.c's program), four "
+           "operations at three attributes; %d checks, %d failed\n", who,
+           cft_format_name((cft_format)fmt), checks - c0, failures - before);
+}
+
+/* (c) the other formats and AUGADD: the one-instruction programs at fp32 and
+ * fp64, and revision 8's AUGADD/AUGERR program (aug_image) at every format,
+ * on the handle - k_seq for every one of them */
+static void pt_others(cft_device *h, cft_device *sw, int fixed, const char *who)
+{
+    const int before = failures, c0 = checks;
+    unsigned char img[32 + 16 * 8];
+    char what[160];
+    cft_run_args H;
+    int f, op, rnd;
+    for (f = 0; f < 2; f++) {
+        const size_t esz = cft_format_size((cft_format)f);
+        fx_pool(fx_pl, f);
+        fx_triples(f);
+        for (op = 0; op < 4; op++)
+            for (rnd = 0; rnd < 5; rnd++) {
+                const size_t bytes = pt_one(img, f, op, rnd);
+                snprintf(what, sizeof what, "(c) %s, %s %s %s", who,
+                         cft_format_name((cft_format)f), FXN[op], RND[rnd]);
+                pt_args(&H, fx_a, fx_b, fx_c, FX_N, 1, esz);
+                PT_AT(f, pt_run(h, sw, fixed, f, img, bytes, &H, 1, 0, 0, what));
+            }
+        for (op = 0; op < 4; op++) {
+            const size_t bytes = pt_chain(img, f, op, op + 1);
+            snprintf(what, sizeof what, "(c) %s, %s the chain from %s", who,
+                     cft_format_name((cft_format)f), FXN[op]);
+            pt_args(&H, fx_a, fx_b, fx_c, FX_N, 2, esz);
+            PT_AT(f, pt_run(h, sw, fixed, f, img, bytes, &H, 2, 0, 0, what));
+        }
+    }
+    for (f = 0; f < 4; f++) {
+        const size_t esz = cft_format_size((cft_format)f), bytes = aug_image(img, f);
+        fx_pool(fx_pl, f);
+        fx_triples(f);
+        snprintf(what, sizeof what, "(c) %s, %s a program with AUGADD and AUGERR", who,
+                 cft_format_name((cft_format)f));
+        pt_args(&H, fx_a, fx_b, fx_c, 2000, 4, esz);
+        PT_AT(f, pt_run(h, sw, fixed, f, img, bytes, &H, 4, 0, 1, what));
+    }
+    printf("  (c) %s: fp32 and fp64 at four operations and five attributes (%d triples), and "
+           "an AUGADD/AUGERR program at every format - k_seq for each; %d checks, %d failed\n",
+           who, FX_N, checks - c0, failures - before);
+}
+
+/* (d) resident and chunks, on the fixed handle: the one-instruction FMA and
+ * the chain with a, b, c and the deposits in cft_alloc buffers - the software
+ * handle's bits, the deposits left on the device (DIRTY), a second run
+ * binding with no page moved; with plants a failed run's deposits LOST under
+ * the fixed tier, and CFT_HIP_CHUNK=64 crossing many program chunks */
+static void pt_resident(const char *artifact, cft_device *hf, cft_device *sw, int plant_build,
+                        int fmt)
+{
+    const size_t esz = cft_format_size((cft_format)fmt), n = 2000;
+    const int before = failures, c0 = checks;
+    static unsigned char want[2000 * 2 * 32];
+    unsigned char img[32 + 16 * 8];
+    struct rb A, B, C, D;
+    struct rb *all[4];
+    cft_buffer_info i0[4], i1[4];
+    cft_run_args H;
+    cft_program *p = NULL, *ps = NULL;
+    uint32_t fh = 0, fs = 0;
+    int k, prog, still = 1;
+    A.b = B.b = C.b = D.b = NULL;
+    all[0] = &A; all[1] = &B; all[2] = &C; all[3] = &D;
+    fill(fx_a, n, fmt, K_RANDOM);
+    fill(fx_b, n, fmt, K_RANDOM);
+    fill(fx_c, n, fmt, K_RANDOM);
+    CHECK(rb_alloc(hf, &A, n * esz) && rb_alloc(hf, &B, n * esz) && rb_alloc(hf, &C, n * esz) &&
+          rb_alloc(hf, &D, n * 2 * esz), "cft_alloc: %s", cft_last_error());
+    if (!A.b || !B.b || !C.b || !D.b)
+        goto out;
+    CHECK(rb_put(&A, fx_a, n * esz) && rb_put(&B, fx_b, n * esz) && rb_put(&C, fx_c, n * esz),
+          "publishing: %s", cft_last_error());
+    for (prog = 0; prog < 2; prog++) {
+        const uint32_t md = prog ? 2 : 1;
+        const size_t bytes = prog ? pt_chain(img, fmt, CFT_SUB, CFT_RMM)
+                                  : pt_one(img, fmt, CFT_FMA, CFT_RNE);
+        cft_status sh, ss;
+        CHECK(cft_program_load(hf, img, bytes, &p) == CFT_OK &&
+              cft_program_load(sw, img, bytes, &ps) == CFT_OK, "load: %s", cft_last_error());
+        if (!p || !ps)
+            goto out;
+        memset(&H, 0, sizeof H);
+        H.struct_size = sizeof H;
+        H.a = A.p;
+        H.b = B.p;
+        H.c = C.p;
+        H.n = n;
+        H.deposits = D.p;
+        H.flags_out = &fh;
+        sh = cft_program_run_ex(p, &H);
+        if (sh == CFT_OK)
+            pt_route(pt_want(1, fmt, 0), fmt, n, 0, "resident");
+        CHECK(sh == CFT_OK && rb_info(&D).device_authority == 1, "%s resident: %s, the "
+              "deposits' authority %d", prog ? "the chain" : "FMA", cft_strerror(sh),
+              rb_info(&D).device_authority);
+        CHECK(cft_buffer_from_device(D.b) == CFT_OK, "the read-back: %s", cft_last_error());
+        H.a = fx_a;
+        H.b = fx_b;
+        H.c = fx_c;
+        H.deposits = want;
+        H.flags_out = &fs;
+        ss = cft_program_run_ex(ps, &H);
+        CHECK(ss == CFT_OK && same(D.p, want, n * md * esz) && fh == fs, "%s resident: bits "
+              "%s, flags 0x%02x / 0x%02x", prog ? "the chain" : "FMA",
+              same(D.p, want, n * md * esz) ? "alike" : "DIFFER", (unsigned)fh, (unsigned)fs);
+        for (k = 0; k < 4; k++)
+            i0[k] = rb_info(all[k]);
+        H.a = A.p;
+        H.b = B.p;
+        H.c = C.p;
+        H.deposits = D.p;
+        H.flags_out = &fh;
+        sh = cft_program_run_ex(p, &H);
+        for (k = 0; k < 4; k++)
+            i1[k] = rb_info(all[k]);
+        for (k = 0; k < 3; k++)
+            still &= i1[k].resident_binds == i0[k].resident_binds + 1 &&
+                     i1[k].staged_binds == i0[k].staged_binds;
+        CHECK(sh == CFT_OK && still && cft_buffer_from_device(D.b) == CFT_OK &&
+              same(D.p, want, n * md * esz), "%s, the second resident run: %s, pages moved "
+              "(a %llu/%llu binds resident/staged; \"%s\"), bits %s", prog ? "the chain" : "FMA",
+              cft_strerror(sh), (unsigned long long)i1[0].resident_binds,
+              (unsigned long long)i1[0].staged_binds, i1[0].staged_why,
+              same(D.p, want, n * md * esz) ? "alike" : "DIFFER");
+        cft_program_free(p);
+        cft_program_free(ps);
+        p = ps = NULL;
+    }
+    printf("  (d) resident a, b, c and the deposits at %s on the fixed handle, FMA and the "
+           "chain: the software handle's bits, the deposits left on the device, the second run "
+           "moving no page%s\n", cft_format_name((cft_format)fmt), still ? "" : " - NOT HELD");
+    if (!plant_build) {
+        nrun("  (d) a failed run's resident deposits LOST, and CFT_HIP_CHUNK=64", "this libcft "
+             "is a default build, which has no CFT_HIP_PLANT=fail-launch and reads no "
+             "CFT_HIP_CHUNK; build with HIP_PLANTS=1");
+    } else {
+        cft_device *h = NULL;
+        cft_status st;
+        char msg[300];
+        const size_t bytes = pt_one(img, fmt, CFT_FMA, CFT_RNE);
+        rb_free(&A); rb_free(&B); rb_free(&C); rb_free(&D);
+        put_env("CFT_HIP_PLANT", "fail-launch");
+        put_env("CFT_HIP_TIER", "fixed");
+        st = cft_open(artifact, 0, &h);
+        put_env("CFT_HIP_PLANT", NULL);
+        put_env("CFT_HIP_TIER", NULL);
+        CHECK(st == CFT_OK, "open with fail-launch under the fixed tier: %s", cft_last_error());
+        if (h && rb_alloc(h, &A, n * esz) && rb_alloc(h, &B, n * esz) &&
+            rb_alloc(h, &C, n * esz) && rb_alloc(h, &D, n * esz) &&
+            cft_program_load(h, img, bytes, &p) == CFT_OK) {
+            cft_buffer_info id;
+            CHECK(rb_put(&A, fx_a, n * esz) && rb_put(&B, fx_b, n * esz) &&
+                  rb_put(&C, fx_c, n * esz), "publishing");
+            memset(&H, 0, sizeof H);
+            H.struct_size = sizeof H;
+            H.a = A.p;
+            H.b = B.p;
+            H.c = C.p;
+            H.n = n;
+            H.deposits = D.p;
+            st = cft_program_run_ex(p, &H);
+            snprintf(msg, sizeof msg, "%s", cft_last_error());
+            pt_route(pt_want(1, fmt, 0), fmt, n, 0, "the failed run");
+            id = rb_info(&D);
+            CHECK(st == CFT_ERR_INTERNAL && strstr(msg, "fail-launch") &&
+                  !strncmp(id.staged_why, "LOST:", 5),
+                  "the failed resident program run under the fixed tier: %s, \"%s\"; the "
+                  "deposits' why \"%s\"", cft_strerror(st), msg, id.staged_why);
+            printf("  (d) a failed program run at %s under the fixed tier: %s; deposits %s\n",
+                   cft_format_name((cft_format)fmt), cft_strerror(st), id.staged_why);
+        }
+        cft_program_free(p);
+        p = NULL;
+        rb_free(&A); rb_free(&B); rb_free(&C); rb_free(&D);
+        cft_close(h);
+        h = NULL;
+        put_env("CFT_HIP_CHUNK", "64");
+        put_env("CFT_HIP_TIER", "fixed");
+        st = cft_open(artifact, 0, &h);
+        put_env("CFT_HIP_CHUNK", NULL);
+        put_env("CFT_HIP_TIER", NULL);
+        CHECK(st == CFT_OK, "open with CFT_HIP_CHUNK=64 under the fixed tier: %s",
+              cft_last_error());
+        if (h) {
+            const size_t cb = pt_chain(img, fmt, CFT_ADD, CFT_RDN);
+            pt_args(&H, fx_a, fx_b, fx_c, n, 2, esz);
+            pt_run(h, sw, 1, fmt, img, cb, &H, 2, 0, 0, "the chain in chunks of 64 lanes");
+            printf("  (d) the chain at %s on a fixed handle with CFT_HIP_CHUNK=64: %lu lanes in "
+                   "%lu chunks, held to the software handle\n", cft_format_name((cft_format)fmt),
+                   (unsigned long)n, (unsigned long)((n + 63) / 64));
+        }
+        cft_close(h);
+    }
+out:
+    cft_program_free(p);
+    cft_program_free(ps);
+    rb_free(&A); rb_free(&B); rb_free(&C); rb_free(&D);
+    printf("  (d) %s: %d checks, %d failed\n", cft_format_name((cft_format)fmt), checks - c0,
+           failures - before);
+}
+
+static void leg_progtier(const char *artifact, cft_device *sw, int only_fmt)
+{
+    const char *was = getenv("CFT_HIP_TIER"), *wp = getenv("CFT_HIP_PLANT");
+    char keep[64] = "", keepp[64] = "";
+    const int before = failures, c0 = checks;
+    const double t0 = fx_now();
+    cft_device *hg = NULL, *hf = NULL, *h = NULL;
+    int k, f, plant_build;
+    printf("progtier\n");
+    if (was)
+        snprintf(keep, sizeof keep, "%s", was);
+    if (wp)
+        snprintf(keepp, sizeof keepp, "%s", wp);
+    fx_probe = FX_PROBE_FN;
+    pt_routes = 0;
+    pt_route_bad = 0;
+    put_env("CFT_HIP_PLANT", "bogus");
+    plant_build = cft_open(artifact, 0, &h) != CFT_OK;
+    put_env("CFT_HIP_PLANT", keepp[0] ? keepp : NULL);
+    cft_close(h);
+    h = NULL;
+    /* (f) G3A2's form (VG3A's M5, not repeated): a default build with
+     * CFT_HIP_PLANT set is REFUSED BY NAME, no check counted, exit 2 - it
+     * has no plant code, and the leg would be green for a plant it never
+     * applied */
+    if (!plant_build && keepp[0]) {
+        printf("  progtier: REFUSED - CFT_HIP_PLANT=\"%s\" is set, and this libcft is a "
+               "default build, which has no plants and never reads the variable: the leg would "
+               "be green for a plant it did not apply. Build it with HIP_PLANTS=1, or unset "
+               "CFT_HIP_PLANT. No check counted; exit 2\n", keepp);
+        fflush(stdout);
+        exit(2);
+    }
+    for (k = 0; k < 5; k++)
+        pt_failed[k] = 0;
+    CHECK(plant_build == (fx_probe != NULL), "a %s build %s the plant build's tier probe",
+          plant_build ? "plant" : "default", fx_probe ? "has" : "lacks");
+    printf("  a %s build; the route probe %s; CFT_HIP_PLANT %s; CFT_HIP_TIER of the caller %s\n",
+           plant_build ? "plant" : "default", fx_probe ? "present" : "absent",
+           keepp[0] ? keepp : "unset", was ? keep : "unset");
+    put_env("CFT_HIP_TIER", "generic");
+    CHECK(cft_open(artifact, 0, &hg) == CFT_OK, "the generic handle: %s", cft_last_error());
+    put_env("CFT_HIP_TIER", "fixed");
+    CHECK(cft_open(artifact, 0, &hf) == CFT_OK, "the fixed handle: %s", cft_last_error());
+    put_env("CFT_HIP_TIER", was ? keep : NULL);
+    if (hg && hf) {
+        for (f = 3; f >= 2; f--) {         /* fp256, then fp128 */
+            if (only_fmt >= 0 && only_fmt != f)
+                continue;
+            PT_AT(f, pt_class(hf, sw, 1, f, "the fixed handle"));
+            PT_AT(f, pt_class(hg, sw, 0, f, "the generic handle"));
+            PT_AT(f, pt_programs(hf, sw, 1, f, "the fixed handle"));
+            PT_AT(f, pt_programs(hg, sw, 0, f, "the generic handle"));
+            PT_AT(f, pt_runex(hf, sw, 1, f, "the fixed handle"));
+            PT_AT(f, pt_resident(artifact, hf, sw, plant_build, f));
+        }
+        if (only_fmt < 0 || only_fmt <= 1) {
+            pt_others(hf, sw, 1, "the fixed handle");
+            pt_others(hg, sw, 0, "the generic handle");
+        }
+    }
+    if (!fx_probe)
+        nrun("  (e) the program route proof", "this libcft is a default build, which defines "
+             "no cfth_plant_tier_probe (the plant build's probe of the last program run's "
+             "kernel); build with HIP_PLANTS=1 - the bits above hold every run, but a "
+             "fall-through to k_seq gives the same bits, so only the probe says which kernel "
+             "ran (a default build's INFO line names the handle's tier and the program "
+             "kernels' frames, and its rates differ)");
+    else
+        printf("  (e) the program route proof: %ld runs' kernel read from the probe - k_seq_fx "
+               "for fp256 and k_seq_fx128 for fp128 programs without AUGADD or AUGERR on the "
+               "fixed handle, k_seq for every other: %ld not the kernel wanted; every other "
+               "check of the leg: %d failed\n", pt_routes, pt_route_bad,
+               failures - before - (int)pt_route_bad);
+    cft_close(hg);
+    cft_close(hf);
+    pt_failed[4] = failures - before - pt_failed[0] - pt_failed[1] - pt_failed[2] -
+                   pt_failed[3];
+    printf("  progtier: failed at fp256 %d, at fp128 %d, elsewhere %d (fp32 %d, fp64 %d, the "
+           "rest %d)\n", pt_failed[CFT_FP256], pt_failed[CFT_FP128],
+           pt_failed[0] + pt_failed[1] + pt_failed[4], pt_failed[0], pt_failed[1], pt_failed[4]);
+    printf("  progtier: %d checks, %.1f s, %d failed\n", checks - c0, fx_now() - t0,
+           failures - before);
+}
+
 int main(int argc, char **argv)
 {
     const char *artifact = NULL,
@@ -3976,6 +4683,8 @@ int main(int argc, char **argv)
                        ",divsqrt"
                        /* round 3's G3A: its legs here, each a line ",name" */
                        ",fixed"
+                       /* round 3's G3B: its legs here, each a line ",name" */
+                       ",progtier"
                        ;
     cft_device *hw = NULL, *sw = NULL;
     int only_fmt = -1, which = 0, i;
@@ -4016,6 +4725,8 @@ int main(int argc, char **argv)
                     ",divsqrt"
                     /* round 3's G3A: its legs here, each a line ",name" */
                     ",fixed"
+                    /* round 3's G3B: its legs here, each a line ",name" */
+                    ",progtier"
                     "] [-f fp32|fp64|fp128|fp256] [-s small|large|all]\n",
                     argv[0]);
             return 2;
@@ -4085,6 +4796,9 @@ int main(int argc, char **argv)
     /* round 3's G3A: its legs' dispatch here */
     if (strstr(legs, "fixed"))
         leg_fixed(artifact, sw, only_fmt);
+    /* round 3's G3B: its legs' dispatch here */
+    if (strstr(legs, "progtier"))
+        leg_progtier(artifact, sw, only_fmt);
     cft_close(hw);
     cft_close(sw);
     if (shown > 60)
