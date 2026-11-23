@@ -32,6 +32,17 @@ log2 and log1p.
     python python/tests/mathlib_runs.py pow-bound [--fn pow,powr]
         [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
         [--guard G] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py pow-budget [--fn pow,powr,pown,rootn,
+        compound] [--formats fp64,fp128,fp256] [--regions a,b] [--n N]
+        [--seed S] [--plant NAME] [--set desktop|box|reference]
+        [--ns 3,-3|pool] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py pow-rate [--fn pow,powr,pown,rootn,
+        compound] [--formats fp64,fp128,fp256] [--attrs rne,rtz]
+        [--regions a,b] [--n N] [--seed S] [--shift K] [--statistics K]
+        [--alpha A] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py pow-family [--fn pow,powr,pown,rootn,
+        compound] [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm]
+        [--census] [--write | --check] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py trig-pools [--fn sin,cos,tan]
         [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
         [--step N] [--quick] [--out PATH]
@@ -1287,6 +1298,10 @@ def _ns_of(a, P, fn, fmt):
     refused by name where asked for."""
     if not a.ns:
         return list(P.check_ns(fn, fmt))
+    if a.ns == "pool":
+        # parcel M3G3: the pool's own n (31 distinct), for the pools' box run
+        return sorted({ln[1] for ln in P.pool(fn, fmt)}
+                      - ({0} if fn == "rootn" else set()))
     ns = [int(v) for v in a.ns.split(",")]
     if fn == "rootn" and 0 in ns:
         raise SystemExit("--ns 0: rootn(x, 0) is invalid for every x, a "
@@ -1565,6 +1580,306 @@ def cmd_pow_bound(a):
     say(f"pow-bound: {measured} regions measured (the pass count), "
         f"{unmeasured} NOT MEASURED (0 main-path lanes), outside it")
     say(f"pow-bound: {_memory_line()}")
+
+
+def _pow_budget_pb():
+    import mathlib_pow_budget as PB
+    return PB
+
+
+# the cells of --set box: the study's box_m3s_sb1.sh (docs/studies/m3/),
+# 10,000 lanes a cell at seed 3: the fix at volume at fp64, the zone and
+# n = 1000 of fp128 and fp256, and (fp64) the plant zone_bound_off where the
+# design before send-back 1 passed 1 Bv: compound's int1000 at 10,000 lanes
+# (1.052 Bv, the model's box) and zone12000 at 20,000 (0.943)
+_BOX_CELLS = {
+    ("fp64", "pow"): ("negint", "rhoedge", "redb", "zone"),
+    ("fp64", "pown"): ("zone12000", "int1000"),
+    ("fp64", "compound"): ("zone12000", "int1000"),
+    ("fp128", "pow"): ("zone", "rhoedge"),
+    ("fp128", "pown"): ("zone188000", "int1000"),
+    ("fp128", "compound"): ("zone188000", "int1000"),
+    ("fp256", "pow"): ("zone", "rhoedge"),
+    ("fp256", "pown"): ("zone2990000", "int1000"),
+    ("fp256", "compound"): ("zone2990000", "int1000"),
+}
+_BOX_PLANTS = {("fp64", "compound"): (("zone12000", 20000),
+                                      ("int1000", 10000))}
+_QUICK_REGIONS = {"pow": ("edge", "zone"), "powr": ("wide", "rhoedge")}
+
+
+def _pow_budget_cells(a, P, PB, fmt, fn):
+    """[(region, count, seed, plant)] of fn at fmt: --set's cells."""
+    seed = a.seed if a.seed is not None else (3 if a.set == "box" else 1)
+    if a.set == "reference":
+        return [(k[2], PB.MODEL_FIGURES[k][0], PB.MODEL_SEED, k[3])
+                for k in PB.MODEL_FIGURES if k[:2] == (fmt.name, fn)]
+    if a.set == "box":
+        names = _BOX_CELLS.get((fmt.name, fn), ())
+        cells = [(r, a.n or 10000, seed, a.plant) for r in names]
+        if not a.plant:
+            cells += [(r, a.n or c, seed, "zone_bound_off")
+                      for r, c in _BOX_PLANTS.get((fmt.name, fn), ())]
+        return cells
+    names = a.regions.split(",") if a.regions else (
+        list(_QUICK_REGIONS.get(fn, ("int", "zone"))) if a.quick else
+        list(P.region_names_n(fn, fmt) if fn in P.INT_FUNCS
+             else P.REGION_NAMES[fn]))
+    count = a.n if a.n else (12 if a.quick else (120 if fmt.name == "fp64"
+                                                  else 40))
+    return [(r, count, seed, a.plant) for r in names]
+
+
+def cmd_pow_budget(a):
+    """The first-order error budget of pow, powr, pown, rootn and compound
+    (parcel M3G3; the study's 3.2): M's largest value plus each rounding's
+    largest capacity in units of each lane's Bv, the residual beside, and the
+    sampled worst of the direct bound over the same lanes, a cell's figure
+    named for what it is (a budget bounds its own sample; a sampled worst is
+    a lower bound). `--set desktop` (the default) is the study's 3.2 table at
+    the harness's every region: 120 lanes a cell at fp64 and 40 above, seed 1;
+    `--set box` the study's box_m3s_sb1.sh cells at 10,000 lanes, seed 3, and
+    the plant zone_bound_off (compound's int1000 at 10,000 lanes and zone12000
+    at 20,000); `--set reference` the 19 cells whose figures are the model's
+    (mathlib_pow_budget.MODEL_FIGURES), the reference leg run on each. A cell
+    with no main-path lane (hugey, int63) is printed NOT MEASURED, with its
+    lane count, and is outside the pass count. --plant is a fault of the
+    fragment (POW_PLANTS' or the budget's two, bound_tight and
+    zone_bound_off), refused by name where it does not act. The attributes'
+    leg runs V under the five attributes on the first 24 lanes of a cell."""
+    P = _pow_harness()
+    PB = _pow_budget_pb()
+    import mathlib_pow_family as PF
+    open_out(a.out)
+    fns = _pow_fns(a.fn)
+    fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in P.FORMATS], fns)
+    if a.set not in ("desktop", "box", "reference"):
+        raise SystemExit(f"--set {a.set!r}: desktop, box or reference")
+    measured = unmeasured = 0
+    for fmt in fmts:
+        if fmt.name == "fp32":
+            raise SystemExit("--formats fp32: the triple word has no "
+                             "budget (parcel M3F2's)")
+        for fn in fns:
+            for region, count, seed, plant in _pow_budget_cells(
+                    a, P, PB, fmt, fn):
+                rn = P.region_n_of(region) if fn in P.INT_FUNCS else None
+                if a.ns and rn is not None and rn not in _ns_of(
+                        a, P, fn, fmt):
+                    continue
+                t0 = time.perf_counter()
+                try:
+                    found, rec = PB.run_cell(fmt, fn, region, count, seed,
+                                             plant=plant, worst=True,
+                                             attrs=24)
+                except ValueError as e:
+                    raise SystemExit(f"--plant {plant!r}: {e}")
+                head = (f"pow-budget {fn} {fmt.name} rne {region} seed "
+                        f"{seed}{' plant ' + plant if plant else ''}")
+                if rec["status"] == "NOT MEASURED":
+                    unmeasured += 1
+                    note(found)
+                    say(f"{head}: NOT MEASURED (0 main-path lanes of "
+                        f"{rec['lanes']}: the screens or the special rows "
+                        f"answer them all), {len(found)} findings")
+                    continue
+                if a.set == "reference":
+                    found += PB.check_reference(fmt, fn, region, plant)[0]
+                B = PF.THRESHOLD_B[(fn, fmt.name)]
+                if rec["figure"] > B and not plant:
+                    found.append(f"budget: {fn} {fmt.name} {region}: the "
+                                 f"cell's figure {rec['figure']:.4g} Bv is "
+                                 f"past the B {B} that the families' "
+                                 f"thresholds use "
+                                 f"(mathlib_pow_family.THRESHOLD_B)")
+                measured += 1
+                note(found)
+                for n, s in rec["groups"]:
+                    if not s["lanes"]:
+                        continue
+                    say(f"{head}{'' if n is None else f' n = {n}'}: "
+                        f"{s['lanes']} main lanes of {rec['lanes']}, "
+                        f"{s['rounding']} instructions round; max |E|/Bv "
+                        f"{s['Emax']:.4g}, M {s['Mmax']:.4g}, capacities "
+                        f"{s['S_cap']:.4g}, BOUND {s['bound']:.4g} Bv (+ "
+                        f"residual {s['resid']:.3g}), the logarithm's sum "
+                        f"{s['log_sum_cap']:.4g}, sampled worst "
+                        f"{s.get('worst_sampled', 0.0):.4g}"
+                        + ("; V is exactly f on every sampled lane"
+                           if PB.exact_v(s) else ""))
+                say(f"{head}: the cell's figure {rec['figure']:.4g} Bv "
+                    f"({PB.B.bits_log2(rec['figure']):.2f} bits) is "
+                    f"{rec['which']}; {len(found)} findings; "
+                    f"{time.perf_counter() - t0:.0f}s")
+    say(f"pow-budget: {measured} cells measured (the pass count), "
+        f"{unmeasured} NOT MEASURED (0 main-path lanes), outside it")
+    say(f"pow-budget: {_memory_line()}")
+
+
+_RATE_SIZES = {"fp64": 600, "fp128": 300, "fp256": 200}
+
+
+def cmd_pow_rate(a):
+    """The mark-rate law of pow, powr, pown, rootn and compound (parcel M3G3;
+    the study's 3.4): with the bound inflated (bound_shift) so that marks are
+    common, the count of marks on the main-path lanes of a region against the
+    law's, each lane's OWN probability p = 2 Bv / s (Bv and R the unplanted
+    build's probes, so that fp64's |t| and |Y k| terms of Bv are in it), the
+    statistic BERNOULLI (variance sum p (1 - p), the exact two-sided tail:
+    the study's z values are the Poisson form, which is wrong where p is not
+    small, and is printed beside as z_poisson). The inflation is the rule's
+    (mathlib_pow_rate.choose_shift: the largest shift at which the largest p
+    is under 1/2, and the expected marks at least 30) unless --shift; a cell
+    that cannot reach 30 expected marks that way is NOT MEASURED, and a cell
+    run at a shift that puts lanes at the cap (2 Bv / s at least 1) is
+    printed CAPPED, its lanes at the cap counted apart (the cap leg: each
+    must mark) and the cell outside the pass count. pow and powr at `wide`;
+    pown, rootn and compound at `int` (n = 3) and `int-neg` (n = -3); the
+    nearest class (rne) and the directed (rtz) by default: two independent
+    statistics a cell, --statistics the run's count for the Bonferroni level
+    (default: functions x formats x classes x regions)."""
+    P = _pow_harness()
+    import mathlib_pow_rate as PR
+    open_out(a.out)
+    fns = _pow_fns(a.fn)
+    fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in P.FORMATS], fns)
+    rnds = attrs_of(a.attrs) if a.attrs else [P.RNE, P.RTZ]
+    regions = {fn: (a.regions.split(",") if a.regions else
+                    ["int", "int-neg"] if fn in P.INT_FUNCS else ["wide"])
+               for fn in fns}
+    cells = sum(len(regions[fn]) for fn in fns)
+    stats = a.statistics or (len(fmts) * cells
+                             * len({H.rate_class(r) for r in rnds}))
+    judged = capped = unmeasured = 0
+    for fmt in fmts:
+        if fmt.name == "fp32":
+            raise SystemExit("--formats fp32: the triple word has no rate "
+                             "check here (parcel M3F2's)")
+        count = a.n if a.n else (60 if a.quick else _RATE_SIZES[fmt.name])
+        for fn in fns:
+            for region in regions[fn]:
+                for rnd in rnds:
+                    t0 = time.perf_counter()
+                    out, st = PR.run_cell(fmt, fn, region, count, a.seed, rnd,
+                                          shift=a.shift, statistics=stats,
+                                          alpha=a.alpha)
+                    note(out)
+                    head = (f"pow-rate {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                            f"{region} seed {a.seed}")
+                    if st["status"] == "NOT MEASURED":
+                        unmeasured += 1
+                        say(f"{head}: NOT MEASURED ({st['lanes']} lanes, "
+                            f"shift {st['shift']} is the rule's largest at "
+                            f"which the largest p is under 1/2 and it "
+                            f"expects {st['expected']:.1f} marks, under "
+                            f"{PR.MIN_MARKS})")
+                        continue
+                    if st["status"] == "CAPPED":
+                        capped += 1
+                    else:
+                        judged += 1
+                    say(f"{head}: {st['status']}; {st['used']} lanes judged "
+                        f"of {st['lanes']} ({st['excluded']} out: ex "
+                        f"{st['ex_n']}, tinyt {st['tinyt_n']}, no p "
+                        f"{st['excluded'] - st['ex_n'] - st['tinyt_n']}; "
+                        f"{st['capped']} at the cap, "
+                        f"{len(st['capped_unmarked'])} of them unmarked), "
+                        f"shift {st['shift']}, largest p {st['pmax']:.3f}; "
+                        f"marked {st['marks']}, expected "
+                        f"{st['expected']:.1f} (sigma {st['sigma']:.2f}): z "
+                        f"{st['z']:+.2f} (the Poisson form {st['z_poisson']:+.2f}), "
+                        f"two-sided tail {st['p_value']:.3g}; "
+                        f"{len(out)} findings; "
+                        f"{time.perf_counter() - t0:.0f}s")
+    say(f"pow-rate: {judged} cells judged (the pass count), {capped} CAPPED "
+        f"and {unmeasured} NOT MEASURED, outside it")
+    say(f"pow-rate: {_memory_line()}")
+
+
+def cmd_pow_family(a):
+    """The structured families of pow, powr, pown, rootn and compound (parcel
+    M3G3; the study's 3.5): `--check` holds the committed list
+    (mathlib_pow_family.POW_FAMILY) to a fresh generation from the theory,
+    `--write` regenerates it. Otherwise the families' lanes (the generators',
+    every lane the theory classes, --quick every 8th) through the fragments
+    under --attrs (default rne and rtz): every lane the theory demands marked
+    is, none it calls clear or decided or gated is (a mark off the list), the
+    exact-case rule's four legs against golden's own classes (decided,
+    marked, replay, off_rule), and the harness's structured rows held to the
+    theory; --census the study's census at its sizes (300 a family, hard3p
+    400; seed 1) with its counts and, at fp64, the model's pinned."""
+    import mathlib_pow_family as PF
+    P = _pow_harness()
+    open_out(a.out)
+    if a.write and a.check:
+        raise SystemExit("--write and --check are exclusive")
+    if a.write:
+        PF.write()
+        say(f"pow-family: wrote {PF.__file__}")
+        return
+    if a.check:
+        out = PF.check_family_list(PF._FAMILY_CLASSES)
+        note(out)
+        say(f"pow-family --check: the committed list against a fresh "
+            f"generation from the theory, {len(out)} findings")
+        say(f"pow-family: {_memory_line()}")
+        return
+    fns = _pow_fns(a.fn)
+    fmts = _pow_formats(a.formats, ["fp64"] if a.quick else
+                        [f.name for f in P.FORMATS], fns)
+    rnds = attrs_of(a.attrs) if a.attrs else [P.RNE, P.RTZ]
+    step = 8 if a.quick else 1
+    for fmt in fmts:
+        if fmt.name == "fp32":
+            raise SystemExit("--formats fp32: the triple word has no "
+                             "structured families here (parcel M3F2's)")
+        for fn in fns:
+            ns = PF.FAMILY_NS if fn in P.INT_FUNCS else ()
+            for rnd in rnds:
+                t0 = time.perf_counter()
+                out, st = PF.check_family(fmt, rnd, fn, step=step)
+                note(out)
+                o2, rs = PF.check_exact_rule(
+                    fmt, rnd, fn, lanes=PF.rule_lanes(fmt, fn)[::step])
+                note(o2)
+                say(f"pow-family {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
+                    f"{sum(v[0] for v in st['per'].values())} lanes of "
+                    f"{len(st['per'])} families, "
+                    + ", ".join(f"{s} {st[s]} (marked {st['marked_' + s]})"
+                                for s in PF.STAT)
+                    + f"; guess wrong {st['guess_wrong']}, wrong unmarked "
+                    f"{st['wrong']}; exact-case rule over {rs['lanes']} "
+                    f"exact lanes: decided {rs['decided']}, marked "
+                    f"{rs['marked']}, replay {rs['replay']}, off_rule "
+                    f"{rs['off_rule']}; {len(out) + len(o2)} findings; "
+                    f"{time.perf_counter() - t0:.0f}s")
+            o3, n3 = PF.check_structured_rows(
+                fmt, fn, ns=P.check_ns(fn, fmt) if fn in P.INT_FUNCS else ())
+            note(o3)
+            say(f"pow-family {fn} {fmt.name}: the harness's structured rows "
+                f"held to the theory: {n3} lane and attribute pairs, "
+                f"{len(o3)} findings")
+    if a.census:
+        for fmt in fmts:
+            for name in PF.CENSUS_FAMILIES:
+                t0 = time.perf_counter()
+                count = 60 if a.quick else PF.CENSUS_COUNT[name]
+                counts, res = PF.census_run(fmt, name, count, rnds)
+                line = ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+                wrong = sum(v[3] for r in res.values() for v in r.values())
+                off = sum(v[4] for r in res.values() for v in r.values())
+                note([f"census: {fmt.name} {name}: {wrong} wrong unmarked"]
+                     if wrong else [])
+                say(f"pow-family census {fmt.name} {name} ({count} drawn): "
+                    f"classes {line}; "
+                    + "; ".join(f"{sf.RND_NAMES[r]}: " + ", ".join(
+                        f"{k} marked {v[1]}/{v[0]}" for k, v in sorted(
+                            res[r].items())) for r in res)
+                    + f"; {wrong} wrong unmarked, off_rule {off}; "
+                    f"{time.perf_counter() - t0:.0f}s")
+    say(f"pow-family: {_memory_line()}")
 
 
 def _spread(items, cap):
@@ -2128,6 +2443,77 @@ def main(argv=None):
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_pow_bound)
+    p = sub.add_parser("pow-budget")
+    p.add_argument("--fn", help="pow,powr,pown,rootn,compound (all by "
+                                "default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--regions", help="a comma list of regions (--set "
+                                     "desktop: every region of the "
+                                     "function)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes a cell (default 120 at fp64 and 40 above; "
+                        "--set box 10,000)")
+    p.add_argument("--seed", type=int, default=None,
+                   help="the lanes' seed (default 1; --set box 3)")
+    p.add_argument("--plant", help="a fault of the fragment (POW_PLANTS or "
+                                   "bound_tight, zone_bound_off)")
+    p.add_argument("--set", default="desktop",
+                   help="desktop (the study's 3.2 at the desktop's sizes), "
+                        "box (box_m3s_sb1.sh's cells) or reference (the "
+                        "model's 19 cells, the reference leg)")
+    p.add_argument("--ns", help="pown, rootn and compound's integer "
+                                "operands: the regions whose n is listed "
+                                "(nlow and m1edge always); 'pool' the pool's "
+                                "31")
+    p.add_argument("--quick", action="store_true",
+                   help="12 lanes, two regions a function, fp128 only by "
+                        "default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_pow_budget)
+    p = sub.add_parser("pow-rate")
+    p.add_argument("--fn", help="pow,powr,pown,rootn,compound (all by "
+                                "default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz (by default: one of each class)")
+    p.add_argument("--regions", help="a comma list (default wide for pow and "
+                                     "powr, int and int-neg for the three)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes asked a cell (default 600 at fp64, 300 at "
+                        "fp128, 200 at fp256)")
+    p.add_argument("--seed", type=int, default=3, help="the lanes' seed")
+    p.add_argument("--shift", type=int, default=None,
+                   help="the bound inflated 2^SHIFT times (default the "
+                        "rule's: the largest with p under 1/2)")
+    p.add_argument("--statistics", type=int, default=0,
+                   help="how many independent statistics the run judges "
+                        "(default: formats x cells x classes)")
+    p.add_argument("--alpha", type=float, default=H.RATE_ALPHA,
+                   help="the run's chance of a false flag (0.001)")
+    p.add_argument("--quick", action="store_true",
+                   help="60 lanes a cell, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_pow_rate)
+    p = sub.add_parser("pow-family")
+    p.add_argument("--fn", help="pow,powr,pown,rootn,compound (all by "
+                                "default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz (by default); any of the five")
+    p.add_argument("--census", action="store_true",
+                   help="the study's census at its sizes (300 a family, "
+                        "hard3p 400)")
+    p.add_argument("--write", action="store_true",
+                   help="regenerate the committed list in "
+                        "mathlib_pow_family.py")
+    p.add_argument("--check", action="store_true",
+                   help="hold the committed list to a fresh generation")
+    p.add_argument("--quick", action="store_true",
+                   help="every 8th lane, 60 census lanes, fp64 only by "
+                        "default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_pow_family)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)

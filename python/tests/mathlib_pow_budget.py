@@ -521,11 +521,25 @@ def leg_of(finding):
     return None
 
 
+def exact_v(s):
+    """V is exactly f on every sampled lane: the measured error and the method
+    error are 0 (a region whose lanes the near-one gate or an exact V
+    answers)."""
+    return bool(s["lanes"]) and s["Emax"] == 0 and s["Mmax"] == 0
+
+
 def judge(s, where, expect=None, head=False, zero_resid=True):
     """[finding]: inv's judge() and the residual's second leg: a residual of
     exactly 0 with main-path lanes, rounding instructions and a bound above 0
     (the tell of 3.6, item 4: a sweep that stopped short has none)."""
     out = IB.judge(s, where, expect, head=head)
+    if exact_v(s):
+        # V is exactly f on every sampled lane (tinyy at fp256: |t| under
+        # the gate, V = 1): the measured error is 0 and there is nothing for
+        # a sweep to bound. A sweep that stopped short is not this: its lanes'
+        # error is not 0 (the lane leg)
+        out = [f for f in out if "reverse sweep reached no rounding" not in f]
+        return out
     if zero_resid and s["lanes"] and s["resid"] == 0 and s["rounding"]:
         out.append(f"{where}: the residual is exactly 0 over {s['lanes']} "
                    f"lanes with {s['rounding']} rounding instructions: a "
@@ -610,15 +624,17 @@ def cell_figure(s, worst):
 
 
 def run_cell(fmt, fn, region, count, seed=1, rnd=sf.RND_RNE, plant=None,
-             tool_plant=None, expect=None, worst=False, attrs=False):
+             tool_plant=None, expect=None, worst=False, attrs=0):
     """One cell of the study's 3.2 table: (findings, record). The record is
     {"status": "measured" | "NOT MEASURED", "lanes": the region's lanes,
     "main": main-path lanes (over the cell's groups), "groups": [(n, summary)],
     "bound", "resid", "worst" (the sampled worst, when asked), "figure",
     "which"}. A cell with no main-path lane is NOT MEASURED and has no finding
-    here: its caller names it and keeps it out of its pass count. The groups
-    are the n of the lanes (pown, rootn and compound: nlow and m1edge carry
-    several), the cell's figure the largest group's."""
+    here: its caller names it and keeps it out of its pass count. `attrs` is
+    the number of lanes (the first of each group) the attributes' leg runs
+    under all five attributes (0: not run). The groups are the n of the
+    lanes (pown, rootn and compound: nlow and m1edge carry several), the cell's
+    figure the largest group's."""
     lanes = cell_lanes(fmt, fn, region, count, seed)
     found, groups = [], []
     for n, ls in by_n(fn, lanes):
@@ -630,7 +646,8 @@ def run_cell(fmt, fn, region, count, seed=1, rnd=sf.RND_RNE, plant=None,
             eb[rnd] = b
         label = region if n is None or len(by_n(fn, lanes)) == 1 \
             else f"{region} n = {n}"
-        f, s = check_budget_pow(b, ls, label, tool_plant, expect, eb)
+        f, s = check_budget_pow(b, ls, label, tool_plant, expect, eb,
+                                attr_lanes=ls[:attrs] if attrs else None)
         s["n"] = n
         if worst:
             s["worst_sampled"] = sampled_worst(b, ls)
