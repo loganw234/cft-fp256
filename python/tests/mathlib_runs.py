@@ -1281,18 +1281,25 @@ def _pow_fns(arg):
     return names
 
 
-def _pow_formats(arg, default):
-    """The formats asked for: fp64, fp128 and fp256 (the double word's); fp32
-    is the triple word, parcel M3F1's, and is refused by name."""
+def _pow_formats(arg, default, fns=None):
+    """The formats asked for: fp64, fp128 and fp256 (the double word's), and
+    fp32, the triple word (parcel M3F1: pow and powr only; never a default).
+    fp32 with any function but pow or powr is refused by name, as parcel
+    M3F2's (pown, rootn and compound are not built at fp32)."""
     P = _pow_harness()
     names = arg.split(",") if arg else default
     for n in names:
         if n == "fp32":
-            raise SystemExit("--formats 'fp32': fp32 is the triple word, "
-                             "parcel M3F1's: pow and powr are not built there")
+            lacking = [f for f in (fns or P.FUNCS) if f not in P.TW_FUNS]
+            if lacking:
+                raise SystemExit(f"--formats 'fp32': {', '.join(lacking)} "
+                                 f"{'is' if len(lacking) == 1 else 'are'} "
+                                 f"not built at fp32: parcel M3F2's (pow and "
+                                 f"powr are the triple word)")
+            continue
         if n not in P.BY_NAME:
-            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256")
-    return [P.BY_NAME[n] for n in names]
+            raise SystemExit(f"--formats {n!r}: fp64, fp128, fp256 or fp32")
+    return [P.FP32 if n == "fp32" else P.BY_NAME[n] for n in names]
 
 
 def cmd_pow_pools(a):
@@ -1314,29 +1321,33 @@ def cmd_pow_pools(a):
     step = a.step if a.step else (8 if a.quick else 1)
     fns = _pow_fns(a.fn)
     fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
-                        [f.name for f in P.FORMATS])
+                        [f.name for f in P.FORMATS], fns)
     rnds = attrs_of(a.attrs) if a.attrs else (
         [P.RNE, P.RTZ] if a.quick else list(sf.RND_MODES))
     for fmt in fmts:
+        tw = fmt.name == "fp32"          # the triple word's checks (M3F1)
         for fn in fns:
             whole = list(P.pool(fn, fmt))
             xs = whole[::step]
             for rnd in rnds:
                 f = ml.fragment(fn, fmt, rnd)
-                out, t = P.check_pools(f, None if step == 1 else xs)
+                out, t = (P.check_pools_tw if tw else P.check_pools)(
+                    f, None if step == 1 else xs)
                 note(out)
                 line = (f"pow-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
                         f"{t.n} lanes, {len(t.marked)} marked (guess right "
                         f"{t.marked_right}), {len(t.wrong)} wrong unmarked; "
                         f"{len(f)} instructions, {f.live_max()} live")
                 if a.seq:
-                    out, lanes = P.check_seq(f, xs=xs)
+                    out, lanes = (P.check_seq_tw if tw else P.check_seq)(
+                        f, xs=xs)
                     note(out)
                     line += (f"; seq.py and the compiled shape over "
                              f"{len(lanes)} lanes: {len(out)} findings")
                 say(line)
             n = a.lanes if a.lanes is not None else (
-                12 if a.quick else P.REGION_LANES[(fn, fmt.name)])
+                12 if a.quick else (P.REGION_LANES_TW[fn] if tw else
+                                    P.REGION_LANES[(fn, fmt.name)]))
             if n:
                 regs = {r: P.region(fmt, fn, r, n, a.seed)
                         for r in P.REGION_NAMES[fn]}
@@ -1369,14 +1380,16 @@ def cmd_pow_bound(a):
     `--quick`: 2.0 s."""
     P = _pow_harness()
     open_out(a.out)
-    sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000}
+    sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000,
+             "fp32": P.BOUND_POINTS_TW}
     fns = _pow_fns(a.fn)
     fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
-                        [f.name for f in P.FORMATS])
+                        [f.name for f in P.FORMATS], fns)
     rnds = attrs_of(a.attrs) if a.attrs else [P.RNE]
     measured = unmeasured = 0
     for fmt in fmts:
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
+        tw = fmt.name == "fp32"          # the triple word's checks (M3F1)
         for fn in fns:
             for rnd in rnds:
                 b = ml.build(fn, fmt, rnd, guard=a.guard)
@@ -1384,7 +1397,8 @@ def cmd_pow_bound(a):
                     lanes = P.region(fmt, fn, region, n, a.seed + k)
                     if not lanes:
                         continue
-                    out, (worst, main, total) = P.check_bound(
+                    out, (worst, main, total) = (
+                        P.check_bound_tw if tw else P.check_bound)(
                         b, lanes, f"{region} seed {a.seed + k}")
                     note(out)
                     if not main:
@@ -1403,6 +1417,17 @@ def cmd_pow_bound(a):
                         f"{main} main-path, largest |V - f| / Bv = "
                         f"2^{worst:+.2f} (a sampled lower bound), "
                         f"{len(out)} findings")
+    for fmt in fmts:
+        if fmt.name != "fp32":
+            continue
+        # a region the function has no lane of at all (powr's negint and
+        # negedge: pow's only) measured nothing: named, outside the pass count
+        for fn in fns:
+            for region in ("negint", "negedge"):
+                if region not in P.REGION_NAMES[fn]:
+                    unmeasured += len(rnds)
+                    say(f"pow-bound {fn} fp32 {region}: NOT MEASURED (0 "
+                        f"lanes: {fn} has no {region} region)")
     say(f"pow-bound: {measured} regions measured (the pass count), "
         f"{unmeasured} NOT MEASURED (0 main-path lanes), outside it")
     say(f"pow-bound: {_memory_line()}")
@@ -1927,9 +1952,9 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_inv_family)
     p = sub.add_parser("pow-pools")
     p.add_argument("--fn", help="pow,powr (the functions built, by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); fp32 "
-                                     "is the triple word, parcel M3F1's, and "
-                                     "refused by name")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); "
+                                     "fp32, the triple word (parcel M3F1), "
+                                     "for pow and powr, never by default")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--seq", action="store_true")
     p.add_argument("--step", type=int, default=0,
@@ -1948,8 +1973,9 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_pow_pools)
     p = sub.add_parser("pow-bound")
     p.add_argument("--fn", help="pow,powr (the functions built, by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); fp32 "
-                                     "is parcel M3F1's, refused by name")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); "
+                                     "fp32, the triple word (parcel M3F1), "
+                                     "for pow and powr, never by default")
     p.add_argument("--attrs", help="rne (by default)")
     p.add_argument("--n", type=int, default=0,
                    help="points a region (default 3,000 at fp64, 1,000 at "

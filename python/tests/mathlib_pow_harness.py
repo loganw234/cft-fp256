@@ -2074,12 +2074,15 @@ def check_port_tw(fn, builds, digests=None, fragments=None):
             out.append(f"{where}: {len(b.label_of)} labels for "
                        f"{len(b.body)} instructions")
             continue
+        # the map is the study's (label -> scheduled phase), by name; the
+        # instruction's own phase is what it was built in (the five of the
+        # bound's coefficient carry the label "test" and the phase head2)
         bad = [i for i in keep
-               if ml._POW_TW_PHASE_MAP.get(b.label_of[i]) != b.phase_of[i]
+               if ml._POW_TW_PHASE_MAP.get(b.label_of[i]) not in ml.PHASE_ORDER
                or b.phase_of[i] not in ml.PHASE_ORDER]
         if bad:
-            out.append(f"{where}: {len(bad)} instructions whose label's "
-                       f"phase is not the phase they were built in or not in "
+            out.append(f"{where}: {len(bad)} instructions whose label maps "
+                       f"to no PHASE_ORDER name or whose phase is not in "
                        f"PHASE_ORDER, first {b.label_of[bad[0]]!r}")
         parts = dict(collections.Counter(ml._POW_TW_PARTS[b.label_of[i]]
                                          for i in keep))
@@ -2147,16 +2150,19 @@ def check_constants_cli_tw():
 # ---- the plants: every check on every plant ----------------------------------------
 
 def red_checks_tw(plant, fn="pow", rnds=(RNE,), region_n=6, bound_n=6,
-                  seq_stride=48, shift=0):
+                  seq_stride=96, pool_step=2, struct_rnds=(RNE, RTZ),
+                  shift=0):
     """{check: [findings]} for CHECKS_TW, EVERY key present (a check that is
     green has an empty list), on `plant` (None: the control) at fp32 on `fn`:
-    pools (the whole pool) and regions and specials under `rnds`, structured
-    under every attribute the plant reaches, seq under the first of `rnds` (a
-    stride of the pool), bound over the placed regions (bound_n points each)
-    under rne, shape under all five (where the plant reaches all five) and
-    constants under rne. A plant the build cannot reach is refused by name.
-    GREEN means green at this scope, which is smaller than the tests' own on
-    the control."""
+    pools over every `pool_step`th lane of the pool (1: the whole pool and its
+    pinned counts; a step above 1 drops the count pins, which the whole-pool
+    check holds) and regions and specials under `rnds`, structured under
+    `struct_rnds`, seq under the first of `rnds` (every `seq_stride`th lane of
+    the pool, the structured lanes and the loud ones), bound over the placed
+    regions (bound_n points each) under rne, shape under all five (where the
+    plant reaches all five) and constants under rne. A plant the build cannot
+    reach is refused by name. GREEN means green at this scope, which is smaller
+    than the tests' own on the control."""
     red = {name: [] for name in CHECKS_TW}
     reach = []
     for rnd in RND_MODES:
@@ -2173,13 +2179,16 @@ def red_checks_tw(plant, fn="pow", rnds=(RNE,), region_n=6, bound_n=6,
     rnds = tuple(r for r in rnds if r in reach) or (reach[0],)
     for rnd in rnds:
         f = tw_fragment_of(fn, rnd, plant, shift)
-        red["pools"] += check_pools_tw(f)[0]
+        red["pools"] += check_pools_tw(
+            f, None if pool_step == 1 else list(pool(fn, FP32)[::pool_step])
+        )[0]
         red["regions"] += check_regions_tw(f, region_n)[0]
     red["specials"] += check_specials_tw(
         fn, {rnd: tw_fragment_of(fn, rnd, plant, shift) for rnd in rnds})[0]
-    for rnd in reach:
-        red["structured"] += check_structured_tw(
-            tw_fragment_of(fn, rnd, plant, shift))[0]
+    for rnd in struct_rnds:
+        if rnd in reach:
+            red["structured"] += check_structured_tw(
+                tw_fragment_of(fn, rnd, plant, shift))[0]
     red["seq"] += check_seq_tw(tw_fragment_of(fn, rnds[0], plant, shift),
                                stride=seq_stride)[0]
     b = tw_build_of(fn, RNE, plant, shift)
@@ -2193,3 +2202,9 @@ def red_checks_tw(plant, fn="pow", rnds=(RNE,), region_n=6, bound_n=6,
         builder=lambda name, f_, r_: tw_build_of(name, r_, plant, shift),
         attrs=(RNE,), names=(fn,))[0]
     return red
+
+
+# the sizes of mathlib_runs.py's pow commands at fp32: the model's regions of
+# 300 lanes (pow-pools) and, for pow-bound, 1,000 points a region
+REGION_LANES_TW = {"pow": 300, "powr": 300}
+BOUND_POINTS_TW = 1000
