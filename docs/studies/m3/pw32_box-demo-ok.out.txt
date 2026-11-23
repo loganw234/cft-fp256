@@ -1,0 +1,2 @@
+every job good (scratch copy): script status 0
+done 2026-11-23 08:18:41 xargs status 0 (every job exited 0)

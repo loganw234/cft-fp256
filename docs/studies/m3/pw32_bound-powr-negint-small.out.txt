@@ -1,0 +1,7 @@
+fp32 powr region negint: 0 main-path lanes of 0, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  NOT MEASURED (0 main-path lanes in this region: no bound, no margin)
+  0 s
+
+SUMMARY fp32 powr, 20 lanes a region, seed 1, rne, B1 2^-66 (first), B2 2^-67 (first):
+  negint   NOT MEASURED (0 lanes: no main-path lane in the region for powr)
+  NOT MEASURED: no region of the 1 had a main-path lane, so there is no bound and no margin; 0 s

@@ -29,4 +29,9 @@ for fn in pow powr; do
     echo "pw32_run.py rate wide 50000 $fn > $OUT/pw32_rate-wide-$fn.out.txt"
 done
 } | xargs -P "$JOBS" -I{} sh -c "\"$PY\" -B {}"
-echo "done $(date '+%F %T')"
+# xargs answers 123 when any job exited 1 to 125 (124 for 255, 125 for a
+# signal, 126 and 127 for a command that cannot run): the script's own status is that, so a failed job
+# fails the run; the `done` line is not a status, this is
+RC=$?
+echo "done $(date '+%F %T') xargs status $RC ($([ "$RC" -eq 0 ] && echo 'every job exited 0' || echo 'AT LEAST ONE JOB FAILED: read OUTDIR and the run log'))"
+exit "$RC"

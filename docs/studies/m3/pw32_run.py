@@ -180,6 +180,11 @@ def mode_bound(args):
               f"residual {s['resid']:.2e} = {tot:.6f} Bv ({ok}); margin "
               f"{-math.log2(tot) if tot > 0 else float('inf'):.2f} bits; "
               f"measured worst {s['Emax']:.6f}")
+    if nmeas == 0:
+        print(f"  NOT MEASURED: no region of the {len(rows)} had a "
+              f"main-path lane, so there is no bound and no margin; "
+              f"{time.time() - t0:.0f} s")
+        return
     print(f"  worst region bound {worst:.6f} Bv, margin "
           f"{-math.log2(worst):.2f} bits, over the {nmeas} of {len(rows)} "
           f"regions measured; {time.time() - t0:.0f} s")
