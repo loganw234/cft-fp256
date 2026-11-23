@@ -1442,18 +1442,16 @@ def _state(fmt, fn, lane, rnd, plant):
     return ("right" if (bits, fw) == want else "WRONG"), bits, fw
 
 
-# the lanes of the plants' named cases that a format has: none at fp128 and
-# fp256 for midpoint_unmarked's (the study printed "no lane at this format")
+# the lanes of the plants' named cases that a format has: all 20 rows at fp64
+# and fp128, 19 at fp256
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
 def test_the_studys_named_case_is_reproduced(fmt):
     n_lane = n_mark = n_redundant = 0
     for plant, fn, rnd, kind, lane in P.plant_cases(fmt):
         if lane is None:
-            assert (plant, fmt.name) in {("midpoint_unmarked", "fp128"),
-                                         ("midpoint_unmarked", "fp256"),
-                                         ("exact_rule_no_tl", "fp64")} \
-                or plant in ("exact_rule_no_tl", "screen_low", "zero_sign_lost",
-                             "bound_loose"), (plant, fmt.name)
+            # the only row without a lane: midpoint_unmarked's at fp256 (the
+            # study printed "no lane at this format"); fp64 and fp128 have it
+            assert (plant, fmt.name) == ("midpoint_unmarked", "fp256")
             continue
         ctl = _state(fmt, fn, lane, rnd, None)
         got = _state(fmt, fn, lane, rnd, plant)
