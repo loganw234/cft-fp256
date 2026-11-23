@@ -26,6 +26,12 @@ log2 and log1p.
         [--n 100000] [--seed 1] [--edge-width 8] [--halves-step 1] [--quick]
     python python/tests/mathlib_runs.py reduction-tw [--n 1000] [--seed 7]
         [--no-halves] [--quick]
+    python python/tests/mathlib_runs.py pow-pools [--fn pow,powr]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
+        [--step N] [--lanes N] [--seed 1] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py pow-bound [--fn pow,powr]
+        [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
+        [--guard G] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py trig-pools [--fn sin,cos,tan]
         [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
         [--step N] [--quick] [--out PATH]
@@ -1259,6 +1265,137 @@ def cmd_inv_bound(a):
     say(f"inv-bound: {_memory_line()}")
 
 
+def _pow_harness():
+    import mathlib_pow_harness as P
+    return P
+
+
+def _pow_fns(arg):
+    P = _pow_harness()
+    names = arg.split(",") if arg else [n for n in P.FUNCS
+                                        if n in P.POOL_FNS]
+    for n in names:
+        if n not in P.FUNCS:
+            raise SystemExit(f"--fn {n!r}: one of {', '.join(P.FUNCS)} "
+                             f"(the ones built)")
+    return names
+
+
+def _pow_formats(arg, default):
+    """The formats asked for: fp64, fp128 and fp256 (the double word's); fp32
+    is the triple word, parcel M3F1's, and is refused by name."""
+    P = _pow_harness()
+    names = arg.split(",") if arg else default
+    for n in names:
+        if n == "fp32":
+            raise SystemExit("--formats 'fp32': fp32 is the triple word, "
+                             "parcel M3F1's: pow and powr are not built there")
+        if n not in P.BY_NAME:
+            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256")
+    return [P.BY_NAME[n] for n in names]
+
+
+def cmd_pow_pools(a):
+    """The whole pools of pow and powr (and what is built beyond them) through
+    every configuration, with --seq the fragment as a program on seq.py over
+    the same lanes, and the study's placed regions (the harness's REGION_NAMES)
+    at --lanes lanes a region (the study's sizes by default: pow 400 at fp64
+    and 80 above, powr half), seed --seed, every attribute, against
+    transcend.py: a failure is an unmarked lane that differs in bits or flag
+    word, and the pools' marks are counted against the model's.
+
+    MEASURED by parcel M3G1 at full size (`pow-pools`, all defaults), one
+    process, unniced, the desktop shared with other parcels and the GPU round
+    (their load not measured): 207.5 s, peak memory 64 MB, RESULT: ok, 0
+    findings. The whole pools of pow and powr at the three formats under the
+    five attributes are 66 s of it (the pool lines' own intervals), the regions the rest. `--quick`: 3.5 s."""
+    P = _pow_harness()
+    open_out(a.out)
+    step = a.step if a.step else (8 if a.quick else 1)
+    fns = _pow_fns(a.fn)
+    fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in P.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else (
+        [P.RNE, P.RTZ] if a.quick else list(sf.RND_MODES))
+    for fmt in fmts:
+        for fn in fns:
+            whole = list(P.pool(fn, fmt))
+            xs = whole[::step]
+            for rnd in rnds:
+                f = ml.fragment(fn, fmt, rnd)
+                out, t = P.check_pools(f, None if step == 1 else xs)
+                note(out)
+                line = (f"pow-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
+                        f"{t.n} lanes, {len(t.marked)} marked (guess right "
+                        f"{t.marked_right}), {len(t.wrong)} wrong unmarked; "
+                        f"{len(f)} instructions, {f.live_max()} live")
+                if a.seq:
+                    out, lanes = P.check_seq(f, xs=xs)
+                    note(out)
+                    line += (f"; seq.py and the compiled shape over "
+                             f"{len(lanes)} lanes: {len(out)} findings")
+                say(line)
+            n = a.lanes if a.lanes is not None else (
+                12 if a.quick else P.REGION_LANES[(fn, fmt.name)])
+            if n:
+                regs = {r: P.region(fmt, fn, r, n, a.seed)
+                        for r in P.REGION_NAMES[fn]}
+                for rnd in rnds:
+                    f = ml.fragment(fn, fmt, rnd)
+                    t0 = time.perf_counter()
+                    out, (lanes, marked) = P.check_regions(f, regs)
+                    note(out)
+                    say(f"pow-regions {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                        f"seed {a.seed}: {len(regs)} regions, {lanes} lanes "
+                        f"({n} a region, the first design's lanes by name "
+                        f"too), {marked} marked, {len(out)} findings; "
+                        f"{time.perf_counter() - t0:.0f}s")
+    say(f"pow-pools: {_memory_line()}")
+
+
+def cmd_pow_bound(a):
+    """|V - f(x, y)| / Bv at placed points of the harness's regions, for pow and
+    powr (and what is built beyond them), each lane also against transcend.py;
+    the study's budget is parcel M3G3's, this is the direct error.
+
+    MEASURED by parcel M3G1 at full size (the defaults: 3,000 points a region
+    at fp64, 1,000 at fp128 and fp256, seed 121, rne), one process a format,
+    unniced, the desktop shared (load not measured), run apart because all
+    three together would pass the ten minutes a run may take: `--formats fp64`
+    380.5 s, `fp128` 153.2 s, `fp256` 227.1 s, each peak memory 64 to 65 MB,
+    RESULT: ok, 0 findings. The largest |V - f| / Bv over the regions
+    (sampled lower bounds): pow 2^-4.38 (fp64, zone), 2^-8.25 (fp128, zone),
+    2^-7.84 (fp256, zone); powr 2^-4.21 (fp64, rhoedge), 2^-8.41, 2^-7.59.
+    `--quick`: 2.0 s."""
+    P = _pow_harness()
+    open_out(a.out)
+    sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000}
+    fns = _pow_fns(a.fn)
+    fmts = _pow_formats(a.formats, ["fp128"] if a.quick else
+                        [f.name for f in P.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else [P.RNE]
+    for fmt in fmts:
+        n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
+        for fn in fns:
+            for rnd in rnds:
+                b = ml.build(fn, fmt, rnd, guard=a.guard)
+                for k, region in enumerate(P.REGION_NAMES[fn]):
+                    lanes = P.region(fmt, fn, region, n, a.seed + k)
+                    if not lanes:
+                        continue
+                    out, (worst, main, total) = P.check_bound(
+                        b, lanes, f"{region} seed {a.seed + k}")
+                    note(out)
+                    where = ("no main-path lane: the screens answer them all"
+                             if not main else
+                             f"largest |V - f| / Bv = 2^{worst:+.2f} (a "
+                             f"sampled lower bound)")
+                    say(f"pow-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                        f"{region} seed {a.seed + k}: {total} lanes, "
+                        f"{main} main-path, {where}, {len(out)} findings")
+    say(f"pow-bound: {_memory_line()}")
+
+
 def _spread(items, cap):
     """At most `cap` of the items, spread over the list (all of them for cap
     0)."""
@@ -1776,6 +1913,43 @@ def main(argv=None):
     p.add_argument("--write", action="store_true")
     p.add_argument("--check", action="store_true")
     p.set_defaults(fn_=cmd_inv_family)
+    p = sub.add_parser("pow-pools")
+    p.add_argument("--fn", help="pow,powr (the functions built, by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); fp32 "
+                                     "is the triple word, parcel M3F1's, and "
+                                     "refused by name")
+    p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
+    p.add_argument("--seq", action="store_true")
+    p.add_argument("--step", type=int, default=0,
+                   help="every this many lanes of the pools (default 1: the "
+                        "whole pool, the model's counts of marks pinned)")
+    p.add_argument("--lanes", type=int, default=None,
+                   help="lanes a placed region (default the study's: pow 400 "
+                        "at fp64 and 80 above, powr half; 0: no regions)")
+    p.add_argument("--seed", type=int, default=1,
+                   help="the regions' seed (the study's: 1)")
+    p.add_argument("--quick", action="store_true",
+                   help="--step 8, 12 lanes a region, fp128 under rne and rtz "
+                        "by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_pow_pools)
+    p = sub.add_parser("pow-bound")
+    p.add_argument("--fn", help="pow,powr (the functions built, by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); fp32 "
+                                     "is parcel M3F1's, refused by name")
+    p.add_argument("--attrs", help="rne (by default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="points a region (default 3,000 at fp64, 1,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=121,
+                   help="the first region's seed, one more each")
+    p.add_argument("--guard", type=int, help="G, instead of the decided one")
+    p.add_argument("--quick", action="store_true",
+                   help="12 points a region, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_pow_bound)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)
