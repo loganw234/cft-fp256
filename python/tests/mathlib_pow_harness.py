@@ -1606,3 +1606,590 @@ def red_checks(plant, fmt=FP64, fn=None, rnds=(RNE,), bound_n=8,
 #
 # (the same tables, for FP32, in a section of its own; FORMATS is the double
 # word's three and stays)
+
+import hashlib  # noqa: E402
+
+from cft_golden import FP32  # noqa: E402
+
+# The functions, the five attributes and the tables of fp32's triple word are
+# here and below; FORMATS is the double word's three and stays. Every table is
+# keyed by (fn, rnd) or by fn, and every pin is the MODEL's (docs/studies/m3/
+# pw32.py, parcel M3X: MEASURED on its builds and on seq.py, and equal on this
+# build's lanes: the port was shown equal to it on every lane of both pools at
+# all five attributes, result, flag word, V0, V1, V2, R, R1, R2 and Bv), not
+# computed from the code under test.
+#
+# Which of the double word's functions are format-generic, CONFIRMED by running
+# each on FP32 (parcel M3F1's tests): golden, pool, region, in_main,
+# check_pools (given its pinned counts), check_regions, check_specials (given
+# its marks), check_structured, check_seq (given its lanes and rows), _screened
+# and H.check_reorder. NOT generic, and written here: bound_log2 and
+# check_bound (they read the double word's probes Vh and Vl), plant_cases and
+# so structured_rows (plant_cases builds the double word's plants, which fp32
+# refuses by name), check_shape's tables, check_constants and red_checks.
+
+TW_FUNS = ("pow", "powr")
+CHECKS_TW = ("pools", "regions", "specials", "structured", "seq", "bound",
+             "shape", "constants")
+
+# the lanes of the pools and the lanes of them that are marked (the model's:
+# pw32_pools-model.out.txt, pw32_pools-seq-pow.out.txt, MEASURED by M3X; equal
+# here): rne, rtz, rdn, rup, rmm. The pool is pool(fn, FP32), M3G1's, whose
+# trials are 64 at width 64 or less
+POOL_SIZES_TW = {"pow": 794, "powr": 823}
+POOL_MARKS_TW = {("pow", RNE): 57, ("pow", RTZ): 55, ("pow", RDN): 55,
+                 ("pow", RUP): 55, ("pow", RMM): 57,
+                 ("powr", RNE): 34, ("powr", RTZ): 33, ("powr", RDN): 33,
+                 ("powr", RUP): 33, ("powr", RMM): 34}
+# the marks of the special rows summed over the five attributes: MEASURED on the
+# model's builds (a scratch run of the rows through pw32.build: pow 10, 10 and
+# 5, powr 5; the double word's are 34 and 20 for the first two)
+SPECIAL_MARKS_TW = {
+    "pow": {"x < 0, y odd integer (sign kept), across y's bands": 10,
+            "x < 0, y even integer, y past 2^p": 10,
+            "subnormal operands": 5},
+    "powr": {"subnormal operands": 5}}
+# the highest register routines.program uses, the model's `live` mode (r31 and
+# r28) and the registers left a caller: 30 less the cap (M4C's rule)
+REG_TOP_TW = {"pow": 31, "powr": 28}
+
+SHAPE_TW = {
+    ("pow", RNE): (925, 143, 32),
+    ("pow", RTZ): (920, 145, 32),
+    ("pow", RDN): (921, 146, 32),
+    ("pow", RUP): (921, 144, 32),
+    ("pow", RMM): (925, 143, 32),
+    ("powr", RNE): (903, 139, 29),
+    ("powr", RTZ): (897, 140, 29),
+    ("powr", RDN): (897, 140, 29),
+    ("powr", RUP): (897, 139, 29),
+    ("powr", RMM): (903, 139, 29),
+}
+# (Fast2Sums, TwoSums) built, before pruning: the model's 61 and 42, the same under every attribute
+EFT_TW = {(fn, rnd): (61, 42) for fn in ("pow", "powr") for rnd in RND_MODES}
+# instructions by phase (Build.phase_of over the live instructions): MEASURED on the model's builds
+PHASES_TW = {
+    ("pow", RNE): {"Z": 46, "classify": 14, "final": 63, "fixed-grid": 27, "front": 19, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 15, "special": 36, "table": 25, "tail": 6},
+    ("pow", RTZ): {"Z": 46, "classify": 14, "final": 63, "fixed-grid": 24, "front": 19, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 13, "special": 36, "table": 25, "tail": 6},
+    ("pow", RDN): {"Z": 46, "classify": 14, "final": 63, "fixed-grid": 24, "front": 19, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 13, "special": 37, "table": 25, "tail": 6},
+    ("pow", RUP): {"Z": 46, "classify": 14, "final": 63, "fixed-grid": 24, "front": 19, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 13, "special": 37, "table": 25, "tail": 6},
+    ("pow", RMM): {"Z": 46, "classify": 14, "final": 63, "fixed-grid": 27, "front": 19, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 15, "special": 36, "table": 25, "tail": 6},
+    ("powr", RNE): {"Z": 46, "classify": 14, "final": 59, "fixed-grid": 25, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 15, "special": 39, "table": 25, "tail": 6},
+    ("powr", RTZ): {"Z": 46, "classify": 14, "final": 58, "fixed-grid": 22, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 13, "special": 39, "table": 25, "tail": 6},
+    ("powr", RDN): {"Z": 46, "classify": 14, "final": 58, "fixed-grid": 22, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 13, "special": 39, "table": 25, "tail": 6},
+    ("powr", RUP): {"Z": 46, "classify": 14, "final": 58, "fixed-grid": 22, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 13, "special": 39, "table": 25, "tail": 6},
+    ("powr", RMM): {"Z": 46, "classify": 14, "final": 59, "fixed-grid": 25, "head2": 82, "head3": 336, "lookup": 24, "recon": 135, "reduce": 97, "scale": 15, "special": 39, "table": 25, "tail": 6},
+}
+# instructions by the study's part (label_of over the live instructions)
+PARTS_TW = {
+    ("pow", RNE): {"exponential": 315, "logarithm": 420, "product": 26, "specials": 69, "test": 95},
+    ("pow", RTZ): {"exponential": 313, "logarithm": 420, "product": 26, "specials": 69, "test": 92},
+    ("pow", RDN): {"exponential": 313, "logarithm": 420, "product": 26, "specials": 70, "test": 92},
+    ("pow", RUP): {"exponential": 313, "logarithm": 420, "product": 26, "specials": 70, "test": 92},
+    ("pow", RMM): {"exponential": 315, "logarithm": 420, "product": 26, "specials": 69, "test": 95},
+    ("powr", RNE): {"exponential": 315, "logarithm": 420, "product": 26, "specials": 53, "test": 89},
+    ("powr", RTZ): {"exponential": 313, "logarithm": 420, "product": 26, "specials": 53, "test": 85},
+    ("powr", RDN): {"exponential": 313, "logarithm": 420, "product": 26, "specials": 53, "test": 85},
+    ("powr", RUP): {"exponential": 313, "logarithm": 420, "product": 26, "specials": 53, "test": 85},
+    ("powr", RMM): {"exponential": 315, "logarithm": 420, "product": 26, "specials": 53, "test": 89},
+}
+# dag_digest of the model's Build (the design's order), of its scheduled fragment, and the sha256 of the scheduled fragment's emitted order (words by bits)
+DIGESTS_TW = {
+    ("pow", RNE): (
+        "7fea1644e003f4c07c2714dbb401a606761ac38bfab597e04a71ab6c5d36faee",
+        "7fea1644e003f4c07c2714dbb401a606761ac38bfab597e04a71ab6c5d36faee",
+        "557980e3c4c266692250209c42dbf08ceece04dbac39c49b98cddeb74abcb084"),
+    ("pow", RTZ): (
+        "92e0e13fc9df847061274efe722b2673f6c7895f53b8d8aca1d2e364e8a79d94",
+        "92e0e13fc9df847061274efe722b2673f6c7895f53b8d8aca1d2e364e8a79d94",
+        "1797867705784270b8ef1e463918e20266cb3c4e98498e5bfaac6f828b18df6c"),
+    ("pow", RDN): (
+        "d98b54ac32903ddeb6f8da4fe6c71a25c3b8784212c323caccadff071361b750",
+        "d98b54ac32903ddeb6f8da4fe6c71a25c3b8784212c323caccadff071361b750",
+        "ad55895b74eafd52ee715ac3db8f52cb11fe0360487711b0a18663fb38b47d77"),
+    ("pow", RUP): (
+        "a753edc11ea7d48801736f9b05e5353006d445ce933f68f62410a605c00500fb",
+        "a753edc11ea7d48801736f9b05e5353006d445ce933f68f62410a605c00500fb",
+        "7337e1c9d4b2c738886d0eb4bd5e9603b61354e8c24f2753aeea8c6e0f6b0496"),
+    ("pow", RMM): (
+        "8a0f496aeace4023163f6a5f5452674662e7563bd323b48df220857a9f3579e5",
+        "8a0f496aeace4023163f6a5f5452674662e7563bd323b48df220857a9f3579e5",
+        "52d483a9b6bc5855cf30fbda0dd99d5ee0ee03534bb921ebb43a3585adeb520c"),
+    ("powr", RNE): (
+        "f0c7f76ddc76522ee4720e3b62bff9e60f798b029f77c0d4fb2c037d0eab8d97",
+        "f0c7f76ddc76522ee4720e3b62bff9e60f798b029f77c0d4fb2c037d0eab8d97",
+        "476f873bb3d4a98c2a01ea622df147a1ca6488d414f55fa51f00f79e0b5b49d9"),
+    ("powr", RTZ): (
+        "c0b21b4c41f1366e79bc621efac1f7c258ad50f8238cde82807a66fb15c6b92d",
+        "c0b21b4c41f1366e79bc621efac1f7c258ad50f8238cde82807a66fb15c6b92d",
+        "bea63561dc9f1f502dfeda66e8f8f6d2c552f1b0693d12568a7a289dab0ba6f2"),
+    ("powr", RDN): (
+        "6c34c1a24aa73919797aba7df069ed1bb6f0216510b09a055a93175306e09096",
+        "6c34c1a24aa73919797aba7df069ed1bb6f0216510b09a055a93175306e09096",
+        "eb673be84f6c5e6ae5b86c0f94164ed9dc0470246904bf9f3db3474b890738cc"),
+    ("powr", RUP): (
+        "900cf609b97b822eaf443af521f2d81556b0d67f413ab76a2a4ec4c814d8ab18",
+        "900cf609b97b822eaf443af521f2d81556b0d67f413ab76a2a4ec4c814d8ab18",
+        "2771e84f4e7f5434eca510bc063cf3105f906196c569520150e321805bcad7ad"),
+    ("powr", RMM): (
+        "dfcce79e6b79c1029b3ea897031725a8781bc6b0d65b7f5a38414b6197b40c73",
+        "dfcce79e6b79c1029b3ea897031725a8781bc6b0d65b7f5a38414b6197b40c73",
+        "df5d03de5df570f359536b71c609d2a6aca408836c8399cbb2bcb948023ff767"),
+}
+
+
+def order_digest(f):
+    """The sha256 of the fragment's EMITTED ORDER: each instruction's opcode,
+    attribute and operands, a word by its bits and a value by its position."""
+    def ref(s):
+        return ("w%x" % f.words[s[1]]) if s[0] == "w" else s[0] + str(s[1])
+    return hashlib.sha256(repr([(op, r, tuple(ref(s) for s in srcs))
+                                for op, r, srcs in f.body]).encode()
+                          ).hexdigest()
+
+
+@functools.lru_cache(maxsize=None)
+def tw_build_of(fn, rnd, plant=None, shift=0):
+    """ml.build(fn, FP32, rnd, plant=plant, bound_shift=shift), once."""
+    return ml.build(fn, FP32, rnd, plant=plant, bound_shift=shift)
+
+
+@functools.lru_cache(maxsize=None)
+def tw_fragment_of(fn, rnd, plant=None, shift=0):
+    """The build's scheduled fragment."""
+    return tw_build_of(fn, rnd, plant, shift).fragment()
+
+
+# ---- the pools, the regions, the specials, the structured lanes, seq ----------
+
+def check_pools_tw(f, xs=None, results=None):
+    """[finding], Tally: pools. check_pools on the whole pool of f's function
+    at fp32 with the model's pinned counts (POOL_SIZES_TW, POOL_MARKS_TW), or
+    on `xs` (a part of it) with none."""
+    if xs is None:
+        return check_pools(f, None, results, POOL_MARKS_TW[(f.op, f.rnd)],
+                           POOL_SIZES_TW[f.op])
+    return check_pools(f, xs, results)
+
+
+@functools.lru_cache(maxsize=None)
+def regions_tw(fn, n=12, seed=1):
+    """{name: lanes}: the function's placed regions at fp32, n lanes each
+    (the study's seed): `region` is generic, and returns [] for a region the
+    function has none of (powr's negint and negedge)."""
+    return {r: tuple(region(FP32, fn, r, n, seed)) for r in REGION_NAMES[fn]}
+
+
+def check_regions_tw(f, n=12, regions=None, first=None, evaluator=None):
+    """[finding], (lanes, marked): regions. check_regions on the fp32 regions
+    of `n` lanes (REGION_NAMES' for the function; a region with no lane adds
+    none) and the first design's lanes by name."""
+    regions = regions_tw(f.op, n) if regions is None else regions
+    return check_regions(f, {k: v for k, v in regions.items() if v}, first,
+                         evaluator)
+
+
+def check_specials_tw(fn, frags, evaluator=None, rows=None, marks=None):
+    """[finding], lanes: specials. check_specials at fp32 with the model's
+    marks (SPECIAL_MARKS_TW)."""
+    return check_specials(FP32, fn, frags, evaluator, rows,
+                          SPECIAL_MARKS_TW.get(fn, {}) if marks is None
+                          else marks)
+
+
+def structured_rows_tw(fn):
+    """[(label, lanes, expectation)] for fn at fp32: structured_rows'
+    families (the exact powers of two, y = 1, the tie, beside 1 either side of
+    the gate, the exact cases and their neighbours, the negative powers of two)
+    and the lanes of the double word's plants that need no plant to build
+    (plant_cases builds the lane of bound_loose with that plant, which fp32
+    refuses by name): each a `free` lane, or `decided` where plant_cases says
+    the design decides it."""
+    fmt = FP32
+    one = sf.one_bits(fmt)
+    q = sf.qnan_bits(fmt)
+
+    def v(s, m, e):
+        return _V(fmt, s, m, e)
+    rows = [("exact powers of two (2^n, 0.5^n, integer t, both signs of n)",
+             _exact_pow2(fmt), "decided"),
+            ("y = 1: x itself", [(x, one) for x in (
+                v(0, 3, 0), v(0, 5, -7), sf.min_subnormal_bits(fmt),
+                sf.max_normal_bits(fmt))], "decided"),
+            ("the tie at half the least subnormal (pow(2, emin - p))",
+             [(_pow2_bits(fmt, 1), _enc(fmt, fmt.emin - fmt.prec))],
+             "decided")]
+    below, above = _beside_one(fmt)
+    rows += [("beside 1, t below 2^-(p+3) (the gate, both signs of y)", below,
+              "decided"),
+             ("beside 1, t above the gate", above, "free")]
+    exact, neigh = _exact_families(fmt)
+    # (3 +- ulp)^2 is a midpoint to within u^2 = 2^-44, which the double word's
+    # bound 2^-(p+G) |V| (2^-97 at fp64) covers and the triple word's 2^-64 |V|
+    # does not: at fp32 the neighbours in x are decided too, so there is no
+    # "midpoint" row (MEASURED: row 3^2's neighbours, 2 of 2 lanes unmarked)
+    rows += [("exact cases that must mark by family", [ln for _, ln in exact],
+              "marked"),
+             ("their neighbours one ulp of x or y away",
+              [ln for _n, ln in neigh], "nearest")]
+    free = [("plant exact_unmarked (lane)", (v(0, 3, 0), v(0, 2, 0))),
+            ("plant exact_unmarked (lane)", (v(0, 10, 0), v(0, 3, 0))),
+            ("plant exact_rule_no_tl (lane)", _notl_lane(fmt)),
+            ("plant pow_zero_nan (lane)", (q, 0)),
+            ("plant pow_one_nan (lane)", (one, q)),
+            ("plant sign_even (lane)", (_enc(fmt, Fraction(-11, 10)),
+                                        v(0, 2, 0))),
+            ("plant sign_odd_lost (lane)", (_enc(fmt, Fraction(-11, 10)),
+                                            v(0, 3, 0))),
+            ("plant zero_sign_lost (lane)", _zero_lane(fmt)),
+            ("plant integrality_wide (lane)",
+             ((one + 1) | fmt.sign_mask, v(0, (1 << (fmt.prec - 2)) + 1, 0))),
+            ("plant side_rule_off (lane)", (_enc(fmt, Fraction(6, 5)),
+                                            sf.min_subnormal_bits(fmt))),
+            ("plant side_rule_off (lane)", (_enc(fmt, Fraction(5, 6)),
+                                            sf.min_subnormal_bits(fmt))),
+            ("plant screen_low (lane)", _screen_lane(fmt))]
+    if fn == "powr":
+        free += [("plant powr_neg_ok (lane)", (v(1, 1, 1), v(0, 1, -1))),
+                 ("plant powr_zero_zero (lane)", (0, 0))]
+    decided = [("plant exact_rule_off (mark)", (v(0, 1, 1), v(0, 10, 0))),
+               ("plant exact_rule_off (mark)", (v(0, 1, -1), v(0, 3, 0))),
+               ("plant near_one_gate_off (mark)", (one + 1, v(0, 1, -60)))]
+    rows += [(lab, [ln], "free") for lab, ln in free if ln is not None]
+    rows += [(lab, [ln], "decided") for lab, ln in decided]
+    if fn == "pow":
+        rows.append(("negative powers of two, the sign by y's parity",
+                     _exact_pow2_neg(fmt), "decided"))
+    return rows
+
+
+def seq_lanes_tw(fn, stride=16):
+    """The lanes of the seq check: every `stride`th lane of the function's pool
+    at fp32, every structured lane and SEQ_LOUD's."""
+    out = list(pool(fn, FP32)[::stride])
+    for _label, lanes, _e in structured_rows_tw(fn):
+        out += lanes
+    out += SEQ_LOUD(FP32)
+    return tuple(dict.fromkeys(out))
+
+
+def check_structured_tw(f, evaluator=None, rows=None):
+    """[finding], lanes: structured, at fp32 (check_structured on
+    structured_rows_tw)."""
+    return check_structured(f, evaluator, structured_rows_tw(f.op)
+                            if rows is None else rows)
+
+
+def check_seq_tw(f, xs=None, stride=16, **kw):
+    """[finding], lanes: seq. check_seq on f at fp32 over seq_lanes_tw (every
+    `stride`th pool lane, the structured lanes and the loud ones) with the
+    structured rows' marked lanes. The bound is not inflated: the byte's mark
+    is exercised by the exact cases that must mark (a row of "marked"), and a
+    run that marks no lane is a finding of check_seq's (STATUS[6])."""
+    rows = structured_rows_tw(f.op)
+    xs = seq_lanes_tw(f.op, stride) if xs is None else xs
+    return check_seq(f, xs=list(xs), rows=rows, **kw)
+
+
+# ---- the bound: V0 + V1 + V2 against mpmath ------------------------------------
+
+def bound_log2_tw(b, lane):
+    """log2(|V - f 2^-k| / Bv) for one main-path lane of the fp32 build b: V
+    the sum of its probes V0, V1 and V2 (the result in the scaled domain, the
+    sign applied; the final multiplications by 2^k1 and 2^k2 are after it,
+    k = floor(n/8), n the probe nf), the true value from mpmath at 4p + 200
+    bits. None where V is exact or the screens take the lane; 999.0 where V is
+    not finite. fp32 has no budget in this build (as M4F1's did not): this is
+    the direct error, and the model's measured margin carries over because
+    the port equals the model."""
+    fmt = b.fmt
+    _res, _fl, pr = b.run(lane, ("V0", "V1", "V2", "Bv", "th0", "nf"))
+    if _screened(fmt, pr):
+        return None
+    try:
+        V = (value(fmt, pr["V0"]) + value(fmt, pr["V1"])
+             + value(fmt, pr["V2"]))
+        Bv = abs(value(fmt, pr["Bv"]))
+    except ValueError:
+        return 999.0
+    with mpmath.workprec(4 * fmt.prec + 200):
+        k = int(value(fmt, pr["nf"])) // 8
+        err = abs(_mp(V) - true_value(b.meta["fn"], fmt, lane)
+                  * mpmath.mpf(2) ** -k)
+        if err == 0:
+            return None
+        return float(mpmath.log(err / _mp(Bv), 2))
+
+
+def check_bound_tw(b, lanes, label="random", need=1):
+    """[finding], (worst log2(err/Bv), main-path lanes, lanes): bound. Every
+    main-path lane of `lanes` under 1 Bv (bound_log2_tw), and every lane equal
+    to transcend.py in bits and flag word or marked; fewer than `need`
+    main-path lanes is a finding (the region measures nothing: BOUND_NO_MAIN's
+    are exempt, and the caller says NOT MEASURED, with the lane count, and
+    keeps the region out of its pass count). The worst is the largest found, a
+    sampled lower bound."""
+    fmt, fn = b.fmt, b.meta["fn"]
+    worst, n, over, differ = -1e9, 0, [], []
+    for lane in lanes:
+        res, fw, pr = b.run(lane, ("th0",))
+        if not fw & MARK and (res, fw) != golden(fmt, b.rnd, lane, fn):
+            differ.append(lane)
+        if not in_main(fn, fmt, lane) or _screened(fmt, pr):
+            continue
+        r = bound_log2_tw(b, lane)
+        n += 1
+        if r is None:
+            continue
+        worst = max(worst, r)
+        if r >= 0:
+            over.append((r, lane))
+    where = f"bound: {fn} {fmt.name} {sf.RND_NAMES[b.rnd]} {label}"
+    out = []
+    if n < need and label.split()[0] not in BOUND_NO_MAIN:
+        out.append(f"{where}: only {n} of {len(lanes)} lanes reach the main "
+                   f"path, {need} wanted: the region measures nothing")
+    if over:
+        r, lane = max(over)
+        out.append(f"{where}: {len(over)} of {n} main-path lanes are past the "
+                   f"bound, the worst {_hexes([lane])} at 2^{r:+.2f} of Bv")
+    if differ:
+        out.append(f"{where}: {len(differ)} unmarked lanes differ from "
+                   f"transcend.{fn}, first {_hexes([differ[0]])}")
+    return out, (worst, n, len(lanes))
+
+
+def bound_regions_tw(b, n=48, seed=11, regions=None):
+    """[finding], {region: (worst, main-path lanes, lanes)}: bound over the
+    function's placed regions at fp32 (placed_points: n points each; a region
+    with no lane at all is not in it, and not_measured_tw names it). A region
+    whose lanes reach the main path in none is NOT MEASURED: it is in the dict
+    with 0 main-path lanes, and the caller prints it so, outside the pass
+    count."""
+    fn = b.meta["fn"]
+    regions = (regions if regions is not None
+               else dict(placed_points(fn, FP32, n, seed)))
+    out, worst = [], {}
+    for label, xs in regions.items():
+        found, w = check_bound_tw(b, xs, label)
+        out += found
+        worst[label] = w
+    return out, worst
+
+
+def not_measured_tw(fn, worst):
+    """[(region, main-path lanes)] of the regions of `fn` that measured
+    NOTHING: those with 0 main-path lanes in `worst`, and those the function
+    has no lane of at all (powr's negint and negedge, at 0). They are outside
+    any pass count."""
+    out = [(name, w[1]) for name, w in worst.items() if w[1] == 0]
+    out += [(name, 0) for name in ("negint", "negedge")
+            if name not in REGION_NAMES.get(fn, ()) or name not in worst]
+    return sorted(set(out))
+
+
+# ---- the shape, the registers, the port ------------------------------------------
+
+def model_phases_tw(fn, fmt_name, rnd):
+    return dict(PHASES_TW[(fn, rnd)])
+
+
+def tables_tw(**kw):
+    """The shape check's pinned data at fp32 (Tables), one attribute a table."""
+    shape = {(fn, "fp32"): [SHAPE_TW[(fn, rnd)] for rnd in RND_MODES]
+             for fn in TW_FUNS}
+    eft = {(fn, "fp32"): EFT_TW[(fn, RNE)] for fn in TW_FUNS}
+    return Tables(**dict({"shape": shape, "eft": eft,
+                          "phases": model_phases_tw}, **kw))
+
+
+def highest_register(prog):
+    """The highest register an instruction of the program names: the
+    destination of an ALU instruction, a register operand of one, and the
+    register a DEPOSIT or RAISE reads."""
+    top = 0
+    for w in prog.insns:
+        d = seq.decode(w)
+        if not d["ctrl"]:
+            top = max(top, d["rd"])
+            for r, k in (("ra", "ka"), ("rb", "kb"), ("rc", "kc")):
+                if not d[k]:
+                    top = max(top, d[r])
+        elif d["op"] in (seq.DEPOSIT, seq.RAISE):
+            top = max(top, d["ra"])
+    return top
+
+
+def check_registers_tw(fn, frags, top=None):
+    """[finding]: shape. routines.program accepts the fragment of `fn` under
+    each attribute of `frags` {rnd: Fragment}, its highest register is
+    REG_TOP_TW's (31 for pow, 28 for powr), and POW_LIVE_CAP's fp32 row is the
+    most values live under any attribute (32 and 29; 30 less the cap is -2 and
+    +1)."""
+    top = REG_TOP_TW[fn] if top is None else top
+    out = []
+    for rnd, f in frags.items():
+        where = f"shape: {fn} fp32 {sf.RND_NAMES[rnd]}"
+        try:
+            prog, _bank = routines.program(f)
+        except AssertionError as e:
+            out.append(f"{where}: routines.program refuses it: {e}")
+            continue
+        got = highest_register(prog)
+        if got != top:
+            out.append(f"{where}: the highest register is r{got}, pinned "
+                       f"r{top}")
+    cap = max(f.live_max() for f in frags.values())
+    if ml.POW_LIVE_CAP[fn]["fp32"] != cap:
+        out.append(f"shape: {fn} fp32: POW_LIVE_CAP is "
+                   f"{ml.POW_LIVE_CAP[fn]['fp32']}, the most values live "
+                   f"under any attribute is {cap}")
+    return out
+
+
+def check_port_tw(fn, builds, digests=None, fragments=None):
+    """[finding]: port. The Build's dag_digest (the design's order), the
+    scheduled fragment's dag_digest and its emitted order, each against the
+    model's literal (DIGESTS_TW); every instruction's label a name of
+    _POW_TW_PHASE_MAP whose phase is the one it was built in, a PHASE_ORDER
+    name; the instructions by study part (PARTS_TW). `builds` {rnd: Build},
+    `digests` stands for the table, `fragments` {rnd: Fragment} for the
+    builds' own scheduled fragments (both for the tests that doctor one
+    leg)."""
+    digests = DIGESTS_TW if digests is None else digests
+    out = []
+    for rnd, b in builds.items():
+        where = f"port: {fn} fp32 {sf.RND_NAMES[rnd]}"
+        f = fragments[rnd] if fragments else b.fragment()
+        got = (ml.dag_digest(b.fragment(schedule=False)), ml.dag_digest(f),
+               order_digest(f))
+        for what, g, w in zip(("the Build's dag digest",
+                               "the scheduled fragment's dag digest",
+                               "the emitted order"), got, digests[(fn, rnd)]):
+            if g != w:
+                out.append(f"{where}: {what} is {g[:16]}, the model's is "
+                           f"{w[:16]}")
+        keep = b.live_indices()
+        if len(b.label_of) != len(b.body):
+            out.append(f"{where}: {len(b.label_of)} labels for "
+                       f"{len(b.body)} instructions")
+            continue
+        bad = [i for i in keep
+               if ml._POW_TW_PHASE_MAP.get(b.label_of[i]) != b.phase_of[i]
+               or b.phase_of[i] not in ml.PHASE_ORDER]
+        if bad:
+            out.append(f"{where}: {len(bad)} instructions whose label's "
+                       f"phase is not the phase they were built in or not in "
+                       f"PHASE_ORDER, first {b.label_of[bad[0]]!r}")
+        parts = dict(collections.Counter(ml._POW_TW_PARTS[b.label_of[i]]
+                                         for i in keep))
+        if parts != PARTS_TW[(fn, rnd)]:
+            out.append(f"{where}: instructions by part {parts}, the model's "
+                       f"{PARTS_TW[(fn, rnd)]}")
+    return out
+
+
+def check_shape_tw(fn, builds=None, tables=None, fragments=None):
+    """[finding]: shape. check_shape on fn at fp32 under all five attributes
+    with tables_tw() (instructions, bank words and live per fragment; the
+    instructions by phase and the Fast2Sum and TwoSum counts the model's; the
+    flag word's nine values; MIN and MAX none; the scheduled fragment the
+    design's reordered; POW_LIVE_CAP's fp32 row the measured maximum, and a cap
+    one under failing by name), then the registers (check_registers_tw) and the
+    port (check_port_tw). `fragments` {rnd: Fragment} stands for the builds'
+    own, for the test that doctors one."""
+    builds = builds or {rnd: tw_build_of(fn, rnd) for rnd in RND_MODES}
+    out = check_shape(FP32, {(fn, rnd): b for rnd, b in builds.items()},
+                      tables or tables_tw(),
+                      {(fn, rnd): f for rnd, f in (fragments or {}).items()}
+                      or None)
+    frags = fragments or {rnd: b.fragment() for rnd, b in builds.items()}
+    out += check_registers_tw(fn, frags)
+    out += check_port_tw(fn, builds, fragments=fragments)
+    return out
+
+
+# ---- the constants ---------------------------------------------------------------
+
+def check_constants_tw(**kw):
+    """[finding], lines: constants. mathlib.check_pow_tw_constants() in
+    process."""
+    lines, findings = ml.check_pow_tw_constants(**kw)
+    return [f"constants: {s}" for s in findings], lines
+
+
+def check_constants_cli_tw():
+    """[finding], output: constants. `python -m cft_golden.mathlib --check
+    --only pow-tw` in a process of its own, exit 0 and its last line ending
+    `0 differences`, listing pow and powr."""
+    r = subprocess.run([sys.executable, "-B", "-m", "cft_golden.mathlib",
+                        "--check", "--only", "pow-tw"], capture_output=True,
+                       text=True, cwd=ROOT / "python")
+    out = r.stdout.strip().splitlines()
+    findings = []
+    if r.returncode != 0:
+        findings.append(f"constants: --check --only pow-tw exited "
+                        f"{r.returncode}")
+    want = (f"mathlib --check (pow, triple word): {len(ml._POW_TW_BUILDERS)} "
+            f"routines, 1 format, 0 differences")
+    if not out or out[-1] != want:
+        findings.append(f"constants: the last line is "
+                        f"{out[-1] if out else r.stderr[-200:]!r}, not "
+                        f"{want!r}")
+    n = sum(1 for ln in out if ln.split(" ")[0] in ml._POW_TW_BUILDERS
+            and "(triple word)" in ln)
+    if n != len(ml._POW_TW_BUILDERS):
+        findings.append(f"constants: {n} routine lines, "
+                        f"{len(ml._POW_TW_BUILDERS)} wanted")
+    return findings, out
+
+
+# ---- the plants: every check on every plant ----------------------------------------
+
+def red_checks_tw(plant, fn="pow", rnds=(RNE,), region_n=6, bound_n=6,
+                  seq_stride=48, shift=0):
+    """{check: [findings]} for CHECKS_TW, EVERY key present (a check that is
+    green has an empty list), on `plant` (None: the control) at fp32 on `fn`:
+    pools (the whole pool) and regions and specials under `rnds`, structured
+    under every attribute the plant reaches, seq under the first of `rnds` (a
+    stride of the pool), bound over the placed regions (bound_n points each)
+    under rne, shape under all five (where the plant reaches all five) and
+    constants under rne. A plant the build cannot reach is refused by name.
+    GREEN means green at this scope, which is smaller than the tests' own on
+    the control."""
+    red = {name: [] for name in CHECKS_TW}
+    reach = []
+    for rnd in RND_MODES:
+        try:
+            tw_build_of(fn, rnd, plant, shift)
+        except ValueError as e:
+            if "does not apply" not in str(e):
+                raise
+            continue
+        reach.append(rnd)
+    if not reach:
+        raise ValueError(f"plant {plant!r} does not apply to {fn} at fp32 "
+                         f"under any attribute")
+    rnds = tuple(r for r in rnds if r in reach) or (reach[0],)
+    for rnd in rnds:
+        f = tw_fragment_of(fn, rnd, plant, shift)
+        red["pools"] += check_pools_tw(f)[0]
+        red["regions"] += check_regions_tw(f, region_n)[0]
+    red["specials"] += check_specials_tw(
+        fn, {rnd: tw_fragment_of(fn, rnd, plant, shift) for rnd in rnds})[0]
+    for rnd in reach:
+        red["structured"] += check_structured_tw(
+            tw_fragment_of(fn, rnd, plant, shift))[0]
+    red["seq"] += check_seq_tw(tw_fragment_of(fn, rnds[0], plant, shift),
+                               stride=seq_stride)[0]
+    b = tw_build_of(fn, RNE, plant, shift)
+    for r, lanes in placed_points(fn, FP32, bound_n).items():
+        red["bound"] += check_bound_tw(b, lanes, r)[0]
+    if len(reach) == len(RND_MODES):
+        red["shape"] += check_shape_tw(
+            fn, {rnd: tw_build_of(fn, rnd, plant, shift)
+                 for rnd in RND_MODES})
+    red["constants"] += check_constants_tw(
+        builder=lambda name, f_, r_: tw_build_of(name, r_, plant, shift),
+        attrs=(RNE,), names=(fn,))[0]
+    return red
