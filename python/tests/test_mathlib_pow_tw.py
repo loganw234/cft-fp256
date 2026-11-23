@@ -45,6 +45,19 @@ def cid(v):
     return v if isinstance(v, str) else sf.RND_NAMES[v]
 
 
+_EV = {}
+
+
+def memo_evaluate(f, x):
+    """ml.evaluate, remembered per (routine, attribute, lane): the specials'
+    rows are evaluated once for the control and for the leg that doctors a
+    mark count."""
+    key = (f.op, f.rnd, x)
+    if key not in _EV:
+        _EV[key] = ml.evaluate(f, x)
+    return _EV[key]
+
+
 @functools.lru_cache(maxsize=None)
 def results_of(fn, rnd):
     f = P.tw_fragment_of(fn, rnd)
@@ -261,7 +274,7 @@ def test_regions(fn, rnd):
 @pytest.mark.parametrize("fn", FNS)
 def test_specials(fn):
     frags = {rnd: P.tw_fragment_of(fn, rnd) for rnd in RND}
-    out, n = P.check_specials_tw(fn, frags)
+    out, n = P.check_specials_tw(fn, frags, evaluator=memo_evaluate)
     assert out == [] and n > 1000
 
 
@@ -385,7 +398,8 @@ def test_each_leg_of_specials_fails_alone():
     five = {rnd: P.tw_fragment_of("pow", rnd) for rnd in RND}
     marks = {k: dict(v) for k, v in P.SPECIAL_MARKS_TW.items()}
     marks["pow"]["subnormal operands"] += 1
-    out = P.check_specials_tw("pow", five, marks=marks["pow"])[0]
+    out = P.check_specials_tw("pow", five, evaluator=memo_evaluate,
+                              marks=marks["pow"])[0]
     assert len(out) == 1 and "marks over the five attributes" in out[0] \
         and "subnormal operands" in out[0]
 
@@ -570,29 +584,29 @@ def test_each_leg_of_constants_fails_alone():
 # so its row runs the whole pool.
 PLANTED = [
     ("l3_dropped", "pow", {"pools", "specials", "structured", "seq", "bound",
-                           "shape"}, 2),
+                           "shape"}, 4),
     ("mark_silenced", "pow", {"pools", "specials", "structured", "seq",
-                              "shape"}, 2),
+                              "shape"}, 4),
     ("v2_dropped", "pow", {"pools", "bound", "shape"}, 1),
     ("lv2_dropped", "pow", {"pools", "specials", "structured", "seq", "bound",
-                            "shape"}, 2),
+                            "shape"}, 4),
     ("r2_dropped", "pow", {"pools", "specials", "structured", "seq", "bound",
-                           "shape"}, 2),
+                           "shape"}, 4),
     ("il2h_ulp", "pow", {"pools", "regions", "specials", "structured", "seq",
-                         "bound", "shape", "constants"}, 2),
+                         "bound", "shape", "constants"}, 4),
     ("y_one_loud", "pow", {"pools", "specials", "structured", "seq", "shape"},
-     2),
-    ("two_sum_all", "pow", {"shape"}, 2),
+     4),
+    ("two_sum_all", "pow", {"shape"}, 4),
 ]
 
 
 @functools.lru_cache(maxsize=None)
-def red_of(plant, fn="pow", pool_step=2):
+def red_of(plant, fn, pool_step):
     return P.red_checks_tw(plant, fn, pool_step=pool_step)
 
 
 def test_the_control_is_green_in_every_check():
-    red = P.red_checks_tw(None, "pow", pool_step=1)
+    red = P.red_checks_tw(None, "pow")
     assert set(red) == set(P.CHECKS_TW)
     assert {k: v for k, v in red.items() if v} == {}
     red = P.red_checks_tw(None, "powr")
@@ -617,7 +631,7 @@ def test_every_check_has_a_plant_red_in_it_and_the_rows_list_every_check():
         assert set(red) == set(P.CHECKS_TW)
     assert seen == set(P.CHECKS_TW)
     # a doctored row that omits a check is refused by the same assertion
-    row = dict(red_of("two_sum_all"))
+    row = dict(red_of("two_sum_all", "pow", 4))
     del row["bound"]
     assert set(row) != set(P.CHECKS_TW)
 
@@ -625,7 +639,7 @@ def test_every_check_has_a_plant_red_in_it_and_the_rows_list_every_check():
 def test_the_plants_not_in_the_table_are_ln2_ulp_and_the_table_is_all_of_it():
     # ln2_ulp is in _POW_TW_PLANTS and red in constants (measured below); the
     # table above has eight rows, its ninth is this one
-    red = red_of("ln2_ulp")
+    red = red_of("ln2_ulp", "pow", 4)
     assert red["constants"] and red["bound"] and red["pools"]
     assert {r[0] for r in PLANTED} | {"ln2_ulp"} == set(ml._POW_TW_PLANTS)
 

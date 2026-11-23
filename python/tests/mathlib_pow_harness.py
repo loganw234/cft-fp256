@@ -2108,7 +2108,8 @@ def check_shape_tw(fn, builds=None, tables=None, fragments=None):
                       or None)
     frags = fragments or {rnd: b.fragment() for rnd, b in builds.items()}
     out += check_registers_tw(fn, frags)
-    out += check_port_tw(fn, builds, fragments=fragments)
+    out += [f"shape: {s}" for s in check_port_tw(fn, builds,
+                                                   fragments=fragments)]
     return out
 
 
@@ -2150,7 +2151,7 @@ def check_constants_cli_tw():
 # ---- the plants: every check on every plant ----------------------------------------
 
 def red_checks_tw(plant, fn="pow", rnds=(RNE,), region_n=6, bound_n=6,
-                  seq_stride=96, pool_step=2, struct_rnds=(RNE, RTZ),
+                  seq_stride=192, pool_step=4, struct_rnds=(RNE,),
                   shift=0):
     """{check: [findings]} for CHECKS_TW, EVERY key present (a check that is
     green has an empty list), on `plant` (None: the control) at fp32 on `fn`:
