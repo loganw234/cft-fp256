@@ -119,8 +119,10 @@ POW_PLANT_NAMES = {
     "integrality_wide", "sign_odd_lost", "powr_neg_ok", "powr_zero_zero",
     "near_one_gate_off", "side_rule_off", "screen_low", "mark_silenced",
     "bound_loose", "zero_sign_lost", "log_table_entry", "il2h_ulp",
-    "screen_ulp", "y_one_loud", "two_sum_all", "log_short",
-    # parcel M3G2's
+    "screen_ulp", "y_one_loud", "two_sum_all", "log_short"}
+# the five plants parcel M3G2 added to the table (test_mathlib_pow_n.py holds
+# them; this file's rows, PLANTED and the plant tests are M3G1's 23)
+M3G2_PLANT_NAMES = {
     "rootn_m0_neg", "compound_onep_rounded", "n_low_dropped", "n_word_ulp",
     "n_row_loud"}
 # the plants build_pow_core accepts (the others are refused by name there,
@@ -184,7 +186,7 @@ def test_pow_names_is_beside_the_other_tuples_which_are_as_they_were():
         "pown": {"fp64": 21, "fp128": 21, "fp256": 21},
         "rootn": {"fp64": 19, "fp128": 19, "fp256": 19},
         "compound": {"fp64": 22, "fp128": 22, "fp256": 22}}
-    assert set(ml.POW_PLANTS) == POW_PLANT_NAMES
+    assert set(ml.POW_PLANTS) == POW_PLANT_NAMES | M3G2_PLANT_NAMES
     assert all(isinstance(t, str) and len(t) > 20
                for t in ml.POW_PLANTS.values())
 
@@ -1371,7 +1373,8 @@ def _check_row(row):
 
 def test_every_plant_is_in_the_table_and_every_row_lists_every_check():
     named = [row[0] for row in PLANTED]
-    assert set(named) == POW_PLANT_NAMES == set(ml.POW_PLANTS)
+    assert set(named) == POW_PLANT_NAMES == (set(ml.POW_PLANTS)
+                                             - M3G2_PLANT_NAMES)
     assert len(named) == len(set(named)) == 22 + 1
     for row in PLANTED:
         _check_row(row)

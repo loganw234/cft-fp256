@@ -1763,9 +1763,10 @@ def region_names_n(fn, fmt):
 
 REGION_NAMES.update({fn: ("int", "int-neg", "int17", "int1000", "int31",
                           "int63", "zone") for fn in INT_FUNCS})
-# the lanes a region at each format: the study's regions_run.py N (400 at fp64
-# and 80 above, as pow's), the box command's size; a check takes a tenth by
-# default (check_regions_n) and the golden stage's test fewer
+# the lanes a region at each format: the box command's size, set as pow's (400
+# at fp64 and 80 above; the study's own run took 150 at fp64, its
+# regions_run.fp64-pown.out.txt); a check takes a tenth by default
+# (check_regions_n) and the golden stage's test fewer
 REGION_LANES.update({(fn, f.name): (400 if f.name == "fp64" else 80)
                      for fn in INT_FUNCS for f in FORMATS})
 

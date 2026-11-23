@@ -1384,7 +1384,20 @@ def cmd_pow_pools(a):
     process, unniced, the desktop shared with other parcels and the GPU round
     (their load not measured): 207.5 s, peak memory 64 MB, RESULT: ok, 0
     findings. The whole pools of pow and powr at the three formats under the
-    five attributes are 66 s of it (the pool lines' own intervals), the regions the rest. `--quick`: 3.5 s."""
+    five attributes are 66 s of it (the pool lines' own intervals), the regions the rest. `--quick`: 3.5 s.
+
+    pown, rootn and compound (parcel M3G2; `--fn pown,rootn,compound`) run per
+    n of `--ns` (default the golden stage's list, mathlib.POW_CHECK_NS: 13 n at
+    fp64, 6 at fp128 and fp256, rootn's 0 left out) through the fragment of that
+    n, the pool's lanes of the n (the pool has 31 distinct n), then the regions
+    at each region's own n (--lanes a region, default 400 at fp64 and 80
+    above). MEASURED by parcel M3G2 at full size, one process a format,
+    unniced, the desktop shared (load not measured), the harness and this file
+    of tree 8526eb64 (the harness since changed in comments only):
+    `--fn pown,rootn,compound --formats fp128` 103 s, `fp256` 180 s, `fp64`
+    441 s, peak memory 68, 69 and 93 MB, RESULT: ok, 0 findings; pown's region
+    int63 at fp64 is NOT MEASURED (0 of 400 lanes reach the main path), 5
+    lines, one an attribute."""
     P = _pow_harness()
     open_out(a.out)
     step = a.step if a.step else (8 if a.quick else 1)
@@ -1445,7 +1458,20 @@ def cmd_pow_bound(a):
     RESULT: ok, 0 findings. The largest |V - f| / Bv over the regions
     (sampled lower bounds): pow 2^-4.38 (fp64, zone), 2^-8.25 (fp128, zone),
     2^-7.84 (fp256, zone); powr 2^-4.21 (fp64, rhoedge), 2^-8.41, 2^-7.59.
-    `--quick`: 2.0 s."""
+    `--quick`: 2.0 s.
+
+    pown, rootn and compound (parcel M3G2): the regions at each region's own n
+    (`--ns` keeps the regions whose n is listed; nlow and m1edge always).
+    MEASURED by parcel M3G2 at full size (3,000 points a region at fp64, 1,000
+    at fp128 and fp256, seed 121, rne), `--fn pown,rootn,compound`, one
+    process a format, unniced, the desktop shared (load not measured), tree
+    8526eb64 for this file and the harness: `--formats fp128` 197.0 s, `fp256`
+    295.6 s, `fp64` 537.4 s (past nine minutes: close to the ten a run may
+    take), peak memory 68, 67 and 70 MB, RESULT: ok, 0 findings. The largest
+    |V - f| / Bv over those regions (sampled lower bounds, over those lanes):
+    2^-3.58 (fp64, compound at int1000), 2^-8.24 (fp128, pown at zone188000),
+    2^-7.29 (fp256, compound at zone2990000). fp64: 29 regions measured, 1 NOT
+    MEASURED (pown int63: 0 main-path lanes of 3,000)."""
     P = _pow_harness()
     open_out(a.out)
     sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000}

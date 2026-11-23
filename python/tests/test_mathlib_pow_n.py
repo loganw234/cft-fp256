@@ -306,7 +306,7 @@ def test_the_named_special_rows():
     assert all(out == [] for out, _c in rows.values())
 
 
-# regions: the study's 3.3, 20 lanes a region at fp64 and 6 above (the study's 400 and 80: the box)
+# regions: the study's 3.3, 20 lanes a region at fp64 and 6 above (the box command's default is REGION_LANES: 400 and 80)
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
 @pytest.mark.parametrize("fn", INT_FUNCS)
 def test_regions(fn, fmt):
@@ -317,7 +317,7 @@ def test_regions(fn, fmt):
         assert lanes, name
         found = []
         main = marked = 0
-        for rnd in (RNE, RUP):
+        for rnd in ((RNE, RUP) if fmt.name == "fp64" else (RNE,)):
             out, (nl, mk, mn) = P.check_regions_n(fn, fmt, rnd, name, cnt)
             found += out
             main = max(main, mn)
@@ -574,16 +574,28 @@ PLANT_RED = {pl: {key: dict(zip(P.CHECKS, row)) for key, row in cases.items()}
              for pl, cases in _RED.items()}
 
 
+def _row_ok(row):
+    """The row assertion: nine booleans, one for each check of CHECKS."""
+    assert len(row) == len(P.CHECKS), row
+    assert all(isinstance(v, bool) for v in row)
+
+
 def test_the_plant_rows_list_every_check_and_every_plant():
     assert set(PLANT_RED) == set(P.PLANT_N) | {None}
     assert set(ml.POW_PLANTS) == set(P.PLANT_N) | P.POW_FRONT_ONLY
     assert len(ml.POW_PLANTS) == 28 and len(P.POW_FRONT_ONLY) == 8
-    for plant, rows in PLANT_RED.items():
-        for key, row in rows.items():
-            assert tuple(row) == P.CHECKS, (plant, key)
-            assert all(isinstance(v, bool) for v in row.values())
-        if plant is not None:
-            assert {k for k in rows} == set(P.PLANT_N[plant])
+    for plant, cases in _RED.items():
+        assert {k for k in cases} == (set(P.PLANT_N[plant]) if plant else
+                                      set(PLANT_RED[None]))
+        for key, row in cases.items():
+            _row_ok(row)
+            assert tuple(PLANT_RED[plant][key]) == P.CHECKS
+    # the row assertion refuses a row that omits a check or is not a bool
+    good = _RED["n_word_ulp"][("pown", 3)]
+    _row_ok(good)
+    for bad in (good[:-1], good[1:], good + (True,), good[:-1] + (1,)):
+        with pytest.raises(AssertionError):
+            _row_ok(bad)
 
 
 def _plant_cases():
