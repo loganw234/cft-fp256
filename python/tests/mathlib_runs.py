@@ -1394,8 +1394,8 @@ def cmd_pow_pools(a):
     above). MEASURED by parcel M3G2 at full size, one process a format,
     unniced, the desktop shared (load not measured), the harness and this file
     of tree 8526eb64 (the harness since changed in comments only):
-    `--fn pown,rootn,compound --formats fp128` 103 s, `fp256` 180 s, `fp64`
-    441 s, peak memory 68, 69 and 93 MB, RESULT: ok, 0 findings; pown's region
+    `--fn pown,rootn,compound --formats fp128` 102.4 s, `fp256` 178.5 s, `fp64`
+    441.0 s (each the output's own last line), peak memory 68, 69 and 93 MB, RESULT: ok, 0 findings; pown's region
     int63 at fp64 is NOT MEASURED (0 of 400 lanes reach the main path), 5
     lines, one an attribute."""
     P = _pow_harness()
