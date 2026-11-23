@@ -9304,7 +9304,7 @@ _POW_CHECK_NS_WIDE = (0, 1, 3, -3, 17, -2 ** 63)       # fp128 and fp256
 
 
 def pow_check_ns(name, fmt):
-    """The n list of `name` at `fmt`: POW_CHECK_NS at fp64, a third of it
+    """The n list of `name` at `fmt`: POW_CHECK_NS (13 n) at fp64, the 6 of
     (0, 1, 3, -3, 17, -2^63) at fp128 and fp256; rootn has no n = 0."""
     ns = POW_CHECK_NS if fmt.name == "fp64" else _POW_CHECK_NS_WIDE
     return tuple(n for n in ns if not (name == "rootn" and n == 0))

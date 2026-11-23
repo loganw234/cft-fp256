@@ -10,8 +10,9 @@ The integer operand n is a constant of the fragment (mathlib.pow_n checks it),
 so every fragment is keyed by (name, fmt, rnd, n) and every check runs at an n:
 python/tests/mathlib_pow_harness.py's `*_n` checks, which return findings that
 begin with the check's name and an "n = N:". The n list is mathlib.POW_CHECK_NS
-(fp64) and a third of it at fp128 and fp256; all five attributes at n = 0, 1, 3,
--3 and one large n, rne and rtz at the others. n = 0 and n = 1 are the small
+(fp64, 13 n) and its 6 shortest (0, 1, 3, -3, 17, -2^63) at fp128 and
+fp256; all five attributes at n = 0, 1, 3, -3 and one large n, rne and rtz at
+the others. n = 0 and n = 1 are the small
 fragments.
 
   pools  regions  specials  structured  seq  bound  shape  core  constants
