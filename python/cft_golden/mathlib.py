@@ -2875,7 +2875,7 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
         return _build_trig(name, fmt, rnd, G, bound_shift, plant)
     if name not in NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built so "
-                         f"far: {', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS))}")
+                         f"far: {', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS) + tuple(_POW_N_BUILDERS))}")
     if fmt not in FORMATS:
         raise ValueError(f"{fmt!r} is not one of the four formats")
     if rnd not in sf.RND_NAMES:
@@ -7815,12 +7815,21 @@ def plan_pow(fmt: FpFormat, G=None) -> types.SimpleNamespace:
 
 
 @functools.lru_cache(maxsize=None)
-def _pow_constants(fmt, GL, KL, DL, GE, KE, DE, cplant):
+def _pow_constants(fmt, GL, KL, DL, GE, KE, DE, cplant, logfn="log2"):
     """(log constants at GL, exp2's at GE): M1's generators, called as the
     study's model calls them (shift 0), the logarithm's under `cplant`, a plant
-    of _log_constants (table_entry, il2h_ulp) or None."""
-    return (_log_constants("log2", fmt, GL, KL, DL, 0, cplant),
-            _dw_constants("exp2", fmt, GE, KE, DE, 0, None))
+    of _log_constants (table_entry, il2h_ulp) or None. `logfn` is the
+    logarithm's name, "log2" (parcel M3G2: "log1p" for compound, whose
+    constants are log1p's with 1/ln 2's two words and their negations added,
+    which the sum k + F/ln 2 reads and log1p's generator does not make)."""
+    cl = _log_constants(logfn, fmt, GL, KL, DL, 0, cplant)
+    if logfn == "log1p":
+        hi, lo = _words(fmt, _inv_ln2(), 2)
+        if cplant == "il2h_ulp":       # the plant's fault, here as log2's
+            hi += 1
+        cl = dict(cl, IL2H=hi, NIL2H=sf.negate(fmt, hi),
+                  NIL2L=sf.negate(fmt, lo))
+    return (cl, _dw_constants("exp2", fmt, GE, KE, DE, 0, None))
 
 
 def _pow_words(b: Build):
@@ -7911,21 +7920,52 @@ def _pow_integrality(b: Build, k_, yc):
 def _pow_logarithm(b: Build, k_, cl, cl_):
     """L = log2 |X| as a double word: M1's log2 (_log_reduce on |X|, the
     table, the polynomial's tail and head, the sum with 1/ln 2 in two words
-    and k) at the logarithm's guard. Returns (r, kf, Lh, Ll); the phases
-    reduce, table, tail, head, Z and recon."""
+    and k) at the logarithm's guard. Returns (r, kf, Lh, Ll, ul); the phases
+    reduce, table, tail, head, Z and recon. Compound's (parcel M3G2) is log1p
+    on x itself, with a "lowword" phase after the table; `ul` is u_l, the low
+    word of 1 + x (None for the others)."""
     fmt = b.fmt
     ZERO = k_["ZERO"]
     KL, DL = b.meta["KL"], b.meta["DL"]
     b.phase = "reduce"
-    clx = types.SimpleNamespace(x=cl.ax, ax=cl.ax)
-    red = _log_reduce(b, "log2", cl_, k_, clx, None)
+    compound = b.meta.get("fn") == "compound"
+    if compound:
+        # parcel M3G2: log1p on x itself (1 + x = u_h + u_l by TwoSum)
+        red = _log_reduce(b, "log1p", cl_, k_, cl, None)
+        if _act(b, "compound_onep_rounded"):
+            red.ul = ZERO
+    else:
+        clx = types.SimpleNamespace(x=cl.ax, ax=cl.ax)
+        red = _log_reduce(b, "log2", cl_, k_, clx, None)
     r, kf = red.r, red.kf
     b.phase = "table"
     Lh, Ll = _table(b, cl_, red.tc, k_,
                     (lambda j: f"LH{j}", lambda j: f"LL{j}"))
-    # parcel M3G2: m3pow.py lines 323 to 340 (compound's low-word block: u_l's
-    # share of r, the correction, and the SMALL path's selects over r, kf, Lh,
-    # Ll and corr)
+    corr = None
+    if compound:
+        # parcel M3G2: m3pow.py lines 323 to 340. u_l's share of r, r_l =
+        # u_l 2^-k c (2^-k taken as 0 past k = p + GL + 2), the correction
+        # r_l/(1 + r) by Newton steps on 1/(1 + r), and the SMALL path (|x| <
+        # 15/256: r = x, k = 0, no table entry, no low word)
+        ib, ONE = k_["ib"], k_["ONE"]
+        p = fmt.prec
+        b.phase = "lowword"
+        p2mk = b.ishl(b.isub(ib(fmt.bias + cl_["MAGIC"], "K_BIAS_MAGIC"),
+                             red.kb), ib(fmt.man_w, "MANTISSA_WIDTH"))
+        p2mk = b.sel(ZERO, p2mk, b.icmplt(
+            ib(cl_["MAGIC"] + p + b.meta["GL"] + 2, "K_CLAMP"), red.kb))
+        rl = b.mul(b.mul(red.ul, p2mk), red.cc)
+        nr0 = b.neg(r)
+        yv = b.sub(ONE, r)
+        for _ in range(3 if p < 100 else 4):
+            e = b.fma(nr0, yv, b.sub(ONE, yv))
+            yv = b.fma(yv, e, yv)
+        corr = b.mul(rl, yv)
+        sm = b.icmplt(cl.ax, b.const("SMALL", cl_["SMALL"]))
+        r = b.sel(cl.x, r, sm)
+        kf = b.sel(ZERO, kf, sm)
+        Lh, Ll = b.sel(ZERO, Lh, sm), b.sel(ZERO, Ll, sm)
+        corr = b.sel(ZERO, corr, sm)
     b.phase = "tail"
     nr = b.neg(r)
     yv = b.const(f"LY{DL}", cl_[f"Y{DL}"])
@@ -7949,6 +7989,8 @@ def _pow_logarithm(b: Build, k_, cl, cl_):
     lph = b.mul(yh, r)
     nlpe = b.fma(yh, nr, lph)
     nlpl = b.fma(yl, nr, nlpe)
+    if corr is not None:
+        nlpl = b.sub(nlpl, corr)         # parcel M3G2: compound's correction
     b.phase = "recon"
     il2h = b.const("IL2H", cl_["IL2H"])
     nil2h = b.const("NIL2H", cl_["NIL2H"])
@@ -7963,7 +8005,7 @@ def _pow_logarithm(b: Build, k_, cl, cl_):
     lo = b.sub(e, ngl)
     Lh2, Ll2 = b.fast_two_sum(S, lo)
     b.probes.update(r=r, Lh=Lh2, Ll=Ll2)
-    return r, kf, Lh2, Ll2
+    return r, kf, Lh2, Ll2, red.ul
 
 
 def _pow_product(b: Build, k_, Yh, Yl, Lh, Ll, kf, ybound):
@@ -8134,7 +8176,8 @@ def pow_core(b: Build, k_, cl, Yh, Yl, ybound, *, negres, sgnw, up,
     rnd = b.rnd
     G, GL, GE = m["G"], m["GL"], m["GE"]
     cl_, ce = _pow_constants(fmt, GL, m["KL"], m["DL"], GE, m["KE"], m["DE"],
-                             _POW_CONST_PLANT.get(m.get("plant")))
+                             _POW_CONST_PLANT.get(m.get("plant")),
+                             "log1p" if m.get("fn") == "compound" else "log2")
     if m.get("plant") in _POW_CONST_PLANT:
         b._fired.add(m["plant"])
     ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
@@ -8143,7 +8186,7 @@ def pow_core(b: Build, k_, cl, Yh, Yl, ybound, *, negres, sgnw, up,
     MARKW = k_["MARKW"]
 
     # ---- the logarithm: L = log2 |X| as a double word (M1's log2) ----------
-    r, kf, Lh, Ll = _pow_logarithm(b, k_, cl, cl_)
+    r, kf, Lh, Ll, ul = _pow_logarithm(b, k_, cl, cl_)
 
     # ---- t = Y L as a double word, the screens, the bound's coefficient ----
     th0, th, tl, ovs, uns, wB, shift = _pow_product(b, k_, Yh, Yl, Lh, Ll, kf,
@@ -8161,11 +8204,15 @@ def pow_core(b: Build, k_, cl, Yh, Yl, ybound, *, negres, sgnw, up,
     if exact_tl and not no_tl:
         ex = b.sel(b.cmpeq(tl, ZERO), ZERO, ex)
     ex = b.sel(b.cmpeq(r, ZERO), ZERO, ex)
-    # parcel M3G2: m3pow.py lines 471 to 472 (compound's extra condition,
-    # u_l = 0)
+    if ul is not None:
+        # parcel M3G2: compound's extra condition, u_l = 0 (1 + x exact)
+        ex = b.sel(b.cmpeq(ul, ZERO), ZERO, ex)
     if _act(b, "exact_rule_off"):
         ex = ZERO
-    # parcel M3G2: m3pow.py lines 475 to 476 (rootn's V = 1 where exact)
+    if m.get("fn") == "rootn":
+        # parcel M3G2: V = 1 where the lane is exact (rootn's exact rule has
+        # no t_l = 0 test, so the sum V is not trusted there)
+        Vh, Vl = b.sel(ONE, Vh, ex), b.sel(ZERO, Vl, ex)
     if sgnw is not None:
         Vh, Vl = b.ixor(Vh, sgnw), b.ixor(Vl, sgnw)
     b.probes.update(Vh=Vh, Vl=Vl, ex=ex)
@@ -8435,23 +8482,316 @@ _POW_BUILDERS = {"pow": _build_pow, "powr": _build_powr}
 # (M3G2's builders, plants and role checks go at this anchor, the section's
 # end, well apart from M3F1's below: assign into _POW_BUILDERS, POW_PLANTS and
 # _POW_ROLE_CHECKS, never edit their literals.)
+#
+# pown(x, n), rootn(x, n) and compound(x, n) on the one core (pow_core), n a
+# CONSTANT of the fragment (the language checks it to int64's range and cftc
+# builds the fragment for that n: the study's 2.6, question 2). The fragment of
+# two n is two fragments with the same op, so the key is (name, fmt, rnd, n);
+# nothing of routines.py changes (parcel M3C moves the key there). The three
+# have one input, "a" = x: the lane is x alone, and the harness's lane is the
+# pair (x, n) with n the build's constant.
+#
+#   pown     Y = n in one word (fp128, fp256, and fp64 where |n| fits 53 bits)
+#            or two (n_h = RN(n), n_l the rest: fp64 above 2^53); ybound |n|
+#   rootn    Y = 1/n in two words (RN(1/n), RN of the rest); ybound 1/|n|;
+#            x < 0 is invalid for an even n; rootn's exact rule has no
+#            t_l = 0 test and V = 1 where it holds
+#   compound X = 1 + x as the exact double word TwoSum(1, x), through the
+#            logarithm's log1p reduction on x itself (its low word in the
+#            correction); never negative
+#
+# n = 0 and n = 1 are the small fragments (_build_pow_small): no core.
+
+POW_INT_NAMES = ("pown", "rootn", "compound")
+
+# the pow family's integer operand: int64 (the language checks it)
+_POW_N_RANGE = (-2 ** 63, 2 ** 63 - 1)
+
+
+def pow_n(name, n):
+    """The integer operand of pown, rootn or compound, checked and returned: a
+    Python int that is not a bool, in [-2^63, 2^63 - 1], else a ValueError by
+    name; rootn(x, 0) is refused by name too (invalid for every x, a constant
+    the compiler refuses)."""
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise ValueError(f"{name}: n = {n!r} is not an integer")
+    lo, hi = _POW_N_RANGE
+    if not lo <= n <= hi:
+        raise ValueError(f"{name}: n = {n} is outside int64 [-2^63, "
+                         f"2^63 - 1]")
+    if name == "rootn" and n == 0:
+        raise ValueError("rootn(x, 0) is invalid for every x: a constant the "
+                         "compiler refuses")
+    return n
+
+
+def _pow_int_words(fmt, n):
+    """(n_h, n_l): n as format words whose sum is n exactly, n_h = RN(n) and
+    n_l the rest (None where n fits the format's p bits: always at fp128 and
+    fp256, and at fp64 up to 2^53)."""
+    hi = _enc(fmt, Fraction(n))
+    rest = Fraction(n) - _dec(fmt, hi)
+    return hi, (None if rest == 0 else _enc(fmt, rest))
+
+
+def _pow_recip_words(fmt, n):
+    """(RN(1/n), RN of the rest): 1/n in two words; the second is None where
+    the first holds 1/n exactly (n a power of two)."""
+    hi, lo = _words(fmt, Fraction(1, n), 2)
+    return hi, (None if lo == 0 else lo)
+
+
+def _pown_rows(b, k_, cl, n, sgnw, bits, fl):
+    """pown's rows (the study's section 4 and m3pow.py :604 to :641), lowest
+    priority first: x = +-0, x = +-inf, a NaN."""
+    ZERO, INF, QNAN = k_["ZERO"], k_["INF"], k_["QNAN"]
+    INVALID, INX = k_["INVALID"], k_["INX"]
+    DIVZ = k_["ib"](sf.FLAG_DIVZERO, "FL_DIVZERO")
+
+    def sgn(v):
+        return v if sgnw is None else b.ixor(v, sgnw)
+    bits = b.sel(sgn(ZERO if n > 0 else INF), bits, cl.iszero)
+    fl = b.sel(DIVZ if n < 0 else ZERO, fl, cl.iszero)
+    bits = b.sel(sgn(INF if n > 0 else ZERO), bits, cl.isinf)
+    fl = b.sel(INX if _act(b, "n_row_loud") else ZERO, fl, cl.isinf)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, cl.issnan), fl, cl.isnan)
+    return bits, fl
+
+
+def _build_pown(b: Build, x):
+    """pown(x, n), n = b.meta["n"] (not 0 or 1: those are _build_pow_small):
+    classify x, the sign (x's where n is odd: sgnw = x's sign bit), Y = n's one
+    or two words, pow_core on |x|, then pown's rows. At fp64 above 2^53 n is
+    two words (n_h, n_l) and Y is a double word: the path _check_ybound and
+    build_pow_core(double=True) hold, first used in a fragment here. The plants
+    n_word_ulp (n_h one ulp off), n_low_dropped (n_l left out: the same
+    fragment where n_l is absent) and n_row_loud (the x = +-inf row's inexact
+    flag left raised). Returns (result, flag word)."""
+    fmt, n = b.fmt, b.meta["n"]
+    k_ = _pow_words(b)
+    ONE, ZERO = k_["ONE"], k_["ZERO"]
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    b.phase = "front"
+    odd = n % 2 != 0
+    negres = cl.neg if odd else None
+    sgnw = b.iand(cl.x, b.const("SIGN", fmt.sign_mask)) if odd else None
+    hi, lo = _pow_int_words(fmt, n)
+    if _act(b, "n_word_ulp"):
+        hi += 1
+    if _act(b, "n_low_dropped"):
+        lo = None
+    Yh = b.const("NH", hi)
+    Yl = None if lo is None else b.const("NL", lo)
+
+    def up():
+        gt1 = b.icmplt(ONE, cl.ax)                    # |x| > 1
+        return b.sel(ZERO, ONE, gt1) if n < 0 else gt1
+    core = pow_core(b, k_, cl, Yh, Yl, Fraction(abs(n)), negres=negres,
+                    sgnw=sgnw, up=up)
+    b.phase = "special"
+    return _pown_rows(b, k_, cl, n, sgnw, core.bits, core.fl)
+
+
+def _build_rootn(b: Build, x):
+    """rootn(x, n): as _build_pown with Y = 1/n in two words (RNH, RNL; RNL is
+    absent where n is a power of two), ybound 1/|n|, the exact rule without
+    its t_l = 0 test (exact_tl False) and V = 1 where it holds (pow_core), and
+    rootn's rows: x = +-0 (+-0 or +-inf by n's sign, the sign by x's where n is
+    odd, divideByZero for n < 0), x = +-inf, x < 0 invalid for an even n, a
+    NaN. The plant rootn_m0_neg answers rootn(-0, n even) with the sign of x
+    (squareRoot's row: -0); it is refused at an odd n, where sgnw already
+    gives it. Returns (result, flag word)."""
+    fmt, n = b.fmt, b.meta["n"]
+    k_ = _pow_words(b)
+    ONE, ZERO, INF, QNAN = k_["ONE"], k_["ZERO"], k_["INF"], k_["QNAN"]
+    INVALID, INX = k_["INVALID"], k_["INX"]
+    DIVZ = k_["ib"](sf.FLAG_DIVZERO, "FL_DIVZERO")
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    b.phase = "front"
+    odd = n % 2 != 0
+    negres = cl.neg if odd else None
+    sgnw = b.iand(cl.x, b.const("SIGN", fmt.sign_mask)) if odd else None
+    hi, lo = _pow_recip_words(fmt, n)
+    if _act(b, "n_word_ulp"):
+        hi += 1
+    Yh = b.const("RNH", hi)
+    Yl = None if lo is None else b.const("RNL", lo)
+
+    def up():
+        gt1 = b.icmplt(ONE, cl.ax)
+        return b.sel(ZERO, ONE, gt1) if n < 0 else gt1
+    core = pow_core(b, k_, cl, Yh, Yl, Fraction(1, abs(n)), negres=negres,
+                    sgnw=sgnw, up=up, exact_tl=False)
+    b.phase = "special"
+    bits, fl = core.bits, core.fl
+
+    def sgn(v):
+        return v if sgnw is None else b.ixor(v, sgnw)
+    bits = b.sel(sgn(INF if n > 0 else ZERO), bits, cl.isinf)
+    fl = b.sel(INX if _act(b, "n_row_loud") else ZERO, fl, cl.isinf)
+    zsign = sgnw
+    if not odd and _act(b, "rootn_m0_neg"):
+        zsign = b.iand(cl.x, b.const("SIGN", fmt.sign_mask))
+    zb = ZERO if n > 0 else INF
+    bits = b.sel(zb if zsign is None else b.ixor(zb, zsign), bits, cl.iszero)
+    fl = b.sel(DIVZ if n < 0 else ZERO, fl, cl.iszero)
+    if not odd:
+        negnz = b.sel(ZERO, b.sel(ZERO, cl.neg, cl.iszero), cl.isnan)
+        bits = b.sel(QNAN, bits, negnz)
+        fl = b.sel(INVALID, fl, negnz)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, cl.issnan), fl, cl.isnan)
+    return bits, fl
+
+
+def _build_compound(b: Build, x):
+    """compound(x, n) = (1 + x)^n: X = 1 + x as TwoSum's exact double word, the
+    logarithm's log1p reduction on x itself with the low word u_l in a
+    correction (_pow_logarithm, fn "compound"), Y = n as pown's (one or two
+    words), never negative, `ex` carrying u_l = 0 (pow_core), the rule beside 1
+    on the side of 1 + x > 1 iff x > 0 (inverted for n < 0), and compound's
+    rows: x = +-inf (+inf for n > 0, else 0), x = +-0 (1), x = -1 (+0 for n >
+    0, else +inf with divideByZero), x < -1 invalid, a NaN. The plants
+    compound_onep_rounded (u_l dropped: 1 + x rounded before the logarithm),
+    n_word_ulp, n_low_dropped and n_row_loud. Returns (result, flag word)."""
+    fmt, n = b.fmt, b.meta["n"]
+    k_ = _pow_words(b)
+    ONE, ZERO, INF, QNAN = k_["ONE"], k_["ZERO"], k_["INF"], k_["QNAN"]
+    INVALID, INX = k_["INVALID"], k_["INX"]
+    DIVZ = k_["ib"](sf.FLAG_DIVZERO, "FL_DIVZERO")
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    b.phase = "front"
+    hi, lo = _pow_int_words(fmt, n)
+    if _act(b, "n_word_ulp"):
+        hi += 1
+    if _act(b, "n_low_dropped"):
+        lo = None
+    Yh = b.const("NH", hi)
+    Yl = None if lo is None else b.const("NL", lo)
+
+    def up():                                         # 1 + x > 1 iff x > 0
+        return cl.neg if n < 0 else b.sel(ZERO, ONE, cl.neg)
+    core = pow_core(b, k_, cl, Yh, Yl, Fraction(abs(n)), negres=None,
+                    sgnw=None, up=up)
+    b.phase = "special"
+    bits, fl = core.bits, core.fl
+    NEGONE = b.const("NEGONE", sf.one_bits(fmt, 1))
+    bits = b.sel(INF if n > 0 else ZERO, bits, cl.isinf)
+    fl = b.sel(INX if _act(b, "n_row_loud") else ZERO, fl, cl.isinf)
+    bits = b.sel(ONE, bits, cl.iszero)
+    fl = b.sel(ZERO, fl, cl.iszero)
+    m1 = b.cmpeq(cl.x, NEGONE)
+    bits = b.sel(ZERO if n > 0 else INF, bits, m1)
+    fl = b.sel(DIVZ if n < 0 else ZERO, fl, m1)
+    below = b.cmplt(cl.x, NEGONE)
+    bits = b.sel(QNAN, bits, below)
+    fl = b.sel(INVALID, fl, below)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, cl.issnan), fl, cl.isnan)
+    return bits, fl
+
+
+def _build_pow_small(name, fmt, rnd, n):
+    """The fragments at n = 0 and n = 1, which need no core (the study's 2.1):
+    n = 0: pown 1 and compound 1 (invalid below -1), a signalling NaN invalid;
+    n = 1: pown and rootn x itself (a NaN quiet, invalid for a signalling
+    one), compound 1 + x rounded once, inexact exactly where TwoSum's error is
+    not zero, overflow only where the sum is infinite (rup at x = max), x = -1
+    answered +0 under every attribute (1 + (-1) is -0 under rdn: the study's
+    3.6, item 3), x < -1 invalid. family "small", inputs ("a",), 6 to 26
+    instructions."""
+    b = Build(fmt, rnd, f"{name}-{fmt.name}-{sf.RND_NAMES[rnd]}-n{n}")
+    b.inputs = ("a",)
+    b.meta.update(fn=name, n=n, family="small", G=GUARD[fmt.name], plant=None)
+    k_ = _pow_words(b)
+    ZERO, ONE, INF, QNAN = k_["ZERO"], k_["ONE"], k_["INF"], k_["QNAN"]
+    INVALID, INX, OVFINX = k_["INVALID"], k_["INX"], k_["OVFINX"]
+    b.phase = "classify"
+    cl = _classify_common(b, k_)
+    x = cl.x
+    b.phase = "special"
+    NEGONE = b.const("NEGONE", sf.one_bits(fmt, 1))
+    if n == 0:
+        bits = b.sel(QNAN, ONE, cl.issnan)
+        fl = b.sel(INVALID, ZERO, cl.issnan)
+        if name == "compound":
+            below = b.cmplt(x, NEGONE)
+            bits = b.sel(QNAN, bits, below)
+            fl = b.sel(INVALID, fl, below)
+        return b.finish(bits, fl)
+    if name in ("pown", "rootn"):
+        bits = b.sel(QNAN, x, cl.isnan)
+        fl = b.sel(INVALID, ZERO, cl.issnan)
+        return b.finish(bits, fl)
+    s = b.add(ONE, x, rnd)
+    _sn, err = b.two_sum(ONE, x)
+    fl = b.sel(ZERO, INX, b.cmpeq(err, ZERO))
+    fl = b.sel(OVFINX, fl, b.cmpeq(s, INF))
+    bits = s
+    bits = b.sel(INF, bits, cl.isinf)
+    fl = b.sel(ZERO, fl, cl.isinf)
+    bits = b.sel(ZERO, bits, b.cmpeq(x, NEGONE))
+    below = b.cmplt(x, NEGONE)
+    bits = b.sel(QNAN, bits, below)
+    fl = b.sel(INVALID, fl, below)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, cl.issnan), fl, cl.isnan)
+    return b.finish(bits, fl)
+
+
+# the builders of the integer operand's three, a table of their own (M4's
+# _INV_TW_BUILDERS' precedent: _POW_BUILDERS stays pow and powr, and the
+# harness's FUNCS the two): builder(b, x) -> (result, flag word), given a Build
+# whose meta["n"] is the checked integer operand
+_POW_N_BUILDERS = {"pown": _build_pown, "rootn": _build_rootn,
+                   "compound": _build_compound}
+
+POW_PLANTS.update({
+    # parcel M3G2's: the study's two, then one each of the checks the study's
+    # table leaves bare (n_low_dropped: the low word of fp64's n above 2^53;
+    # n_word_ulp: the constants' check of the n words; n_row_loud: seq's flag
+    # byte on an n-keyed row). A plant the build cannot reach (rootn_m0_neg at
+    # an odd n or in pown, n_low_dropped in rootn) is refused by name.
+    "rootn_m0_neg": "rootn(-0, 2) answered -0 (squareRoot's row): the sign of "
+                    "x, not +0, for an even n",
+    "compound_onep_rounded": "1 + x rounded before the logarithm, its low "
+                             "word u_l dropped",
+    "n_low_dropped": "n_l left out of Y at fp64 above 2^53 (Y = n_h alone): "
+                     "the same fragment where n_l is absent",
+    "n_word_ulp": "the word of n (pown, compound) or of 1/n (rootn) one ulp "
+                  "off",
+    "n_row_loud": "the x = +-inf row's flag word left inexact (pown, rootn, "
+                  "compound): the answer right, a flag raised",
+})
+
 
 # ---- fp32: the triple word, pow and powr (parcel M3F1) builds here ----
 
 
 def _pow_refuse(name, fmt, n):
     """The refusals by name: fp32 (the triple word, parcel M3F1's), a name not
-    yet built (saying whose it is), and an integer operand given to pow or
-    powr."""
+    built (saying whose it is), an integer operand given to pow or powr, and,
+    for pown, rootn and compound (parcel M3G2), n missing or not an int64
+    (pow_n's)."""
     if fmt.name == "fp32":
         raise ValueError(f"{name} at fp32 is not built: fp32 is the triple "
                          f"word, parcel M3F1's")
-    if name not in _POW_BUILDERS:
+    built = tuple(_POW_BUILDERS) + tuple(_POW_N_BUILDERS)
+    if name not in built:
         raise ValueError(f"{name!r} is not built yet: it is parcel "
-                         f"{_POW_PARCEL[name]}'s ({', '.join(_POW_BUILDERS)} "
-                         f"{'is' if len(_POW_BUILDERS) == 1 else 'are'} "
-                         f"built)")
-    if n is not None:
+                         f"{_POW_PARCEL[name]}'s ({', '.join(built)} "
+                         f"{'is' if len(built) == 1 else 'are'} built)")
+    if name in _POW_N_BUILDERS:
+        # parcel M3G2: n is a constant of the fragment, required
+        if n is None:
+            raise ValueError(f"{name} needs its integer operand n: a constant "
+                             f"of the fragment (n=...)")
+        pow_n(name, n)
+    elif n is not None:
         raise ValueError(f"{name} takes no integer operand (n = {n!r}): "
                          f"its second operand is an input")
 
@@ -8496,9 +8836,20 @@ def _build_pow_family(name, fmt, rnd, G, shift, plant, n=None):
     """One of POW_NAMES, built: a Build with its inputs named (("a", "b") = (x,
     y) for pow and powr), its meta set, its front end (_POW_BUILDERS[name])
     called with the input refs, and the Build finished."""
+    if name in _POW_N_BUILDERS and n in (0, 1):
+        # parcel M3G2: the small fragments have no core and no plant
+        if plant is not None:
+            raise ValueError(f"plant {plant!r} does not apply to {name} at "
+                             f"{fmt.name}, n = {n}: the small fragment has "
+                             f"no core")
+        return _build_pow_small(name, fmt, rnd, n)
     b = _pow_setup(name, fmt, rnd, G, shift, plant, n)
-    b.inputs = ("a", "b")
-    bits, fl = _POW_BUILDERS[name](b, *[("in", i) for i in b.inputs])
+    if name in _POW_N_BUILDERS:
+        b.inputs = ("a",)                    # parcel M3G2: x; n is a constant
+        bits, fl = _POW_N_BUILDERS[name](b, ("in", "a"))
+    else:
+        b.inputs = ("a", "b")
+        bits, fl = _POW_BUILDERS[name](b, *[("in", i) for i in b.inputs])
     b.finish(bits, fl)
     _check_pow_plant_fired(b)
     return b
@@ -8601,6 +8952,11 @@ def _check_pow_plan(fmt, G):
     B1 = Fraction(1, 2 ** (2 * p - 6)) if short else Fraction(0)
     B2 = Fraction(1, 2 ** (2 * p - 5)) if short else Fraction(0)
     return want, GL, KD, KDe, B1, B2
+
+
+# parcel M3G2: the plan is a function of (fmt, G) alone and the check asks it
+# again for every fragment (0.4 s at fp256): asked once
+_check_pow_plan_cached = functools.lru_cache(maxsize=None)(_check_pow_plan)
 
 
 def _check_pow_neighbour(rnd, sign, away, p):
@@ -8738,7 +9094,7 @@ def _check_pow_build(b: Build, findings, scale=True):
                             f", {why}")
 
     # ---- the plan, from exact rationals ----
-    want, GL, (KL, DL), (KE, DE), B1, B2 = _check_pow_plan(fmt, G)
+    want, GL, (KL, DL), (KE, DE), B1, B2 = _check_pow_plan_cached(fmt, G)
     m = b.meta
     if (m["GL"], m["GE"]) != (GL, G + 2):
         findings.append(f"{tag}: (GL, GE) = {(m['GL'], m['GE'])} is not the "
@@ -8759,8 +9115,15 @@ def _check_pow_build(b: Build, findings, scale=True):
     point("NMAGIC16", -magic / 16)
     point("HALF", Fraction(1, 2))
     point("NEGONE", -1)
-    point("MINN", Fraction(2) ** emin)
-    point("P2P", Fraction(2) ** p)
+    if fn == "compound":
+        # parcel M3G2: log1p's reduction has no subnormal scaling
+        held_only_if("MINN", False, "log1p's reduction (compound) does not "
+                                    "scale a subnormal")
+        held_only_if("P2P", False, "log1p's reduction (compound) does not "
+                                   "scale a subnormal")
+    else:
+        point("MINN", Fraction(2) ** emin)
+        point("P2P", Fraction(2) ** p)
     for j in range(N):
         lo, hi = _check_log16(16 if j == 0 else 8 + j)
         w = verify(f"LH{j}", "rn", lo, hi)
@@ -8809,16 +9172,22 @@ def _check_pow_build(b: Build, findings, scale=True):
     # ---- the bound ----
     point("BREL", Fraction(2) ** (-(p + G) + shift))
     held_only_if("B1", bool(B1), "B1 is 0 where GL reached its target")
-    held_only_if("B2", bool(B2), "B2 is 0 where GL reached its target")
+    # parcel M3G2: pown, rootn and compound hold the word YB2 (|n| B2 or B2 /
+    # |n|, upward) in place of B2 and its product with |y|: _check_pow_n_roles
+    n_keyed = fn in POW_INT_NAMES
+    held_only_if("B2", bool(B2) and not n_keyed, "B2 is 0 where GL reached "
+                 "its target, and the integer operand's three hold YB2")
     if B1:
         verify("B1", "rn", B1 * 2 ** shift, B1 * 2 ** shift)
-    if B2:
+    if B2 and not n_keyed:
         verify("B2", "ru", B2 * 2 ** shift, B2 * 2 ** shift)
     # ---- the screens, the gate, the neighbours of 1, the responses ----
     point("TOVF", emax + 2)
     point("TUNF", emin - p - 2)
     point("TINYT", Fraction(1, 2 ** (p + 3)))
-    neg_result = fn == "pow"
+    # parcel M3G2: pown and rootn are negative where x is and n is odd
+    neg_result = fn == "pow" or (fn in ("pown", "rootn")
+                                 and b.meta["n"] % 2 != 0)
     for sign in ((0, 1) if neg_result else (0,)):
         for away in (0, 1):
             role = f"NB{sign}{away}"
@@ -8840,7 +9209,7 @@ def _check_pow_build(b: Build, findings, scale=True):
     bits_are("SIGN_SHIFT", W - 1)
     bits_are("MANTISSA_WIDTH", mw)
     bits_are("MANTISSA_MASK", (1 << mw) - 1)
-    if neg_result:
+    if neg_result or (n_keyed and "SIGN" in b.roles):
         bits_are("SIGN", 1 << (W - 1))
     for role, v in _POW_FLAG_WORDS.items():
         if role in b.roles or (role == "FL_DIVZERO" and fn != "pow_core"):
@@ -8850,7 +9219,11 @@ def _check_pow_build(b: Build, findings, scale=True):
             bits_are(f"I{v}", v)
     # the reduction's and the scale's offsets, from MAGIC's encoding
     bits_are("K_OFFSET", magic_bits - bias)
-    bits_are("K_OFFSET_SUB", magic_bits - bias - p)
+    if fn == "compound":
+        held_only_if("K_OFFSET_SUB", False, "log1p's reduction (compound) "
+                                            "does not scale a subnormal")
+    else:
+        bits_are("K_OFFSET_SUB", magic_bits - bias - p)
     bits_are("C_WRAP", magic_bits + 9)
     OFF = p + 8
     if (bias + OFF) % 2:
@@ -8875,7 +9248,7 @@ def _check_pow_build(b: Build, findings, scale=True):
         point("P2PM1", Fraction(2) ** (p - 1))
         point("P2P_Y", Fraction(2) ** p)
     if fn in _POW_ROLE_CHECKS:
-        _POW_ROLE_CHECKS[fn](b, tag, verify, point, bits_are)
+        _POW_ROLE_CHECKS[fn](b, tag, verify, point, bits_are, held_only_if)
     unchecked = sorted(set(b.roles) - seen)
     if unchecked:
         findings.append(f"{tag}: derived but not checked: {unchecked}")
@@ -8885,14 +9258,272 @@ def _check_pow_build(b: Build, findings, scale=True):
     if nameless:
         findings.append(f"{tag}: words the fragment holds with no role: "
                         f"{[(n, hex(b.words[n])) for n in nameless]}")
-    lanes = _check_pow_scale(b, findings) if scale and fn in ("pow", "powr") \
-        else 0
+    if scale and fn in ("pow", "powr"):
+        lanes = _check_pow_scale(b, findings)
+    elif scale and n_keyed:
+        lanes = _check_pow_n_scale(b, findings)
+    else:
+        lanes = 0
     return count[0], lanes
 
 
 # the role checks of each function beyond the common ones: _POW_ROLE_CHECKS[fn]
 # (b, tag, verify, point, bits_are); parcel M3G2 assigns its own at its anchor
 _POW_ROLE_CHECKS = {}
+
+
+# ---- pown, rootn and compound: the constants, checked (parcel M3G2) ------------
+#
+# check_pow_n_constants is check_pow_constants' shape for the three of an
+# integer operand: every fragment of the n list (POW_CHECK_NS), through
+# _check_pow_build's common roles (the logarithm's and the exponential's words,
+# the plan, the bound, the screens, the neighbours of 1, the responses, the
+# IEEE-field integers) and the roles of their own, below. n = 0 and n = 1 are
+# the small fragments, whose used words are checked by _check_pow_small. A word
+# with no role is a finding, and so is a role not asked for ("derived but not
+# checked").
+#
+#   NH, NL     n_h = RN(n) and n_l = RN of the rest, of the exact integer n
+#              (pown, compound): the sum is n; NL is absent where n fits p bits
+#   RNH, RNL   RN(1/n) and RN of the rest, of the exact rational 1/n (rootn);
+#              RNL is absent where 1/n is one word (n a power of two)
+#   YB2        the upward rounding of |n| B2 2^shift (pown, compound) or of
+#              B2 2^shift / |n| (rootn), where B2 is not 0 (fp64) and absent
+#              where it is (fp128, fp256); B2's own word is absent
+#   SMALL      15/256 (compound: below it the reduction is skipped), and
+#   K_BIAS_MAGIC, K_CLAMP   the low word's 2^-k and its clamp (compound),
+#              from MAGIC's encoding
+
+# the n list of the golden stage and of --only pow-n: n = 0 and 1 (the small
+# fragments), the sign and parity classes, a power of two (8: the scale words
+# at every j of rootn), a mid value, the 32-bit and 64-bit edges and 2^53 + 1
+# (n_l = 1 at fp64: the double-word Y)
+POW_CHECK_NS = (0, 1, 2, -2, 3, -3, 8, 17, 1000, 2 ** 31 - 1, 2 ** 63 - 1,
+                -2 ** 63, 2 ** 53 + 1)
+_POW_CHECK_NS_WIDE = (0, 1, 3, -3, 17, -2 ** 63)       # fp128 and fp256
+
+
+def pow_check_ns(name, fmt):
+    """The n list of `name` at `fmt`: POW_CHECK_NS at fp64, a third of it
+    (0, 1, 3, -3, 17, -2^63) at fp128 and fp256; rootn has no n = 0."""
+    ns = POW_CHECK_NS if fmt.name == "fp64" else _POW_CHECK_NS_WIDE
+    return tuple(n for n in ns if not (name == "rootn" and n == 0))
+
+
+def pow_check_attrs(fmt, n):
+    """The attributes of the n-keyed fragments the golden stage builds: all
+    five at n = 0, 1 (small), 3, -3 and one large n (2^53 + 1 at fp64, -2^63
+    above), rne and rtz at the others."""
+    big = 2 ** 53 + 1 if fmt.name == "fp64" else -2 ** 63
+    return sf.RND_MODES if n in (0, 1, 3, -3, big) else (RNE, RTZ)
+
+
+def _check_pow_n_roles(b, tag, verify, point, bits_are, held_only_if):
+    """The roles of pown, rootn and compound beyond the common ones (the
+    section's comment): `held_only_if(role, held, why)` is _check_pow_build's."""
+    fmt, p = b.fmt, b.fmt.prec
+    fn, n, G = b.meta["fn"], b.meta["n"], b.meta["G"]
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    bias = 2 ** (ew - 1) - 1
+    _want, GL, _KD, _KDe, _B1, B2 = _check_pow_plan_cached(fmt, G)
+    shift = b.meta["shift"]
+
+    def two_words(first, second, value):
+        w = verify(first, "rn", value, value)
+        rest = value - w
+        if rest != 0:
+            verify(second, "rn", rest, rest)
+        else:
+            held_only_if(second, False, "but the first word is the value")
+    if fn == "rootn":
+        two_words("RNH", "RNL", Fraction(1, n))
+        yb = Fraction(1, abs(n))
+    else:
+        # n_h = RN(n) by integer arithmetic (ties to even: a tie is where
+        # the "rn" rule of an enclosure cannot choose), n_l the rest exactly
+        mag = abs(n)
+        drop = max(0, mag.bit_length() - p)
+        q, r = divmod(mag, 1 << drop)
+        if 2 * r > 1 << drop or (2 * r == 1 << drop and q & 1):
+            q += 1
+        hi = (q << drop) * (1 if n > 0 else -1)
+        point("NH", hi)
+        if n - hi != 0:
+            point("NL", n - hi)
+        else:
+            held_only_if("NL", False, "but n is the first word")
+        yb = Fraction(abs(n))
+    if B2:
+        verify("YB2", "ru", yb * B2 * 2 ** shift, yb * B2 * 2 ** shift)
+    else:
+        held_only_if("YB2", False, "B2 is 0 where GL reached its target")
+    if fn == "compound":
+        point("SMALL", Fraction(15, 256))
+        magic_bits = ((bias + p - 1) << mw) | (1 << (mw - 1))
+        bits_are("K_BIAS_MAGIC", bias + magic_bits)
+        bits_are("K_CLAMP", magic_bits + p + GL + 2)
+
+
+_POW_ROLE_CHECKS.update({name: _check_pow_n_roles for name in POW_INT_NAMES})
+
+
+def _check_pow_n_scale(b: Build, findings):
+    """The scale offsets, the fixed grid's words and the table's wiring, where
+    they act, on one-input lanes whose t is exactly known: pown and compound at
+    x = 2^E (pown) or 2^E - 1 (compound) where t = n E is an integer (j = 0),
+    rootn at x = 2^E where E / n is an exact multiple of 1/8 (n a power of
+    two: every j at n = 8). A lane whose probes th + tl are not that t is not
+    run. -> lanes run (_check_pow_scale's bodies, on a one-input build)."""
+    fmt, p, mw = b.fmt, b.fmt.prec, b.fmt.man_w
+    ew, _mw = _TRIG_FIELDS[fmt.name]
+    emin = 2 - 2 ** (ew - 1)
+    emax = 2 ** (ew - 1) - 1
+    bias = emax
+    OFF = b.meta["OFF"]
+    fn, n = b.meta["fn"], b.meta["n"]
+    ks = [emin - p - 2, emin - 2, emin - 1, emin, emin + 1, emin + p, -2, -1,
+          0, 1, 2, emax - 1, emax, emax + 1]
+    lanes = []                       # (x encoding, t exactly)
+    for k in ks:
+        for j in (0, 3, 4, 5, 7):
+            t = Fraction(8 * k + j, 8)
+            if fn == "rootn":
+                E = t * n
+            elif fn == "pown":
+                E = t / n
+            else:
+                E = None             # compound: x = 2^E - 1, t = n E
+            if fn == "compound":
+                continue
+            if E.denominator != 1 or not emin - p + 1 <= E <= emax:
+                continue
+            lanes.append((sf.round_pack(fmt, 0, 1, int(E), RNE)[0], t))
+    if fn == "compound":
+        for E in (1, 2, 3, 5, -1, -2, -3):
+            x = _enc_exact(fmt, Fraction(2) ** E - 1)
+            lanes.append((x, Fraction(n * E)))
+    tag = f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]} n = {n}"
+    ran = 0
+    for x, t in lanes:
+        _res, _fl, pr = b.run(x, ("nf", "th", "tl", "Ek", "S1", "S2", "rp",
+                                  "sub_p", "klt", "Cu", "hu", "Th", "Tl"))
+        if _dec(fmt, pr["th"]) + _dec(fmt, pr["tl"]) != t:
+            continue
+        n8 = int(_dec(fmt, pr["nf"]))
+        if Fraction(n8, 8) != t or abs(t) >= _pow_t_reach(fmt) - 3:
+            continue
+        k, j = n8 // 8, n8 % 8
+        ran += 1
+        where = f"{tag} t = {t} (k = {k})"
+        if pr["Ek"] != k + bias + OFF:
+            findings.append(f"{where}: Ek = {pr['Ek']}, want "
+                            f"{k + bias + OFF}")
+        for nm, kk in (("S1", k // 2), ("S2", k - k // 2)):
+            u = sf.unpack(fmt, pr[nm])
+            if (u.kind != sf.NORM or u.sign or u.m != 1 << mw
+                    or u.e + mw != kk):
+                findings.append(f"{where}: {nm} = {pr[nm]:#x} is not 2^{kk}")
+        if _dec(fmt, pr["rp"]) != 0:
+            findings.append(f"{where}: t = n/8, and the remainder is "
+                            f"{pr['rp']:#x}, not 0")
+        for nm, truth in (("sub_p", k <= emin), ("klt", k < emin)):
+            if (pr[nm] == sf.one_bits(fmt)) != truth or pr[nm] not in (
+                    0, sf.one_bits(fmt)):
+                findings.append(f"{where}: {nm} = {pr[nm]:#x}, want {truth}")
+        if k <= emin:
+            cu = Fraction(2) ** (emin - k) if k < emin else Fraction(1, 16)
+            if _dec(fmt, pr["Cu"]) != cu:
+                findings.append(f"{where}: Cu is not {cu}")
+            if "hu" in pr and _dec(fmt, pr["hu"]) != \
+                    Fraction(2) ** (emin - p - k):
+                findings.append(f"{where}: u/2 is not 2^{emin - p - k}")
+        for nm, role in (("Th", f"TH{j}"), ("Tl", f"TL{j}")):
+            if pr[nm] != b.words[b.roles[role][1]]:
+                findings.append(f"{where}: the table read for j = {j} is not "
+                                f"{role}")
+    return ran
+
+
+def _check_pow_small(b: Build, findings):
+    """The small fragments (n = 0 and n = 1): every word the fragment reads
+    carries a role and each of its roles is the IEEE-field value (the common
+    words, NEGONE, the flag words). -> words checked."""
+    fmt, W = b.fmt, b.fmt.width
+    tag = f"{b.meta['fn']} {fmt.name} {sf.RND_NAMES[b.rnd]} n = {b.meta['n']}"
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    full = (1 << W) - 1
+    want = {"ZERO": 0, "ONE": sf.one_bits(fmt), "INT1": 1,
+            "ABSM": full ^ (1 << (W - 1)),
+            "INF": ((1 << ew) - 1) << mw,
+            "QNAN": (((1 << ew) - 1) << mw) | (1 << (mw - 1)),
+            "QBIT": 1 << (mw - 1), "SIGN_SHIFT": W - 1,
+            "NEGONE": (1 << (W - 1)) | sf.one_bits(fmt)}
+    want.update({"FL_INVALID": 0x01, "FL_INEXACT": 0x10,
+                 "FL_OVER_INEXACT": 0x14})
+    used = {s[1] for i in b.live_indices() for s in b.body[i][2]
+            if s[0] == "w"}
+    if b.result[0] == "w":
+        used.add(b.result[1])
+    if b.flags[0] == "w":
+        used.add(b.flags[1])
+    n_ok = 0
+    for name in sorted(used):
+        roles = [r for r, ref in b.roles.items() if ref[1] == name]
+        if not roles:
+            findings.append(f"{tag}: a word the fragment reads with no role: "
+                            f"{name} = {b.words[name]:#x}")
+            continue
+        for r in roles:
+            if r not in want:
+                findings.append(f"{tag}: {r} is read and has no derivation")
+            elif b.words[name] != want[r]:
+                findings.append(f"{tag} {r}: {b.words[name]:#x} is not "
+                                f"{want[r]:#x}")
+            else:
+                n_ok += 1
+    return n_ok
+
+
+def check_pow_n_constants(builder=None, formats=POW_FORMATS, attrs=None,
+                          names=None, ns=None):
+    """(lines, findings): re-derive every derived constant of every built
+    pown, rootn and compound fragment at each of `formats`, at `ns` (default
+    pow_check_ns) under `attrs` (default pow_check_attrs): the common roles of
+    _check_pow_build, the n words (the section's comment), the small
+    fragments' used words, and the scale words where they act. `builder(name,
+    fmt, rnd, n)` is build with n=, or a faulted one for a test. `lines` say
+    what was checked; `findings` are the differences, each naming its n."""
+    builder = builder or (lambda name, fmt, rnd, n: build(name, fmt, rnd, n=n))
+    names = tuple(_POW_N_BUILDERS) if names is None else tuple(names)
+    lines, findings = [], []
+    for name in names:
+        for fmt in formats:
+            n_const = n_lanes = n_frag = 0
+            these = pow_check_ns(name, fmt) if ns is None else tuple(
+                n for n in ns if not (name == "rootn" and n == 0))
+            for n in these:
+                for rnd in (pow_check_attrs(fmt, n) if attrs is None
+                            else attrs):
+                    b = builder(name, fmt, rnd, n)
+                    mine = []
+                    if n in (0, 1):
+                        c, ln = _check_pow_small(b, mine), 0
+                    else:
+                        c, ln = _check_pow_build(b, mine,
+                                                 rnd == sf.RND_MODES[0])
+                    findings += [f"{s} (n = {n})" for s in mine]
+                    n_const += c
+                    n_lanes += ln
+                    n_frag += 1
+            lines.append(
+                f"{name} {fmt.name}: n in {these}: {n_const} derived "
+                f"constants in {n_frag} fragments, each the rounding its rule "
+                f"gives for an enclosure of the true number (the n words of "
+                f"the exact integer n or rational 1/n, the atanh series, the "
+                f"integer 8th root), the plan re-derived in exact rationals, "
+                f"the integers from the IEEE fields; {n_lanes} one-input "
+                f"lanes of the scale words")
+    return lines, findings
 
 
 def check_pow_constants(builder=None, formats=POW_FORMATS,
@@ -9067,7 +9698,7 @@ def fragment(name, fmt: FpFormat, rnd: int, n=None):
     if name not in NAMES and name not in TRIG_NAMES             and name not in INV_NAMES and name not in POW_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "
                          f"so far: "
-                         f"{', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS))}")
+                         f"{', '.join(NAMES + TRIG_NAMES + tuple(_INV_BUILDERS) + tuple(_POW_BUILDERS) + tuple(_POW_N_BUILDERS))}")
     key = (name, fmt, rnd, n)
     if key not in _CACHE:
         f = build(name, fmt, rnd, n=n).fragment()
@@ -10407,7 +11038,10 @@ def main(argv=None):
                          "trig and inv (atan, asin, acos and atan2: its "
                          "lines, too, only here), and inv-tw (the same at "
                          "fp32, the triple word: atan, parcel M4F1; its "
-                         "lines, too, only here), to check or list "
+                         "lines, too, only here), pow (pow and powr: its "
+                         "lines, too, only here) and pow-n (pown, rootn and "
+                         "compound, at the n list: its lines, too, only "
+                         "here), to check or list "
                          "(default: all, the reduction and trig checked but "
                          "not listed, inv checked and its differences "
                          "printed)")
@@ -10415,9 +11049,9 @@ def main(argv=None):
     only = tuple(n for n in args.only.split(",") if n)
     for n in only:
         if n not in NAMES and n not in ("reduction", "reduction-tw", "trig",
-                                        "inv", "inv-tw", "pow"):
+                                        "inv", "inv-tw", "pow", "pow-n"):
             ap.error(f"--only {n!r}: one of {', '.join(NAMES)}, reduction, "
-                     f"reduction-tw, trig, inv, inv-tw, pow")
+                     f"reduction-tw, trig, inv, inv-tw, pow, pow-n")
     names = tuple(n for n in only if n in NAMES) or (() if only else NAMES)
     reduction = not only or "reduction" in only
     reduction_tw = not only or "reduction-tw" in only
@@ -10425,6 +11059,7 @@ def main(argv=None):
     inv = not only or "inv" in only
     inv_tw = not only or "inv-tw" in only
     pow_ = not only or "pow" in only
+    pow_n_ = not only or "pow-n" in only
     if args.check:
         failed = False
         if names:
@@ -10515,6 +11150,21 @@ def main(argv=None):
                       f"{len(POW_FORMATS)} formats, "
                       f"{len(findings)} differences")
             failed = failed or bool(findings)
+        if pow_n_:
+            # parcel M3G2: pown, rootn and compound at the n list. As pow
+            # above, the default run prints only its differences
+            lines, findings = check_pow_n_constants()
+            if "pow-n" in only:
+                for ln in lines:
+                    print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            if "pow-n" in only:
+                print(f"mathlib --check (pow, integer operand): "
+                      f"{len(_POW_N_BUILDERS)} routines, "
+                      f"{len(POW_FORMATS)} formats, "
+                      f"{len(findings)} differences")
+            failed = failed or bool(findings)
         return 1 if failed else 0
     if names:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
@@ -10554,6 +11204,19 @@ def main(argv=None):
                     print(f"{name:8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "
                           f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
                           f"{POW_LIVE_CAP[name][fmt.name]}")
+    if "pow-n" in only:
+        # parcel M3G2: the integer operand's three at the n list
+        print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'n':>20s} "
+              f"{'insns':>6s} {'words':>6s} {'live':>5s}  cap")
+        for name in _POW_N_BUILDERS:
+            for fmt in POW_FORMATS:
+                for n in pow_check_ns(name, fmt):
+                    for rnd in pow_check_attrs(fmt, n):
+                        f = fragment(name, fmt, rnd, n)
+                        print(f"{name:8s} {fmt.name:6s} "
+                              f"{sf.RND_NAMES[rnd]:4s} {n:20d} {len(f):6d} "
+                              f"{len(f.words):6d} {f.live_max():5d}  "
+                              f"{POW_LIVE_CAP[name][fmt.name]}")
     if "trig" in only:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
               f"{'words':>6s} {'live':>5s}  cap")

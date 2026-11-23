@@ -58,9 +58,11 @@ tuple (x, y) of encodings, in the build's inputs' order.
 
 import collections
 import functools
+import hashlib
 import importlib.util
 import math
 import random
+import re
 import subprocess
 import sys
 from fractions import Fraction
@@ -95,8 +97,20 @@ CHECKS = ("pools", "regions", "specials", "structured", "seq", "bound",
 @functools.lru_cache(maxsize=None)
 def golden(fmt, rnd, lane, fn):
     """transcend.py's function: the definition, (bits, flag word), for the lane
-    (x, y). Cached, since a plant re-runs the lanes of the clean fragment."""
+    (x, y). Cached, since a plant re-runs the lanes of the clean fragment.
+    For pown, rootn and compound (parcel M3G2) the lane is (x, n) with n the
+    integer operand, which transcend.compute takes by keyword."""
+    if fn in ml.POW_INT_NAMES:
+        return transcend.compute(fmt, fn, lane[0], 0, rnd, n=lane[1])
     return transcend.compute(fmt, fn, lane[0], lane[1], rnd)
+
+
+def lane_args(fn, lane):
+    """The argument of a fragment's or build's evaluate() and run() for a lane:
+    the lane itself for pow and powr, whose two operands are inputs, and (x,)
+    for pown, rootn and compound (parcel M3G2), whose n is a constant of the
+    fragment and whose one input is x."""
+    return (lane[0],) if fn in ml.POW_INT_NAMES else lane
 
 
 def value(fmt, bits):
@@ -230,7 +244,7 @@ def check_pools(f, xs=None, results=None, marks=None, size=None):
         if size is None:
             size = POOL_SIZES[(fn, fmt.name)]
     if results is None:
-        results = [ml.evaluate(f, x) for x in xs]
+        results = [ml.evaluate(f, lane_args(fn, x)) for x in xs]
     t = Tally()
     for x, (bits, fw) in zip(xs, results):
         gb, gf = golden(fmt, rnd, x, fn)
@@ -1072,9 +1086,10 @@ def check_seq(f, xs=None, evaluator=None, loud=False, post=None, rows=None):
     xs += [x for x in dict.fromkeys(must) if x not in have]
     where = f"seq: {fn} {fmt.name} {sf.RND_NAMES[rnd]}"
     out = []
-    outs, words = routines.run(f, *_split(xs))
+    ins = _split(xs)[:1] if fn in ml.POW_INT_NAMES else _split(xs)
+    outs, words = routines.run(f, *ins)
     got = list(zip(outs, words))
-    true = [ml.evaluate(f, x) for x in xs]
+    true = [ml.evaluate(f, lane_args(fn, x)) for x in xs]
     ev = true if evaluator is None else [evaluator(f, x) for x in xs]
     bad = [x for x, a, b in zip(xs, got, ev) if a != b]
     if bad:
@@ -1086,7 +1101,8 @@ def check_seq(f, xs=None, evaluator=None, loud=False, post=None, rows=None):
         out.append(f"{where}: {len(wrong)} unmarked lanes on seq.py differ "
                    f"from transcend.{fn}, first {_hexes([wrong[0]])}")
     prog, bank = H.r24_program(f, loud)
-    res = seq.run(prog, *_split(xs), bank=bank)
+    res = seq.run(prog, *(ins if len(ins) > 1 else (ins[0], [0] * len(xs))),
+                  bank=bank)
     if post is not None:
         res = post(res)
     flags_or, marked = 0, False
@@ -1141,7 +1157,8 @@ def bound_log2(b, lane, signed=True):
     None where V is exact or the screens take the lane; 999.0 where V is not
     finite."""
     fmt = b.fmt
-    _res, _fl, pr = b.run(lane, ("Vh", "Vl", "Bv", "th0", "nf"))
+    _res, _fl, pr = b.run(lane_args(b.meta["fn"], lane),
+                          ("Vh", "Vl", "Bv", "th0", "nf"))
     if _screened(fmt, pr):
         return None
     try:
@@ -1178,10 +1195,11 @@ def check_bound(b, lanes, label="random", need=1):
     fmt, fn = b.fmt, b.meta["fn"]
     worst, n, over, differ = -1e9, 0, [], []
     for lane in lanes:
-        res, fw, pr = b.run(lane, ("th0",))
+        res, fw, pr = b.run(lane_args(fn, lane), ("th0",))
         if not fw & MARK and (res, fw) != golden(fmt, b.rnd, lane, fn):
             differ.append(lane)
-        if not in_main(fn, fmt, lane) or _screened(fmt, pr):
+        if not (in_main_n if fn in ml.POW_INT_NAMES else in_main)(
+                fn, fmt, lane) or _screened(fmt, pr):
             continue
         r = bound_log2(b, lane)
         n += 1
@@ -1595,12 +1613,1572 @@ def red_checks(plant, fmt=FP64, fn=None, rnds=(RNE,), bound_n=8,
 
 
 # ---- pown, rootn and compound: parcel M3G2 builds here ----
+
+# The lane of pown, rootn and compound is the pair (x, n): x an encoding and n
+# the build's integer operand (a Python int). Their fragments are keyed by n
+# (mathlib._POW_N_BUILDERS), so every check below takes the n it runs at, and
+# its findings name it. FUNCS and the pow-only tables above stay pow and powr.
+INT_FUNCS = ml.POW_INT_NAMES
+EV_N = lambda f, lane: ml.evaluate(f, (lane[0],))        # noqa: E731
+
+
+@functools.lru_cache(maxsize=None)
+def build_n(fn, fmt, rnd, n, plant=None):
+    """ml.build(fn, fmt, rnd, n=n, plant=plant), once (a Build is never
+    mutated by a check)."""
+    return ml.build(fn, fmt, rnd, n=n, plant=plant)
+
+
+@functools.lru_cache(maxsize=None)
+def fragment_n(fn, fmt, rnd, n, plant=None):
+    """The scheduled fragment (the library's own, held to its invariants, for
+    no plant)."""
+    if plant is None:
+        return ml.fragment(fn, fmt, rnd, n)
+    return build_n(fn, fmt, rnd, n, plant).fragment()
+
+
+def check_ns(fn, fmt):
+    """The n list of fn at fmt (mathlib.pow_check_ns)."""
+    return ml.pow_check_ns(fn, fmt)
+
+
+def check_attrs(fmt, n):
+    return ml.pow_check_attrs(fmt, n)
+
+
+def in_main_n(fn, fmt, lane):
+    """The lane (x, n) is one the main path answers (the model's regions.py
+    main_lane): x finite and nonzero, n not 0 or 1, rootn's x < 0 only for an
+    odd n, compound's x > -1. The screens may still take it."""
+    x, n = lane
+    if sf.unpack(fmt, x).kind in (sf.NAN, sf.INF, sf.ZERO) or n in (0, 1):
+        return False
+    q = value(fmt, x)
+    if fn in ("pown", "rootn") and abs(q) == 1:
+        return False              # L = 0: t = 0, nothing of the core to measure
+    if fn == "rootn":
+        return not (q < 0 and n % 2 == 0)
+    if fn == "compound":
+        return q > -1
+    return True
+
+
+def _true_pown(fmt, lane):
+    X, n = value(fmt, lane[0]), lane[1]
+    mag = mpmath.power(abs(_mp(X)), n)
+    return -mag if (X < 0 and n % 2) else +mag
+
+
+def _true_rootn(fmt, lane):
+    X, n = value(fmt, lane[0]), lane[1]
+    mag = mpmath.power(abs(_mp(X)), mpmath.mpf(1) / n)
+    return -mag if (X < 0 and n % 2) else +mag
+
+
+def _true_compound(fmt, lane):
+    X, n = value(fmt, lane[0]), lane[1]
+    return mpmath.power(_mp(X + 1), n)
+
+
+TRUE_FNS.update({"pown": _true_pown, "rootn": _true_rootn,
+                 "compound": _true_compound})
+
+
+# ---- the pools: (x, n) pairs, one pool for the three, grouped by n -----------
+
+def _int_pool(fmt):
+    """The vector sets' (operand, n) pairs (vectors.transcend_int_pow_cases as
+    transcend_cases calls it: 24 extra, seed 17) and the stage's (host/tests/
+    transcend_check.py's int_pow_cases at its default trials, seed 5),
+    deduplicated in order: 4,260, 4,131 and 3,204 pairs over 31 distinct n."""
+    tc = H._transcend_check()
+    return _dedup(list(vectors.transcend_int_pow_cases(fmt, 24, 17))
+                  + list(tc.int_pow_cases(fmt, _trials(fmt), 5)))
+
+
+POOL_FNS.update({fn: _int_pool for fn in INT_FUNCS})
+# the pool's lanes the golden stage runs of each n: every POOL_STEP-th (the
+# whole pools are pow-pools', on the box)
+POOL_STEP = 3
+
+
+@functools.lru_cache(maxsize=None)
+def pool_n(fn, fmt, n, step=POOL_STEP):
+    """The lanes of the pool of fn at fmt whose integer operand is n, every
+    `step`-th."""
+    return tuple([ln for ln in pool(fn, fmt) if ln[1] == n][::step])
+
+
+def check_pools_n(fn, fmt, rnd, n, plant=None, step=POOL_STEP, marks=None):
+    """[finding], Tally: pools, at n. The lanes of pool_n against transcend.py,
+    unmarked equal in bits and flag word, the marks counted and pinned to the
+    model's (POOL_MARKS_N: over the lanes this step takes; None where the pool
+    has none of n). `marks` stands for the pinned count."""
+    f = fragment_n(fn, fmt, rnd, n, plant)
+    xs = pool_n(fn, fmt, n, step)
+    if marks is None and step == POOL_STEP and xs:
+        marks = POOL_MARKS_N.get((fn, fmt.name, n), {}).get(
+            sf.RND_NAMES[rnd])
+    out, t = check_pools(f, list(xs), marks=marks, size=None)
+    return [s.replace("pools:", f"pools: n = {n}:", 1) for s in out], t
+
+
+# ---- the placed regions of the integer operand (the study's regions.py) -------
 #
-# (assign into POOL_FNS, TRUE_FNS, POOL_SIZES, POOL_MARKS, REGION_NAMES,
-# REGION_LANES, FIRST_LANES, SPECIAL_ROWS, SPECIAL_MARKS, STRUCT_ROWS, SHAPE,
-# EFT, FLAG_WORDS, MIN_MAX, PHASES_RNE and PHASE_DELTA, and extend plant_cases'
-# rows through a table of its own and POWR_ONLY's analogue; do not edit the
-# checks above)
+#   int<N>   x placed so that t = n log2|x| (pown: t uniform in range; rootn:
+#            x log-uniform over the format's range, t = log2|x|/n; compound:
+#            1 + x across (0, max] and x in [-1/2, -2^-(p+4)], |n log2(1 + x)|
+#            in range), either sign of x where the function allows, at n = N:
+#            int (3), int-neg (-3), int17, int1000, int31 (2^31 - 1), int63
+#            (-2^63: the study's 3.3 finds no main-path lane in it)
+#   zone     |x| (1 + x for compound) in the cancelling zone of M1's reduction,
+#            [1/2, 241/256), as pow's zone, at n = 3; zone<N> at n = N (where
+#            |n L| is still in range at the zone's top: 12,000 at fp64,
+#            188,000 at fp128, 2,990,000 at fp256; 1,000 at fp64 too)
+#   m1edge   compound: x just above -1: x = -(1 - k ulp) with k log-uniform to
+#            2^(p-1), so 1 + x = k ulp exactly (Sterbenz), n small enough
+#   nlow     pown and compound at fp64: n over NLOW_NS (n_l nonzero of both
+#            signs) and x = 1 + k ulp or 1 - k ulp (compound: x = +-k ulp), k up
+#            to the largest for which |n log2 x| is below T_f, and their mirrors
+#            (x negated where n is odd, for pown)
+REGION_N = {"int": 3, "int-neg": -3, "int17": 17, "int1000": 1000,
+            "int31": 2 ** 31 - 1, "int63": -2 ** 63}
+NLOW_NS = (2 ** 53 + 1, 2 ** 54 + 3, 2 ** 60 + 5, -(2 ** 54 + 3))
+ZONE_BIG = {"fp64": 12000, "fp128": 188000, "fp256": 2990000}
+
+
+def region_names_n(fn, fmt):
+    """The regions of fn at fmt, in the order they are reported."""
+    names = list(REGION_N) + ["zone"]
+    if fmt.name == "fp64":
+        names.append("zone1000")
+    names.append(f"zone{ZONE_BIG[fmt.name]}")
+    if fmt.name == "fp64" and fn in ("pown", "compound"):
+        names.append("nlow")
+    if fn == "compound":
+        names.append("m1edge")
+    return tuple(names)
+
+
+REGION_NAMES.update({fn: ("int", "int-neg", "int17", "int1000", "int31",
+                          "int63", "zone") for fn in INT_FUNCS})
+# the lanes a region at each format: the study's regions_run.py N (400 at fp64
+# and 80 above, as pow's), the box command's size; a check takes a tenth by
+# default (check_regions_n) and the golden stage's test fewer
+REGION_LANES.update({(fn, f.name): (400 if f.name == "fp64" else 80)
+                     for fn in INT_FUNCS for f in FORMATS})
+
+
+def region_n_of(name, fmt=None):
+    """The n of region `name`: REGION_N's, zone's 3, zone<N>'s and int<N>'s N;
+    None for nlow (its own set) and m1edge (n small)."""
+    if name in REGION_N:
+        return REGION_N[name]
+    if name == "zone":
+        return 3
+    m = re.fullmatch(r"(?:int|zone)(-?\d+)", name)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _nlow_kmax(fmt, n, below):
+    """The largest k with |n log2(1 +- k ulp)| below T_f (1 - k ulp is k half
+    ulps below 1): by mpmath, then checked at k + 1."""
+    Tf = ml._pow_t_reach(fmt) - 3
+    p = fmt.prec
+    ulp = Fraction(1, 2 ** ((p - 1) + (1 if below else 0)))
+
+    def ok(k):
+        q = 1 - k * ulp if below else 1 + k * ulp
+        with mpmath.workprec(p + 64):
+            return abs(n * mpmath.log(_mp(q), 2)) < Tf
+    lo, hi = 1, 1 << (p - 2)
+    if not ok(1):
+        return 0
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if ok(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def nlow_lanes(fmt, fn, n, per, rng):
+    """Lanes (x, n) beside 1 at one n (|n| above 2^53 at fp64, so n_l is not
+    zero): x = 1 + k ulp and 1 - k ulp (compound: x = +-k ulp), k up to the
+    largest for which |n log2 x| is below T_f (none where that is 0: n =
+    2^63 - 1 has no such lane at fp64), and their mirrors (x negated where n is
+    odd, for pown)."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    out = []
+    for below in (False, True):
+        kmax = _nlow_kmax(fmt, n, below)
+        ks = sorted({1, 2, kmax, max(1, kmax // 2)}
+                    | {rng.randint(1, max(1, kmax)) for _ in range(per)})
+        for k in ks:
+            if not 1 <= k <= kmax:
+                continue
+            if fn == "compound":
+                x = _enc(fmt, Fraction(k, 2 ** (p - 1 + below))
+                         * (-1 if below else 1))
+            else:
+                x = one - k if below else one + k
+            out.append((x, n))
+            if fn == "pown" and n % 2:
+                out.append((x | fmt.sign_mask, n))         # the mirror
+    return out
+
+
+def region_n(fmt, fn, name, count, seed=1):
+    """`count` lanes (x, n) of the region `name` for fn at fmt (the study's
+    regions.py, ported; seed * 1000003 + width). nlow takes `count` over its
+    four n; [] where the function has none of the region."""
+    rng = random.Random(seed * 1000003 + fmt.width)
+    p = fmt.prec
+    lo_e, hi_e = fmt.emin - p + 1, fmt.emax
+    Tf = ml._pow_t_reach(fmt) - 3
+    one = sf.one_bits(fmt)
+    out, tries = [], 0
+    if name == "nlow":
+        if fmt.name != "fp64" or fn == "rootn":
+            return []
+        out = []
+        for n in NLOW_NS:
+            out += nlow_lanes(fmt, fn, n, max(1, count // len(NLOW_NS)), rng)
+        return out
+    n_fixed = region_n_of(name, fmt)
+    if name == "m1edge" and fn != "compound":
+        return []
+    while len(out) < count and tries < 50 * count + 100:
+        tries += 1
+        lane = None
+        if name == "m1edge":
+            n = rng.choice((-17, -3, -2, 2, 3, 17))
+            kk = int(2 ** rng.uniform(0, p - 1))
+            q = -(1 - Fraction(kk, 2 ** p))                  # 1 + q = kk 2^-p
+            lane = (_enc(fmt, q), n)
+        elif name.startswith("zone"):
+            n = n_fixed
+            lo = 0.5
+            if fn != "rootn":
+                lo = max(0.5, 2.0 ** (-Tf / abs(n)))
+            X = _zone_x(rng, lo)
+            if fn == "compound":
+                lane = (_enc(fmt, X - 1), n)
+            else:
+                x = _enc(fmt, X)
+                if rng.random() < 0.5 and (fn != "rootn" or n % 2):
+                    x |= fmt.sign_mask
+                lane = (x, n)
+        else:
+            n = n_fixed
+            if fn == "compound":
+                if rng.random() < 0.3:
+                    x = _rand_mag(fmt, rng, -p - 4, -1) | fmt.sign_mask
+                else:
+                    x = _rand_mag(fmt, rng, lo_e, hi_e)
+                q = value(fmt, x) + 1
+                with mpmath.workprec(p + 64):
+                    L = mpmath.log(_mp(q), 2)
+                if abs(n * L) >= Tf:
+                    continue
+                lane = (x, n)
+            else:
+                if fn == "rootn":
+                    x = _rand_mag(fmt, rng, lo_e, hi_e)
+                else:
+                    with mpmath.workprec(p + 64):
+                        xv = mpmath.power(2, mpmath.mpf(rng.uniform(-Tf, Tf))
+                                          / n)
+                        x = _enc(fmt, ml._frac(xv))
+                    if not (x & ~fmt.sign_mask) or \
+                            (x & ~fmt.sign_mask) >= sf.inf_bits(fmt):
+                        continue
+                if rng.random() < 0.5 and (fn != "rootn" or n % 2):
+                    x |= fmt.sign_mask
+                lane = (x, n)
+        if lane is not None and in_main_n(fn, fmt, lane):
+            out.append(lane)
+    return out
+
+
+@functools.lru_cache(maxsize=None)
+def region_n_cached(fmt, fn, name, count, seed=1):
+    return tuple(region_n(fmt, fn, name, count, seed))
+
+
+def _by_n(lanes):
+    """{n: [lane]} in order."""
+    out = {}
+    for ln in lanes:
+        out.setdefault(ln[1], []).append(ln)
+    return out
+
+
+def reach_n(fn, fmt, lanes, n=None):
+    """(main-path lanes, lanes): a lane reaches the main path where in_main_n
+    holds and the screens do not take it (t_h0 inside them): the build's probe.
+    Lanes of one n only (`n`, else each lane's)."""
+    c = 0
+    for ln in lanes:
+        k = ln[1] if n is None else n
+        if not in_main_n(fn, fmt, ln):
+            continue
+        _r, _f, pr = build_n(fn, fmt, RNE, k).run((ln[0],), ("th0",))
+        if not _screened(fmt, pr):
+            c += 1
+    return c, len(lanes)
+
+
+def check_regions_n(fn, fmt, rnd, name, count=None, plant=None):
+    """[finding], (lanes, marked, main-path lanes): regions, one region at its
+    n (or its n's: nlow), every lane through the fragment of its n against
+    transcend.py (0 wrong unmarked), the main-path lanes counted (the region
+    that reaches none is NOT MEASURED, the caller says so)."""
+    count = REGION_LANES[(fn, fmt.name)] // 10 if count is None else count
+    lanes = region_n_cached(fmt, fn, name, count, 1)
+    out, n_lanes, marked, main = [], 0, 0, 0
+    for n, ls in _by_n(lanes).items():
+        f = fragment_n(fn, fmt, rnd, n, plant)
+        o, (nl, mk) = check_regions(f, {name: ls}, first=[], evaluator=EV_N)
+        out += [s.replace("regions:", f"regions: n = {n}:", 1) for s in o]
+        n_lanes += nl
+        marked += mk
+        main += reach_n(fn, fmt, ls, n)[0]
+    return out, (n_lanes, marked, main)
+
+
+# ---- the specials: the study's section 4, per n --------------------------------
+
+def _special_xs(fmt):
+    p = fmt.prec
+    one, mone = sf.one_bits(fmt), sf.one_bits(fmt, 1)
+    z, mz = sf.zero_bits(fmt), sf.zero_bits(fmt, 1)
+    inf, minf = sf.inf_bits(fmt), sf.inf_bits(fmt, 1)
+    qn, sn = sf.qnan_bits(fmt), sf.snan_bits(fmt)
+    mx, mn = sf.max_normal_bits(fmt), sf.min_subnormal_bits(fmt)
+    S = fmt.sign_mask
+
+    def v(s, m, e):
+        return _V(fmt, s, m, e)
+    return [z, mz, inf, minf, qn, sn, one, mone, one + 1, one - 1, mone + 1,
+            mone - 1, mn, mn | S, mx, mx | S, v(0, 3, 0), v(1, 3, 0),
+            v(0, 1, -1), v(1, 1, -1), v(0, 1, -p - 3), v(1, 1, -p - 3)]
+
+
+def special_rows_n(fn, fmt, n):
+    """[(label, lanes)] of fn at n: the model's row (specials.py): x specials
+    and neighbours of +-1, 0 and the range, at this n."""
+    return [(f"{fn} n = {n}: x specials and neighbours of +-1, 0 and the "
+             f"range", [(x, n) for x in _special_xs(fmt)])]
+
+
+def _named_special_lanes(fn, fmt, n):
+    """[(label, lane, (bits, flags))]: the study's named rows, answered by the
+    rule itself (not by transcend.py): rootn(+-0, n) by n's parity and sign
+    (2.6, MEASURED in 4), pown(-1, 2^63 - 1) = -1 and pown(-1, -2^63) = +1,
+    compound(-1, n)'s +0 or +inf, compound(x < -1) invalid, compound(+inf)."""
+    one, mone = sf.one_bits(fmt), sf.one_bits(fmt, 1)
+    z, mz = sf.zero_bits(fmt), sf.zero_bits(fmt, 1)
+    inf, minf = sf.inf_bits(fmt), sf.inf_bits(fmt, 1)
+    qn = sf.qnan_bits(fmt)
+    DZ, INV = sf.FLAG_DIVZERO, sf.FLAG_INVALID
+    out = []
+    if fn == "rootn" and n not in (0, 1):
+        for zero, neg in ((z, 0), (mz, 1)):
+            odd = n % 2 != 0
+            if n > 0:
+                want = (mz if (odd and neg) else z, 0)
+            else:
+                want = (minf if (odd and neg) else inf, DZ)
+            out.append((f"rootn({'-' if neg else '+'}0, {n})", (zero, n),
+                        want))
+    if fn == "pown" and n in (2 ** 63 - 1, -2 ** 63):
+        out.append((f"pown(-1, {n})", (mone, n),
+                    (mone if n % 2 else one, 0)))
+    if fn == "compound" and n not in (0, 1):
+        out.append((f"compound(-1, {n})", (mone, n),
+                    (z, 0) if n > 0 else (inf, DZ)))
+        out.append((f"compound(-2, {n})", (_enc(fmt, -2), n), (qn, INV)))
+        out.append((f"compound(+inf, {n})", (inf, n),
+                    (inf, 0) if n > 0 else (z, 0)))
+        out.append((f"compound(-inf, {n})", (minf, n), (qn, INV)))
+        out.append((f"compound(-0, {n})", (mz, n), (one, 0)))
+    return out
+
+
+def check_specials_n(fn, fmt, n, rnds=None, plant=None, marks=None):
+    """[finding], lanes: specials, at n: every row of special_rows_n through
+    the fragments at n under `rnds` (all five by default), unmarked equal to
+    transcend.py in bits AND flag word, the marks of the row the model's
+    (SPECIAL_MARKS_N: summed over the five attributes, compared where all five
+    run), and the named rows (_named_special_lanes) answered as the rule says
+    under every attribute run."""
+    rnds = RND_MODES if rnds is None else rnds
+    frags = {r: fragment_n(fn, fmt, r, n, plant) for r in rnds}
+    rows = special_rows_n(fn, fmt, n)
+    if marks is None:
+        pinned = SPECIAL_MARKS_N.get((fn, fmt.name, n))
+        marks = {rows[0][0]: None if pinned is None else sum(pinned)}
+    out, cnt = check_specials(fmt, fn, frags, evaluator=EV_N, rows=rows,
+                              marks={k: v for k, v in marks.items()
+                                     if v is not None})
+    for label, lane, want in _named_special_lanes(fn, fmt, n):
+        for r, f in frags.items():
+            cnt += 1
+            got = ml.evaluate(f, (lane[0],))
+            if got[1] & MARK or got != want:
+                out.append(f"specials: {fn} {fmt.name} "
+                           f"{sf.RND_NAMES[r]}: named row {label}: got "
+                           f"({got[0]:#x}, {got[1]:#x}), want "
+                           f"({want[0]:#x}, {want[1]:#x}) and unmarked")
+    return [s.replace("specials:", f"specials: n = {n}:", 1) for s in out], cnt
+
+
+def region_line_n(name, main, lanes):
+    """One region's line: a region none of whose lanes reaches the main path
+    is NOT MEASURED (its lane count printed), never a pass."""
+    if main == 0:
+        return f"{name}: NOT MEASURED ({lanes} lanes, none reaches the main path)"
+    return f"{name}: measured ({main} of {lanes} lanes reach the main path)"
+
+
+def region_summary_n(results):
+    """(passed, not_measured, lines, RESULT line) over {name: (main, lanes,
+    findings)}: the pass count is of the measured regions only, and the RESULT
+    line says how many were not measured."""
+    lines = [region_line_n(k, m, n) for k, (m, n, _f) in results.items()]
+    nm = [k for k, (m, _n, _f) in results.items() if m == 0]
+    bad = [k for k, (_m, _n, f) in results.items() if f]
+    passed = len(results) - len(nm) - len(bad)
+    res = (f"RESULT: {'ok' if not bad else 'FAIL'}: {passed} regions "
+           f"measured and passing, {len(nm)} NOT MEASURED ({', '.join(nm) or 'none'}), "
+           f"{len(bad)} failing")
+    return passed, nm, lines, res
+
+
+# ---- the structured lanes, per n -------------------------------------------------
+#
+# The expectations are check_structured's (decided, marked, nearest, midpoint,
+# free). The exact cases are chosen by transcend.py's OWN rules, not by this
+# file's idea of them: pown's and compound's by _pown_dyadic (M = 1 at any n,
+# an odd M only while M^n fits p + 1 bits and n > 0), rootn's by _rootn_dyadic
+# (M a perfect |n|-th power and |n| divides E; a negative n only where the root
+# is 1), compound's operand 1 + x by _exact_one_plus, its dominant operand by
+# transcend.compound's threshold vexp(x) >= p + 2 + bits(|n|).
+
+def _odd_candidates(fmt, n):
+    """Odd M >= 3 near the edges of _pown_dyadic's fit (M^n of p bits and of
+    p + 1 bits), and a few small ones."""
+    p = fmt.prec
+    out = [3, 5, 7, 9, 15]
+    if 2 <= n <= p + 1:        # past it _pown_dyadic answers None for every odd M > 1
+        for bits in (p, p + 1):
+            r = ml._iroot(1 << bits, n)
+            for d in (-4, -3, -2, -1, 0, 1, 2, 3):
+                m = r + d
+                if m >= 3 and m % 2 == 1:
+                    out.append(m)
+    return sorted({m for m in out if m.bit_length() <= p})
+
+
+def _pown_classes(fmt, n):
+    """(exact, mid): odd M >= 3 for which transcend._pown_dyadic(M, 0, n) is
+    an exact dyadic of at most p bits (exact: a representable result) and of
+    p + 1 bits (a midpoint of the format)."""
+    p = fmt.prec
+    exact, mid = [], []
+    for m in _odd_candidates(fmt, n):
+        res = transcend._pown_dyadic(fmt, m, 0, n)
+        if res is None:
+            continue
+        bl = res[0].bit_length()
+        (exact if bl <= p else mid if bl == p + 1 else []).append(m)
+    return exact, mid
+
+
+def _signs(fmt, x, n, both):
+    """x, and -x where n is odd (the sign of pown's and rootn's result) or
+    `both`."""
+    return [x, x | fmt.sign_mask] if (both or n % 2) else [x]
+
+
+def _structured_core_n(fn, fmt, n):
+    p = fmt.prec
+    rows = []
+    emin, emax = fmt.emin, fmt.emax
+
+    def x2(E):
+        return _V(fmt, 0, 1, E)
+    if fn == "pown":
+        decided = []
+        Es = [1, 2, -1, -3, 5, -7, 100]
+        for t in (emin - p, emin - p + 1, emin, emax, emax + 1, emax - 1):
+            if t % n == 0:
+                Es.append(t // n)
+        for E in Es:
+            if emin - p + 1 <= E <= emax:
+                decided += [(x, n) for x in _signs(fmt, x2(E), n, False)]
+        rows.append(("exact powers of two (x = 2^E, both signs where n is "
+                     "odd, integer t, overflow and the tie included where "
+                     "they exist)", decided, "decided"))
+        exact, mid = _pown_classes(fmt, n)
+        for e in (0, -3):
+            ex = [(_V(fmt, 0, m, e), n) for m in exact]
+            ex += [(_V(fmt, 1, m, e), n) for m in exact if n % 2]
+            rows.append((f"pown exact cases that must mark (odd M^n of at "
+                         f"most p bits, transcend._pown_dyadic), 2^{e}", ex,
+                         "marked"))
+        rows.append(("pown midpoint cases (M^n of p + 1 bits)",
+                     [(_V(fmt, 0, m, 0), n) for m in mid], "midpoint"))
+        neigh = [(x + d, n) for x, _n in
+                 [(_V(fmt, 0, m, 0), n) for m in exact[:3]] for d in (1, -1)]
+        # (3 +- ulp)^2 and the like are a midpoint to within the bound: free
+        rows.append(("their neighbours one ulp of x away", neigh, "free"))
+    elif fn == "rootn":
+        decided = []
+        k = abs(n)
+        for F in (1, -1, 2, 7, -9, 40):
+            E = F * n
+            if emin - p + 1 <= E <= emax:
+                decided += [(x, n) for x in _signs(fmt, x2(E), n, False)]
+        rows.append(("exact powers of two (x = 2^E, |n| divides E, both signs "
+                     "where n is odd)", decided, "decided"))
+        marked, neigh = [], []
+        for r in (3, 5, 7, 9, 11, 13, 15, 17):
+            if n < 0 or n > p:           # r^n of at most p bits needs n <= p
+                break
+            m = r ** n
+            if m.bit_length() > p:
+                break
+            for F in (0, 1, -2):
+                x = _V(fmt, 0, m, F * n)
+                u = sf.unpack(fmt, x)
+                if transcend._rootn_dyadic(fmt, u, n) is None:
+                    continue
+                marked += [(y, n) for y in _signs(fmt, x, n, False)]
+                neigh += [(x + 1, n), (x - 1, n)]
+        rows.append(("rootn exact cases that must mark (M a perfect |n|-th "
+                     "power, transcend._rootn_dyadic)", marked, "marked"))
+        rows.append(("their neighbours one ulp of x away", neigh, "nearest"))
+    else:                                              # compound
+        decided = []
+        for E in (1, 2, 3, 5, -1, -2, -3, -5):
+            decided.append((_enc(fmt, Fraction(2) ** E - 1), n))
+        rows.append(("1 + x a power of two (x = 2^E - 1, E of either sign)",
+                     decided, "decided"))
+        exact, mid = _pown_classes(fmt, n)
+        rows.append(("compound exact cases that must mark (1 + x = M odd, M^n "
+                     "of at most p bits: _exact_one_plus, _pown_dyadic)",
+                     [(_enc(fmt, m - 1), n) for m in exact], "marked"))
+        rows.append(("compound midpoint cases (M^n of p + 1 bits)",
+                     [(_enc(fmt, m - 1), n) for m in mid], "midpoint"))
+        thr = p + 2 + abs(n).bit_length()
+        dom = []
+        for V in (thr, thr - 1):
+            for m in (3, 5):
+                if V + 2 <= emax:
+                    dom.append((_V(fmt, 0, m, V - 1), n))
+        rows.append((f"compound's dominant operand at vexp(x) = p + 2 + "
+                     f"bits(|n|) = {thr} and one below (transcend.compound)",
+                     dom, "free"))
+    if fn == "pown" and n > 0 and n % 2:
+        # a negative result rounding to zero on the subnormal grid (the plant
+        # zero_sign_lost): x = -RN(2^((emin - p - 0.1) / n)), t = emin - p - 0.1
+        with mpmath.workprec(p + 64):
+            xv = mpmath.power(2, (mpmath.mpf(emin - p) - mpmath.mpf(1) / 10)
+                              / n)
+        rows.append(("a negative result rounding to zero on the subnormal "
+                     "grid (plant zero_sign_lost)",
+                     [(_enc(fmt, ml._frac(xv)) | fmt.sign_mask, n)], "free"))
+    # the plants' named lanes (the study's plants.py): compound(RN(0.1), 3) is
+    # two ulps off where 1 + x is rounded before the logarithm; rootn(-0, n
+    # even) is +0 (squareRoot(-0) is -0: the standard's note)
+    if fn == "compound":
+        rows.append(("plant compound_onep_rounded: x = RN(0.1), 1 + x not "
+                     "representable", [(_enc(fmt, Fraction(1, 10)), n)],
+                     "free"))
+    if fn == "rootn" and n % 2 == 0:
+        rows.append(("plant rootn_m0_neg: rootn(-0, n even) is +0",
+                     [(sf.zero_bits(fmt, 1), n)], "decided"))
+    return rows
+
+
+def _beside_one_n(fn, fmt, n):
+    """(below, above): lanes (x, n) whose t = Y log2|X| is under and over the
+    gate 2^-(p+3) (0.3 to 0.97 and 1.03 to 4 times it), found by scan: pown
+    has none (|t| >= |n| ulp / ln 2), rootn takes x = 1 +- k ulp at a large |n|,
+    compound x = +-m 2^-j."""
+    p = fmt.prec
+    gate = Fraction(1, 2 ** (p + 3))
+    cands = []
+    one = sf.one_bits(fmt)
+    if fn == "compound":
+        for j in range(p - 2, 2 * p + 10, 3):
+            for m in (1, 3, 5):
+                for sg in (1, -1):
+                    cands.append(_enc(fmt, sg * Fraction(m, 2 ** j)))
+    else:
+        for k in (1, 2, 3, 5, 9, 17, 33):
+            cands += [one + k, one - k]
+    below, above = [], []
+    for x in cands:
+        X = value(fmt, x) + (1 if fn == "compound" else 0)
+        if X <= 0:
+            continue
+        with mpmath.workprec(p + 64):
+            L = mpmath.log(_mp(X), 2)
+            t = abs(L * n) if fn != "rootn" else abs(L / n)
+            r = float(t / _mp(gate))
+        if 0.3 <= r <= 0.97 and len(below) < 3:
+            below.append((x, n))
+        elif 1.03 <= r <= 4 and len(above) < 3:
+            above.append((x, n))
+    return below, above
+
+
+def structured_rows_n(fn, fmt, n):
+    """[(label, lanes, expectation)] of fn at n: _structured_core_n's, the
+    lanes beside 1 under and over the gate (where they exist), and the small
+    fragments' (n = 0, 1)."""
+    p = fmt.prec
+    mx, mn = sf.max_normal_bits(fmt), sf.min_subnormal_bits(fmt)
+    one = sf.one_bits(fmt)
+    if n in (0, 1):
+        xs = _special_xs(fmt) + [mx, mn, one + 1, one - 1,
+                                 _V(fmt, 0, 1, -p - 1), _V(fmt, 1, 1, -p - 1),
+                                 _enc(fmt, -2), _enc(fmt, Fraction(-3, 2)),
+                                 _enc(fmt, Fraction(-1, 2))]
+        return [(f"the small fragment (n = {n}): specials, +-max, +-min, "
+                 f"neighbours of 1 and -1, x just inside +-2^-p, x < -1",
+                 [(x, n) for x in xs], "decided")]
+    rows = list(_structured_core_n(fn, fmt, n))
+    below, above = _beside_one_n(fn, fmt, n)
+    if below:
+        rows.append(("beside 1, t below 2^-(p+3) (the gate, both signs of x "
+                     "where they exist)", below, "decided"))
+    if above:
+        rows.append(("beside 1, t above the gate", above, "free"))
+    return [r for r in rows if r[1]]
+
+
+def check_structured_n(fn, fmt, rnd, n, plant=None):
+    """[finding], lanes: structured, at n."""
+    f = fragment_n(fn, fmt, rnd, n, plant)
+    out, cnt = check_structured(f, evaluator=EV_N,
+                                rows=structured_rows_n(fn, fmt, n))
+    return [s.replace("structured:", f"structured: n = {n}:", 1)
+            for s in out], cnt
+
+
+# ---- seq, per n --------------------------------------------------------------------
+
+def seq_lanes_n(fn, fmt, n):
+    """The seq check's lanes at n: the pool's lanes of n (every POOL_STEP-th),
+    every structured lane, and the loud ones (the largest finite x, a signalling
+    NaN, the least subnormal, an infinity)."""
+    out = list(pool_n(fn, fmt, n))
+    for _l, lanes, _e in structured_rows_n(fn, fmt, n):
+        out += lanes
+    out += [(sf.max_normal_bits(fmt), n), (sf.snan_bits(fmt), n),
+            (sf.min_subnormal_bits(fmt), n), (sf.inf_bits(fmt), n)]
+    return tuple(dict.fromkeys(out))
+
+
+def check_seq_n(fn, fmt, rnd, n, plant=None, **kw):
+    """[finding], lanes: seq, at n (check_seq on seq_lanes_n and the n's
+    structured rows)."""
+    f = fragment_n(fn, fmt, rnd, n, plant)
+    out, xs = check_seq(f, xs=seq_lanes_n(fn, fmt, n),
+                        rows=structured_rows_n(fn, fmt, n), **kw)
+    return [s.replace("seq:", f"seq: n = {n}:", 1) for s in out], xs
+
+
+# ---- the bound, per n ----------------------------------------------------------------
+
+# a region in which no lane reaches the main path is NOT MEASURED, not passed:
+# int63 at fp64 (the study's 3.3), and any other a run finds to have none
+BOUND_NO_MAIN.add("int63")
+
+
+def bound_regions_n(fn, fmt, count=8, seed=11):
+    """{region: lanes}: `count` points of each of the function's regions (the
+    bound's seed 11, the study's regions' own is 1)."""
+    return {r: region_n_cached(fmt, fn, r, count, seed)
+            for r in region_names_n(fn, fmt)}
+
+
+def check_bound_n(fn, fmt, rnd, name, count=8, plant=None, lanes=None):
+    """[finding], (worst, main-path lanes, lanes): bound, over one region's
+    lanes at each of its n (check_bound on the build of that n). The worst is
+    the largest found over THESE lanes; the zone's and int1000's direct errors
+    are a sample (the budget at 10,000 lanes is parcel M3G3's)."""
+    lanes = region_n_cached(fmt, fn, name, count, 11) if lanes is None \
+        else lanes
+    out, worst, main, total = [], -1e9, 0, 0
+    for n, ls in _by_n(lanes).items():
+        b = build_n(fn, fmt, rnd, n, plant)
+        o, (w, m, t) = check_bound(b, ls, f"{name} n = {n}")
+        out += o
+        worst, main, total = max(worst, w), main + m, total + t
+    return out, (worst, main, total)
+
+
+# ---- the shape, per n ----------------------------------------------------------------
+
+def _phases_digest(b):
+    c = collections.Counter(b.phase_of[i] for i in b.live_indices())
+    return hashlib.sha256(repr(sorted(c.items())).encode()).hexdigest()[:16]
+
+
+def check_shape_n(fn, fmt, n, rnds=None, plant=None, pins=None, eft=None,
+                  fragments=None, builds=None):
+    """[finding]: shape, at n. Per attribute the instructions, bank words and
+    live values, the dag digest of the scheduled fragment and the digest of
+    the instructions by phase pinned to the model's (PINS_N); the Fast2Sum and
+    TwoSum counts (EFT_N); the flag word's values (FLAG_WORDS_N); no MIN or MAX;
+    the scheduled fragment the design's reordered; its own invariants under
+    POW_LIVE_CAP. `pins`, `eft`, `fragments` and `builds` stand for the pinned
+    tables and the objects, for the tests that doctor one leg."""
+    pins = PINS_N if pins is None else pins
+    eft_t = EFT_N if eft is None else eft
+    rnds = check_attrs(fmt, n) if rnds is None else rnds
+    out = []
+    for rnd in rnds:
+        b = (builds or {}).get(rnd) or build_n(fn, fmt, rnd, n, plant)
+        f = (fragments or {}).get(rnd) or b.fragment()
+        key = (fn, fmt.name, sf.RND_NAMES[rnd], n)
+        where = f"shape: n = {n}: {fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+        want = pins[key]
+        got = (len(f), len(f.words), f.live_max(), ml.dag_digest(f)[:32],
+               _phases_digest(b))
+        names = ("instructions", "bank words", "values live",
+                 "dag digest", "instructions-by-phase digest")
+        for nm, g, w in zip(names, got, want):
+            if g != w:
+                out.append(f"{where}: {nm} {g}, pinned {w}")
+        e = (b.meta["fast_two_sum"], b.meta["two_sum"])
+        if e != tuple(eft_t[(fn, fmt.name, n)]):
+            out.append(f"{where}: {e[0]} Fast2Sums and {e[1]} TwoSums, the "
+                       f"model's {eft_t[(fn, fmt.name, n)]}")
+        fw = routines.flag_words(f)
+        wantfw = FLAG_WORDS_N[(fn, f"n{n}" if n in (0, 1) else
+                               ("neg" if n < 0 else "pos"))]
+        if fw != wantfw:
+            out.append(f"{where}: the flag word takes "
+                       f"{sorted(hex(w) for w in fw or ())}, pinned "
+                       f"{sorted(hex(w) for w in wantfw)}")
+        counts = f.counts()
+        if counts.get("min", 0) or counts.get("max", 0):
+            out.append(f"{where}: MIN or MAX instructions: {counts}")
+        out += [f"shape: n = {n}: {s}" for s in H.check_reorder(b, f)]
+        out += [f"{where}: invariants: {s}"
+                for s in ml.invariants(f, live_cap=ml.POW_LIVE_CAP[fn][
+                    fmt.name])]
+    return out
+
+
+def check_caps_n(fn, fmt, ns=None, plant=None, caps=None, fragments=None):
+    """[finding]: shape. POW_LIVE_CAP's row of fn at fmt is the measured
+    maximum over the n list and its attributes, the fragment of that maximum
+    holds it and fails, by name, a cap one under. `caps` stands for the table,
+    `fragments` {(n, rnd): Fragment} for the objects."""
+    caps = ml.POW_LIVE_CAP if caps is None else caps
+    frags = fragments or {(n, rnd): fragment_n(fn, fmt, rnd, n, plant)
+                          for n in (check_ns(fn, fmt) if ns is None else ns)
+                          for rnd in check_attrs(fmt, n)}
+    lives = {k: f.live_max() for k, f in frags.items()}
+    top = max(lives.values())
+    cap = caps[fn][fmt.name]
+    out = []
+    if cap != top:
+        out.append(f"shape: {fn} {fmt.name}: the cap is {cap}, the most "
+                   f"values live over {len(frags)} fragments is {top}")
+    worst = frags[max(lives, key=lives.get)]
+    if ml.invariants(worst, live_cap=top) != []:
+        out.append(f"shape: {fn} {fmt.name}: the maximal fragment fails its "
+                   f"own cap {top}")
+    under = ml.invariants(worst, live_cap=top - 1)
+    if under != [f"{top} values live at once, past {top - 1}"]:
+        out.append(f"shape: {fn} {fmt.name}: a cap one under ({top - 1}) does "
+                   f"not fail by name: {under}")
+    return out
+
+
+# ---- core: the double-word Y and the Fraction ybound ---------------------------------
+
+def check_core_n(fn, fmt, rnd=RNE, plant=None, lanes=None):
+    """[finding], (worst, lanes, n_l signs): core, at fp64 for pown and
+    compound. (1) The double-word Y path on real lanes: the nlow region's
+    lanes (n_l of both signs) through the build of their n, |V - f| / Bv under
+    1 by mpmath (bound_log2), a finding where one sign of n_l is missing among
+    the main-path lanes. (2) The Fraction ybound, on lanes of each function at
+    n = 3 and at fp64's n_l lanes: the build's own Bv equal to the exact bound
+    |V| (2^-(p+G) + |t_h| B1 + |Y_h k| B2) rounded upward (_check_ybound's
+    rule), where B2 is not 0 (fp64) and the term is absent where it is 0."""
+    out = []
+    p, G = fmt.prec, ml.GUARD[fmt.name]
+    P = ml.plan_pow(fmt, G)
+    worst, n_main, signs = -1e9, 0, set()
+    if fn in ("pown", "compound") and fmt.name == "fp64":
+        lanes = region_n_cached(fmt, fn, "nlow", 40, 5) if lanes is None \
+            else lanes
+        for n, ls in _by_n(lanes).items():
+            b = build_n(fn, fmt, rnd, n, plant)
+            hi, lo = ml._pow_int_words(fmt, n)
+            for ln in ls:
+                _r, _f, pr = b.run((ln[0],), ("th0",))
+                if not in_main_n(fn, fmt, ln) or _screened(fmt, pr):
+                    continue
+                r = bound_log2(b, ln)
+                n_main += 1
+                signs.add(value(fmt, lo) < 0 if lo is not None else None)
+                if r is not None:
+                    worst = max(worst, r)
+                    if r >= 0:
+                        out.append(f"core: {fn} {fmt.name} n = {n}: past the "
+                                   f"bound at {_hexes([ln])}: 2^{r:+.2f} Bv")
+        if signs != {True, False}:
+            out.append(f"core: {fn} {fmt.name}: n_l has "
+                       f"{'one sign' if len(signs) == 1 else 'no lane'} "
+                       f"among the {n_main} main-path lanes")
+    # the Fraction ybound, by the fragments' own words
+    if P.B2:
+        bad = tot = 0
+        for n in (3, -3, 2 ** 53 + 1):
+            if fn == "rootn" and n == 0:
+                continue
+            b = build_n(fn, fmt, rnd, n, plant)
+            yb = Fraction(1, abs(n)) if fn == "rootn" else Fraction(abs(n))
+            for ln in region_n_cached(fmt, fn, "int", 12, 7):
+                ln = (ln[0], n)
+                if not in_main_n(fn, fmt, ln):
+                    continue
+                _r, _f, pr = b.run((ln[0],), ("Vh", "th", "Bv", "kf", "th0"))
+                if _screened(fmt, pr):
+                    continue
+                tot += 1
+                need = abs(value(fmt, pr["Vh"])) * (
+                    Fraction(1, 2 ** (p + G))
+                    + abs(value(fmt, pr["th"])) * P.B1
+                    + yb * abs(value(fmt, pr["kf"])) * P.B2)
+                got = value(fmt, pr["Bv"])
+                if not need <= got <= need * (1 + Fraction(1, 2 ** (p - 3))):
+                    bad += 1
+        if bad:
+            out.append(f"core: {fn} {fmt.name}: the build's Bv is not the "
+                       f"exact bound |V| (2^-(p+G) + |t_h| B1 + |Y k| B2), "
+                       f"upward rounded, on {bad} of {tot} lanes")
+    return out, (worst, n_main, sorted(s for s in signs if s is not None))
+
+
+# ---- the constants ----------------------------------------------------------------------
+
+def check_constants_n(**kw):
+    """[finding], lines: constants. mathlib.check_pow_n_constants() in
+    process, at POW_FORMATS unless `formats` is given."""
+    kw.setdefault("formats", FORMATS)
+    lines, findings = ml.check_pow_n_constants(**kw)
+    return [f"constants: {s}" for s in findings], lines
+
+
+def check_constants_n_cli():
+    """[finding], output: constants. `python -m cft_golden.mathlib --check
+    --only pow-n` in a process of its own, exit 0 and its last line ending
+    `0 differences`, listing every routine and format."""
+    r = subprocess.run([sys.executable, "-B", "-m", "cft_golden.mathlib",
+                        "--check", "--only", "pow-n"], capture_output=True,
+                       text=True, cwd=ROOT / "python")
+    out = r.stdout.strip().splitlines()
+    findings = []
+    if r.returncode != 0:
+        findings.append(f"constants: --check --only pow-n exited "
+                        f"{r.returncode}")
+    want = (f"mathlib --check (pow, integer operand): "
+            f"{len(ml._POW_N_BUILDERS)} routines, {len(ml.POW_FORMATS)} "
+            f"formats, 0 differences")
+    if not out or out[-1] != want:
+        findings.append(f"constants: the last line is "
+                        f"{out[-1] if out else r.stderr[-200:]!r}, not "
+                        f"{want!r}")
+    n = sum(1 for ln in out if ln.split(" ")[0] in ml._POW_N_BUILDERS)
+    if n != len(ml._POW_N_BUILDERS) * len(ml.POW_FORMATS):
+        findings.append(f"constants: {n} routine lines, "
+                        f"{len(ml._POW_N_BUILDERS) * len(ml.POW_FORMATS)} "
+                        f"wanted")
+    return findings, out
+
+
+# ---- the plants, per n ------------------------------------------------------------------
+#
+# Every plant of POW_PLANTS acts on the build it reaches and is refused by name
+# ("does not apply") where it does not: PLANT_N says, for each, which (function,
+# n) it is shown at; the plants of pow's front (pow_zero_nan, pow_one_nan,
+# sign_even, integrality_wide, sign_odd_lost, y_one_loud) and powr's are not
+# reached by any of the three, and the plants of the budget are parcel M3G3's.
+
+POW_FRONT_ONLY = {"pow_zero_nan", "pow_one_nan", "sign_even",
+                  "integrality_wide", "sign_odd_lost", "y_one_loud",
+                  "powr_neg_ok", "powr_zero_zero"}
+# plant: [(fn, n)] the cases it is shown red at (fp64)
+PLANT_N = {
+    "rootn_m0_neg": [("rootn", 2)],
+    "compound_onep_rounded": [("compound", 3)],
+    "n_low_dropped": [("pown", 2 ** 53 + 1), ("compound", 2 ** 53 + 1)],
+    "n_word_ulp": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "n_row_loud": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "exact_unmarked": [("pown", 2), ("compound", 2), ("rootn", 2)],
+    "exact_rule_off": [("pown", 2), ("rootn", 2), ("compound", 2)],
+    "exact_rule_no_tl": [("pown", 3), ("compound", 3)],
+    "midpoint_unmarked": [("pown", 2)],
+    "near_one_gate_off": [("compound", 3), ("rootn", 1000)],
+    "side_rule_off": [("compound", 3), ("rootn", 1000)],
+    "screen_low": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "mark_silenced": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "bound_loose": [("pown", 2), ("rootn", 3), ("compound", 3)],
+    "zero_sign_lost": [("pown", 3)],
+    "log_table_entry": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "il2h_ulp": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "screen_ulp": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "two_sum_all": [("pown", 3), ("rootn", 3), ("compound", 3)],
+    "log_short": [("pown", 3), ("rootn", 3), ("compound", 3)],
+}
+
+
+def _reaches_n(fn, fmt, rnd, n, plant):
+    try:
+        build_n(fn, fmt, rnd, n, plant)
+    except ValueError as e:
+        if "does not apply" not in str(e):
+            raise
+        return False
+    return True
+
+
+def red_checks_n(plant, fn, n, fmt=FP64, rnds=(RNE,), bound_n=8,
+                 region_n_=6):
+    """{check: [findings]} for the checks RED on `plant` (None: the control) at
+    (fn, n) at `fmt`: pools (the pool's lanes of n, every POOL_STEP-th), seq,
+    regions (the n's own region lanes), structured and specials at n under all
+    five attributes where they reach, bound over the n's int region (bound_n
+    points), shape under all five and core (fp64) and constants (rne). A check
+    a plant cannot reach is green there; ValueError where the plant does not
+    apply at (fn, n) under any attribute."""
+    reach = [r for r in RND_MODES if _reaches_n(fn, fmt, r, n, plant)]
+    if not reach:
+        raise ValueError(f"plant {plant!r} does not apply to {fn} at "
+                         f"{fmt.name}, n = {n} under any attribute")
+    rnds = tuple(r for r in rnds if r in reach) or (reach[0],)
+    red = {}
+
+    def add(name, found):
+        if found:
+            red.setdefault(name, []).extend(found)
+    for rnd in rnds:
+        add("pools", check_pools_n(fn, fmt, rnd, n, plant)[0])
+    add("seq", check_seq_n(fn, fmt, rnds[0], n, plant)[0])
+    huge = fmt.name == "fp64" and abs(n) > 2 ** 53 and fn != "rootn"
+    if huge:           # x beside 1: the only lanes |n log2 x| keeps in range
+        lanes = tuple(nlow_lanes(fmt, fn, n, region_n_,
+                                 random.Random(1))) or ()
+    else:
+        lanes = tuple((x, n) for x, _n in region_n(fmt, fn, "int", region_n_,
+                                                    1))
+    for rnd in (RNE, RTZ, RUP):
+        if rnd in reach:
+            f = fragment_n(fn, fmt, rnd, n, plant)
+            add("regions", check_regions(f, {"int": list(lanes)}, first=[],
+                                         evaluator=EV_N)[0])
+    if huge:           # the nlow region too: n_l of both signs (its four n)
+        add("regions", check_regions_n(fn, fmt, RNE, "nlow", 40, plant)[0])
+    for rnd in reach:
+        add("structured", check_structured_n(fn, fmt, rnd, n, plant)[0])
+    add("specials", check_specials_n(fn, fmt, n, rnds, plant)[0])
+    b = build_n(fn, fmt, RNE, n, plant)
+    if huge:
+        pts = tuple(nlow_lanes(fmt, fn, n, bound_n, random.Random(11)))
+    else:
+        pts = tuple((x, n) for x, _n in region_n(fmt, fn, "int", bound_n,
+                                                  11))
+    if pts:
+        add("bound", check_bound(b, list(pts), f"int n = {n}")[0])
+    pinned = tuple(r for r in reach if r in check_attrs(fmt, n))
+    add("shape", check_shape_n(fn, fmt, n, pinned, plant))
+    if fmt.name == "fp64" and fn in ("pown", "compound") \
+            and abs(n) > 2 ** 53 and plant is not None:
+        add("core", check_core_n(fn, fmt, RNE, plant)[0])
+    elif fmt.name == "fp64" and plant is None:
+        add("core", check_core_n(fn, fmt, RNE, plant)[0])
+    add("constants", check_constants_n(
+        builder=lambda name, f_, r_, n_: build_n(name, f_, r_, n_, plant),
+        formats=(fmt,), attrs=(RNE,), names=(fn,), ns=(n,))[0])
+    return red
+
+# ---- the pinned data: the MODEL's, for the n list ----------------------------
+#
+# generated by the parcel's scratch script from the MODEL (docs/studies/m3/m3pow.py build_any at
+# the base), once: shape (instructions, bank words, live, dag digest, instructions-by-phase digest)
+PINS_N = {('compound', 'fp128', 'rdn', -9223372036854775808): (462, 155, 20, 'dfed1224adf3386e0f6bd34632793689',
+                                                      '6e7f72726998556a'),
+ ('compound', 'fp128', 'rdn', -3): (462, 155, 20, '44358e97507b10a207b862dd9b90e50a', '6e7f72726998556a'),
+ ('compound', 'fp128', 'rdn', 0): (9, 8, 3, '425d2afda22e322f80785dc953cf9f09', '87852c9d56d2b291'),
+ ('compound', 'fp128', 'rdn', 1): (26, 10, 7, 'f8a5c3013a71d0affb26f97e42f823e2', '8b1e2965175a1b97'),
+ ('compound', 'fp128', 'rdn', 3): (463, 155, 20, '29d9b9e51a90f8329b787ea83b9b8b94', '1a918aaa97faa307'),
+ ('compound', 'fp128', 'rmm', -9223372036854775808): (469, 153, 22, 'cad39db86321afaf40eac637bea54e14',
+                                                      '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rmm', -3): (469, 153, 22, '6eb373cf2a2de2687489b1082e9746c0', '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rmm', 0): (9, 8, 3, '425d2afda22e322f80785dc953cf9f09', '87852c9d56d2b291'),
+ ('compound', 'fp128', 'rmm', 1): (26, 10, 7, 'd948cc6cd6d146bf0b09a7ec07bf9079', '8b1e2965175a1b97'),
+ ('compound', 'fp128', 'rmm', 3): (469, 153, 22, 'a2a7f08dba9dc328d4cdd21d18003011', '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rne', -9223372036854775808): (469, 153, 22, 'eb5503d1a82424d2b81024a66f6b2299',
+                                                      '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rne', -3): (469, 153, 22, 'd4b59991369daed2ff176ff66b892379', '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rne', 0): (9, 8, 3, '425d2afda22e322f80785dc953cf9f09', '87852c9d56d2b291'),
+ ('compound', 'fp128', 'rne', 1): (25, 10, 7, '999dd016065188f81579731dd1ac8b94', '6bb06f4f804cd716'),
+ ('compound', 'fp128', 'rne', 3): (469, 153, 22, '0aa987ee20aaab40e7d6fa74aa6d666a', '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rne', 17): (469, 153, 22, '57268d1a1d4366609750bcd7c48943d9', '8b6edc94bc5eda3d'),
+ ('compound', 'fp128', 'rtz', -9223372036854775808): (462, 155, 20, '21340a0e96dd7022c4f4ea39aeb6ce7a',
+                                                      '6e7f72726998556a'),
+ ('compound', 'fp128', 'rtz', -3): (462, 155, 20, '6044d4fb53e29b472056fb5a5eede6ae', '6e7f72726998556a'),
+ ('compound', 'fp128', 'rtz', 0): (9, 8, 3, '425d2afda22e322f80785dc953cf9f09', '87852c9d56d2b291'),
+ ('compound', 'fp128', 'rtz', 1): (26, 10, 7, 'ff14e2dcf435f40c6c97a354b030b299', '8b1e2965175a1b97'),
+ ('compound', 'fp128', 'rtz', 3): (463, 155, 20, '3de961adca1ff2380e455a8dd5c29493', '1a918aaa97faa307'),
+ ('compound', 'fp128', 'rtz', 17): (463, 155, 20, '527eb8814bf42b201cb28d7587587b2b', '1a918aaa97faa307'),
+ ('compound', 'fp128', 'rup', -9223372036854775808): (462, 154, 20, '94dc5647d2835717cc7c5e55db94c262',
+                                                      '6e7f72726998556a'),
+ ('compound', 'fp128', 'rup', -3): (462, 154, 20, '957c430c64e810d9be73d526db62e38b', '6e7f72726998556a'),
+ ('compound', 'fp128', 'rup', 0): (9, 8, 3, '425d2afda22e322f80785dc953cf9f09', '87852c9d56d2b291'),
+ ('compound', 'fp128', 'rup', 1): (26, 10, 7, '805920292627e9e6a10782d5c6bd43bb', '8b1e2965175a1b97'),
+ ('compound', 'fp128', 'rup', 3): (463, 154, 20, 'da42e797fbac6d2c4772df1594eb53d4', '1a918aaa97faa307'),
+ ('compound', 'fp256', 'rdn', -9223372036854775808): (513, 200, 20, 'f721096e631596e7b6e692c8ed21b323',
+                                                      'e46a3ec1d92bddb1'),
+ ('compound', 'fp256', 'rdn', -3): (513, 200, 20, '2a94c9912a69e489c2aa99b9f1043ce7', 'e46a3ec1d92bddb1'),
+ ('compound', 'fp256', 'rdn', 0): (9, 8, 3, 'e9660be42f4f7f1785a5ad7a65e05819', '87852c9d56d2b291'),
+ ('compound', 'fp256', 'rdn', 1): (26, 10, 7, '2bb18c0a52d96a26799cc1506f82b16c', '8b1e2965175a1b97'),
+ ('compound', 'fp256', 'rdn', 3): (514, 200, 20, '535a7ff56c1acec4b98d28f29ee5f3cc', 'c22cc9a03504c48f'),
+ ('compound', 'fp256', 'rmm', -9223372036854775808): (520, 198, 22, '0dd5abe266775784706b4df1ca1a4179',
+                                                      'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rmm', -3): (520, 198, 22, '4653eebcb4f4562a9ac091202297ab2e', 'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rmm', 0): (9, 8, 3, 'e9660be42f4f7f1785a5ad7a65e05819', '87852c9d56d2b291'),
+ ('compound', 'fp256', 'rmm', 1): (26, 10, 7, '8564949636426691b343a8b9dae14e45', '8b1e2965175a1b97'),
+ ('compound', 'fp256', 'rmm', 3): (520, 198, 22, '410a7dfd21f06cf30ddbd181d620f9e3', 'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rne', -9223372036854775808): (520, 198, 22, '725084c0ce0d0a439d2e70571f524622',
+                                                      'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rne', -3): (520, 198, 22, '2632852ef3bb320efaa4864a7849dfc0', 'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rne', 0): (9, 8, 3, 'e9660be42f4f7f1785a5ad7a65e05819', '87852c9d56d2b291'),
+ ('compound', 'fp256', 'rne', 1): (25, 10, 7, '7d250d1bde78ef5656294c8768e5c08b', '6bb06f4f804cd716'),
+ ('compound', 'fp256', 'rne', 3): (520, 198, 22, 'a6edfc4423fb2eab99bddf3e2450648c', 'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rne', 17): (520, 198, 22, 'fb5d37bfda3de5da674c7d757c78ce03', 'ad5f92e987862d1b'),
+ ('compound', 'fp256', 'rtz', -9223372036854775808): (513, 200, 20, '364a375de5861ba34ed5a1d228c6b3fc',
+                                                      'e46a3ec1d92bddb1'),
+ ('compound', 'fp256', 'rtz', -3): (513, 200, 20, 'ed1b51d43908243747c74c35463f87f0', 'e46a3ec1d92bddb1'),
+ ('compound', 'fp256', 'rtz', 0): (9, 8, 3, 'e9660be42f4f7f1785a5ad7a65e05819', '87852c9d56d2b291'),
+ ('compound', 'fp256', 'rtz', 1): (26, 10, 7, '270a06880955b4102a0105347d18a223', '8b1e2965175a1b97'),
+ ('compound', 'fp256', 'rtz', 3): (514, 200, 20, 'cbcff15870fd6d85892be89f88c924ad', 'c22cc9a03504c48f'),
+ ('compound', 'fp256', 'rtz', 17): (514, 200, 20, '9ac4e4ac62476ef15bc5878725343c97', 'c22cc9a03504c48f'),
+ ('compound', 'fp256', 'rup', -9223372036854775808): (513, 199, 20, 'f9c47d2a0964b2270ad172bfa6c9897b',
+                                                      'e46a3ec1d92bddb1'),
+ ('compound', 'fp256', 'rup', -3): (513, 199, 20, 'cde7b5e816077d9955f6887531e7ff54', 'e46a3ec1d92bddb1'),
+ ('compound', 'fp256', 'rup', 0): (9, 8, 3, 'e9660be42f4f7f1785a5ad7a65e05819', '87852c9d56d2b291'),
+ ('compound', 'fp256', 'rup', 1): (26, 10, 7, '5f76ed1e6e05ab6571b12b01ad2f305f', '8b1e2965175a1b97'),
+ ('compound', 'fp256', 'rup', 3): (514, 199, 20, 'ef7141df32e998e703139f896f37dbfe', 'c22cc9a03504c48f'),
+ ('compound', 'fp64', 'rdn', -3): (403, 127, 21, '7466d2b41ab44cffcf0e6d2245957818', '16ceb96e4ddbe889'),
+ ('compound', 'fp64', 'rdn', 0): (9, 8, 3, 'ab315843037c0487427e8ba4046dab66', '87852c9d56d2b291'),
+ ('compound', 'fp64', 'rdn', 1): (26, 10, 7, 'fc5e373c0211b193195fd09a2c0c56c8', '8b1e2965175a1b97'),
+ ('compound', 'fp64', 'rdn', 3): (404, 127, 21, '12b1771a67cbd61ca09f19273fa2e598', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rdn', 9007199254740993): (405, 127, 21, '3e346094d790df28095f62c89ff9af31',
+                                                 '6676f859f6d982a4'),
+ ('compound', 'fp64', 'rmm', -3): (410, 126, 22, '5a177234f3cc993ba15e3ac066ab53ad', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rmm', 0): (9, 8, 3, 'ab315843037c0487427e8ba4046dab66', '87852c9d56d2b291'),
+ ('compound', 'fp64', 'rmm', 1): (26, 10, 7, '56b1190ccb29e7f1dfbcb804f90d60f3', '8b1e2965175a1b97'),
+ ('compound', 'fp64', 'rmm', 3): (410, 126, 22, 'e9ea22cc56fe718afb0d66ea48f76b83', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rmm', 9007199254740993): (411, 126, 22, 'e454bd7e36b4188d5491892d11d06375',
+                                                 '2e52f03de8a21a02'),
+ ('compound', 'fp64', 'rne', -9223372036854775808): (410, 126, 22, '07deb52d5ec7c2421b344b4eb739e470',
+                                                     '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', -3): (410, 126, 22, '978e38176873f3c288cb4ce4f70f13f0', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', -2): (410, 125, 22, '7047c168f081b80fd8aa13474e264386', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 0): (9, 8, 3, 'ab315843037c0487427e8ba4046dab66', '87852c9d56d2b291'),
+ ('compound', 'fp64', 'rne', 1): (25, 10, 7, '643c43b7d7e325456fd368126a6e8e14', '6bb06f4f804cd716'),
+ ('compound', 'fp64', 'rne', 2): (410, 125, 22, 'c8f446c50b79ae1fec67de59df4f8f47', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 3): (410, 126, 22, '557a39f6bd68b545ad2d01924e926801', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 8): (410, 125, 22, '5cfcd301b8b2909cc314c71922c4cd62', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 17): (410, 126, 22, '3fb7b898a80bcaf76cc8a1f56d37618a', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 1000): (410, 126, 22, 'a693da8dd1826d8e97c7c3ce1602936b', '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 2147483647): (410, 126, 22, '41ff0fc8536aa926ee4c94448371cd6f',
+                                           '0b8b7b9ade43140e'),
+ ('compound', 'fp64', 'rne', 9007199254740993): (411, 126, 22, '8d865c1a09915293e00d9c38bfd2c3d5',
+                                                 '2e52f03de8a21a02'),
+ ('compound', 'fp64', 'rne', 9223372036854775807): (411, 126, 22, '46ee2a1eae34aafb7d522b783de4dcf4',
+                                                    '2e52f03de8a21a02'),
+ ('compound', 'fp64', 'rtz', -9223372036854775808): (403, 127, 21, '1005171f70a1e5caf0759c76e00d1f9c',
+                                                     '16ceb96e4ddbe889'),
+ ('compound', 'fp64', 'rtz', -3): (403, 127, 21, '2d6c8c4120b14c0d9a7213266c867086', '16ceb96e4ddbe889'),
+ ('compound', 'fp64', 'rtz', -2): (403, 126, 21, '82cfc876e2e7ffd672b50e92484b777f', '16ceb96e4ddbe889'),
+ ('compound', 'fp64', 'rtz', 0): (9, 8, 3, 'ab315843037c0487427e8ba4046dab66', '87852c9d56d2b291'),
+ ('compound', 'fp64', 'rtz', 1): (26, 10, 7, 'c5d34ba551849e95ee354a36533ed942', '8b1e2965175a1b97'),
+ ('compound', 'fp64', 'rtz', 2): (404, 126, 21, '2a0f7a91e4f963adc8daf58274266177', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rtz', 3): (404, 127, 21, '7f1c4d3ba8481887915608fa2fe054dd', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rtz', 8): (404, 126, 21, '8f3275cb6cc2c0a97837d56d2e59c566', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rtz', 17): (404, 127, 21, '1e7d4dd190ab3aca8cd300e929fea50b', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rtz', 1000): (404, 127, 21, 'df04d6ce53c99ec9f99800df41127517', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rtz', 2147483647): (404, 127, 21, '1887a3f25193c7017c2eebfffe547715',
+                                           '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rtz', 9007199254740993): (405, 127, 21, '8169ac7846d681ecd872defc1c72ac63',
+                                                 '6676f859f6d982a4'),
+ ('compound', 'fp64', 'rtz', 9223372036854775807): (405, 127, 21, '9b54a326fa6e2d0588f52d8873ae894c',
+                                                    '6676f859f6d982a4'),
+ ('compound', 'fp64', 'rup', -3): (403, 126, 21, '1a194a06abdb12edbaa20970f1654232', '16ceb96e4ddbe889'),
+ ('compound', 'fp64', 'rup', 0): (9, 8, 3, 'ab315843037c0487427e8ba4046dab66', '87852c9d56d2b291'),
+ ('compound', 'fp64', 'rup', 1): (26, 10, 7, '7dc6c453bfd48a635e18b36269e12f71', '8b1e2965175a1b97'),
+ ('compound', 'fp64', 'rup', 3): (404, 126, 21, 'd08f2bc97b690c416373ede35849a89e', '9604a57af3ad2f03'),
+ ('compound', 'fp64', 'rup', 9007199254740993): (405, 126, 21, 'd02ae20cfc500d80eb0e49535517f256',
+                                                 '6676f859f6d982a4'),
+ ('pown', 'fp128', 'rdn', -9223372036854775808): (425, 154, 19, '20787a3e1d0d0ce3862642225404cc4d',
+                                                  'f3b8c7483398aa46'),
+ ('pown', 'fp128', 'rdn', -3): (437, 159, 20, 'd8b75911d19e5a6e5c779db5fabfb534', '181c04cc6751f892'),
+ ('pown', 'fp128', 'rdn', 0): (6, 7, 2, '708cafe9b4c4211f25472cf4bdf302fc', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rdn', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rdn', 3): (436, 159, 20, 'ee10a4f0d4a1fed4ae932a4aff1129b7', '9b6f0b059c5d25a9'),
+ ('pown', 'fp128', 'rmm', -9223372036854775808): (431, 153, 21, '3a911407722bfe6cf1cf65be9bae8701',
+                                                  'c917ba0f0544a3e5'),
+ ('pown', 'fp128', 'rmm', -3): (442, 156, 20, '3d306fcc977a74486918d7d3497442cc', '55c20d2a3ef2a324'),
+ ('pown', 'fp128', 'rmm', 0): (6, 7, 2, '708cafe9b4c4211f25472cf4bdf302fc', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rmm', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rmm', 3): (442, 156, 20, 'bf43ad742f5236d16655327f3ebb2c5a', '55c20d2a3ef2a324'),
+ ('pown', 'fp128', 'rne', -9223372036854775808): (431, 153, 21, '20b314d42b588be1779329ce2d8fe5a7',
+                                                  'c917ba0f0544a3e5'),
+ ('pown', 'fp128', 'rne', -3): (442, 156, 20, '86a15dc6c833f467e831fc7b8511209f', '55c20d2a3ef2a324'),
+ ('pown', 'fp128', 'rne', 0): (6, 7, 2, '708cafe9b4c4211f25472cf4bdf302fc', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rne', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rne', 3): (442, 156, 20, '0d60fdbc7dbc0a3d25657f704c1e3760', '55c20d2a3ef2a324'),
+ ('pown', 'fp128', 'rne', 17): (442, 156, 20, 'b1929c1fa3734968c3967a59dc9bd108', '55c20d2a3ef2a324'),
+ ('pown', 'fp128', 'rtz', -9223372036854775808): (425, 154, 19, 'fe5f470f3552fc1d2c7a5e6ba871a3f2',
+                                                  'f3b8c7483398aa46'),
+ ('pown', 'fp128', 'rtz', -3): (437, 158, 20, '3e8f3dcc1f1363f1c1aee9cc63253a01', '181c04cc6751f892'),
+ ('pown', 'fp128', 'rtz', 0): (6, 7, 2, '708cafe9b4c4211f25472cf4bdf302fc', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rtz', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rtz', 3): (436, 158, 20, 'd47d248dd50420611fe49dd2df7ec1e2', '9b6f0b059c5d25a9'),
+ ('pown', 'fp128', 'rtz', 17): (436, 158, 20, 'fca88f7c444c484a4a8660646769979a', '9b6f0b059c5d25a9'),
+ ('pown', 'fp128', 'rup', -9223372036854775808): (425, 153, 19, '1bbc16146a69f8ca02064cd5383f3bd8',
+                                                  'f3b8c7483398aa46'),
+ ('pown', 'fp128', 'rup', -3): (437, 157, 20, '42fa92c8af86e636b648a6f268af41d3', '181c04cc6751f892'),
+ ('pown', 'fp128', 'rup', 0): (6, 7, 2, '708cafe9b4c4211f25472cf4bdf302fc', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rup', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('pown', 'fp128', 'rup', 3): (436, 157, 20, '9a9e2714f0d8979fafe38ab384d0f527', '9b6f0b059c5d25a9'),
+ ('pown', 'fp256', 'rdn', -9223372036854775808): (476, 199, 19, 'd24f463f7c544feed668ea1f35a5f80d',
+                                                  '1896d5a718a4c264'),
+ ('pown', 'fp256', 'rdn', -3): (488, 204, 20, '4d9714de8983e0965bb39fa03dbdde9d', '8da761c333beb2be'),
+ ('pown', 'fp256', 'rdn', 0): (6, 7, 2, 'f30e43afef1d37c888c3a562e2fccabd', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rdn', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rdn', 3): (487, 204, 20, '96225b306e0c2ed4ccd2f170aa2742f8', '59ce5a8b6683de7d'),
+ ('pown', 'fp256', 'rmm', -9223372036854775808): (482, 198, 21, 'f6b391554c1db55132d95f66ebb3b20a',
+                                                  '1d4f98ddcd2eb5da'),
+ ('pown', 'fp256', 'rmm', -3): (493, 201, 20, 'bd41fff40f5c0b06a7b7ac1533a21058', 'c90bad1fd54a0eb7'),
+ ('pown', 'fp256', 'rmm', 0): (6, 7, 2, 'f30e43afef1d37c888c3a562e2fccabd', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rmm', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rmm', 3): (493, 201, 20, '75e0a061fbed3db5c7cfa6346ff20aab', 'c90bad1fd54a0eb7'),
+ ('pown', 'fp256', 'rne', -9223372036854775808): (482, 198, 21, '123db7b65c44bb3382eade2184c575da',
+                                                  '1d4f98ddcd2eb5da'),
+ ('pown', 'fp256', 'rne', -3): (493, 201, 20, '2117f58abd409321aaaf59e5ac80b3be', 'c90bad1fd54a0eb7'),
+ ('pown', 'fp256', 'rne', 0): (6, 7, 2, 'f30e43afef1d37c888c3a562e2fccabd', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rne', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rne', 3): (493, 201, 20, '55b95d870e068c4512c6ac2aa2615199', 'c90bad1fd54a0eb7'),
+ ('pown', 'fp256', 'rne', 17): (493, 201, 20, '3f7260df1c20c0805e48ec69fd485868', 'c90bad1fd54a0eb7'),
+ ('pown', 'fp256', 'rtz', -9223372036854775808): (476, 199, 19, 'ae9d86e40817ceab3bdbd762b46efcff',
+                                                  '1896d5a718a4c264'),
+ ('pown', 'fp256', 'rtz', -3): (488, 203, 20, '69212d6d72235df3b63c0289d3c9c8aa', '8da761c333beb2be'),
+ ('pown', 'fp256', 'rtz', 0): (6, 7, 2, 'f30e43afef1d37c888c3a562e2fccabd', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rtz', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rtz', 3): (487, 203, 20, 'c156c849b514e8fc35aeb84c2d6bd91e', '59ce5a8b6683de7d'),
+ ('pown', 'fp256', 'rtz', 17): (487, 203, 20, 'ae137dc66b8398c8dea2212e0a583015', '59ce5a8b6683de7d'),
+ ('pown', 'fp256', 'rup', -9223372036854775808): (476, 198, 19, '298d0be4db08d44fc1780ec50f4f2e59',
+                                                  '1896d5a718a4c264'),
+ ('pown', 'fp256', 'rup', -3): (488, 202, 20, '725bd48237e3d7d000373ff9dfb71271', '8da761c333beb2be'),
+ ('pown', 'fp256', 'rup', 0): (6, 7, 2, 'f30e43afef1d37c888c3a562e2fccabd', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rup', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('pown', 'fp256', 'rup', 3): (487, 202, 20, '25053065145922e74beeb2799e3c14d5', '59ce5a8b6683de7d'),
+ ('pown', 'fp64', 'rdn', -3): (381, 131, 21, 'ff314862485560258b549022cd4d2a5f', '81feee007c9a3170'),
+ ('pown', 'fp64', 'rdn', 0): (6, 7, 2, '33f4ed572c379364ded125886df8f9ac', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rdn', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rdn', 3): (380, 131, 21, 'bccc34f1cd1ca0c8bc2cdb5803ff8e02', 'b95b9cccd7cdc064'),
+ ('pown', 'fp64', 'rdn', 9007199254740993): (381, 130, 21, '1f3c2cba03c9d2a296acbff17b31bcfb',
+                                             'f5dc6a98676985a9'),
+ ('pown', 'fp64', 'rmm', -3): (386, 128, 21, '69c0a44c709a029c60e06aab8a2c74e4', 'd1ff3af4107efad5'),
+ ('pown', 'fp64', 'rmm', 0): (6, 7, 2, '33f4ed572c379364ded125886df8f9ac', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rmm', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rmm', 3): (386, 128, 21, '9950b2efabd05680caf38a4e54e2dc55', 'd1ff3af4107efad5'),
+ ('pown', 'fp64', 'rmm', 9007199254740993): (387, 127, 21, '5b3791864557137966c6a7dfcc6d0791',
+                                             '85d6114b18958e7b'),
+ ('pown', 'fp64', 'rne', -9223372036854775808): (375, 126, 21, 'fdd4989cc4c5b3f79cc384de1eef1cc1',
+                                                 '0a17e5f932417a60'),
+ ('pown', 'fp64', 'rne', -3): (386, 128, 21, '518125692ef09e71ffc454e94d3edf8c', 'd1ff3af4107efad5'),
+ ('pown', 'fp64', 'rne', -2): (375, 125, 21, 'f8c8d4d0e8742d32b4fa1038d7afbf33', '0a17e5f932417a60'),
+ ('pown', 'fp64', 'rne', 0): (6, 7, 2, '33f4ed572c379364ded125886df8f9ac', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rne', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rne', 2): (375, 125, 21, 'd81cf02f1c1a96fb3647d55b74306e27', '0a17e5f932417a60'),
+ ('pown', 'fp64', 'rne', 3): (386, 128, 21, '054058564c30bf082beb6b4f944b237f', 'd1ff3af4107efad5'),
+ ('pown', 'fp64', 'rne', 8): (375, 125, 21, 'bf08f35484ec8965b11bdfee13cdc5de', '0a17e5f932417a60'),
+ ('pown', 'fp64', 'rne', 17): (386, 128, 21, '10b384815bd9a0cd9fd9abf11917e288', 'd1ff3af4107efad5'),
+ ('pown', 'fp64', 'rne', 1000): (375, 126, 21, 'ddbf167e9e878eacbafce1fe7e2e5b7e', '0a17e5f932417a60'),
+ ('pown', 'fp64', 'rne', 2147483647): (386, 128, 21, 'bdf5af2ccbaedd3976dcea3004125b90', 'd1ff3af4107efad5'),
+ ('pown', 'fp64', 'rne', 9007199254740993): (387, 127, 21, '8424cddfc7a6cb73b56ba473a0a9d4f4',
+                                             '85d6114b18958e7b'),
+ ('pown', 'fp64', 'rne', 9223372036854775807): (387, 128, 21, '1bb7f61400dc4355e9842e9b86676038',
+                                                '85d6114b18958e7b'),
+ ('pown', 'fp64', 'rtz', -9223372036854775808): (369, 127, 20, 'ab71372fe2e2e75ec1d0cf0aa8b5846c',
+                                                 '53cd5c6a6cadeb5f'),
+ ('pown', 'fp64', 'rtz', -3): (381, 130, 21, '7f97de607d28cbeadaca7ff7ac21593f', '81feee007c9a3170'),
+ ('pown', 'fp64', 'rtz', -2): (369, 126, 20, 'b4a3fbd0fcd27075270a19d95219ba0a', '53cd5c6a6cadeb5f'),
+ ('pown', 'fp64', 'rtz', 0): (6, 7, 2, '33f4ed572c379364ded125886df8f9ac', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rtz', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rtz', 2): (368, 126, 20, '29857f787a2bc25d1ff9564e3d155fb0', '185e15abb8c4c351'),
+ ('pown', 'fp64', 'rtz', 3): (380, 130, 21, 'eb725ecf66614535318201502ad0dd71', 'b95b9cccd7cdc064'),
+ ('pown', 'fp64', 'rtz', 8): (368, 126, 20, 'b58129d0563fb4cb809c924ac442d246', '185e15abb8c4c351'),
+ ('pown', 'fp64', 'rtz', 17): (380, 130, 21, '0b9e23beb0e9d021ea4b773eb7f139fd', 'b95b9cccd7cdc064'),
+ ('pown', 'fp64', 'rtz', 1000): (368, 127, 20, '453ef31100726bb620382d5b109fa3cf', '185e15abb8c4c351'),
+ ('pown', 'fp64', 'rtz', 2147483647): (380, 130, 21, '7ac3525aba20d5affdfcaad34390b601', 'b95b9cccd7cdc064'),
+ ('pown', 'fp64', 'rtz', 9007199254740993): (381, 129, 21, 'bef0d99f8f22a1f419fd464ce2098158',
+                                             'f5dc6a98676985a9'),
+ ('pown', 'fp64', 'rtz', 9223372036854775807): (381, 130, 21, '8d6042b7b001122093190b584bd994c2',
+                                                'f5dc6a98676985a9'),
+ ('pown', 'fp64', 'rup', -3): (381, 129, 21, 'abf0aca764410744001677fdbb59ddf7', '81feee007c9a3170'),
+ ('pown', 'fp64', 'rup', 0): (6, 7, 2, '33f4ed572c379364ded125886df8f9ac', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rup', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('pown', 'fp64', 'rup', 3): (380, 129, 21, '98201463952b516a9de9b3923f71b4d6', 'b95b9cccd7cdc064'),
+ ('pown', 'fp64', 'rup', 9007199254740993): (381, 128, 21, '099caef7b6be535ca442d81c2ca8cb69',
+                                             'f5dc6a98676985a9'),
+ ('rootn', 'fp128', 'rdn', -9223372036854775808): (430, 155, 16, '07605af66371e17d915f1ce818a5624a',
+                                                   '2829f55569ab0c0c'),
+ ('rootn', 'fp128', 'rdn', -3): (438, 160, 17, 'd539ce412f4315c6ddd3d5cef09be4fc', '51ea6f64d4b8c016'),
+ ('rootn', 'fp128', 'rdn', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('rootn', 'fp128', 'rdn', 3): (437, 158, 17, 'ff1413fc75fb2965e6d55c862a2d6a03', '647213b31354da83'),
+ ('rootn', 'fp128', 'rmm', -9223372036854775808): (436, 154, 18, '8789c7b76ec53a3698ce4b995ca2b2da',
+                                                   'a6ed7bf24eb7e0ab'),
+ ('rootn', 'fp128', 'rmm', -3): (443, 157, 19, '69f642ff9a2e16a7f7e191b445f3950d', '0350d09a931a7632'),
+ ('rootn', 'fp128', 'rmm', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('rootn', 'fp128', 'rmm', 3): (443, 155, 19, 'cb7ca5116ff458ec7e7846de6ed04d32', '0350d09a931a7632'),
+ ('rootn', 'fp128', 'rne', -9223372036854775808): (436, 154, 18, '08e6e21dcd00d13ed1431aa4d4b356e5',
+                                                   'a6ed7bf24eb7e0ab'),
+ ('rootn', 'fp128', 'rne', -3): (443, 157, 19, 'bf5939f173c4cef9cb5b1ae3405e9543', '0350d09a931a7632'),
+ ('rootn', 'fp128', 'rne', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('rootn', 'fp128', 'rne', 3): (443, 155, 19, '20f3d7edd71a3de7c48552139bc9a60f', '0350d09a931a7632'),
+ ('rootn', 'fp128', 'rne', 17): (443, 156, 19, '86698a12724020753cd9969dfaae6f62', '0350d09a931a7632'),
+ ('rootn', 'fp128', 'rtz', -9223372036854775808): (430, 155, 16, 'b1ec37943b68d109a2d08e40ccdda6e2',
+                                                   '2829f55569ab0c0c'),
+ ('rootn', 'fp128', 'rtz', -3): (438, 159, 17, 'a1c54865a9de3089b2d669a714df49da', '51ea6f64d4b8c016'),
+ ('rootn', 'fp128', 'rtz', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('rootn', 'fp128', 'rtz', 3): (437, 157, 17, 'b70f74f2e31c3e3eb8d9b5b81602e34f', '647213b31354da83'),
+ ('rootn', 'fp128', 'rtz', 17): (437, 158, 17, '65bd51cccbe4e182b2753c2082d47c36', '647213b31354da83'),
+ ('rootn', 'fp128', 'rup', -9223372036854775808): (430, 154, 16, 'bb1dbaac5afcccdcde50e75dbfbbaca4',
+                                                   '2829f55569ab0c0c'),
+ ('rootn', 'fp128', 'rup', -3): (438, 158, 17, 'b8319eba67854565444b29b6aacf854f', '51ea6f64d4b8c016'),
+ ('rootn', 'fp128', 'rup', 1): (6, 6, 3, 'a0a4d950af06a09cd10a3cee11f0c09f', '9286480e7da5e680'),
+ ('rootn', 'fp128', 'rup', 3): (437, 156, 17, 'f0c3291f9e88ff27d46a412e6a6fcbac', '647213b31354da83'),
+ ('rootn', 'fp256', 'rdn', -9223372036854775808): (481, 200, 16, '4f67aff1aae03faea9f2020db338750a',
+                                                   'bb950b238df9ff6f'),
+ ('rootn', 'fp256', 'rdn', -3): (489, 205, 17, 'daaa9c56bfc9d6ee07805206aea0d64d', 'f73ee15c31de8ab0'),
+ ('rootn', 'fp256', 'rdn', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('rootn', 'fp256', 'rdn', 3): (488, 203, 17, '5937ae3bcfd3d4c5d3b5aa026779a883', '4fc9b545c133872f'),
+ ('rootn', 'fp256', 'rmm', -9223372036854775808): (487, 199, 18, '4a56c15119324456addb97064c90fbc2',
+                                                   'f673fd0c795d4068'),
+ ('rootn', 'fp256', 'rmm', -3): (494, 202, 19, '08d2bb8df15d7e6fd32c9ef21f570fb6', '9ab4da2dce0af23a'),
+ ('rootn', 'fp256', 'rmm', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('rootn', 'fp256', 'rmm', 3): (494, 200, 19, '65845bd9c757a1665419ef197cfba2ef', '9ab4da2dce0af23a'),
+ ('rootn', 'fp256', 'rne', -9223372036854775808): (487, 199, 18, '437297d4c9d1a397468e2a0d7965e398',
+                                                   'f673fd0c795d4068'),
+ ('rootn', 'fp256', 'rne', -3): (494, 202, 19, '6f76553b7c64e06f712892f510a6243b', '9ab4da2dce0af23a'),
+ ('rootn', 'fp256', 'rne', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('rootn', 'fp256', 'rne', 3): (494, 200, 19, '53358d6e8ca59a0ad5f0ed4d6712b4b4', '9ab4da2dce0af23a'),
+ ('rootn', 'fp256', 'rne', 17): (494, 200, 19, '52f53f5219d35bbd33bce4175dd400dd', '9ab4da2dce0af23a'),
+ ('rootn', 'fp256', 'rtz', -9223372036854775808): (481, 200, 16, '42102c82fc5fe2503f26c2f14a6e7087',
+                                                   'bb950b238df9ff6f'),
+ ('rootn', 'fp256', 'rtz', -3): (489, 204, 17, '145cdb635400046fec54564351ea47ae', 'f73ee15c31de8ab0'),
+ ('rootn', 'fp256', 'rtz', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('rootn', 'fp256', 'rtz', 3): (488, 202, 17, '5356f4335843e916bd5d5c02c2dfa69f', '4fc9b545c133872f'),
+ ('rootn', 'fp256', 'rtz', 17): (488, 202, 17, '6985c1c72350c82ffc18f5b627efb973', '4fc9b545c133872f'),
+ ('rootn', 'fp256', 'rup', -9223372036854775808): (481, 199, 16, 'c80a93db7281e0133219c98379a51ba6',
+                                                   'bb950b238df9ff6f'),
+ ('rootn', 'fp256', 'rup', -3): (489, 203, 17, '5d013db01dc59eae14ef53bcaa755774', 'f73ee15c31de8ab0'),
+ ('rootn', 'fp256', 'rup', 1): (6, 6, 3, '43ae19dcbfb158c655833addeebb3963', '9286480e7da5e680'),
+ ('rootn', 'fp256', 'rup', 3): (488, 201, 17, '52f4100cd0b6d4a5081230573611b47f', '4fc9b545c133872f'),
+ ('rootn', 'fp64', 'rdn', -3): (382, 132, 18, '3ef91166a93e529ea960fd5ff7804ce3', '825969e1c2a89fe5'),
+ ('rootn', 'fp64', 'rdn', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('rootn', 'fp64', 'rdn', 3): (381, 130, 18, '626abb42d42e8b5c0a80e6552c13c8fd', 'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rdn', 9007199254740993): (381, 132, 18, '9625a7a0d3458852a6ce1903eb3caeaf',
+                                              'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rmm', -3): (387, 129, 19, '5143362330eca4c821b738a1c95d0320', '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rmm', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('rootn', 'fp64', 'rmm', 3): (387, 127, 19, 'fcd1c3489904d57b5e93fe09801a66fc', '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rmm', 9007199254740993): (387, 129, 19, '8db2231e29d9a2fbb3be3fa810a7b0a6',
+                                              '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rne', -9223372036854775808): (380, 126, 18, '067d7532f740361680c36f1df3401637',
+                                                  '65341c5631abe958'),
+ ('rootn', 'fp64', 'rne', -3): (387, 129, 19, 'f02ef13698718582486b2bcb307fc260', '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rne', -2): (380, 125, 18, '3f4cc785d7fd64418c563875348cfb7f', '65341c5631abe958'),
+ ('rootn', 'fp64', 'rne', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('rootn', 'fp64', 'rne', 2): (380, 125, 18, '126481fd1f8162258c26c4057353f988', '65341c5631abe958'),
+ ('rootn', 'fp64', 'rne', 3): (387, 127, 19, 'fe7f1c10a8b68ea7b1d1e29c4b45b50f', '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rne', 8): (380, 126, 18, '2ec64a90ded0988b39760d20ea4e83e9', '65341c5631abe958'),
+ ('rootn', 'fp64', 'rne', 17): (387, 128, 19, 'e4eda5b344aa814b1d303e840ad86eb3', '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rne', 1000): (381, 127, 18, 'e61eca76cde81d2b679cef93a3249577', '22c4c18ea9b0d075'),
+ ('rootn', 'fp64', 'rne', 2147483647): (387, 129, 19, '57e8d019b036b49c3bf92acfe5943034', '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rne', 9007199254740993): (387, 129, 19, 'a65ec91dc54541cd7ed8a0b5dfc2f8d2',
+                                              '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rne', 9223372036854775807): (387, 129, 19, 'c56e88c55d2ddaa1549ae783a9e02248',
+                                                 '85d6114b18958e7b'),
+ ('rootn', 'fp64', 'rtz', -9223372036854775808): (374, 127, 17, '846e52909dd23130f8bb004864b8ad3c',
+                                                  '7fd81f627423c6c3'),
+ ('rootn', 'fp64', 'rtz', -3): (382, 131, 18, 'b05c21962b11e4547618aaec97313c2f', '825969e1c2a89fe5'),
+ ('rootn', 'fp64', 'rtz', -2): (374, 126, 17, 'ac3dce0db1ba6060f07c38ca2ec9b41c', '7fd81f627423c6c3'),
+ ('rootn', 'fp64', 'rtz', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('rootn', 'fp64', 'rtz', 2): (373, 126, 17, 'c7f1b802abbc97eee62878864146a839', '2505cbc174d96c13'),
+ ('rootn', 'fp64', 'rtz', 3): (381, 129, 18, '6604f7acb7d3555ef83727f44daac88e', 'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rtz', 8): (373, 127, 17, '46afedc2a33e45877a0b294d8e152bd5', '2505cbc174d96c13'),
+ ('rootn', 'fp64', 'rtz', 17): (381, 130, 18, 'b88b52c1c65abb36faa10142d8517b48', 'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rtz', 1000): (374, 128, 17, 'fb25b898662b37f3f18a16410ab516f3', 'b755e5ef02deba60'),
+ ('rootn', 'fp64', 'rtz', 2147483647): (381, 131, 18, '4fd8633627f97c25e0af909b0611415a', 'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rtz', 9007199254740993): (381, 131, 18, '260baa325fe1e6bbc5772389b0c576fd',
+                                              'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rtz', 9223372036854775807): (381, 131, 18, 'cb620a144fb3b04189662e92257b3a1d',
+                                                 'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rup', -3): (382, 130, 18, 'a98f78bee8f1360300ee785aec86f8b0', '825969e1c2a89fe5'),
+ ('rootn', 'fp64', 'rup', 1): (6, 6, 3, 'cd40c863b2241b86a977f5ba5be2b81f', '9286480e7da5e680'),
+ ('rootn', 'fp64', 'rup', 3): (381, 128, 18, '9a304bae38eac8ee80b54527f9f8b6f9', 'f5dc6a98676985a9'),
+ ('rootn', 'fp64', 'rup', 9007199254740993): (381, 130, 18, 'e28d326f2cf7ec723e5edd2c948c28bc',
+                                              'f5dc6a98676985a9')}
+
+EFT_N = {('compound', 'fp128', -9223372036854775808): (31, 1),
+ ('compound', 'fp128', -3): (31, 1),
+ ('compound', 'fp128', 0): (0, 0),
+ ('compound', 'fp128', 1): (0, 1),
+ ('compound', 'fp128', 3): (31, 1),
+ ('compound', 'fp128', 17): (31, 1),
+ ('compound', 'fp256', -9223372036854775808): (32, 1),
+ ('compound', 'fp256', -3): (32, 1),
+ ('compound', 'fp256', 0): (0, 0),
+ ('compound', 'fp256', 1): (0, 1),
+ ('compound', 'fp256', 3): (32, 1),
+ ('compound', 'fp256', 17): (32, 1),
+ ('compound', 'fp64', -9223372036854775808): (26, 1),
+ ('compound', 'fp64', -3): (26, 1),
+ ('compound', 'fp64', -2): (26, 1),
+ ('compound', 'fp64', 0): (0, 0),
+ ('compound', 'fp64', 1): (0, 1),
+ ('compound', 'fp64', 2): (26, 1),
+ ('compound', 'fp64', 3): (26, 1),
+ ('compound', 'fp64', 8): (26, 1),
+ ('compound', 'fp64', 17): (26, 1),
+ ('compound', 'fp64', 1000): (26, 1),
+ ('compound', 'fp64', 2147483647): (26, 1),
+ ('compound', 'fp64', 9007199254740993): (26, 1),
+ ('compound', 'fp64', 9223372036854775807): (26, 1),
+ ('pown', 'fp128', -9223372036854775808): (31, 0),
+ ('pown', 'fp128', -3): (31, 0),
+ ('pown', 'fp128', 0): (0, 0),
+ ('pown', 'fp128', 1): (0, 0),
+ ('pown', 'fp128', 3): (31, 0),
+ ('pown', 'fp128', 17): (31, 0),
+ ('pown', 'fp256', -9223372036854775808): (32, 0),
+ ('pown', 'fp256', -3): (32, 0),
+ ('pown', 'fp256', 0): (0, 0),
+ ('pown', 'fp256', 1): (0, 0),
+ ('pown', 'fp256', 3): (32, 0),
+ ('pown', 'fp256', 17): (32, 0),
+ ('pown', 'fp64', -9223372036854775808): (26, 0),
+ ('pown', 'fp64', -3): (26, 0),
+ ('pown', 'fp64', -2): (26, 0),
+ ('pown', 'fp64', 0): (0, 0),
+ ('pown', 'fp64', 1): (0, 0),
+ ('pown', 'fp64', 2): (26, 0),
+ ('pown', 'fp64', 3): (26, 0),
+ ('pown', 'fp64', 8): (26, 0),
+ ('pown', 'fp64', 17): (26, 0),
+ ('pown', 'fp64', 1000): (26, 0),
+ ('pown', 'fp64', 2147483647): (26, 0),
+ ('pown', 'fp64', 9007199254740993): (26, 0),
+ ('pown', 'fp64', 9223372036854775807): (26, 0),
+ ('rootn', 'fp128', -9223372036854775808): (31, 0),
+ ('rootn', 'fp128', -3): (31, 0),
+ ('rootn', 'fp128', 1): (0, 0),
+ ('rootn', 'fp128', 3): (31, 0),
+ ('rootn', 'fp128', 17): (31, 0),
+ ('rootn', 'fp256', -9223372036854775808): (32, 0),
+ ('rootn', 'fp256', -3): (32, 0),
+ ('rootn', 'fp256', 1): (0, 0),
+ ('rootn', 'fp256', 3): (32, 0),
+ ('rootn', 'fp256', 17): (32, 0),
+ ('rootn', 'fp64', -9223372036854775808): (26, 0),
+ ('rootn', 'fp64', -3): (26, 0),
+ ('rootn', 'fp64', -2): (26, 0),
+ ('rootn', 'fp64', 1): (0, 0),
+ ('rootn', 'fp64', 2): (26, 0),
+ ('rootn', 'fp64', 3): (26, 0),
+ ('rootn', 'fp64', 8): (26, 0),
+ ('rootn', 'fp64', 17): (26, 0),
+ ('rootn', 'fp64', 1000): (26, 0),
+ ('rootn', 'fp64', 2147483647): (26, 0),
+ ('rootn', 'fp64', 9007199254740993): (26, 0),
+ ('rootn', 'fp64', 9223372036854775807): (26, 0)}
+
+FLAG_WORDS_N = {('compound', 'n0'): frozenset({0, 1}),
+ ('compound', 'n1'): frozenset({0, 1, 20, 16}),
+ ('compound', 'neg'): frozenset({0, 1, 2, 16, 144, 20, 148, 24, 152}),
+ ('compound', 'pos'): frozenset({0, 1, 16, 144, 20, 148, 24, 152}),
+ ('pown', 'n0'): frozenset({0, 1}),
+ ('pown', 'n1'): frozenset({0, 1}),
+ ('pown', 'neg'): frozenset({0, 1, 2, 16, 144, 20, 148, 24, 152}),
+ ('pown', 'pos'): frozenset({0, 1, 16, 144, 20, 148, 24, 152}),
+ ('rootn', 'n1'): frozenset({0, 1}),
+ ('rootn', 'neg'): frozenset({0, 1, 2, 16, 144, 20, 148, 24, 152}),
+ ('rootn', 'pos'): frozenset({0, 1, 16, 144, 20, 148, 24, 152})}
+
+POOL_MARKS_N = {('compound', 'fp128', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp128', -3): {'rdn': 1, 'rmm': 2, 'rne': 2, 'rtz': 1, 'rup': 1},
+ ('compound', 'fp128', 0): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp128', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp128', 3): {'rdn': 15, 'rmm': 16, 'rne': 16, 'rtz': 15, 'rup': 15},
+ ('compound', 'fp128', 17): {'rdn': 9, 'rmm': 10, 'rne': 10, 'rtz': 9, 'rup': 9},
+ ('compound', 'fp256', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp256', -3): {'rdn': 0, 'rmm': 1, 'rne': 1, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp256', 0): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp256', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp256', 3): {'rdn': 11, 'rmm': 11, 'rne': 11, 'rtz': 11, 'rup': 11},
+ ('compound', 'fp256', 17): {'rdn': 10, 'rmm': 10, 'rne': 10, 'rtz': 10, 'rup': 10},
+ ('compound', 'fp64', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp64', -3): {'rdn': 0, 'rmm': 1, 'rne': 1, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp64', -2): {'rdn': 2, 'rmm': 2, 'rne': 2, 'rtz': 2, 'rup': 2},
+ ('compound', 'fp64', 0): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp64', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp64', 2): {'rdn': 24, 'rmm': 25, 'rne': 25, 'rtz': 24, 'rup': 24},
+ ('compound', 'fp64', 3): {'rdn': 16, 'rmm': 17, 'rne': 17, 'rtz': 16, 'rup': 16},
+ ('compound', 'fp64', 8): {'rdn': 11, 'rmm': 11, 'rne': 11, 'rtz': 11, 'rup': 11},
+ ('compound', 'fp64', 17): {'rdn': 2, 'rmm': 3, 'rne': 3, 'rtz': 2, 'rup': 2},
+ ('compound', 'fp64', 1000): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp64', 2147483647): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('compound', 'fp64', 9223372036854775807): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp128', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp128', -3): {'rdn': 2, 'rmm': 6, 'rne': 6, 'rtz': 2, 'rup': 2},
+ ('pown', 'fp128', 0): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp128', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp128', 3): {'rdn': 23, 'rmm': 23, 'rne': 23, 'rtz': 23, 'rup': 23},
+ ('pown', 'fp128', 17): {'rdn': 19, 'rmm': 19, 'rne': 19, 'rtz': 19, 'rup': 19},
+ ('pown', 'fp256', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp256', -3): {'rdn': 0, 'rmm': 2, 'rne': 2, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp256', 0): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp256', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp256', 3): {'rdn': 16, 'rmm': 16, 'rne': 16, 'rtz': 16, 'rup': 16},
+ ('pown', 'fp256', 17): {'rdn': 16, 'rmm': 16, 'rne': 16, 'rtz': 16, 'rup': 16},
+ ('pown', 'fp64', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp64', -3): {'rdn': 3, 'rmm': 5, 'rne': 5, 'rtz': 3, 'rup': 3},
+ ('pown', 'fp64', -2): {'rdn': 3, 'rmm': 3, 'rne': 3, 'rtz': 3, 'rup': 3},
+ ('pown', 'fp64', 0): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp64', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp64', 2): {'rdn': 34, 'rmm': 35, 'rne': 35, 'rtz': 34, 'rup': 34},
+ ('pown', 'fp64', 3): {'rdn': 20, 'rmm': 20, 'rne': 20, 'rtz': 20, 'rup': 20},
+ ('pown', 'fp64', 8): {'rdn': 15, 'rmm': 15, 'rne': 15, 'rtz': 15, 'rup': 15},
+ ('pown', 'fp64', 17): {'rdn': 5, 'rmm': 7, 'rne': 7, 'rtz': 5, 'rup': 5},
+ ('pown', 'fp64', 1000): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp64', 2147483647): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('pown', 'fp64', 9223372036854775807): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp128', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp128', -3): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp128', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp128', 3): {'rdn': 5, 'rmm': 5, 'rne': 5, 'rtz': 5, 'rup': 5},
+ ('rootn', 'fp128', 17): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp256', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp256', -3): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp256', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp256', 3): {'rdn': 1, 'rmm': 1, 'rne': 1, 'rtz': 1, 'rup': 1},
+ ('rootn', 'fp256', 17): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', -9223372036854775808): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', -3): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', -2): {'rdn': 1, 'rmm': 1, 'rne': 1, 'rtz': 1, 'rup': 1},
+ ('rootn', 'fp64', 1): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', 2): {'rdn': 7, 'rmm': 13, 'rne': 13, 'rtz': 7, 'rup': 7},
+ ('rootn', 'fp64', 3): {'rdn': 3, 'rmm': 3, 'rne': 3, 'rtz': 3, 'rup': 3},
+ ('rootn', 'fp64', 8): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', 17): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', 1000): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', 2147483647): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0},
+ ('rootn', 'fp64', 9223372036854775807): {'rdn': 0, 'rmm': 0, 'rne': 0, 'rtz': 0, 'rup': 0}}
+
+SPECIAL_MARKS_N = {('compound', 'fp128', -9223372036854775808): (2, 2, 2, 2, 2),
+ ('compound', 'fp128', -3): (1, 1, 1, 1, 1),
+ ('compound', 'fp128', 0): (0, 0, 0, 0, 0),
+ ('compound', 'fp128', 1): (0, 0, 0, 0, 0),
+ ('compound', 'fp128', 3): (3, 1, 1, 1, 3),
+ ('compound', 'fp128', 17): (3, 1, 1, 1, 3),
+ ('compound', 'fp256', -9223372036854775808): (2, 2, 2, 2, 2),
+ ('compound', 'fp256', -3): (1, 1, 1, 1, 1),
+ ('compound', 'fp256', 0): (0, 0, 0, 0, 0),
+ ('compound', 'fp256', 1): (0, 0, 0, 0, 0),
+ ('compound', 'fp256', 3): (3, 1, 1, 1, 3),
+ ('compound', 'fp256', 17): (3, 1, 1, 1, 3),
+ ('compound', 'fp64', -9223372036854775808): (0, 0, 0, 0, 0),
+ ('compound', 'fp64', -3): (1, 1, 1, 1, 1),
+ ('compound', 'fp64', -2): (2, 1, 1, 1, 2),
+ ('compound', 'fp64', 0): (0, 0, 0, 0, 0),
+ ('compound', 'fp64', 1): (0, 0, 0, 0, 0),
+ ('compound', 'fp64', 2): (3, 3, 3, 3, 3),
+ ('compound', 'fp64', 3): (3, 1, 1, 1, 3),
+ ('compound', 'fp64', 8): (5, 4, 4, 4, 5),
+ ('compound', 'fp64', 17): (3, 1, 1, 1, 3),
+ ('compound', 'fp64', 1000): (0, 0, 0, 0, 0),
+ ('compound', 'fp64', 2147483647): (0, 0, 0, 0, 0),
+ ('compound', 'fp64', 9007199254740993): (0, 0, 0, 0, 0),
+ ('compound', 'fp64', 9223372036854775807): (0, 0, 0, 0, 0),
+ ('pown', 'fp128', -9223372036854775808): (0, 0, 0, 0, 0),
+ ('pown', 'fp128', -3): (4, 2, 2, 2, 4),
+ ('pown', 'fp128', 0): (0, 0, 0, 0, 0),
+ ('pown', 'fp128', 1): (0, 0, 0, 0, 0),
+ ('pown', 'fp128', 3): (6, 6, 6, 6, 6),
+ ('pown', 'fp128', 17): (6, 6, 6, 6, 6),
+ ('pown', 'fp256', -9223372036854775808): (4, 4, 4, 4, 4),
+ ('pown', 'fp256', -3): (4, 2, 2, 2, 4),
+ ('pown', 'fp256', 0): (0, 0, 0, 0, 0),
+ ('pown', 'fp256', 1): (0, 0, 0, 0, 0),
+ ('pown', 'fp256', 3): (6, 6, 6, 6, 6),
+ ('pown', 'fp256', 17): (6, 6, 6, 6, 6),
+ ('pown', 'fp64', -9223372036854775808): (0, 0, 0, 0, 0),
+ ('pown', 'fp64', -3): (4, 2, 2, 2, 4),
+ ('pown', 'fp64', -2): (4, 4, 4, 4, 4),
+ ('pown', 'fp64', 0): (0, 0, 0, 0, 0),
+ ('pown', 'fp64', 1): (0, 0, 0, 0, 0),
+ ('pown', 'fp64', 2): (6, 6, 6, 6, 6),
+ ('pown', 'fp64', 3): (6, 6, 6, 6, 6),
+ ('pown', 'fp64', 8): (6, 6, 6, 6, 6),
+ ('pown', 'fp64', 17): (4, 4, 4, 4, 4),
+ ('pown', 'fp64', 1000): (0, 0, 0, 0, 0),
+ ('pown', 'fp64', 2147483647): (0, 0, 0, 0, 0),
+ ('pown', 'fp64', 9007199254740993): (0, 0, 0, 0, 0),
+ ('pown', 'fp64', 9223372036854775807): (0, 0, 0, 0, 0),
+ ('rootn', 'fp128', -9223372036854775808): (0, 0, 0, 0, 0),
+ ('rootn', 'fp128', -3): (0, 0, 0, 0, 0),
+ ('rootn', 'fp128', 1): (0, 0, 0, 0, 0),
+ ('rootn', 'fp128', 3): (0, 0, 0, 0, 0),
+ ('rootn', 'fp128', 17): (0, 0, 0, 0, 0),
+ ('rootn', 'fp256', -9223372036854775808): (0, 0, 0, 0, 0),
+ ('rootn', 'fp256', -3): (0, 0, 0, 0, 0),
+ ('rootn', 'fp256', 1): (0, 0, 0, 0, 0),
+ ('rootn', 'fp256', 3): (0, 0, 0, 0, 0),
+ ('rootn', 'fp256', 17): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', -9223372036854775808): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', -3): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', -2): (1, 1, 1, 1, 1),
+ ('rootn', 'fp64', 1): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 2): (3, 0, 0, 0, 3),
+ ('rootn', 'fp64', 3): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 8): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 17): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 1000): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 2147483647): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 9007199254740993): (0, 0, 0, 0, 0),
+ ('rootn', 'fp64', 9223372036854775807): (0, 0, 0, 0, 0)}
 
 # ---- fp32: the triple word, pow and powr (parcel M3F1) builds here ----
 #

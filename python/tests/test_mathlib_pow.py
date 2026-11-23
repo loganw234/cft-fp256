@@ -119,7 +119,10 @@ POW_PLANT_NAMES = {
     "integrality_wide", "sign_odd_lost", "powr_neg_ok", "powr_zero_zero",
     "near_one_gate_off", "side_rule_off", "screen_low", "mark_silenced",
     "bound_loose", "zero_sign_lost", "log_table_entry", "il2h_ulp",
-    "screen_ulp", "y_one_loud", "two_sum_all", "log_short"}
+    "screen_ulp", "y_one_loud", "two_sum_all", "log_short",
+    # parcel M3G2's
+    "rootn_m0_neg", "compound_onep_rounded", "n_low_dropped", "n_word_ulp",
+    "n_row_loud"}
 # the plants build_pow_core accepts (the others are refused by name there,
 # "does not apply"): what pow_core acts on
 CORE_PLANTS = {"exact_unmarked", "exact_rule_off", "exact_rule_no_tl",
@@ -244,14 +247,22 @@ def test_plan_pow_steps_down_and_refuses_by_name_the_proof_it_cannot_make(
 
 # ---- the refusals, by name ---------------------------------------------------
 
-def test_names_not_built_and_fp32_are_refused_by_name():
+def test_pown_rootn_compound_need_n_and_refuse_a_bad_one():
+    """Parcel M3G2 builds them: n is a constant of the fragment, required and
+    checked (python/tests/test_mathlib_pow_n.py holds the rest)."""
     for name in ("pown", "rootn", "compound"):
         for call in (ml.build, ml.fragment):
-            with pytest.raises(ValueError, match=f"{name!r} is not built "
-                               f"yet: it is parcel M3G2's"):
+            with pytest.raises(ValueError, match=f"{name} needs its integer "
+                               f"operand n"):
                 call(name, FP64, RNE)
-        with pytest.raises(ValueError, match="parcel M3G2's"):
-            ml.build(name, FP64, RNE, n=3)
+        with pytest.raises(ValueError, match="is outside int64"):
+            ml.build(name, FP64, RNE, n=2 ** 63)
+        with pytest.raises(ValueError, match="is not an integer"):
+            ml.fragment(name, FP64, RNE, n=2.5)
+        assert ml.fragment(name, FP64, RNE, n=3).op == name
+
+
+def test_names_not_built_and_fp32_are_refused_by_name():
     for name in ("pow", "powr", "pown"):
         for call in (ml.build, ml.fragment):
             with pytest.raises(ValueError, match=f"{name} at fp32 is not "
@@ -1568,8 +1579,8 @@ def test_the_pow_commands_run_at_small_sizes_and_refuse_an_existing_out(
     with pytest.raises(SystemExit, match="fp32 is the triple word, parcel "
                        "M3F1's"):
         R.main(["pow-bound", "--formats", "fp32"])
-    with pytest.raises(SystemExit, match="--fn 'pown'"):
-        R.main(["pow-bound", "--fn", "pown"])
+    with pytest.raises(SystemExit, match="rootn.x, 0. is invalid for every x"):
+        R.main(["pow-bound", "--fn", "rootn", "--ns", "0"])
     # --seq runs the compiled shape over the same lanes, --lanes sizes the
     # regions (0: none) and --step takes part of the pool
     R.FINDINGS.clear()

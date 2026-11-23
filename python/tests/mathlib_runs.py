@@ -1272,13 +1272,89 @@ def _pow_harness():
 
 def _pow_fns(arg):
     P = _pow_harness()
-    names = arg.split(",") if arg else [n for n in P.FUNCS
-                                        if n in P.POOL_FNS]
+    built = tuple(P.FUNCS) + tuple(P.INT_FUNCS)       # parcel M3G2: pown, ...
+    names = arg.split(",") if arg else [n for n in built if n in P.POOL_FNS]
     for n in names:
-        if n not in P.FUNCS:
-            raise SystemExit(f"--fn {n!r}: one of {', '.join(P.FUNCS)} "
+        if n not in built:
+            raise SystemExit(f"--fn {n!r}: one of {', '.join(built)} "
                              f"(the ones built)")
     return names
+
+
+def _ns_of(a, P, fn, fmt):
+    """The integer operands of --ns (a comma list; default the golden stage's
+    n list at the format, mathlib.POW_CHECK_NS's), rootn's 0 left out and
+    refused by name where asked for."""
+    if not a.ns:
+        return list(P.check_ns(fn, fmt))
+    ns = [int(v) for v in a.ns.split(",")]
+    if fn == "rootn" and 0 in ns:
+        raise SystemExit("--ns 0: rootn(x, 0) is invalid for every x, a "
+                         "constant the compiler refuses")
+    return ns
+
+
+def _pow_n_pools(a, P, fn, fmt, rnds, step):
+    """pown, rootn and compound's pools, per n: the pool's lanes of each n
+    (every `step`-th) through the fragment of that n under every attribute
+    (the model's marks pinned where step is the golden stage's), then the
+    placed regions at each region's own n (--lanes a region)."""
+    for n in _ns_of(a, P, fn, fmt):
+        for rnd in rnds:
+            out, t = P.check_pools_n(fn, fmt, rnd, n, step=step)
+            note(out)
+            f = P.fragment_n(fn, fmt, rnd, n)
+            say(f"pow-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]} n = {n}: "
+                f"{t.n} lanes, {len(t.marked)} marked, {len(t.wrong)} wrong "
+                f"unmarked; {len(f)} instructions, {f.live_max()} live")
+    cnt = a.lanes if a.lanes is not None else (
+        12 if a.quick else P.REGION_LANES[(fn, fmt.name)])
+    if not cnt:
+        return
+    for name in P.region_names_n(fn, fmt):
+        rn = P.region_n_of(name)
+        if a.ns and rn is not None and rn not in _ns_of(a, P, fn, fmt):
+            continue
+        for rnd in rnds:
+            t0 = time.perf_counter()
+            out, (lanes, marked, main) = P.check_regions_n(
+                fn, fmt, rnd, name, cnt)
+            note(out)
+            say(f"pow-regions {fn} {fmt.name} {sf.RND_NAMES[rnd]} {name}: "
+                f"{lanes} lanes, {marked} marked, {main} reach the main "
+                f"path, {len(out)} findings; "
+                f"{time.perf_counter() - t0:.0f}s"
+                + ("; NOT MEASURED" if not main else ""))
+
+
+def _pow_n_bound(a, P, fn, fmt, rnds, n_pts):
+    """pown, rootn and compound's direct error |V - f| / Bv over the regions at
+    each region's own n (--ns keeps the regions whose n is listed). -> (regions
+    measured, regions NOT MEASURED)."""
+    measured = unmeasured = 0
+    for rnd in rnds:
+        for k, name in enumerate(P.region_names_n(fn, fmt)):
+            rn = P.region_n_of(name)
+            if a.ns and rn is not None and rn not in _ns_of(a, P, fn, fmt):
+                continue
+            lanes = P.region_n_cached(fmt, fn, name, n_pts, a.seed + k)
+            if not lanes:
+                continue
+            out, (worst, main, total) = P.check_bound_n(
+                fn, fmt, rnd, name, lanes=lanes)
+            note(out)
+            if not main:
+                unmeasured += 1
+                say(f"pow-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} {name} "
+                    f"seed {a.seed + k}: NOT MEASURED (0 main-path lanes of "
+                    f"{total}), {len(out)} findings")
+                continue
+            measured += 1
+            say(f"pow-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} {name} seed "
+                f"{a.seed + k}: {total} lanes, {main} main-path, largest "
+                f"|V - f| / Bv = 2^{worst:+.2f} (a sampled lower bound over "
+                f"these lanes), {len(out)} findings")
+    return measured, unmeasured
 
 
 def _pow_formats(arg, default):
@@ -1319,6 +1395,9 @@ def cmd_pow_pools(a):
         [P.RNE, P.RTZ] if a.quick else list(sf.RND_MODES))
     for fmt in fmts:
         for fn in fns:
+            if fn in P.INT_FUNCS:                     # parcel M3G2
+                _pow_n_pools(a, P, fn, fmt, rnds, step)
+                continue
             whole = list(P.pool(fn, fmt))
             xs = whole[::step]
             for rnd in rnds:
@@ -1378,6 +1457,10 @@ def cmd_pow_bound(a):
     for fmt in fmts:
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
         for fn in fns:
+            if fn in P.INT_FUNCS:                     # parcel M3G2
+                m_, u_ = _pow_n_bound(a, P, fn, fmt, rnds, n)
+                measured, unmeasured = measured + m_, unmeasured + u_
+                continue
             for rnd in rnds:
                 b = ml.build(fn, fmt, rnd, guard=a.guard)
                 for k, region in enumerate(P.REGION_NAMES[fn]):
@@ -1943,6 +2026,9 @@ def main(argv=None):
     p.add_argument("--quick", action="store_true",
                    help="--step 8, 12 lanes a region, fp128 under rne and rtz "
                         "by default")
+    p.add_argument("--ns", help="pown, rootn and compound's integer operands, "
+                                "a comma list (default the golden stage's "
+                                "n list, mathlib.POW_CHECK_NS)")
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_pow_pools)
@@ -1959,6 +2045,9 @@ def main(argv=None):
     p.add_argument("--guard", type=int, help="G, instead of the decided one")
     p.add_argument("--quick", action="store_true",
                    help="12 points a region, fp128 only by default")
+    p.add_argument("--ns", help="pown, rootn and compound's integer operands "
+                                "(a comma list): the regions whose n is "
+                                "listed (nlow and m1edge always)")
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_pow_bound)
