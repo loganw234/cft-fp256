@@ -716,14 +716,16 @@ def test_the_pow_commands_run_at_fp32_and_say_what_is_not_measured(
     assert "pow-regions powr fp32 rtz seed 1: 10 regions, 120 lanes" in shown
     R.FINDINGS.clear()
     R.OUT = None
-    R.main(["pow-bound", "--quick", "--formats", "fp32", "--out",
-            str(tmp_path / "b.txt")])
+    R.main(["pow-bound", "--quick", "--fn", "pow,powr", "--formats", "fp32",
+            "--out", str(tmp_path / "b.txt")])
     shown = capsys.readouterr().out
     assert "pow-bound powr fp32 negint: NOT MEASURED (0 lanes" in shown
     assert "pow-bound powr fp32 negedge: NOT MEASURED (0 lanes" in shown
     assert "pow-bound pow fp32 rne hugey seed 129: NOT MEASURED" in shown
-    assert "21 regions measured (the pass count), 4 NOT MEASURED" in shown \
-        or "regions measured (the pass count)" in shown
+    # the count line exactly (the lead, wave 2's merge: an "or" here passed on
+    # any count, and the count it named, 4, was not the run's)
+    assert ("21 regions measured (the pass count), 3 NOT MEASURED (0 "
+            "main-path lanes), outside it") in shown
     assert "RESULT: ok" in shown
     R.FINDINGS.clear()
     R.OUT = None

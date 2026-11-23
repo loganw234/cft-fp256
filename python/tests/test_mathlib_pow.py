@@ -1578,7 +1578,7 @@ def test_the_pow_commands_run_at_small_sizes_and_refuse_an_existing_out(
         R.main(["pow-pools", "--formats", "fp16"])
     with pytest.raises(SystemExit, match="parcel M3F2's"):
         # pow-bound's default --fn holds all five names (parcel M3G2), and at
-        # fp32 pown, rootn and compound are parcel M3F2's (the lead's merge)
+        # fp32 pown, rootn and compound are parcel M3F2's (since wave 2's merge)
         R.main(["pow-bound", "--formats", "fp32"])
     with pytest.raises(SystemExit, match="parcel M3F2's"):
         R._pow_formats("fp32", [], ["pow", "pown"])

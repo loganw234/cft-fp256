@@ -2085,7 +2085,9 @@ def main(argv=None):
     p.add_argument("--check", action="store_true")
     p.set_defaults(fn_=cmd_inv_family)
     p = sub.add_parser("pow-pools")
-    p.add_argument("--fn", help="pow,powr (the functions built, by default)")
+    p.add_argument("--fn", help="a comma list (by default the five built: "
+                                "pow, powr, pown, rootn, compound; fp32 "
+                                "takes --fn pow,powr)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); "
                                      "fp32, the triple word (parcel M3F1), "
                                      "for pow and powr, never by default")
@@ -2109,7 +2111,9 @@ def main(argv=None):
                                  "exists is refused")
     p.set_defaults(fn_=cmd_pow_pools)
     p = sub.add_parser("pow-bound")
-    p.add_argument("--fn", help="pow,powr (the functions built, by default)")
+    p.add_argument("--fn", help="a comma list (by default the five built: "
+                                "pow, powr, pown, rootn, compound; fp32 "
+                                "takes --fn pow,powr)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); "
                                      "fp32, the triple word (parcel M3F1), "
                                      "for pow and powr, never by default")

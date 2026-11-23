@@ -8491,9 +8491,10 @@ _POW_BUILDERS = {"pow": _build_pow, "powr": _build_powr}
 
 # ---- pown, rootn and compound: parcel M3G2 builds here ----
 
-# (M3G2's builders, plants and role checks are at this anchor, the section's
-# end, apart from M3F1's below: its own table _POW_N_BUILDERS, and
-# POW_PLANTS.update and _POW_ROLE_CHECKS.update, their literals unedited.)
+# (M3G2's builders and plants are at this anchor, the section's end, apart
+# from M3F1's below: its own table _POW_N_BUILDERS, and POW_PLANTS.update;
+# its role checks join by _POW_ROLE_CHECKS.update in its constants' section
+# below. The tables' literals are unedited.)
 #
 # pown(x, n), rootn(x, n) and compound(x, n) on the one core (pow_core), n a
 # CONSTANT of the fragment (the language checks it to int64's range and cftc
