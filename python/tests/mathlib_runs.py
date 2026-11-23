@@ -1298,7 +1298,8 @@ def _pow_formats(arg, default, fns=None):
                                  f"powr are the triple word)")
             continue
         if n not in P.BY_NAME:
-            raise SystemExit(f"--formats {n!r}: fp64, fp128, fp256 or fp32")
+            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256 (or "
+                             f"fp32, for pow and powr)")
     return [P.FP32 if n == "fp32" else P.BY_NAME[n] for n in names]
 
 

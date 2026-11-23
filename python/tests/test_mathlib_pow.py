@@ -176,8 +176,8 @@ def test_pow_names_is_beside_the_other_tuples_which_are_as_they_were():
     assert ml._POW_PARCEL == {"pow": "M3G1", "powr": "M3G1", "pown": "M3G2",
                               "rootn": "M3G2", "compound": "M3G2"}
     assert {fn: ml.POW_LIVE_CAP[fn] for fn in ml.POW_NAMES} == {
-        "pow": {"fp64": 30, "fp128": 30, "fp256": 30},
-        "powr": {"fp64": 23, "fp128": 22, "fp256": 22},
+        "pow": {"fp64": 30, "fp128": 30, "fp256": 30, "fp32": 32},
+        "powr": {"fp64": 23, "fp128": 22, "fp256": 22, "fp32": 29},
         "pown": {"fp64": 21, "fp128": 21, "fp256": 21},
         "rootn": {"fp64": 19, "fp128": 19, "fp256": 19},
         "compound": {"fp64": 22, "fp128": 22, "fp256": 22}}
@@ -252,12 +252,9 @@ def test_names_not_built_and_fp32_are_refused_by_name():
                 call(name, FP64, RNE)
         with pytest.raises(ValueError, match="parcel M3G2's"):
             ml.build(name, FP64, RNE, n=3)
-    for name in ("pow", "powr", "pown"):
-        for call in (ml.build, ml.fragment):
-            with pytest.raises(ValueError, match=f"{name} at fp32 is not "
-                               f"built: fp32 is the triple word, parcel "
-                               f"M3F1's"):
-                call(name, FP32, RNE)
+    # pow and powr at fp32 are built (parcel M3F1): see
+    # test_mathlib_pow_tw.py::test_fp32_pow_and_powr_are_built_and_the_rest_
+    # refused_by_name
     with pytest.raises(ValueError, match="pow takes no integer operand"):
         ml.build("pow", FP64, RNE, n=3)
     with pytest.raises(ValueError, match="powr takes no integer operand"):
@@ -1565,9 +1562,9 @@ def test_the_pow_commands_run_at_small_sizes_and_refuse_an_existing_out(
     R.FINDINGS.clear()
     with pytest.raises(SystemExit, match="fp64, fp128 or fp256"):
         R.main(["pow-pools", "--formats", "fp16"])
-    with pytest.raises(SystemExit, match="fp32 is the triple word, parcel "
-                       "M3F1's"):
-        R.main(["pow-bound", "--formats", "fp32"])
+    with pytest.raises(SystemExit, match="parcel M3F2's"):
+        # (--fn pown is refused first, by _pow_fns: M3G2's)
+        R._pow_formats("fp32", [], ["pow", "pown"])
     with pytest.raises(SystemExit, match="--fn 'pown'"):
         R.main(["pow-bound", "--fn", "pown"])
     # --seq runs the compiled shape over the same lanes, --lanes sizes the
