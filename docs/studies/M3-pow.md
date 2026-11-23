@@ -42,6 +42,47 @@ reader of its section 2 would meet it:
   are the second and third routines of two inputs" holds after atan2; and
   section 6's "MATH holds the thirteen" is the language's, untouched here.
 
+**A note of 2026-11-23, at parcel M3G2** (pown, rootn and compound built in
+the golden generator on M3G1's core; the study's text stays as written). What
+is built, and where it differs from the study:
+
+- n is a constant of the fragment and the key is `(name, fmt, rnd, n)`;
+  `mathlib.pow_n(name, n)` checks it (an int that is not a bool, in int64's
+  range; `rootn(x, 0)` refused by name). Their builders are a table of their
+  own, `_POW_N_BUILDERS`, not `_POW_BUILDERS` (which stays pow and powr, so
+  the harness's `FUNCS` stays two: the lead's approval of 2026-11-23). Their
+  one input is x; two n are two fragments with one `op`.
+- n = 0 and n = 1 are the small fragments (family "small": 6 instructions, 9
+  for compound(x, 0), 25 to 26 for compound(x, 1)); a plant at them is refused
+  by name. The study's model fell through to the core there.
+- Equal to the model (`docs/studies/m3/m3pow.py` `build_any`) at 570
+  configurations (the three functions, fp64, fp128 and fp256, five attributes,
+  19 n at fp64 and 10 at the others, from 0 to 2^63 - 1 and -2^63, 2^53 + 1,
+  2^54 + 3, 2^60 + 5): by dag digest of the design-order fragment and of the
+  scheduled one, by the emitted instruction order (words by their bits), live,
+  instruction counts and instructions by phase. The one difference, 315 of
+  the 570: the model's Build holds the word `SIGN_BIT` (the sign mask) in every
+  build, and this port holds it only where it is read (pown and rootn at an odd
+  n, and rootn's plant), so its bank has one word fewer there; no instruction
+  reads it.
+- `compound` takes the log1p reduction on x through `_pow_logarithm` (the
+  low word's block, the correction subtracted in phase Z, SMALL's selects);
+  its constants are log1p's with 1/ln 2's two words added to the dictionary
+  (the generator makes no `IL2H` for log1p), so the plant `il2h_ulp` acts on it
+  there too. `ex` carries `u_l = 0` for compound; rootn's V = 1 where `ex`.
+- At fp64 and |n| above 2^53, Y is a double word (n_h, n_l), first used in a
+  fragment here; the Fraction `ybound` (`YB2`) first ran in a routine here. At
+  fp64 n_l is nonzero only above 2^53; the region `nlow` holds lanes there,
+  `n_low_dropped` is red in it. At n = 2^63 - 1 no lane of x beside 1 keeps
+  |n log2 x| under T_f at fp64 (kmax 0), so that n has no in-range lane.
+- A region none of whose lanes reaches the main path prints NOT MEASURED (the
+  study's `int63` at fp64 for pown, and the others a run finds); it is outside
+  the pass count. pown and rootn exclude |x| = 1 from the main path.
+- The plants `exact_rule_no_tl` (shape alone) and `side_rule_off` (shape and
+  constants) are red in no check of lanes for these three: at x = 2^E, L = E exactly so t_l is 0 (the
+  rule's test never decides), and t_h cannot underflow with n an integer (the
+  first design's corner is pow's y).
+
 M4's study (docs/studies/M4-invtrig.md) is its nearest model of form,
 section for section, and M1's design (docs/studies/M1-exp-log.md) is its
 foundation: pow is built from M1's logarithm and M1's exponential. Where
