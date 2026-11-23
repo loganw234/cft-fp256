@@ -10,7 +10,8 @@ The integer operand n is a constant of the fragment (mathlib.pow_n checks it),
 so every fragment is keyed by (name, fmt, rnd, n) and every check runs at an n:
 python/tests/mathlib_pow_harness.py's `*_n` checks, which return findings that
 begin with the check's name and an "n = N:". The n list is mathlib.POW_CHECK_NS
-(fp64, 13 n) and its 6 shortest (0, 1, 3, -3, 17, -2^63) at fp128 and
+(fp64, 13 n) and a selection of 6 (0, 1, 3, -3, 17, -2^63: the small
+fragments, the sign classes, a mid value and the int64 edge) at fp128 and
 fp256; all five attributes at n = 0, 1, 3, -3 and one large n, rne and rtz at
 the others. n = 0 and n = 1 are the small
 fragments.
@@ -798,16 +799,74 @@ def test_leg_shape_every_pinned_field_and_the_caps():
     assert out == []
 
 
-def test_leg_core_one_sign_of_n_l_and_a_wrong_ybound():
+def test_leg_core_one_sign_of_n_l():
     lanes = [ln for ln in P.region_n_cached(FP64, "pown", "nlow", 40, 5)
              if ln[1] == 2 ** 53 + 1]
     out, (_w, _n, signs) = P.check_core_n("pown", FP64, lanes=lanes)
     assert signs == [False] and any("one sign" in s for s in out)
-    # the pinned Bv: a build with the YB2 word one ulp off fails the exact-bound leg
     out, _ = P.check_core_n("pown", FP64, plant=None)
     assert out == []
-    b = P.build_n("pown", FP64, RNE, 3, "n_word_ulp")
-    assert b.roles["NH"]                         # (constants: the other leg)
+
+
+def _with_word(role, edit):
+    """A builder of build_n's builds with the word of `role` replaced by
+    edit(bits): a copy, the cached build untouched."""
+    import copy
+
+    def builder(fn, fmt, rnd, n, plant):
+        b = copy.copy(P.build_n(fn, fmt, rnd, n, plant))
+        b.words = dict(b.words)
+        nm = b.roles[role][1]
+        b.words[nm] = edit(b.words[nm])
+        return b
+    return builder
+
+
+@pytest.mark.parametrize("fn", INT_FUNCS)
+def test_leg_core_bv_a_doubled_ybound_word_fails_and_one_ulp_does_not(fn):
+    """core's exact-bound leg is a window, need <= Bv <= need (1 + 2^-(p-3)):
+    the YB2 word doubled (+ one exponent step) is red alone, and one ulp off is
+    not seen (the constants' check is the leg that holds YB2 to the ulp)."""
+    assert P.check_core_n(fn, FP64)[0] == []
+    one_exp = 1 << FP64.man_w
+    out, _ = P.check_core_n(fn, FP64, builder=_with_word(
+        "YB2", lambda w: w + one_exp))
+    assert out and all(s.startswith("core:") for s in out)
+    assert any("the build's Bv is not the exact bound" in s for s in out)
+    out, _ = P.check_core_n(fn, FP64, builder=_with_word(
+        "YB2", lambda w: w + 1))
+    assert out == []
+    # and the constants' check sees the one-ulp fault the window cannot
+    found, _ = P.check_constants_n(
+        builder=lambda name, f_, r_, n_: _with_word(
+            "YB2", lambda w: w + 1)(name, f_, r_, n_, None),
+        formats=(FP64,), attrs=(RNE,), names=(fn,), ns=(3,))
+    assert any(" YB2:" in s for s in found)
+
+
+def test_leg_constants_the_small_fragments_two_legs():
+    """_check_pow_small's legs, each red alone: a word the fragment reads whose
+    role is not its IEEE-field value, and a word it reads with no role."""
+    import copy
+    b = P.build_n("compound", FP64, RNE, 1)
+    clean = []
+    assert ml._check_pow_small(b, clean) > 0 and clean == []
+    bad = copy.copy(b)
+    bad.words = dict(b.words)
+    nm = b.roles["NEGONE"][1]
+    bad.words[nm] = b.words[nm] ^ 1
+    found = []
+    ml._check_pow_small(bad, found)
+    assert len(found) == 1 and " NEGONE:" in found[0]
+    nameless = copy.copy(b)
+    nameless.roles = {r: ref for r, ref in b.roles.items() if r != "NEGONE"}
+    found = []
+    ml._check_pow_small(nameless, found)
+    assert len(found) == 1 and "a word the fragment reads with no role"         in found[0]
+    # through the in-process entry, at n = 1 and n = 0
+    for n in (0, 1):
+        assert P.check_constants_n(formats=(FP64,), attrs=(RNE,),
+                                   names=("compound",), ns=(n,))[0] == []
 
 
 def test_leg_constants_each_role_alone():

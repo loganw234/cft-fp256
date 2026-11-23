@@ -2412,7 +2412,7 @@ def check_caps_n(fn, fmt, ns=None, plant=None, caps=None, fragments=None):
 
 # ---- core: the double-word Y and the Fraction ybound ---------------------------------
 
-def check_core_n(fn, fmt, rnd=RNE, plant=None, lanes=None):
+def check_core_n(fn, fmt, rnd=RNE, plant=None, lanes=None, builder=None):
     """[finding], (worst, lanes, n_l signs): core, at fp64 for pown and
     compound. (1) The double-word Y path on real lanes: the nlow region's
     lanes (n_l of both signs) through the build of their n, |V - f| / Bv under
@@ -2420,7 +2420,11 @@ def check_core_n(fn, fmt, rnd=RNE, plant=None, lanes=None):
     the main-path lanes. (2) The Fraction ybound, on lanes of each function at
     n = 3 and at fp64's n_l lanes: the build's own Bv equal to the exact bound
     |V| (2^-(p+G) + |t_h| B1 + |Y_h k| B2) rounded upward (_check_ybound's
-    rule), where B2 is not 0 (fp64) and the term is absent where it is 0."""
+    rule), where B2 is not 0 (fp64) and the term is absent where it is 0. That
+    leg is a WINDOW, need <= Bv <= need (1 + 2^-(p-3)): a YB2 word one ulp off
+    stays inside it and is not seen (the constants' check holds YB2 to one
+    ulp); a doubled one is. `builder(fn, fmt, rnd, n, plant)` stands for
+    build_n, for the test that doctors a word."""
     out = []
     p, G = fmt.prec, ml.GUARD[fmt.name]
     P = ml.plan_pow(fmt, G)
@@ -2429,7 +2433,7 @@ def check_core_n(fn, fmt, rnd=RNE, plant=None, lanes=None):
         lanes = region_n_cached(fmt, fn, "nlow", 40, 5) if lanes is None \
             else lanes
         for n, ls in _by_n(lanes).items():
-            b = build_n(fn, fmt, rnd, n, plant)
+            b = (builder or build_n)(fn, fmt, rnd, n, plant)
             hi, lo = ml._pow_int_words(fmt, n)
             for ln in ls:
                 _r, _f, pr = b.run((ln[0],), ("th0",))
@@ -2453,7 +2457,7 @@ def check_core_n(fn, fmt, rnd=RNE, plant=None, lanes=None):
         for n in (3, -3, 2 ** 53 + 1):
             if fn == "rootn" and n == 0:
                 continue
-            b = build_n(fn, fmt, rnd, n, plant)
+            b = (builder or build_n)(fn, fmt, rnd, n, plant)
             yb = Fraction(1, abs(n)) if fn == "rootn" else Fraction(abs(n))
             for ln in region_n_cached(fmt, fn, "int", 12, 7):
                 ln = (ln[0], n)
