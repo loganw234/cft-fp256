@@ -20,4 +20,11 @@ TOTALS for 57 slices of 2^32 lanes (COMPUTED; formulas shown)
   software backend (the device's own function on software), single thread: slices x 2^32 x 4637 x 0.23..0.32 us = 7.25e+04 to 1.01e+05 hours; over 36 threads 2.01e+03 to 2.8e+03 h
   oracle `all` path, pow's list slices, five oracle calls a lane (an upper bound: the sweep tool derives four from one evaluation): mean 15.251 us a lane (max 28.458): 57 x 2^32 x 15.251 us = 1.04e+03 hours single thread; 28.8 h over 36 threads
   oracle `all` path, powr's list slices, five oracle calls a lane (an upper bound: the sweep tool derives four from one evaluation): mean 14.195 us a lane (max 27.161): 57 x 2^32 x 14.195 us = 965 hours single thread; 26.8 h over 36 threads
-  which side sets the pace: compare the device figures (instruction-bound, then the plan's atan2-scaled 'pace') with the oracle's, per the slice-rate table in the entry
+
+THE PACE, one process a tile, device and oracle in sequence (the lead's formula, notes-W1.md item 10): a slice costs 2^32 x (device `all` + O), O the oracle seconds a lane in that process; the quad's four tiles run one process each, so 57 slices take 57 x 2^32 x (device + O) / 4
+  pow, O = 3.300 us (one call, mean of the 18 list slices; MEASURED): a slice 4294967296 x (4.544 + 3.300) us = 9.4 h on one tile; 57 slices on the quad 133 h (COMPUTED); oracle share 42 %
+  pow, O = 15.251 us (five calls, mean of the 18 list slices; MEASURED): a slice 4294967296 x (4.544 + 15.251) us = 23.6 h on one tile; 57 slices on the quad 337 h (COMPUTED); oracle share 77 %
+  powr, O = 3.025 us (one call, mean of the 18 list slices; MEASURED): a slice 4294967296 x (4.544 + 3.025) us = 9.0 h on one tile; 57 slices on the quad 129 h (COMPUTED); oracle share 40 %
+  powr, O = 14.195 us (five calls, mean of the 18 list slices; MEASURED): a slice 4294967296 x (4.544 + 14.195) us = 22.4 h on one tile; 57 slices on the quad 319 h (COMPUTED); oracle share 76 %
+  a threaded oracle (36 threads beside the call) is a later step and not the tool as it is; what it would give is the oracle's 28.8 h above spread, with the device alone then 77 h on four tiles
+  units: the 309 above is tile-hours, instruction-bound, one process a tile without an oracle; the 352 is card hours at atan2's measured pace (plan.md:96, 31 h for nine slices = 3.44 h a slice), which includes atan2's own oracle and its 70 % marked lanes; they are not one range

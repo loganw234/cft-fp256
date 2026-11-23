@@ -11,7 +11,7 @@ fp32 pow region wide: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^
     exp-reduce   capacity 0.000195  observed 0.000091
     log-head3    capacity 0.000185  observed 0.000080
     exp-head3    capacity 0.000113  observed 0.000036
-  13 s
+  15 s
 fp32 pow region near1: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 287
   M max 0.001706 Bv; capacities 0.142559 Bv; BOUND 0.144265 Bv (2^-2.79)
@@ -25,7 +25,7 @@ fp32 pow region near1: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     log-Z        capacity 0.004406  observed 0.002771
     exp-Z        capacity 0.001094  observed 0.000425
     exp-reduce   capacity 0.000191  observed 0.000113
-  12 s
+  15 s
 fp32 pow region edge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 314
   M max 0.000464 Bv; capacities 0.046864 Bv; BOUND 0.047328 Bv (2^-4.40)
@@ -39,7 +39,7 @@ fp32 pow region edge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^
     log-Z        capacity 0.000082  observed 0.000048
     exp-Z        capacity 0.000021  observed 0.000016
     exp-reduce   capacity 0.000010  observed 0.000006
-  13 s
+  16 s
 fp32 pow region redb: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 321
   M max 0.002618 Bv; capacities 0.125506 Bv; BOUND 0.128124 Bv (2^-2.96)
@@ -53,7 +53,7 @@ fp32 pow region redb: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^
     log-Z        capacity 0.001312  observed 0.000438
     exp-Z        capacity 0.000584  observed 0.000409
     exp-reduce   capacity 0.000273  observed 0.000208
-  14 s
+  17 s
 fp32 pow region small: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 304
   M max 0.001423 Bv; capacities 0.006650 Bv; BOUND 0.008073 Bv (2^-6.95)
@@ -67,7 +67,7 @@ fp32 pow region small: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     product      capacity 0.000104  observed 0.000062
     exp-head3    capacity 0.000102  observed 0.000037
     exp-tail     capacity 0.000093  observed 0.000046
-  13 s
+  16 s
 fp32 pow region negint: 285 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 316
   M max 0.002168 Bv; capacities 0.196198 Bv; BOUND 0.198366 Bv (2^-2.33)
@@ -81,7 +81,7 @@ fp32 pow region negint: 285 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 
     exp-head2    capacity 0.002244  observed 0.001234
     exp-Z        capacity 0.000513  observed 0.000179
     exp-reduce   capacity 0.000183  observed 0.000070
-  12 s
+  17 s
 fp32 pow region sub: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 311
   M max 0.001454 Bv; capacities 0.045906 Bv; BOUND 0.047359 Bv (2^-4.40)
@@ -95,7 +95,7 @@ fp32 pow region sub: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-
     exp-reduce   capacity 0.000231  observed 0.000074
     exp-head3    capacity 0.000112  observed 0.000059
     exp-tail     capacity 0.000091  observed 0.000058
-  11 s
+  14 s
 fp32 pow region tinyy: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 322
   M max 0.000000 Bv; capacities 0.053887 Bv; BOUND 0.053887 Bv (2^-4.21)
@@ -109,7 +109,7 @@ fp32 pow region tinyy: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     log-sum      capacity 0.000000  observed 0.000000
     log-head3    capacity 0.000000  observed 0.000000
     log-Z        capacity 0.000000  observed 0.000000
-  12 s
+  15 s
 fp32 pow region hugey: 13 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 272
   M max 0.000675 Bv; capacities 0.059331 Bv; BOUND 0.060006 Bv (2^-4.06)
@@ -137,7 +137,7 @@ fp32 pow region negedge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2
     exp-head2    capacity 0.000276  observed 0.000264
     log-head2    capacity 0.000048  observed 0.000017
     exp-Z        capacity 0.000037  observed 0.000024
-  13 s
+  14 s
 fp32 pow region rhoedge: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 309
   M max 0.000791 Bv; capacities 0.135547 Bv; BOUND 0.136338 Bv (2^-2.87)
@@ -151,7 +151,7 @@ fp32 pow region rhoedge: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2
     exp-head2    capacity 0.002473  observed 0.001634
     exp-reduce   capacity 0.000268  observed 0.000103
     exp-Z        capacity 0.000190  observed 0.000135
-  12 s
+  14 s
 fp32 pow region zone: 286 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 315
   M max 0.000813 Bv; capacities 0.184201 Bv; BOUND 0.185014 Bv (2^-2.43)
@@ -165,7 +165,7 @@ fp32 pow region zone: 286 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^
     log-Z        capacity 0.001605  observed 0.001337
     exp-Z        capacity 0.000280  observed 0.000106
     exp-reduce   capacity 0.000139  observed 0.000083
-  12 s
+  13 s
 
 SUMMARY fp32 pow, 300 lanes a region, seed 1, rne, B1 2^-66 (first), B2 2^-67 (first):
   wide     lanes  281  bound 0.071711 + residual 2.21e-05 = 0.071733 Bv (under 1); margin 3.80 bits; measured worst 0.008218
@@ -180,4 +180,4 @@ SUMMARY fp32 pow, 300 lanes a region, seed 1, rne, B1 2^-66 (first), B2 2^-67 (f
   negedge  lanes  300  bound 0.197309 + residual 1.88e-06 = 0.197311 Bv (under 1); margin 2.34 bits; measured worst 0.029550
   rhoedge  lanes  280  bound 0.136338 + residual 1.20e-05 = 0.136350 Bv (under 1); margin 2.87 bits; measured worst 0.012830
   zone     lanes  286  bound 0.185014 + residual 1.02e-05 = 0.185024 Bv (under 1); margin 2.43 bits; measured worst 0.035381
-  worst region bound 0.198385 Bv, margin 2.33 bits; 137 s
+  worst region bound 0.198385 Bv, margin 2.33 bits, over the 12 of 12 regions measured; 169 s

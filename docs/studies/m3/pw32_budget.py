@@ -241,6 +241,11 @@ def report(bld, lanes, label, t0):
           f"of {len(lanes)}, G {bld.meta['G']}, GL {bld.meta['GL']}, B1 "
           f"2^{lg(bld.meta['B1']) if bld.meta['B1'] else '-inf'}, B2 "
           f"2^{lg(bld.meta['B2']) if bld.meta['B2'] else '-inf'}")
+    if s["lanes"] == 0:
+        print("  NOT MEASURED (0 main-path lanes in this region: no bound, "
+              "no margin)")
+        print(f"  {time.time() - t0:.0f} s", flush=True)
+        return s
     print(f"  rounding instructions active {s['rounding']}")
     print(f"  M max {s['Mmax']:.6f} Bv; capacities {s['S_cap']:.6f} Bv; "
           f"BOUND {s['bound']:.6f} Bv (2^{lg(s['bound']):.2f})")

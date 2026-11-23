@@ -11,7 +11,7 @@ fp32 powr region wide: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     exp-reduce   capacity 0.000195  observed 0.000091
     log-head3    capacity 0.000185  observed 0.000080
     exp-head3    capacity 0.000113  observed 0.000036
-  13 s
+  14 s
 fp32 powr region near1: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 287
   M max 0.001706 Bv; capacities 0.142559 Bv; BOUND 0.144265 Bv (2^-2.79)
@@ -25,7 +25,7 @@ fp32 powr region near1: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 
     log-Z        capacity 0.004406  observed 0.002771
     exp-Z        capacity 0.001094  observed 0.000425
     exp-reduce   capacity 0.000191  observed 0.000113
-  12 s
+  14 s
 fp32 powr region edge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 314
   M max 0.000464 Bv; capacities 0.046864 Bv; BOUND 0.047328 Bv (2^-4.40)
@@ -39,7 +39,7 @@ fp32 powr region edge: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     log-Z        capacity 0.000082  observed 0.000048
     exp-Z        capacity 0.000021  observed 0.000016
     exp-reduce   capacity 0.000010  observed 0.000006
-  13 s
+  15 s
 fp32 powr region redb: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 321
   M max 0.002618 Bv; capacities 0.125506 Bv; BOUND 0.128124 Bv (2^-2.96)
@@ -67,12 +67,9 @@ fp32 powr region small: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 
     product      capacity 0.000104  observed 0.000062
     exp-head3    capacity 0.000102  observed 0.000037
     exp-tail     capacity 0.000093  observed 0.000046
-  13 s
+  14 s
 fp32 powr region negint: 0 main-path lanes of 0, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
-  rounding instructions active 0
-  M max 0.000000 Bv; capacities 0.000000 Bv; BOUND 0.000000 Bv (2^-inf)
-  measured worst 0.000000 Bv at -
-  residual (second order, measured) 0.000e+00 Bv; bound + residual 0.000000 Bv
+  NOT MEASURED (0 main-path lanes in this region: no bound, no margin)
   0 s
 fp32 powr region sub: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 311
@@ -87,7 +84,7 @@ fp32 powr region sub: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^
     exp-reduce   capacity 0.000231  observed 0.000074
     exp-head3    capacity 0.000112  observed 0.000059
     exp-tail     capacity 0.000091  observed 0.000058
-  12 s
+  14 s
 fp32 powr region tinyy: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 321
   M max 0.000000 Bv; capacities 0.019619 Bv; BOUND 0.019619 Bv (2^-5.67)
@@ -101,7 +98,7 @@ fp32 powr region tinyy: 300 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 
     log-sum      capacity 0.000000  observed 0.000000
     log-head3    capacity 0.000000  observed 0.000000
     log-Z        capacity 0.000000  observed 0.000000
-  12 s
+  15 s
 fp32 powr region hugey: 10 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 270
   M max 0.000574 Bv; capacities 0.059448 Bv; BOUND 0.060023 Bv (2^-4.06)
@@ -117,10 +114,7 @@ fp32 powr region hugey: 10 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     exp-Z        capacity 0.000066  observed 0.000033
   2 s
 fp32 powr region negedge: 0 main-path lanes of 0, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
-  rounding instructions active 0
-  M max 0.000000 Bv; capacities 0.000000 Bv; BOUND 0.000000 Bv (2^-inf)
-  measured worst 0.000000 Bv at -
-  residual (second order, measured) 0.000e+00 Bv; bound + residual 0.000000 Bv
+  NOT MEASURED (0 main-path lanes in this region: no bound, no margin)
   0 s
 fp32 powr region rhoedge: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 309
@@ -135,7 +129,7 @@ fp32 powr region rhoedge: 280 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B
     exp-head2    capacity 0.002473  observed 0.001634
     exp-reduce   capacity 0.000268  observed 0.000103
     exp-Z        capacity 0.000190  observed 0.000135
-  12 s
+  15 s
 fp32 powr region zone: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
   rounding instructions active 314
   M max 0.000805 Bv; capacities 0.193650 Bv; BOUND 0.194455 Bv (2^-2.36)
@@ -149,7 +143,7 @@ fp32 powr region zone: 281 main-path lanes of 300, G 40, GL 48, B1 2^-66.0, B2 2
     exp-head2    capacity 0.002875  observed 0.001181
     exp-Z        capacity 0.000326  observed 0.000162
     exp-reduce   capacity 0.000307  observed 0.000113
-  12 s
+  16 s
 
 SUMMARY fp32 powr, 300 lanes a region, seed 1, rne, B1 2^-66 (first), B2 2^-67 (first):
   wide     lanes  281  bound 0.071711 + residual 2.21e-05 = 0.071733 Bv (under 1); margin 3.80 bits; measured worst 0.008218
@@ -157,11 +151,11 @@ SUMMARY fp32 powr, 300 lanes a region, seed 1, rne, B1 2^-66 (first), B2 2^-67 (
   edge     lanes  300  bound 0.047328 + residual 1.66e-06 = 0.047330 Bv (under 1); margin 4.40 bits; measured worst 0.007206
   redb     lanes  300  bound 0.128124 + residual 1.32e-05 = 0.128137 Bv (under 1); margin 2.96 bits; measured worst 0.016436
   small    lanes  300  bound 0.008073 + residual 9.78e-06 = 0.008082 Bv (under 1); margin 6.95 bits; measured worst 0.003642
-  negint   lanes    0  bound 0.000000 + residual 0.00e+00 = 0.000000 Bv (under 1); margin inf bits; measured worst 0.000000
+  negint   NOT MEASURED (0 lanes: no main-path lane in the region for powr)
   sub      lanes  281  bound 0.047359 + residual 2.22e-05 = 0.047382 Bv (under 1); margin 4.40 bits; measured worst 0.006545
   tinyy    lanes  300  bound 0.019619 + residual 2.80e-10 = 0.019619 Bv (under 1); margin 5.67 bits; measured worst 0.000756
   hugey    lanes   10  bound 0.060023 + residual 9.23e-06 = 0.060032 Bv (under 1); margin 4.06 bits; measured worst 0.007875
-  negedge  lanes    0  bound 0.000000 + residual 0.00e+00 = 0.000000 Bv (under 1); margin inf bits; measured worst 0.000000
+  negedge  NOT MEASURED (0 lanes: no main-path lane in the region for powr)
   rhoedge  lanes  280  bound 0.136338 + residual 1.20e-05 = 0.136350 Bv (under 1); margin 2.87 bits; measured worst 0.012830
   zone     lanes  281  bound 0.194455 + residual 1.02e-05 = 0.194465 Bv (under 1); margin 2.36 bits; measured worst 0.039309
-  worst region bound 0.194465 Bv, margin 2.36 bits; 114 s
+  worst region bound 0.194465 Bv, margin 2.36 bits, over the 10 of 12 regions measured; 133 s

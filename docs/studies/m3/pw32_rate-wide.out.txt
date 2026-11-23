@@ -1,11 +1,11 @@
 fp32 pow region wide: 2000 lanes, seed 3, G' = 6 (the bound 2^34 times its own, B1 and B2 with it)
-  rne: 2000 lanes, marked 1468, the law predicts 1613.2, z = -3.61; wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
+  rne: 2000 lanes, marked 1468, the law predicts 1613.2, z = -3.61 (rate.py's Poisson form), Bernoulli z = -12.11 (variance sum p(1-p) = 143.7; 1191 of 2000 lanes have p = 1); wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
     rate at G = 40, COMPUTED: nominal 2^-(G-1) mean sig(V) x 2 = 5.248e-12 (2^-37.47) a main-path call; with this region's own bounds (B1, B2 terms) the mean of 2 Bv / s = 7.487e-11 (2^-33.64)
-  rtz: 2000 lanes, marked 1093, the law predicts 1195.7, z = -2.97; wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
+  rtz: 2000 lanes, marked 1093, the law predicts 1195.7, z = -2.97 (rate.py's Poisson form), Bernoulli z = -6.16 (variance sum p(1-p) = 278.3; 401 of 2000 lanes have p = 1); wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
     rate at G = 40, COMPUTED: nominal 2^-(G-1) mean sig(V) = 2.624e-12 (2^-38.47) a main-path call; with this region's own bounds (B1, B2 terms) the mean of 2 Bv / s = 3.744e-11 (2^-34.64)
 fp32 powr region wide: 2000 lanes, seed 3, G' = 6 (the bound 2^34 times its own, B1 and B2 with it)
-  rne: 2000 lanes, marked 1468, the law predicts 1613.2, z = -3.61; wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
+  rne: 2000 lanes, marked 1468, the law predicts 1613.2, z = -3.61 (rate.py's Poisson form), Bernoulli z = -12.11 (variance sum p(1-p) = 143.7; 1191 of 2000 lanes have p = 1); wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
     rate at G = 40, COMPUTED: nominal 2^-(G-1) mean sig(V) x 2 = 5.248e-12 (2^-37.47) a main-path call; with this region's own bounds (B1, B2 terms) the mean of 2 Bv / s = 7.487e-11 (2^-33.64)
-  rtz: 2000 lanes, marked 1093, the law predicts 1195.7, z = -2.97; wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
+  rtz: 2000 lanes, marked 1093, the law predicts 1195.7, z = -2.97 (rate.py's Poisson form), Bernoulli z = -6.16 (variance sum p(1-p) = 278.3; 401 of 2000 lanes have p = 1); wrong guesses 0, WRONG UNMARKED 0; mean sig(V) 1.4426
     rate at G = 40, COMPUTED: nominal 2^-(G-1) mean sig(V) = 2.624e-12 (2^-38.47) a main-path call; with this region's own bounds (B1, B2 terms) the mean of 2 Bv / s = 3.744e-11 (2^-34.64)
-46 s
+55 s

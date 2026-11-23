@@ -167,16 +167,22 @@ def mode_bound(args):
           f"{'2^' + str(e1) if e1 is not None else '2^-66 (first)'}, B2 "
           f"{'2^' + str(e2) if e2 is not None else '2^-67 (first)'}:")
     worst = 0.0
+    nmeas = sum(1 for _n, s_ in rows if s_["lanes"])
     for name, s in rows:
         tot = s["bound"] + s["resid"]
         worst = max(worst, tot)
+        if s["lanes"] == 0:
+            print(f"  {name:8s} NOT MEASURED (0 lanes: no main-path lane in "
+                  f"the region for {fn})")
+            continue
         ok = "under 1" if tot < 1 else "OVER 1"
         print(f"  {name:8s} lanes {s['lanes']:4d}  bound {s['bound']:.6f} + "
               f"residual {s['resid']:.2e} = {tot:.6f} Bv ({ok}); margin "
               f"{-math.log2(tot) if tot > 0 else float('inf'):.2f} bits; "
               f"measured worst {s['Emax']:.6f}")
     print(f"  worst region bound {worst:.6f} Bv, margin "
-          f"{-math.log2(worst):.2f} bits; {time.time() - t0:.0f} s")
+          f"{-math.log2(worst):.2f} bits, over the {nmeas} of {len(rows)} "
+          f"regions measured; {time.time() - t0:.0f} s")
 
 
 def mode_control():
@@ -374,6 +380,8 @@ def mode_rate_wide(args):
             b = _b(fn, rnd, bound_shift=shift)
             used = obs = wrong = gw = 0
             exp = 0.0
+            var = 0.0
+            capped = 0
             sigs = []
             ex_true = 0.0
             for lane in lanes:
@@ -394,7 +402,10 @@ def mode_rate_wide(args):
                 e = math.floor(math.log2(Rq))
                 ulp = 2.0 ** (e - fmt.prec + 1)
                 s = ulp / 2 if rnd in (RNE, RMM) else ulp
-                exp += min(1.0, 2 * Bvq / s)
+                pm = min(1.0, 2 * Bvq / s)
+                exp += pm
+                var += pm * (1 - pm)
+                capped += pm == 1.0
                 ex_true += 2 * Bvq / s / 2 ** shift
                 sigs.append(_sig(fmt, pr["Vh"]))
                 mk = bool(fl & MARK)
@@ -407,11 +418,15 @@ def mode_rate_wide(args):
                 if not mk and not same:
                     wrong += 1
             z = (obs - exp) / math.sqrt(exp) if exp > 0 else float("nan")
+            zb = (obs - exp) / math.sqrt(var) if var > 0 else float("nan")
             msig = sum(sigs) / len(sigs)
             nominal = 2.0 ** -(G - 1) * msig * (2 if rnd == RNE else 1)
             actual = ex_true / used
             print(f"  {AN[rnd]}: {used} lanes, marked {obs}, the law predicts "
-                  f"{exp:.1f}, z = {z:+.2f}; wrong guesses {gw}, WRONG "
+                  f"{exp:.1f}, z = {z:+.2f} (rate.py's Poisson form), "
+                  f"Bernoulli z = {zb:+.2f} (variance sum p(1-p) = "
+                  f"{var:.1f}; {capped} of {used} lanes have p = 1); "
+                  f"wrong guesses {gw}, WRONG "
                   f"UNMARKED {wrong}; mean sig(V) {msig:.4f}")
             print(f"    rate at G = 40, COMPUTED: nominal 2^-(G-1) mean "
                   f"sig(V){' x 2' if rnd == RNE else ''} = {nominal:.3e} "
@@ -463,10 +478,12 @@ def mode_rate_lists(args):
                 print(f"fp32 {fn:5s} slice {kind}-fixed {label:8s} "
                       f"({fixed:#010x}), {len(lanes)} lanes: {line}; "
                       f"sample mark rate of the non-exact marks {rate} "
-                      f"(x 2^32 = "
-                      + ", ".join(
-                          f"{AN[rnd]} {(r['marked'] - ex) / len(lanes) * 2 ** 32:.3g}"
-                          for rnd, r, ex in cells) + ")", flush=True)
+                      + "; as a 95 % upper bound on the rate, the rule of "
+                      + "three, " + ", ".join(
+                          f"{AN[rnd]} <= {max(3.0, 1.0 * (r['marked'] - ex)) / len(lanes):.2e} a lane"
+                          for rnd, r, ex in cells)
+                      + " (a bound on the sample, not an extrapolation)",
+                      flush=True)
     print(f"{time.time() - t0:.0f} s")
 
 
@@ -515,6 +532,7 @@ def _marks_under_shift(fn, n, plant):
     b = _b(fn, RNE, bound_shift=shift, plant=plant)
     marked = wrong = used = 0
     exp = 0.0
+    var = 0.0
     for lane in lanes:
         bits, fl, pr = M.run(b, fn, lane, ("ex", "tinyt", "R", "Bv"))
         if pr["ex"] & ~fmt.sign_mask or pr["tinyt"] & ~fmt.sign_mask:
@@ -525,12 +543,14 @@ def _marks_under_shift(fn, n, plant):
             continue
         used += 1
         e = math.floor(math.log2(abs(float(dec(fmt, pr["R"])))))
-        exp += min(1.0, 2 * float(dec(fmt, pr["Bv"])) /
-                   (2.0 ** (e - fmt.prec + 1) / 2))
+        pm = min(1.0, 2 * float(dec(fmt, pr["Bv"])) /
+                 (2.0 ** (e - fmt.prec + 1) / 2))
+        exp += pm
+        var += pm * (1 - pm)
         marked += bool(fl & MARK)
         if not fl & MARK and (bits, fl & ~MARK) != golden(fmt, fn, lane, RNE):
             wrong += 1
-    return used, marked, wrong, exp
+    return used, marked, wrong, exp, var
 
 
 def mode_plants():
@@ -553,14 +573,18 @@ def mode_plants():
                   f"{'RED (over 1)' if tot >= 1 else 'green (under 1)'}",
                   flush=True)
     print("plant 3, mark_silenced: " + pw32.PLANTS["mark_silenced"])
+    base = None
     for plant in (None, "mark_silenced"):
-        used, marked, wrong, exp = _marks_under_shift("pow", 600, plant)
-        z = (marked - exp) / math.sqrt(exp)
+        used, marked, wrong, exp, var = _marks_under_shift("pow", 600, plant)
+        if plant is None:
+            base = marked
+        z = (marked - exp) / math.sqrt(var)
         print(f"  rate mode, fp32 pow region wide, 600 lanes, seed 3, G' = 6,"
               f" rne, plant {plant}: {used} main-path lanes, marked "
-              f"{marked}, the law predicts {exp:.1f}, z = {z:+.2f}, WRONG "
+              f"{marked}, the law predicts {exp:.1f}, Bernoulli z = {z:+.2f}, WRONG "
               f"UNMARKED {wrong} -> "
-              f"{'RED (z past -5)' if z < -5 else 'green'}", flush=True)
+              f"{'RED (under half the control' + chr(39) + 's marks)' if marked < base / 2 else 'green (the control: the law over-predicts, see the rate mode)'}",
+              flush=True)
     lanes = H.pool(fmt, "pow")
     for plant in (None, "mark_silenced"):
         r = _compare(lambda f_, rnd_: _b(f_, rnd_, plant=plant), "pow",
@@ -668,51 +692,34 @@ def mode_slice():
               f"evaluation): mean {mean5:.3f} us a lane (max {mx5:.3f}): "
               f"{SLICES} x 2^32 x {mean5:.3f} us = {h1:.3g} hours single "
               f"thread; {h1 / THREADS:.3g} h over {THREADS} threads")
-    print("  which side sets the pace: compare the device figures "
-          "(instruction-bound, then the plan's atan2-scaled 'pace') with the "
-          "oracle's, per the slice-rate table in the entry")
-
-
-def _structured():
-    """The free operand's structured candidates: integers to 256 and the
-    halves, quarters and eighths to 32, either sign (where exact cases and
-    the midpoints live; a sample of 4,096 uniform encodings meets almost
-    none of them)."""
-    vals = set()
-    for k in range(1, 257):
-        vals.add(Fraction(k))
-    for q in (2, 4, 8):
-        for k in range(1, 32 * q + 1):
-            vals.add(Fraction(k, q))
-    out = []
-    for v in sorted(vals):
-        out.append(enc(fmt, v))
-        out.append(enc(fmt, -v))
-    return out
-
-
-def mode_rate_exact(args):
-    fns = [args[0]] if args else list(FNS)
-    t0 = time.time()
-    free = _structured()
-    for fn in fns:
-        for kind, lst in (("x", X_LIST), ("y", Y_LIST)):
-            for label, fixed in lst:
-                lanes = [(fixed, v) if kind == "x" else (v, fixed)
-                         for v in free]
-                cells = []
-                for rnd in (RNE, RTZ):
-                    r = _compare(_b, fn, lanes, rnd, stop=10 ** 9)
-                    ex = sum(1 for m in r["marks"] if m[4] != "irr")
-                    cells.append((rnd, r, ex))
-                line = ", ".join(
-                    f"{AN[rnd]}: marked {r['marked']} (exact cases {ex}, "
-                    f"others {r['marked'] - ex}), WRONG UNMARKED {r['wrong']}"
-                    for rnd, r, ex in cells)
-                print(f"fp32 {fn:5s} structured {kind}-fixed {label:8s} "
-                      f"({fixed:#010x}), {len(lanes)} lanes: {line}",
-                      flush=True)
-    print(f"{time.time() - t0:.0f} s")
+    print("\nTHE PACE, one process a tile, device and oracle in sequence "
+          "(the lead's formula, notes-W1.md item 10): a slice costs "
+          "2^32 x (device `all` + O), O the oracle seconds a lane in that "
+          "process; the quad's four tiles run one process each, so 57 "
+          "slices take 57 x 2^32 x (device + O) / 4")
+    dev_all = ins_all * TILE_NS / 1000          # us a lane, five attributes
+    for fn, grp in (("pow", pw), ("powr", prw)):
+        if not grp:
+            continue
+        o1 = sum(r[5] for r in grp) / len(grp)
+        o5 = sum(r[6] for r in grp) / len(grp)
+        for lab, o in (("one call", o1), ("five calls", o5)):
+            slice_h = LANES * (dev_all + o) * 1e-6 / 3600
+            quad_h = SLICES * slice_h / 4
+            print(f"  {fn}, O = {o:.3f} us ({lab}, mean of the 18 list "
+                  f"slices; MEASURED): a slice {LANES} x ({dev_all:.3f} + "
+                  f"{o:.3f}) us = {slice_h:.1f} h on one tile; 57 slices on "
+                  f"the quad {quad_h:.0f} h (COMPUTED); oracle share "
+                  f"{o / (dev_all + o) * 100:.0f} %")
+    print("  a threaded oracle (36 threads beside the call) is a later "
+          "step and not the tool as it is; what it would give is the "
+          "oracle's 28.8 h above spread, with the device alone then "
+          f"{SLICES * LANES * dev_all * 1e-6 / 3600 / 4:.0f} h on four tiles")
+    print("  units: the 309 above is tile-hours, instruction-bound, one "
+          "process a tile without an oracle; the 352 is card hours at "
+          "atan2's measured pace (plan.md:96, 31 h for nine slices = "
+          "3.44 h a slice), which includes atan2's own oracle and its 70 % "
+          "marked lanes; they are not one range")
 
 
 if __name__ == "__main__":
