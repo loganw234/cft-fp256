@@ -23,6 +23,7 @@ import contextlib
 import functools
 import pathlib
 import sys
+from fractions import Fraction
 
 import pytest
 
@@ -40,6 +41,7 @@ import mathlib_pow_harness as P  # noqa: E402
 RNE, RTZ, RMM = sf.RND_RNE, sf.RND_RTZ, sf.RND_RMM
 MARK = ml.MARK
 FNS = ml.POW_NAMES
+NAME_TO_RND = {sf.RND_NAMES[r]: r for r in sf.RND_MODES}
 
 
 @contextlib.contextmanager
@@ -211,8 +213,7 @@ def test_the_census_port_reproduces_the_studys_counts_at_fp64():
         want_counts, want_res = PF.CENSUS_FP64[name]
         assert counts == want_counts, name
         for rnd_name, by in want_res.items():
-            rnd = sf.RND_NAMES.index(rnd_name) if False else \
-                {v: k for k, v in sf.RND_NAMES.items()}[rnd_name]
+            rnd = NAME_TO_RND[rnd_name]
             if rnd not in res:
                 continue
             for cls, pin in by.items():
@@ -231,12 +232,10 @@ def _two(fmt, x, y):
 
 
 def test_each_leg_of_the_exact_case_rule_fails_alone_on_a_doctored_input():
-    from fractions import Fraction
     fmt = FP64
     real = PF.runner(fmt, "pow", RNE)
     pow2 = _two(fmt, 4, 3)                      # 4^3 = 64: base 2^2: decided
     nine = _two(fmt, 3, 2)                      # 3^2 = 9: exact, base 3: marked
-    mid = (P._enc(fmt, 3), P._val if False else P._enc(fmt, 34))   # 3^34
     assert PF.status(fmt, RNE, "pow", pow2) == "decided"
     assert PF.status(fmt, RNE, "pow", nine) == "must"
     lanes = [pow2, nine]
@@ -271,15 +270,13 @@ def test_each_leg_of_the_exact_case_rule_fails_alone_on_a_doctored_input():
     # and the same input through the real run is green in every leg
     out, _ = PF.check_exact_rule(fmt, RNE, "pow", lanes=lanes, run=real)
     assert out == []
-    del Fraction, mid
 
 
 def test_a_mark_off_the_list_fails_and_names_the_lane():
     fmt = FP64
     real = PF.runner(fmt, "pow", RNE)
-    clear = _two(fmt, 5, Fraction_half()) if False else _two(fmt, 5, 7)
-    # 5^7 = 78125 is exact (rep): marked is right; take an irrational lane
-    irr = _two(fmt, 3, __import__("fractions").Fraction(1, 3))
+    clear = _two(fmt, 5, 7)     # 5^7 = 78125: exact, marked is right
+    irr = _two(fmt, 3, Fraction(1, 3))        # irrational: clear
     assert PF.status(fmt, RNE, "pow", irr) == "clear"
     out, n = PF.check_off_list(fmt, RNE, "pow", [irr, clear])
     assert n == 2 and len(out) == 1 and "off_list" in out[0]
@@ -300,11 +297,6 @@ def test_a_mark_off_the_list_fails_and_names_the_lane():
     out, _ = PF.check_lanes(fmt, RNE, "pow", [nine],
                             lambda ln: P.golden(fmt, RNE, ln, "pow"))
     assert out and out[0].startswith("family:") and "must be marked" in out[0]
-
-
-def Fraction_half():          # (kept for the doctored lane's readability)
-    from fractions import Fraction
-    return Fraction(1, 2)
 
 
 # =====================================================================
@@ -400,6 +392,5 @@ def test_the_marks_of_the_pools_are_all_on_the_list():
     for fn in ml.POW_INT_NAMES:
         for rnd in (RNE, RTZ):
             out, t = P.check_pools_n(fn, FP64, rnd, 3)
-            f_marked = [(x, 3) for x, _n in t.marked]
-            o, n = PF.check_off_list(FP64, rnd, fn, f_marked)
+            o, n = PF.check_off_list(FP64, rnd, fn, t.marked)
             assert o == [], o
