@@ -1316,7 +1316,15 @@ def cmd_pow_pools(a):
     process, unniced, the desktop shared with other parcels and the GPU round
     (their load not measured): 207.5 s, peak memory 64 MB, RESULT: ok, 0
     findings. The whole pools of pow and powr at the three formats under the
-    five attributes are 66 s of it (the pool lines' own intervals), the regions the rest. `--quick`: 3.5 s."""
+    five attributes are 66 s of it (the pool lines' own intervals), the regions the rest. `--quick`: 3.5 s.
+
+    At --formats fp32 (the triple word, parcel M3F1; pow and powr only, never a
+    default) the checks are the harness's _tw ones (the model's pool sizes and
+    marks pinned: 794 and 823 lanes, 57, 55, 55, 55, 57 and 34, 33, 33, 33,
+    34) and a region has 300 lanes (the model's): MEASURED at full size
+    (`pow-pools --formats fp32`, one process, unniced, the desktop shared with
+    parcel M3G2 and the GPU round, their load not measured): 271.3 s, peak
+    memory 68 MB, RESULT: ok, 0 findings."""
     P = _pow_harness()
     open_out(a.out)
     step = a.step if a.step else (8 if a.quick else 1)
@@ -1378,7 +1386,18 @@ def cmd_pow_bound(a):
     RESULT: ok, 0 findings. The largest |V - f| / Bv over the regions
     (sampled lower bounds): pow 2^-4.38 (fp64, zone), 2^-8.25 (fp128, zone),
     2^-7.84 (fp256, zone); powr 2^-4.21 (fp64, rhoedge), 2^-8.41, 2^-7.59.
-    `--quick`: 2.0 s."""
+    `--quick`: 2.0 s.
+
+    At --formats fp32 (the triple word, parcel M3F1; pow and powr only, never
+    a default) a region has 1,000 points and the check is the harness's
+    check_bound_tw (V = V0 + V1 + V2): MEASURED at full size (`pow-bound
+    --formats fp32`, one process, unniced, the desktop shared, load not
+    measured): 250.6 s, peak memory 67 MB, RESULT: ok, 0 findings; the largest
+    |V - f| / Bv over the regions (sampled lower bounds) is pow 2^-4.68 (zone),
+    powr 2^-4.10 (zone); 22 regions measured, and powr's negint and negedge
+    (no lane: the function has none) are printed NOT MEASURED, outside the
+    pass count. pow's hugey has 37 main-path lanes of 1,000 and powr's 34, so
+    they count as measured, thinly."""
     P = _pow_harness()
     open_out(a.out)
     sizes = {"fp64": 3000, "fp128": 1000, "fp256": 1000,

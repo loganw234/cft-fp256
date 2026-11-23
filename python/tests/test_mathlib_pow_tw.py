@@ -429,7 +429,7 @@ def test_each_leg_of_structured_fails_alone():
 
 def test_each_leg_of_seq_fails_alone():
     f = P.tw_fragment_of("pow", RNE)
-    xs = list(P.seq_lanes_tw("pow", 200))
+    xs = list(P.seq_lanes_tw("pow", 400))
     rows = P.structured_rows_tw("pow")
     assert P.check_seq_tw(f, xs=xs)[0] == []
     out = P.check_seq_tw(f, xs=xs, evaluator=_doctor_eval)[0]
@@ -637,10 +637,17 @@ def test_every_check_has_a_plant_red_in_it_and_the_rows_list_every_check():
 
 
 def test_the_plants_not_in_the_table_are_ln2_ulp_and_the_table_is_all_of_it():
-    # ln2_ulp is in _POW_TW_PLANTS and red in constants (measured below); the
-    # table above has eight rows, its ninth is this one
-    red = red_of("ln2_ulp", "pow", 4)
-    assert red["constants"] and red["bound"] and red["pools"]
+    # ln2_ulp is in _POW_TW_PLANTS; the table above has eight rows, its ninth
+    # is this one, red in constants (the word of ln 2 one ulp off) and in the
+    # port (a different dataflow graph); the other checks see it too, as il2h's
+    # row shows for 1/ln 2 (this row runs the two cheap checks only)
+    red = {"constants": P.check_constants_tw(
+        builder=lambda n, f_, r_: P.tw_build_of(n, r_, "ln2_ulp"),
+        attrs=(RNE,), names=("pow",))[0],
+        "shape": P.check_shape_tw(
+            "pow", {r_: P.tw_build_of("pow", r_, "ln2_ulp") for r_ in RND})}
+    assert red["constants"] and red["shape"]
+    assert all(s.startswith("constants:") for s in red["constants"])
     assert {r[0] for r in PLANTED} | {"ln2_ulp"} == set(ml._POW_TW_PLANTS)
 
 
@@ -690,10 +697,10 @@ def test_the_pow_commands_run_at_fp32_and_say_what_is_not_measured(
     import mathlib_runs as R
     R.FINDINGS.clear()
     R.OUT = None
-    R.main(["pow-pools", "--quick", "--formats", "fp32", "--out",
-            str(tmp_path / "p.txt")])
+    R.main(["pow-pools", "--quick", "--formats", "fp32", "--fn", "powr",
+            "--attrs", "rtz", "--out", str(tmp_path / "p.txt")])
     shown = capsys.readouterr().out
-    assert "pow-pools pow fp32 rne:" in shown and "RESULT: ok" in shown
+    assert "pow-pools powr fp32 rtz:" in shown and "RESULT: ok" in shown
     assert "pow-regions powr fp32 rtz seed 1: 10 regions, 120 lanes" in shown
     R.FINDINGS.clear()
     R.OUT = None
