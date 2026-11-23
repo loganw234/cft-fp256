@@ -1,0 +1,24 @@
+the double word at fp32: the largest G the model's m3pow.build accepts is 16
+  G = 17: refused: G = 19 is past the double word's floor at fp32: 10 u^2 = 2^-44.7
+  G = 18: refused: G = 20 is past the double word's floor at fp32: 10 u^2 = 2^-44.7
+double word fp32 pow rne G=16: instructions 527, words 289, live 30, highest register r29; meta GL 18, B1 2^-42.0
+double word fp32 pow rtz G=16: instructions 522, words 291, live 28, highest register r27; meta GL 18, B1 2^-42.0
+double word fp32 pow rdn G=16: instructions 523, words 292, live 28, highest register r27; meta GL 18, B1 2^-42.0
+double word fp32 pow rup G=16: instructions 523, words 290, live 28, highest register r27; meta GL 18, B1 2^-42.0
+double word fp32 pow rmm G=16: instructions 527, words 289, live 30, highest register r29; meta GL 18, B1 2^-42.0
+double word fp32 powr rne G=16: instructions 506, words 285, live 23, highest register r22; meta GL 18, B1 2^-42.0
+double word fp32 powr rtz G=16: instructions 500, words 286, live 21, highest register r20; meta GL 18, B1 2^-42.0
+double word fp32 powr rdn G=16: instructions 500, words 286, live 21, highest register r20; meta GL 18, B1 2^-42.0
+double word fp32 powr rup G=16: instructions 500, words 285, live 21, highest register r20; meta GL 18, B1 2^-42.0
+double word fp32 powr rmm G=16: instructions 506, words 285, live 23, highest register r22; meta GL 18, B1 2^-42.0
+double word G=16 fp32 pow   rne: lanes 794, marked 117, wrong guesses 52, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 46, 'mid': 2, 'rep': 52}
+double word G=16 fp32 pow   rtz: lanes 794, marked 94, wrong guesses 52, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 42, 'rep': 52}
+double word G=16 fp32 pow   rdn: lanes 794, marked 94, wrong guesses 52, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 42, 'rep': 52}
+double word G=16 fp32 pow   rup: lanes 794, marked 94, wrong guesses 52, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 42, 'rep': 52}
+double word G=16 fp32 pow   rmm: lanes 794, marked 117, wrong guesses 55, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 46, 'mid': 2, 'rep': 52}
+double word G=16 fp32 powr  rne: lanes 823, marked 94, wrong guesses 30, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 63, 'mid': 1, 'rep': 30}
+double word G=16 fp32 powr  rtz: lanes 823, marked 72, wrong guesses 30, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 42, 'rep': 30}
+double word G=16 fp32 powr  rdn: lanes 823, marked 72, wrong guesses 30, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 42, 'rep': 30}
+double word G=16 fp32 powr  rup: lanes 823, marked 72, wrong guesses 30, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 42, 'rep': 30}
+double word G=16 fp32 powr  rmm: lanes 823, marked 94, wrong guesses 32, differing from the model 0, WRONG UNMARKED 0; marks by class {'irr': 63, 'mid': 1, 'rep': 30}
+fallback: 0 wrong unmarked lanes in all; 24 s

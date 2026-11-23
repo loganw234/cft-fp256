@@ -1,0 +1,14 @@
+plant 1, l3_dropped: the third word of L dropped: the product's rounded term y L2 and L2's share of the sum are left out
+  bound mode, fp32 pow region wide, 100 lanes, seed 1, rne, plant None: bound + residual 0.046618 Bv over 92 lanes, measured worst 0.00461634 Bv -> green (under 1)
+  bound mode, fp32 pow region wide, 100 lanes, seed 1, rne, plant l3_dropped: bound + residual 71490.5 Bv over 92 lanes, measured worst 52843.2 Bv -> RED (over 1)
+plant 2, b1_dropped: the bound's |t0| B1 term dropped (B1 = 0): Bv = |V0| (2^-(p+G) + |y k| B2)
+  bound mode, fp32 pow region edge, 100 lanes, seed 1, rne, plant None: bound + residual 0.0418867 Bv over 100 lanes, measured worst 0.0072056 Bv -> green (under 1)
+  bound mode, fp32 pow region edge, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.666109 Bv over 100 lanes, measured worst 0.0262907 Bv -> green (under 1)
+  bound mode, fp32 pow region near1, 100 lanes, seed 1, rne, plant None: bound + residual 0.115357 Bv over 89 lanes, measured worst 0.0111049 Bv -> green (under 1)
+  bound mode, fp32 pow region near1, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 2.40005 Bv over 89 lanes, measured worst 0.311189 Bv -> RED (over 1)
+plant 3, mark_silenced: the mark never set
+  rate mode, fp32 pow region wide, 600 lanes, seed 3, G' = 6, rne, plant None: 600 main-path lanes, marked 446, the law predicts 482.3, z = -1.65, WRONG UNMARKED 0 -> green
+  rate mode, fp32 pow region wide, 600 lanes, seed 3, G' = 6, rne, plant mark_silenced: 600 main-path lanes, marked 0, the law predicts 482.3, z = -21.96, WRONG UNMARKED 0 -> RED (z past -5)
+  pools mode (model), fp32 pow, rne, 794 lanes, plant None: marked 57, WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pow, rne, 794 lanes, plant mark_silenced: marked 0, WRONG UNMARKED 54 -> RED (wrong unmarked lanes)
+43 s

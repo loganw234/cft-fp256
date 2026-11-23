@@ -1,0 +1,19 @@
+control: this tool (pw32_budget.TWBudget, V as Vh and Vl) on the model's fp64 pow, region edge, 120 lanes, seed 1; the reference is budget.fp64-pow-edge.out.txt (the model's own tool)
+fp64 pow region edge: 120 main-path lanes of 120, G 44, GL 47, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 147
+  M max 0.000988 Bv; capacities 0.013644 Bv; BOUND 0.014632 Bv (2^-6.09)
+  measured worst 0.008022 Bv at x=0x3bdffe541913b4b5 y=0xc02f7dde1dfd94f4
+  residual (second order, measured) 2.096e-07 Bv; bound + residual 0.014632 Bv
+    product      capacity 0.007186  observed 0.005170
+    log-sum      capacity 0.006317  observed 0.004159
+    log-poly     capacity 0.000103  observed 0.000055
+    exp-recon    capacity 0.000021  observed 0.000018
+    exp-poly     capacity 0.000016  observed 0.000013
+    exp-reduce   capacity 0.000001  observed 0.000001
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  3 s
+control: bound line equal to the reference's: True; active roundings equal: True
+  reference: M max 0.000988 Bv; capacities 0.013644 Bv; BOUND 0.014632 Bv (2^-6.09)
+  this tool: M max 0.000988 Bv; capacities 0.013644 Bv; BOUND 0.014632 Bv (2^-6.09)
+CONTROL REPRODUCES the bound to its printed digits

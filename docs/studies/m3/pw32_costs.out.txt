@@ -1,0 +1,46 @@
+fp32 pow rne: instructions 925, bank words 143, live 32 scheduled / 51 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 95, specials 69
+    by label: log-head3 240, exp-head3 96, log-sum 81, exp-recon 54, exp-reduce 52, log-head2 46, exp-Z 41, special 36, test 35, exp-head2 31, fixed-grid 27, product 26, log-table 25, exp-table 24, front 19, log-reduce 19, final 17, exp-scale 15, classify 14, exact 11, log-Z 5, beside-1 5, log-tail 4, exp-tail 2
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pow rtz: instructions 920, bank words 145, live 32 scheduled / 50 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 92, specials 69
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pow rdn: instructions 921, bank words 146, live 32 scheduled / 50 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 92, specials 70
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pow rup: instructions 921, bank words 144, live 32 scheduled / 50 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 92, specials 70
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pow rmm: instructions 925, bank words 143, live 32 scheduled / 51 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 95, specials 69
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 powr rne: instructions 903, bank words 139, live 29 scheduled / 48 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 89, specials 53
+    by label: log-head3 240, exp-head3 96, log-sum 81, exp-recon 54, exp-reduce 52, log-head2 46, exp-Z 41, special 39, test 35, exp-head2 31, product 26, log-table 25, fixed-grid 25, exp-table 24, log-reduce 19, final 17, exp-scale 15, classify 14, exact 8, log-Z 5, log-tail 4, beside-1 4, exp-tail 2
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 powr rtz: instructions 897, bank words 140, live 29 scheduled / 47 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 85, specials 53
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 powr rdn: instructions 897, bank words 140, live 29 scheduled / 47 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 85, specials 53
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 powr rup: instructions 897, bank words 139, live 29 scheduled / 47 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 85, specials 53
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 powr rmm: instructions 903, bank words 139, live 29 scheduled / 48 design order, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 89, specials 53
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
