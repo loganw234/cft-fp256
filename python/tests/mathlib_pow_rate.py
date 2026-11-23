@@ -148,17 +148,17 @@ def lane_p(fmt, rnd, pr, nominal=False, meta=None, shift=0):
 
 
 def probabilities(fmt, fn, lanes, rnd, n, shift):
-    """[(lane, p_raw or None, excluded)] from the UNPLANTED build at `shift`:
-    p_raw = 2 Bv / s uncapped; excluded is "ex", "tinyt" (decided in the lane:
-    never marks) or None."""
+    """[(lane, p_raw or None, excluded, result, flag word)] from the UNPLANTED
+    build at `shift`: p_raw = 2 Bv / s uncapped; excluded is "ex", "tinyt"
+    (decided in the lane: never marks) or None."""
     b = _build(fn, fmt, rnd, n, shift)
     sm = fmt.sign_mask
     out = []
     for lane in lanes:
-        _r, _f, pr = b.run(P.lane_args(fn, lane), ("R", "Bv", "ex", "tinyt"))
-        why = "ex" if pr["ex"] & ~sm else "tinyt" if pr["tinyt"] & ~sm \
-            else None
-        out.append((lane, lane_p(fmt, rnd, pr), why))
+        res, fl, pr = b.run(P.lane_args(fn, lane),
+                            ("R", "Bv", "ex", "tinyt"))
+        why = "ex" if pr["ex"] & ~sm else "tinyt" if pr["tinyt"] & ~sm             else None
+        out.append((lane, lane_p(fmt, rnd, pr), why, res, fl))
     return out
 
 

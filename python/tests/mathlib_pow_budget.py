@@ -238,7 +238,14 @@ class PowBudget(IB.InvBudget):
             if not self.in_main(lane):
                 self.skipped += 1
                 continue
-            L = an.analyze(P.lane_args(fn, lane))
+            try:
+                L = an.analyze(P.lane_args(fn, lane))
+            except TypeError:
+                if self.plant != "inputs_swapped":
+                    raise
+                raise _refuse(self.plant, b, f"the swapped operands of the "
+                              f"lane {P._hexes([lane])} have no value (x "
+                              f"read as y)")
             k = int(ml._dec(fmt, L.vals[b.probes["nf"][1]])) // 8
             self.worst_k = max(self.worst_k, abs(k))
             with mpmath.workprec(an.prec):

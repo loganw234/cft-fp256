@@ -146,7 +146,7 @@ def test_a_budget_leaves_the_memoised_build_as_it_found_it():
     # check_budget_pow asserts it, on a build whose body a fault changes
     class Mutating(PB.PowBudget):
         def add(self, lanes):
-            self.an.b.body = list(self.an.b.body)       # a check that mutates
+            self.an.b.meta["touched"] = 1               # a check that mutates
             return super().add(lanes)
     b2 = copy.copy(P.build_of("pow", FP64, RNE))
     b2.meta = dict(b2.meta)
@@ -337,7 +337,11 @@ def test_the_analytic_zone_bound_is_the_studys_computed_figures():
     U = PB.zone_U(53, rows)
     assert abs(U / 2.0 ** -106 - 7.885) < 5e-4
     meta = dict(b.meta)
-    assert abs(PB.zone_analytic(meta, fmt, "pown", None) - 0.171) < 5e-4
+    # the study's 0.171 leaves |L| B1 out of the denominator; with the
+    # build's own B1 the bound is tighter
+    assert abs(PB.zone_analytic(dict(meta, B1=0), fmt, "pown", None)
+               - 0.171) < 5e-4
+    assert 0.145 < PB.zone_analytic(meta, fmt, "pown", None) < 0.146
     off = dict(meta, B2=0)
     assert abs(PB.zone_analytic(off, fmt, "pown", 1000.0) - 0.898) < 5e-4
     assert abs(PB.zone_analytic(off, fmt, "pown", 12000.0) - 0.973) < 5e-4
@@ -408,3 +412,268 @@ def test_the_tool_plants_are_a_table_of_this_module_and_refused_by_name():
     # the base class's names stay the base class's table
     assert "fixed_grid_as_before_v" not in IB.TOOL_PLANTS
     assert "scale_unscaled" not in IB.TOOL_PLANTS
+
+
+# =====================================================================
+# the matrix: the three budget plants and the control against twelve checks
+# =====================================================================
+
+CHECKS12 = tuple(P.CHECKS) + ("budget", "rate", "family")
+# the budget check's cells of each plant (the cell where it is red: the
+# study's table, MEASURED here), at fp64 alone for the two that act there
+BUDGET_SCOPE = {
+    "bound_tight": ((FP64, "pow", "edge", 30),),
+    "zone_bound_off": ((FP64, "compound", "zone1000", 30),),
+    "log_short": ((FP128, "pow", "rhoedge", 12),),
+}
+BUDGET_CONTROL = tuple(c for cs in BUDGET_SCOPE.values() for c in cs)
+
+
+def budget_check(plant):
+    """["budget: ..."] over the plant's cells (the control: all of them)."""
+    out = []
+    for fmt, fn, region, count in (BUDGET_CONTROL if plant is None
+                                   else BUDGET_SCOPE[plant]):
+        found, rec = PB.run_cell(fmt, fn, region, count, 1, plant=plant)
+        out += found
+    return out
+
+
+@functools.lru_cache(maxsize=None)
+def pow_wide_lanes(count=300):
+    return tuple(PR.main_lanes(FP64, "pow", "wide", count, 3))
+
+
+def rate_check(plant):
+    out, _st = PR.run_cell(FP64, "pow", "wide", 300, 3, RNE, plant=plant,
+                           lanes=list(pow_wide_lanes()))
+    return out
+
+
+def family_check(plant):
+    import mathlib_pow_family as PF
+    run = PF.runner(FP64, "pow", RNE, plant=plant)
+    out, _st = PF.check_family(FP64, RNE, "pow", run=run,
+                               families=("intpow", "near1", "hard3p"), step=3)
+    return out
+
+
+def matrix_red(plant):
+    """{check: [findings]} of the twelve checks on `plant` (None: the
+    control): M3G1's nine at fp64 (red_checks, its trimmed scale), and the
+    budget, rate and family of this parcel at theirs."""
+    red = P.red_checks(plant, FP64, bound_n=6, region_n=4) \
+        if plant in ml.POW_PLANTS or plant is None else \
+        _red_budget_plant(plant)
+    red = dict(red)
+    for name, fn in (("budget", budget_check), ("rate", rate_check),
+                     ("family", family_check)):
+        try:
+            found = fn(plant)
+        except ValueError as e:              # a plant refused where it
+            if "does not apply" not in str(e):   # cannot act: green there
+                raise
+            found = []
+        if found:
+            red[name] = found
+    return red
+
+
+def _red_budget_plant(plant):
+    """red_checks for a plant of _POW_BUDGET_PLANTS (red_checks' own
+    _reaches reads POW_PLANTS only through build_of, so it takes them)."""
+    return P.red_checks(plant, FP64, bound_n=6, region_n=4)
+
+
+@functools.lru_cache(maxsize=None)
+def red_of(plant):
+    return matrix_red(plant)
+
+
+def assert_row(plant, red, want):
+    """The assertion every plant row is held to: the row lists EVERY check
+    (red or green: the keys are CHECKS12, each a list of findings, empty when
+    green), exactly `want` are red, each finding begins with the name of its
+    check."""
+    assert set(red) | (set(CHECKS12) - set(red)) == set(CHECKS12) \
+        and set(red) <= set(CHECKS12), (plant, set(red) - set(CHECKS12))
+    assert {k for k, v in red.items() if v} == want, plant
+    for name, found in red.items():
+        assert all(s.startswith(name + ":") for s in found), (name, found[:1])
+
+
+def test_each_tool_plant_is_red_in_its_leg_and_the_control_is_green():
+    """MEASURED on pow's negint at fp64 (30 lanes, seed 1; the control's bound
+    0.0647 Bv and residual 1.1e-6): fixed_grid_as_before_v is red in `bound`
+    alone (4.3e12 Bv: the method error of the sweep that stopped at V_l, the
+    study's 3.6 item 4, while the measured error is 0.0128) and its residual
+    is the control's, the tell being the bound; scale_unscaled in `bound`
+    (inf: V is in the scaled domain, f is not); inputs_swapped in `bound`;
+    negation_as_data in `reach` and `residual` (the sweep stops at V's sign:
+    no rounding reached, residual exactly 0); capacities_dropped in `lane`."""
+    b, ls = _cell(FP64, "pow", "negint", 30)
+    f, s0 = PB.check_budget_pow(b, ls, "negint")
+    assert f == [] and 0.06 < s0["bound"] < 0.07 and s0["resid"] > 0
+    want = {"fixed_grid_as_before_v": {"bound"}, "scale_unscaled": {"bound"},
+            "inputs_swapped": {"bound"},
+            "negation_as_data": {"reach", "residual"},
+            "capacities_dropped": {"lane"}}
+    assert set(want) == set(PB.POW_TOOL_PLANTS)
+    for plant, legs in want.items():
+        f, s = PB.check_budget_pow(b, ls, "negint", plant)
+        assert legs_of(f) == legs, (plant, f)
+        assert b.meta["fn"] == "pow" and "fixed-grid" in b.phase_of
+    f, s = PB.check_budget_pow(b, ls, "negint", "fixed_grid_as_before_v")
+    assert s["bound"] > 1e9 and s["Emax"] < 0.02       # a method error, not
+    assert s["resid"] == s0["resid"]                   # a measured one
+    f, s = PB.check_budget_pow(b, ls, "negint", "capacities_dropped")
+    assert s["S_cap"] == 0 and s["Emax"] > s["bound"] * 1.001
+    f, s = PB.check_budget_pow(b, ls, "negint", "negation_as_data")
+    assert s["resid"] == 0
+
+
+def test_scale_unscaled_is_green_where_k_is_zero():
+    b, _ls = _cell(FP64, "pow", "small", 6)
+    lanes = PB.cell_lanes(FP64, "pow", "small", 12, 1)
+    f, s = PB.check_budget_pow(b, lanes, "small", "scale_unscaled")
+    assert s["kmax"] == 0 and "bound" not in legs_of(f)
+
+
+# =====================================================================
+# NOT MEASURED, and the commands
+# =====================================================================
+
+def test_a_region_with_no_main_path_lane_is_not_measured_and_crashes_nothing():
+    found, rec = PB.run_cell(FP64, "pow", "hugey", 12, 1)
+    assert rec["status"] == "NOT MEASURED" and rec["main"] == 0
+    assert rec["lanes"] == 12 and "bound" not in rec and found == []
+    found, rec = PB.run_cell(FP64, "pown", "int63", 12, 1)
+    assert rec["status"] == "NOT MEASURED" and rec["main"] == 0
+    # an empty summary is judged without a crash
+    s = PB.budget_of(P.build_of("pow", FP64, RNE), [])[0]
+    assert s["lanes"] == 0 and s["bound"] == 0
+    assert "no lane of the sample" in PB.judge(s, WHERE)[0]
+
+
+def _run(argv, capsys):
+    R.FINDINGS.clear()
+    rc = R.main(argv)
+    return rc, capsys.readouterr().out
+
+
+def test_pow_budget_prints_not_measured_outside_the_pass_count(capsys):
+    rc, out = _run(["pow-budget", "--fn", "pow", "--formats", "fp64",
+                    "--regions", "hugey,edge", "--n", "8"], capsys)
+    assert rc == 0
+    assert "pow-budget pow fp64 rne hugey seed 1: NOT MEASURED (0 main-path " \
+        "lanes of 8" in out
+    assert "pow-budget: 1 cells measured (the pass count), 1 NOT MEASURED" \
+        in out and "RESULT: ok" in out
+
+
+def test_pow_budget_refuses_an_existing_out_and_a_plant_that_cannot_act(
+        tmp_path):
+    path = tmp_path / "x.txt"
+    path.write_text("x")
+    with pytest.raises(SystemExit, match="the file exists; refusing"):
+        R.main(["pow-budget", "--quick", "--fn", "pow", "--out", str(path)])
+    R.OUT = None
+    with pytest.raises(SystemExit, match="plant 'bound_tight' does not apply "
+                       "to pow at fp128: the fault is not reached"):
+        R.main(["pow-budget", "--quick", "--fn", "pow", "--plant",
+                "bound_tight"])
+    with pytest.raises(SystemExit, match="fp32"):
+        R.main(["pow-budget", "--formats", "fp32", "--fn", "pow"])
+
+
+def test_pow_budget_exits_non_zero_on_a_doctored_job(capsys):
+    """zone_bound_off at fp64: the analytic leg is red at any lane count, so
+    the command's RESULT line says findings and its status is 1."""
+    rc, out = _run(["pow-budget", "--fn", "compound", "--formats", "fp64",
+                    "--regions", "zone1000", "--n", "12", "--plant",
+                    "zone_bound_off"], capsys)
+    assert rc == 1 and "the analytic bound of the logarithm" in out \
+        and "findings" in out.splitlines()[-1]
+    rc, out = _run(["pow-budget", "--fn", "compound", "--formats", "fp64",
+                    "--regions", "zone1000", "--n", "12"], capsys)
+    assert rc == 0 and "RESULT: ok" in out
+
+
+def test_the_pool_word_of_ns_is_the_pools_own_n():
+    class A:
+        ns = "pool"
+    for fn, fmt in (("pown", FP64), ("rootn", FP128), ("compound", FP256)):
+        ns = R._ns_of(A, P, fn, fmt)
+        assert ns == sorted({ln[1] for ln in P.pool(fn, fmt)} - (
+            {0} if fn == "rootn" else set()))
+        assert ns == sorted(ns) and len(ns) >= 30
+    A.ns = "3,-3"
+    assert R._ns_of(A, P, "pown", FP64) == [3, -3]
+    A.ns = "0"
+    with pytest.raises(SystemExit, match="rootn"):
+        R._ns_of(A, P, "rootn", FP64)
+
+
+# =====================================================================
+# the matrix
+# =====================================================================
+
+# MEASURED (matrix_red at fp64: M3G1's nine at red_checks' trimmed scale, the
+# budget over the plant's cell, rate over pow's wide at 293 main-path lanes of
+# 300 under rne at the rule's shift, family over intpow, near1 and hard3p of
+# pow at every third lane under rne):
+#   bound_tight    red in the direct bound (near1: 1 of 6 lanes at 2^+0.34; at
+#                  edge too at 120 lanes, seeds 1 and 2: 2^+0.63 and 2^+0.42,
+#                  not at 48 points seed 11: a sampled lower bound), in the
+#                  budget (pow edge 2.72 Bv), in rate (0 of 293 marked, 39.7
+#                  expected: Bv without its |t| and |Y k| terms), in shape and
+#                  constants
+#   zone_bound_off red in the budget alone among the new checks (compound's
+#                  zone1000, the analytic leg: 1.426 Bv for the sum, the
+#                  direct bound never: 2^-5.5 and under) and in shape and
+#                  constants (its words)
+#   log_short      red in the budget at fp128's rhoedge (26 Bv at 12 lanes),
+#                  shape and constants; green in bound and rate at fp64, where
+#                  B1 and B2 carry it (the direct bound sees it at fp128 and
+#                  fp256: test_mathlib_pow.py)
+MATRIX = [
+    ("bound_tight", ("bound", "shape", "constants", "budget", "rate")),
+    ("zone_bound_off", ("shape", "constants", "budget")),
+    ("log_short", ("shape", "constants", "budget")),
+]
+
+
+def test_the_control_is_green_in_every_one_of_the_twelve_checks():
+    red = red_of(None)
+    assert {k: v[:1] for k, v in red.items() if v} == {}
+    assert_row("control", red, set())
+
+
+@pytest.mark.parametrize("row", MATRIX, ids=lambda r: r[0])
+def test_each_budget_plant_is_red_where_the_matrix_says(row):
+    plant, want = row
+    assert_row(plant, red_of(plant), set(want))
+
+
+def test_every_row_lists_every_check_and_the_assertion_refuses_a_bad_one():
+    for plant, want in MATRIX:
+        assert set(want) <= set(CHECKS12) and want
+    real = red_of("zone_bound_off")
+    assert_row("zone_bound_off", real, {"shape", "constants", "budget"})
+    # four doctored rows through the SAME assertion: a check turned red that
+    # the table says is green, a name that is no check, a finding that does
+    # not begin with its check's name, a check the row says is red and is
+    # green
+    with pytest.raises(AssertionError):
+        assert_row("zone_bound_off", dict(real, bound=["bound: x"]),
+                   {"shape", "constants", "budget"})
+    with pytest.raises(AssertionError):
+        assert_row("zone_bound_off", dict(real, bogus=["bogus: x"]),
+                   {"shape", "constants", "budget"})
+    with pytest.raises(AssertionError):
+        assert_row("zone_bound_off", dict(real, budget=["rate: not mine"]),
+                   {"shape", "constants", "budget"})
+    with pytest.raises(AssertionError):
+        assert_row("zone_bound_off", real, {"shape", "constants", "budget",
+                                            "rate"})
+    assert set(P.CHECKS) | {"budget", "rate", "family"} == set(CHECKS12)
