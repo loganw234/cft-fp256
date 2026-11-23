@@ -16,4 +16,4 @@ fp32 powr  structured y-fixed 2        (0x40000000), 960 lanes: rne: marked 468 
 fp32 powr  structured y-fixed 3        (0x40400000), 960 lanes: rne: marked 468 (exact cases 468, others 0), WRONG UNMARKED 0, rtz: marked 468 (exact cases 468, others 0), WRONG UNMARKED 0
 fp32 powr  structured y-fixed 2^-20    (0x35800000), 960 lanes: rne: marked 0 (exact cases 0, others 0), WRONG UNMARKED 0, rtz: marked 0 (exact cases 0, others 0), WRONG UNMARKED 0
 fp32 powr  structured y-fixed 2^20     (0x49800000), 960 lanes: rne: marked 0 (exact cases 0, others 0), WRONG UNMARKED 0, rtz: marked 0 (exact cases 0, others 0), WRONG UNMARKED 0
-183 s
+204 s

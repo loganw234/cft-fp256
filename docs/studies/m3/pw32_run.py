@@ -722,5 +722,47 @@ def mode_slice():
           "marked lanes; they are not one range")
 
 
+def _structured():
+    """The free operand's structured candidates: integers to 256 and the
+    halves, quarters and eighths to 32, either sign (where exact cases and
+    the midpoints live; a sample of 4,096 uniform encodings meets almost
+    none of them)."""
+    vals = set()
+    for k in range(1, 257):
+        vals.add(Fraction(k))
+    for q in (2, 4, 8):
+        for k in range(1, 32 * q + 1):
+            vals.add(Fraction(k, q))
+    out = []
+    for v in sorted(vals):
+        out.append(enc(fmt, v))
+        out.append(enc(fmt, -v))
+    return out
+
+
+def mode_rate_exact(args):
+    fns = [args[0]] if args else list(FNS)
+    t0 = time.time()
+    free = _structured()
+    for fn in fns:
+        for kind, lst in (("x", X_LIST), ("y", Y_LIST)):
+            for label, fixed in lst:
+                lanes = [(fixed, v) if kind == "x" else (v, fixed)
+                         for v in free]
+                cells = []
+                for rnd in (RNE, RTZ):
+                    r = _compare(_b, fn, lanes, rnd, stop=10 ** 9)
+                    ex = sum(1 for m in r["marks"] if m[4] != "irr")
+                    cells.append((rnd, r, ex))
+                line = ", ".join(
+                    f"{AN[rnd]}: marked {r['marked']} (exact cases {ex}, "
+                    f"others {r['marked'] - ex}), WRONG UNMARKED {r['wrong']}"
+                    for rnd, r, ex in cells)
+                print(f"fp32 {fn:5s} structured {kind}-fixed {label:8s} "
+                      f"({fixed:#010x}), {len(lanes)} lanes: {line}",
+                      flush=True)
+    print(f"{time.time() - t0:.0f} s")
+
+
 if __name__ == "__main__":
     main()
