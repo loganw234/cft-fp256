@@ -596,6 +596,8 @@ PLANTED = [
                          "bound", "shape", "constants"}, 4),
     ("y_one_loud", "pow", {"pools", "specials", "structured", "seq", "shape"},
      4),
+    ("ln2_ulp", "pow", {"pools", "specials", "structured", "seq", "bound",
+                        "shape", "constants"}, 4),
     ("two_sum_all", "pow", {"shape"}, 4),
 ]
 
@@ -636,19 +638,8 @@ def test_every_check_has_a_plant_red_in_it_and_the_rows_list_every_check():
     assert set(row) != set(P.CHECKS_TW)
 
 
-def test_the_plants_not_in_the_table_are_ln2_ulp_and_the_table_is_all_of_it():
-    # ln2_ulp is in _POW_TW_PLANTS; the table above has eight rows, its ninth
-    # is this one, red in constants (the word of ln 2 one ulp off) and in the
-    # port (a different dataflow graph); the other checks see it too, as il2h's
-    # row shows for 1/ln 2 (this row runs the two cheap checks only)
-    red = {"constants": P.check_constants_tw(
-        builder=lambda n, f_, r_: P.tw_build_of(n, r_, "ln2_ulp"),
-        attrs=(RNE,), names=("pow",))[0],
-        "shape": P.check_shape_tw(
-            "pow", {r_: P.tw_build_of("pow", r_, "ln2_ulp") for r_ in RND})}
-    assert red["constants"] and red["shape"]
-    assert all(s.startswith("constants:") for s in red["constants"])
-    assert {r[0] for r in PLANTED} | {"ln2_ulp"} == set(ml._POW_TW_PLANTS)
+def test_the_table_has_every_plant_of_the_triple_word():
+    assert {r[0] for r in PLANTED} == set(ml._POW_TW_PLANTS)
 
 
 def test_the_plants_are_refused_by_name_where_they_cannot_act(monkeypatch):
