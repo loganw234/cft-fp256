@@ -4003,6 +4003,14 @@ static long pt_routes;
 /* the route proof's own failures, so that a plant red at the route alone
  * (seqfx-refuse, seqfx128-refuse) is read beside every other check's count */
 static long pt_route_bad;
+/* send-back 1 (VG3B's b3): under the three plants whose red is a refusal by
+ * the literal test - 1 seqfx-cover, 2 seqfx128-cover, 3 seqna-aug - every
+ * failed run of the fixed handle is held to the literal test's own sentence
+ * (the kernel's name and "which it does not cover"), so that a fall-through
+ * to the executor, whose own failure is CFT_ERR_INTERNAL too, is never
+ * counted as the refusal; 0 under any other plant and with none */
+static int pt_refuse_plant;
+static long pt_refused, pt_unrefused;
 /* the leg's failures counted by the format of the part that failed (fp32
  * to fp256; [4] the rest), as the fixed leg's are */
 static int pt_failed[5];
@@ -4056,6 +4064,26 @@ static void pt_route(int want, int fmt, size_t n, int aug, const char *who)
           (unsigned long long)v[11], KN[want]);
 }
 
+/* a failed run's sentence, read at once after it (cft_last_error), held to
+ * the literal test's under a refusal plant; nothing with none */
+static void pt_refusal(cft_status st, int fmt, const char *what)
+{
+    char msg[600];
+    const char *kn;
+    int ok;
+    if (!pt_refuse_plant)
+        return;
+    snprintf(msg, sizeof msg, "%s", cft_last_error());
+    kn = pt_refuse_plant == 1 ? "(k_seq_fx)" : pt_refuse_plant == 2 ? "(k_seq_fx128)"
+       : fmt == CFT_FP128 ? "(k_seq_fx128)" : "(k_seq_fx)";
+    ok = st == CFT_ERR_INTERNAL && strstr(msg, "the fixed tier's executor ") != NULL &&
+         strstr(msg, kn) != NULL && strstr(msg, "which it does not cover") != NULL;
+    pt_refused += ok;
+    pt_unrefused += !ok;
+    CHECK(ok, "%s: failed, but not by the literal test's sentence (\"the fixed tier's executor "
+          "%s ... which it does not cover\" wanted): %s - %s", what, kn, cft_strerror(st), msg);
+}
+
 /* one image on handle h (fixed or not) against the software handle - all of
  * prog_pair's comparisons - then the route */
 static void pt_run(cft_device *h, cft_device *sw, int fixed, int fmt, const unsigned char *img,
@@ -4063,8 +4091,37 @@ static void pt_run(cft_device *h, cft_device *sw, int fixed, int fmt, const unsi
                    const char *what)
 {
     const cft_status st = prog_pair(h, sw, fmt, img, bytes, H, md, nso, what);
-    if (st == CFT_OK)
+    if (st == CFT_OK) {
         pt_route(pt_want(fixed, fmt, aug), fmt, H->n, aug, what);
+    } else if (fixed && pt_refuse_plant) {
+        /* prog_pair keeps the GPU's sentence to itself: the image again on the
+         * fixed handle alone (a refusal comes before anything is staged) */
+        cft_program *p = NULL;
+        cft_status s2 = cft_program_load(h, img, bytes, &p);
+        if (s2 == CFT_OK)
+            s2 = cft_program_run_ex(p, H);
+        pt_refusal(s2, fmt, what);
+        cft_program_free(p);
+    }
+}
+
+/* send-back 1: a program with AUGADD alone or AUGERR alone (code 10 or 11:
+ * r3 := r0 (+) r1, its rounded sum or its error; deposit r3; halt), so that
+ * each half of the route's scan is seen by the leg */
+static size_t pt_aug1(unsigned char *img, int fmt, unsigned code)
+{
+    const uint32_t hdr[8] = {0x50544643u, 1, 3, 0, 1, (uint32_t)fmt, 0, 0};
+    const uint64_t C = 1ull << 31;
+    const uint64_t w[3] = {C | code | (3u << 8) | (0u << 12) | (1u << 16), C | 3u | (3u << 12),
+                           C};
+    int j, k;
+    for (j = 0; j < 8; j++)
+        for (k = 0; k < 4; k++)
+            img[4 * j + k] = (unsigned char)(hdr[j] >> (8 * k));
+    for (j = 0; j < 3; j++)
+        for (k = 0; k < 8; k++)
+            img[32 + 8 * j + k] = (unsigned char)(w[j] >> (8 * k));
+    return 32 + 3 * 8;
 }
 
 /* op r3, r0, r1, r2 at rnd; deposit r3; halt */
@@ -4363,8 +4420,14 @@ static void pt_runex(cft_device *h, cft_device *sw, int fixed, int fmt, const ch
             E.d = fx_dh;
             E.flags_out = &fh;
             sh = cft_run_ex(h, (cft_op)op, (cft_format)fmt, (cft_round)rnd, &E);
-            if (sh == CFT_OK)
+            if (sh == CFT_OK) {
                 pt_route(pt_want(fixed, fmt, 0), fmt, n, 0, "cft_run_ex with tables");
+            } else if (fixed) {
+                char wh[160];
+                snprintf(wh, sizeof wh, "cft_run_ex %s %s %s %s with tables", who,
+                         cft_format_name((cft_format)fmt), FXN[op], RND[rnd]);
+                pt_refusal(sh, fmt, wh);
+            }
             E.d = fx_ds;
             E.flags_out = &fs;
             ss = cft_run_ex(sw, (cft_op)op, (cft_format)fmt, (cft_round)rnd, &E);
@@ -4421,8 +4484,22 @@ static void pt_others(cft_device *h, cft_device *sw, int fixed, const char *who)
         pt_args(&H, fx_a, fx_b, fx_c, 2000, 4, esz);
         PT_AT(f, pt_run(h, sw, fixed, f, img, bytes, &H, 4, 0, 1, what));
     }
-    printf("  (c) %s: fp32 and fp64 at four operations and five attributes (%d triples), and "
-           "an AUGADD/AUGERR program at every format - k_seq for each; %d checks, %d failed\n",
+    for (f = 3; f >= 2; f--) {             /* send-back 1: each half of the scan alone */
+        const size_t esz = cft_format_size((cft_format)f);
+        unsigned code;
+        fx_pool(fx_pl, f);
+        fx_triples(f);
+        for (code = 10; code <= 11; code++) {
+            const size_t bytes = pt_aug1(img, f, code);
+            snprintf(what, sizeof what, "(c) %s, %s a program with %s alone", who,
+                     cft_format_name((cft_format)f), code == 10 ? "AUGADD" : "AUGERR");
+            pt_args(&H, fx_a, fx_b, fx_c, 2000, 1, esz);
+            PT_AT(f, pt_run(h, sw, fixed, f, img, bytes, &H, 1, 0, 1, what));
+        }
+    }
+    printf("  (c) %s: fp32 and fp64 at four operations and five attributes (%d triples), an "
+           "AUGADD/AUGERR program at every format, and AUGADD alone and AUGERR alone at fp256 "
+           "and fp128 - k_seq for each; %d checks, %d failed\n",
            who, FX_N, checks - c0, failures - before);
 }
 
@@ -4476,6 +4553,8 @@ static void pt_resident(const char *artifact, cft_device *hf, cft_device *sw, in
         sh = cft_program_run_ex(p, &H);
         if (sh == CFT_OK)
             pt_route(pt_want(1, fmt, 0), fmt, n, 0, "resident");
+        else
+            pt_refusal(sh, fmt, prog ? "(d) resident, the chain" : "(d) resident, FMA");
         CHECK(sh == CFT_OK && rb_info(&D).device_authority == 1, "%s resident: %s, the "
               "deposits' authority %d", prog ? "the chain" : "FMA", cft_strerror(sh),
               rb_info(&D).device_authority);
@@ -4497,6 +4576,9 @@ static void pt_resident(const char *artifact, cft_device *hf, cft_device *sw, in
         H.deposits = D.p;
         H.flags_out = &fh;
         sh = cft_program_run_ex(p, &H);
+        if (sh != CFT_OK)
+            pt_refusal(sh, fmt, prog ? "(d) the second resident run, the chain"
+                                     : "(d) the second resident run, FMA");
         for (k = 0; k < 4; k++)
             i1[k] = rb_info(all[k]);
         for (k = 0; k < 3; k++)
@@ -4620,6 +4702,9 @@ static void leg_progtier(const char *artifact, cft_device *sw, int only_fmt)
     }
     for (k = 0; k < 5; k++)
         pt_failed[k] = 0;
+    pt_refuse_plant = !plant_build ? 0 : !strcmp(keepp, "seqfx-cover") ? 1
+                    : !strcmp(keepp, "seqfx128-cover") ? 2 : !strcmp(keepp, "seqna-aug") ? 3 : 0;
+    pt_refused = pt_unrefused = 0;
     CHECK(plant_build == (fx_probe != NULL), "a %s build %s the plant build's tier probe",
           plant_build ? "plant" : "default", fx_probe ? "has" : "lacks");
     printf("  a %s build; the route probe %s; CFT_HIP_PLANT %s; CFT_HIP_TIER of the caller %s\n",
@@ -4659,6 +4744,10 @@ static void leg_progtier(const char *artifact, cft_device *sw, int only_fmt)
                "fixed handle, k_seq for every other: %ld not the kernel wanted; every other "
                "check of the leg: %d failed\n", pt_routes, pt_route_bad,
                failures - before - (int)pt_route_bad);
+    if (pt_refuse_plant)
+        printf("  (e) the refusals under CFT_HIP_PLANT=%s: %ld failed runs of the fixed handle "
+               "refused by the literal test's own sentence, %ld failed without it\n", keepp,
+               pt_refused, pt_unrefused);
     cft_close(hg);
     cft_close(hf);
     pt_failed[4] = failures - before - pt_failed[0] - pt_failed[1] - pt_failed[2] -

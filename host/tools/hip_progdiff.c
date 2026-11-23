@@ -278,6 +278,26 @@ int main(int argc, char **argv)
                         "least 0\n");
         return 2;
     }
+    /* a lane plant of the other format's acts on no lane this run makes, so
+     * the run would be green for a plant it never applied: refused by name,
+     * as hip-fmadiff refuses one (send-back 1) */
+    if (pv && *pv) {
+        static const char *const lane[4] = {"rmm", "flag", "steer", "mulsign"};
+        int q;
+        for (q = 0; q < 4; q++) {
+            char n256[32], n128[32];
+            snprintf(n256, sizeof n256, "seqfx-%s", lane[q]);
+            snprintf(n128, sizeof n128, "seqfx128-%s", lane[q]);
+            if ((fmt == 2 && !strcmp(pv, n256)) || (fmt == 3 && !strcmp(pv, n128))) {
+                fprintf(stderr, "hip-progdiff: refused: CFT_HIP_PLANT=\"%s\" acts on the %s "
+                                "lane, and this run is --format %s: it would be green for a "
+                                "plant it did not apply. Run it with --format %s\n", pv,
+                        fmt == 2 ? "fp256" : "fp128", fmt == 2 ? "fp128" : "fp256",
+                        fmt == 2 ? "fp256" : "fp128");
+                return 2;
+            }
+        }
+    }
     total = atoll(pos[0]);
     seed = strtoull(pos[1], NULL, 10);
     esz = fmt == 2 ? 16 : 32;

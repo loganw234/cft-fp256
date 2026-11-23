@@ -710,7 +710,8 @@ clean-fma128:
 # HIP=1 build left.
 clean: clean-hip
 clean-hip:
-	rm -f src/backend_hip.o src/backend_hip.lo hip-test hip-test.exe \
+	rm -f src/backend_hip.o src/backend_hip.lo src/backend_hip_fx.o src/backend_hip_fx.lo \
+	      hip-test hip-test.exe \
 	      hip-corpus hip-corpus.exe hip-fmadiff hip-fmadiff.exe \
 	      gen/hip/hip_fmadiff.o gen/hip/hip_fmadiff_sha256.o \
 	      hip-progdiff hip-progdiff.exe
