@@ -1057,9 +1057,15 @@ STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "sc
                    "scaleb32-all", "scaleb32-wide") + WIDE_TILE_OPS + WIDE_C5_TILE_OPS
 # Parcel M4X2: the routine items (host/tools/routine_sweep.c; the catalog's `routine` group) have an op WORD each, <name>-f32[-x<8 hex>][-d<8 hex>], with
 # the digest of the programs in it, so the words are not a fixed list: a routine op is a tile op by a RULE, read from routine_sweep.c's op grammar
-# (parse_op: the thirteen names, then -x and -d words of exactly eight hex digits) and not copied from hw/card_stress_lib.py's table of digests - the
+# (parse_op: the names, then -x and -d words of exactly eight hex digits) and not copied from hw/card_stress_lib.py's table of digests - the
 # two statements stay two, as STRESS_TILE_OPS and OP_REACH do. Each lane of a routine item is a program run on the tile (cft_program_run_ex).
-ROUTINE_OP_RE = re.compile(r"^(?:exp|exp2|expm1|log|log2|log1p|sin|cos|tan|atan|asin|acos|atan2)-f32(?:-x[0-9a-f]{8})?(?:-d[0-9a-f]{8})?$")
+# Parcel M3X2 (2026-11-24): the grammar is by the routine's kind, as parse_op's is: the twelve one-operand names take no suffix, atan2 takes -x, pow and powr
+# take exactly one of -x and -y, and pown, rootn and compound take -n<token> (decimal, m for a minus, no leading zero); every op may end -d<8 hex digits>.
+ROUTINE_OP_RE = re.compile(r"^(?:(?:exp|exp2|expm1|log|log2|log1p|sin|cos|tan|atan|asin|acos)-f32"
+                           r"|atan2-f32-x[0-9a-f]{8}"
+                           r"|powr?-f32-[xy][0-9a-f]{8}"
+                           r"|(?:pown|rootn|compound)-f32-n(?:0|m?[1-9][0-9]*))"
+                           r"(?:-d[0-9a-f]{8})?$")
 
 
 def is_tile_op(op):

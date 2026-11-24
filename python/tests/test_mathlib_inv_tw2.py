@@ -1518,9 +1518,10 @@ def test_the_sweep_generator_builds_the_four_inverse_routines_at_fp32(tmp_path):
     import hashlib
     import importlib.util
     import subprocess
+    THIRTEEN = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")   # by name (parcel M3X2: the generator builds eighteen by default now)
     out = tmp_path / "imgs"
     r = subprocess.run([sys.executable, "-B", str(
-        ROOT / "host" / "tools" / "gen_sweep_images.py"), "--out", str(out)],
+        ROOT / "host" / "tools" / "gen_sweep_images.py"), "--out", str(out), "--names", ",".join(THIRTEEN)],
         capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     files = sorted(p.name for p in out.iterdir())
@@ -1556,7 +1557,7 @@ def test_the_sweep_generator_builds_the_four_inverse_routines_at_fp32(tmp_path):
     finally:
         sys.modules.pop("card_stress_lib", None)
     cat = {d[1]: d[2] for d in digests if d[1] in lib.ROUTINE_DIGESTS}
-    assert len(cat) == 13 and cat == dict(lib.ROUTINE_DIGESTS)
+    assert len(cat) == 13 and cat == {n: lib.ROUTINE_DIGESTS[n] for n in THIRTEEN}
     assert all(n in lib.ROUTINE_DIGESTS
                for n in ("atan", "asin", "acos", "atan2"))
     assert len(digests) == 13

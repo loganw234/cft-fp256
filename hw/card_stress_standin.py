@@ -110,34 +110,58 @@ OP = ""      # a soak job's op (argv[1] after the binary), for rules that name o
 # them to hw/card_stress_lib.py's ROUTINE_DIGESTS and to the real `routine-sweep list`, the fixture hw/card_stress_fixtures/rs-list.txt): the digests of the thirteen
 # routines that have images, and the instructions and words of exp's five (the tool's own image lines, step1 of the same run); every
 # other routine's image lines carry the exp numbers - a count that adds up, not a measurement - and a hash the stand-in makes up.
-ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
+# Parcel M3X2: the eighteen of routine_sweep.c's RTNS: pow and powr have images and a digest; pown, rootn and compound have none (parcel M3F2's), so `list`
+# says `no image` for them and an op word of theirs is refused as a tool refuses a name with no image (exit 2).
+ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2",
+                 "pow", "powr", "pown", "rootn", "compound")
+ROUTINE_FAMILY = ("pow", "powr", "pown", "rootn", "compound")      # the names that have the exact family and its line
 ROUTINE_ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
 ROUTINE_STANDIN_DIGESTS = {"exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb", "log2": "c274c957",
                            "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e",
-                           "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8"}
+                           "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8",
+                           "pow": "7043fd38", "powr": "8aefb175"}
 ROUTINE_EXP_SIZES = {"rne": (387, 71), "rtz": (385, 71), "rdn": (385, 71), "rup": (384, 70), "rmm": (387, 71)}
-ROUTINE_OP = re.compile(r"^(%s)-f32(?:-x([0-9a-f]{8}))?(?:-d([0-9a-f]{8}))?$" % "|".join(ROUTINE_NAMES))
+ROUTINE_POW_SIZES = {"rne": (930, 143), "rtz": (925, 145), "rdn": (926, 146), "rup": (926, 144), "rmm": (930, 143)}     # pow's, the tool's own image lines (MEASURED 2026-11-24)
+_NTOK = r"(?:0|m?[1-9][0-9]*)"
+ROUTINE_OP = re.compile(
+    r"^(?:(?P<n_plain>exp|exp2|expm1|log|log2|log1p|sin|cos|tan|atan|asin|acos)-f32"
+    r"|(?P<n_atan2>atan2)-f32-x(?P<ax>[0-9a-f]{8})"
+    r"|(?P<n_pow>powr?)-f32-(?P<k>[xy])(?P<w>[0-9a-f]{8})"
+    r"|(?P<n_nkey>pown|rootn|compound)-f32-n(?P<t>" + _NTOK + r"))"
+    r"(?:-d(?P<d>[0-9a-f]{8}))?$")
 EXP_SMOKE_LANE = 0x33ffffff           # exp's marked lane in the lead's smoke slice: rtz and rdn guess 1.0, rup the next float up (all right)
 EXP_SMOKE_MARKS = (("rtz", 0x3f800000), ("rdn", 0x3f800000), ("rup", 0x3f800001))
 
 
-def routine_marks(name: str, attrs, lo: int, hi: int, do: str):
-    """The marked lanes this stand-in says a routine slice has: [(attribute, lane, guess, wrong, off_list)] in the tool's order (attribute
-    by attribute). By default exp's three in the smoke slice (the tool's own, MEASURED), none elsewhere; `do` makes others."""
+POW_SMOKE_LANE = 0x40400000           # pow with y = 2 fixed: x = 3, whose 3^2 = 9 is exact: marked under all five attributes, every guess wrong (the tool's own, MEASURED)
+POW_SMOKE_GUESS = {"rne": 0x41100000, "rtz": 0x410fffff, "rdn": 0x410fffff, "rup": 0x41100000, "rmm": 0x41100000}
+
+
+def routine_marks(name: str, attrs, lo: int, hi: int, do: str, fixed=None):
+    """The marked lanes this stand-in says a routine slice has: [(attribute, lane, guess, wrong, off_list, exact)] in the tool's order (attribute
+    by attribute). By default exp's three in the smoke slice and pow's five at y = 2 (the tool's own, MEASURED), none elsewhere; `do` makes others. A name of the pow
+    family (ROUTINE_FAMILY) has the exact family: its marks are on an exact lane unless off the list (the last field), as the tool classes them."""
+    fam = name in ROUTINE_FAMILY
     if do == "marks":
-        return [(a, lo, 0x3f800000 + i, False, False) for i, a in enumerate(attrs) if a in ("rtz", "rdn", "rup")] if len(attrs) > 1 else             [(attrs[0], lo, 0x3f800000, False, False)]
+        return [(a, lo, 0x3f800000 + i, False, False, fam) for i, a in enumerate(attrs) if a in ("rtz", "rdn", "rup")] if len(attrs) > 1 else \
+            [(attrs[0], lo, 0x3f800000, False, False, fam)]
     if do == "offlist":
-        return [(attrs[0], lo, 0x3f800000, False, True)]
+        return [(attrs[0], lo, 0x3f800000, False, True, False)]
     if do == "wrongguess":
-        return [(attrs[0], lo, 0x3f800000, True, False)]
+        return [(attrs[0], lo, 0x3f800000, True, False, fam)]
+    if do == "exactmarks":
+        return [(attrs[i % len(attrs)], lo + i, 0x3f800000, False, False, True) for i in range(3)]
     if do == "manymarks":
         res = []
         for i in range(40):
             a = attrs[(i * len(attrs)) // 40]
-            res.append((a, lo + i, 0x3f800000, i in (7, 31), i in (3, 20, 33)))
+            off = i in (3, 20, 33)
+            res.append((a, lo + i, 0x3f800000, i in (7, 31), off, fam and not off))
         return res
     if name == "exp" and lo <= EXP_SMOKE_LANE < hi:
-        return [(a, EXP_SMOKE_LANE, g, False, False) for a, g in EXP_SMOKE_MARKS if a in attrs]
+        return [(a, EXP_SMOKE_LANE, g, False, False, False) for a, g in EXP_SMOKE_MARKS if a in attrs]
+    if name == "pow" and fixed == ("y", 0x40000000) and lo <= POW_SMOKE_LANE < hi:
+        return [(a, POW_SMOKE_LANE, POW_SMOKE_GUESS[a], True, False, True) for a in attrs]
     return []
 
 
@@ -149,9 +173,18 @@ def routine_main(real, do: str) -> int:
             err(f"usage: {real[0]} <op word> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>")
             return 2
         missing = [x for x in (os.environ.get("CFT_STANDIN_LIST_MISSING") or "").split(",") if x]
+        # CFT_STANDIN_LIST_N=pown:3:0123abcd,pown:m3:0123abcd: the rows of an n-keyed name that has images (the tool's `<name>-f32-n<token>: ...`), which the stand-in has none of
+        nrows: dict = {}
+        for item in (os.environ.get("CFT_STANDIN_LIST_N") or "").split(","):
+            if item:
+                nm, tok, dg = item.split(":")
+                nrows.setdefault(nm, []).append((tok, dg))
         for n in ROUTINE_NAMES:
             if n in missing:                                # routine_sweep.c:830, some of the five images not found
                 out(f"{n}-f32: 4 of 5 images found (cannot read {os.environ.get('CFT_SWEEP_IMAGES') or 'sweep-images'}/{n}-fp32-rmm.cftp)")
+            elif n in nrows:
+                for tok, dg in nrows[n]:
+                    out(f"{n}-f32-n{tok}: images rne rtz rdn rup rmm, digest {dg}")
             elif n in ROUTINE_STANDIN_DIGESTS:
                 out(f"{n}-f32: images rne rtz rdn rup rmm, digest {ROUTINE_STANDIN_DIGESTS[n]}")
             else:
@@ -159,9 +192,12 @@ def routine_main(real, do: str) -> int:
         return 0
     m = ROUTINE_OP.match(op)
     if m is None or len(real) != 5:
-        err(f"routine-sweep: {op}: unknown op (the thirteen are exp exp2 expm1 log log2 log1p sin cos tan atan asin acos atan2, each as <name>-f32)")
+        err(f"routine-sweep: {op}: unknown op (the eighteen are exp exp2 expm1 log log2 log1p sin cos tan atan asin acos atan2 pow powr pown rootn compound, "
+            f"each as <name>-f32 and the suffix its kind takes)")
         return 2
-    name, d = m.group(1), m.group(3)
+    name = m.group("n_plain") or m.group("n_atan2") or m.group("n_pow") or m.group("n_nkey")
+    d = m.group("d")
+    fixed = (m.group("k"), int(m.group("w"), 16)) if m.group("n_pow") else None
     lo, hi, mode = int(real[2], 0), int(real[3], 0), real[4]
     if not 0 <= lo < hi <= 1 << 32 or (mode != "all" and mode not in ROUTINE_ATTRS):
         err(f"routine-sweep: [{real[2]}, {real[3]}) must satisfy 0 <= lo < hi <= 2^32, and the mode one of rne rtz rdn rup rmm all")
@@ -169,8 +205,9 @@ def routine_main(real, do: str) -> int:
     attrs = ROUTINE_ATTRS if mode == "all" else (mode,)
     imgdir = os.environ.get("CFT_SWEEP_IMAGES") or "sweep-images"
     out(f"standin: env CFT_SWEEP_IMAGES={os.environ.get('CFT_SWEEP_IMAGES', '<unset>')}")
-    if do == "noimage":
-        err(f"routine-sweep: cannot read {imgdir}/{name}-fp32-{attrs[0] if d is None else 'rne'}.cftp")
+    if do == "noimage" or name not in ROUTINE_STANDIN_DIGESTS:       # pown, rootn and compound have no image until parcel M3F2 has merged
+        stem = f"{name}-n{m.group('t')}" if m.group("n_nkey") else name
+        err(f"routine-sweep: cannot read {imgdir}/{stem}-fp32-{attrs[0] if d is None else 'rne'}.cftp")
         return 2
     if do == "digest" or (d is not None and name in ROUTINE_STANDIN_DIGESTS and d != ROUTINE_STANDIN_DIGESTS[name]):
         want = ROUTINE_STANDIN_DIGESTS.get(name, "00000000")
@@ -182,14 +219,19 @@ def routine_main(real, do: str) -> int:
     err(f"soaking the {'DEVICE' if art else 'software'} backend{': ' + art if art else ''}")
     err(f"oracle: MPFR {os.environ.get('CFT_STANDIN_MPFR') or '4.2.2'} with GMP 6.3.0, mpfr_ieee.h's emulation")
     for a in attrs:
-        ninsn, nwords = ROUTINE_EXP_SIZES[a]
+        ninsn, nwords = (ROUTINE_POW_SIZES if name in ("pow", "powr") else ROUTINE_EXP_SIZES)[a]
         err(f"image {name} {a}: sha256 {hashlib.sha256((name + a).encode()).hexdigest()}, {ninsn} instructions, {nwords} words")
     err(f"{op} {mode}: device 0.000 s, oracle 0.000 s, 16384 lanes a call")
     enc = hi - lo - (1 if do == "short" else 0)
     cases = enc * len(attrs) - (1 if do == "shortcase" else 0)
-    marks = routine_marks(name, attrs, lo, hi, do)
-    for a, lane, guess, wrong, off in marks[:16]:
-        out(f"  MARK {a} a=0x{lane:08x} guess=0x{guess:08x} {'WRONG' if wrong else 'right'}{' (off the list)' if off else ''}")
+    marks = routine_marks(name, attrs, lo, hi, do, fixed)
+    fam = name in ROUTINE_FAMILY
+    shown = {True: 0, False: 0}          # the family's exact-lane marks have a budget of sixteen of their own, the others another (routine_sweep.c: shown_e, shown_k)
+    for a, lane, guess, wrong, off, ex in marks:
+        if shown[ex and fam] < 16:
+            shown[ex and fam] += 1
+            out(f"  MARK {a} a=0x{lane:08x} guess=0x{guess:08x} {'WRONG' if wrong else 'right'}"
+                f"{' (exact lane)' if ex and fam else ' (off the list)' if off else ''}")
     bad = do in ("fail", "mismatch")
     if bad:
         out(f"  MISMATCH {attrs[0]} a=0x{lo:08x} lib=0x3f800000 mpfr=0x3f800001")
@@ -201,6 +243,8 @@ def routine_main(real, do: str) -> int:
         total = sum(k for k in counts if k != "-") + (1 if do == "badmarks" else 0)
         out(f"{op} {mode}: {total} marked (rne {counts[0]}, rtz {counts[1]}, rdn {counts[2]}, rup {counts[3]}, rmm {counts[4]}), "
             f"{sum(1 for k in marks if k[4])} off the list, {sum(1 for k in marks if k[3])} guesses wrong")
+        if fam and do != "exactmissing":
+            out(f"{op} {mode}: {sum(1 for k in marks if k[5])} marked on an exact lane")
     return 1 if bad else 0
 
 # The checks a slice of each exhaustive conversion/scaleB mode makes for every encoding of its operand:

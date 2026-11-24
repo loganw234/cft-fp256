@@ -1,0 +1,1 @@
+routine-sweep: pow-f32: pow and powr take exactly one of -x<8 hex digits> (x fixed, y swept) and -y<8 hex digits> (y fixed, x swept)

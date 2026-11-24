@@ -5639,6 +5639,16 @@ DOC_ROUTINE_DIGESTS = [("exp", "043b3bb5"), ("exp2", "ce1e05a9"), ("expm1", "e63
 DOC_ATAN2_XS = [0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb]    # the lead's nine, in his order
 DOC_ROUTINE_OPS = [f"{n}-f32-d{d}" for n, d in DOC_ROUTINE_DIGESTS if n != "atan2"] + [f"atan2-f32-x{x:08x}-d{DOC_ROUTINE_DIGESTS[-1][1]}" for x in DOC_ATAN2_XS]
 DOC_ROUTINE_NAMES = [f"{op}-all" for op in DOC_ROUTINE_OPS]
+# parcel M3X2 (2026-11-24): the pow family's 36 items, typed from docs/studies/M3-pow.md question 5 (a) (the nine x and the nine y, in the order of the lead's
+# measured slices, docs/studies/m3/pw32_slice-oracle.out.txt) and from the generator's `digest` lines (rs3-images-manifest.txt, the lead's to approve), in the tool's
+# order: pow's eighteen (every y at each x, then every x at each y), powr's eighteen. They are appended to the 21 and the 308 keep their places.
+DOC_POW_DIGESTS = [("pow", "7043fd38"), ("powr", "8aefb175")]
+DOC_POW_XS = [0x3f000000, 0x3f7fffff, 0x3f800001, 0x3fc00000, 0x40000000, 0x40400000, 0x41200000, 0x00800000, 0x7f7fffff]
+DOC_POW_YS = [0xc0000000, 0xbf800000, 0xbf000000, 0x3f000000, 0x3fc00000, 0x40000000, 0x40400000, 0x35800000, 0x49800000]
+DOC_POW_OPS = [f"{n}-f32-{k}{w:08x}-d{d}" for n, d in DOC_POW_DIGESTS for k, ws in (("x", DOC_POW_XS), ("y", DOC_POW_YS)) for w in ws]
+DOC_POW_NAMES = [f"{op}-all" for op in DOC_POW_OPS]
+DOC_NKEYED = ("pown", "rootn", "compound")                     # no item until parcel M3F2 has merged and the lead has added the rows of ROUTINE_N_DIGESTS
+BASE_VARS_308 = "0cc63fa2a23102828f06fdf6e659dd8c0b69a3879715c9700d303e7a1df304dd"    # vars() of the 308, hashed, at f7a1ce95 (the base of parcel M3X2)
 WIDE_C5_LOGS = (("wc-rint128-class.txt", "rint128-class-rne"), ("wc-rint256-class.txt", "rint256-class-rmm"),
                 ("wc-scaleb128-class.txt", "scaleb128-class-rup"), ("wc-scaleb256-class.txt", "scaleb256-class-rdn"),
                 ("wc-rint128-f32.txt", "rint128-f32-rne"), ("wc-rint256-f32.txt", "rint256-f32-rmm"),
@@ -6628,9 +6638,15 @@ def routine_catalog_checks(src: str = HERE) -> list:
           h(old) == BASE_VARS_125 and h(full[:287]) == BASE_VARS_287 and len(old) == 125
           and all(i.group == "base" for i in full[:125]) and all(i.group == "wide" for i in full[125:287]) and not any(i.tool == "routine" for i in full[:287]),
           f"{len(old)} {h(old)[:12]} {h(full[:287])[:12]}")
-        rs = full[287:]
-        c("routine catalog: the 21 routine items (twelve routines one each, atan2 nine) follow the 287, in the tool's order, named <op word>-all, and the catalog is 308 items with mpfr and 125 without",
-          len(full) == 308 == 287 + len(DOC_ROUTINE_NAMES) and [it.name for it in rs] == DOC_ROUTINE_NAMES and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
+        rs = full[287:308]
+        pw = full[308:]
+        c("routine catalog: the 21 routine items (twelve routines one each, atan2 nine) follow the 287, in the tool's order, named <op word>-all; the pow family's 36 follow them, and the catalog is "
+          "344 items with mpfr and 125 without",
+          len(full) == 344 == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) and [it.name for it in rs] == DOC_ROUTINE_NAMES and [it.name for it in pw] == DOC_POW_NAMES
+          and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
+        c("routine catalog: the first 308 items with mpfr are the base's, field for field (vars() of each, hashed; the digest is f7a1ce95's, the base of parcel M3X2): the pow family's 36 add to them and "
+          "change none, in places, names or fields",
+          h(full[:308]) == BASE_VARS_308 and h(full[:287]) == BASE_VARS_287, f"{h(full[:308])[:12]}")
         bad = []
         for it, op_ in zip(rs, DOC_ROUTINE_OPS):
             got = (it.tool, it.kind, it.op, it.mode, it.verdict_mode, it.exact, it.per_encoding, it.space, it.level, it.whole, it.mpfr, it.reach, it.format,
@@ -6641,22 +6657,52 @@ def routine_catalog_checks(src: str = HERE) -> list:
                 bad.append(f"{it.name}: {got} vs {want}")
         c("routine catalog: each item runs routine-sweep's `all` mode (the op word the item's name ends in -all), is exact with five checks an encoding over 2^32 encodings "
           "and none skipped (whole space 5 x 2^32, 0), reaches the tile, is fp32, takes no seed, and is in group routine", not bad and len(rs) == 21, "; ".join(bad[:2]))
-        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the 21 op words, both built from the digest table (a new digest needs no third edit)",
-          all(L2.OP_REACH.get(it.op) == "tile" and L2.OP_FORMAT.get(it.op) == "fp32" for it in rs)
-          and {op for op in L2.OP_REACH if L2.ROUTINE_OP.match(op)} == {it.op for it in rs} == {op for op in L2.OP_FORMAT if L2.ROUTINE_OP.match(op)})
+        bad = []
+        for it, op_ in zip(pw, DOC_POW_OPS):
+            got = (it.tool, it.kind, it.op, it.mode, it.verdict_mode, it.exact, it.per_encoding, it.space, it.level, it.whole, it.mpfr, it.reach, it.format,
+                   it.extra_cases, it.seed_index, it.group, it.base_seed, it.layout_dependent)
+            want = ("routine", "exhaustive", op_, "all", "all", True, 5, 1 << 32, "exhaustive", (5 << 32, 0), True, "tile", "fp32",
+                    0, None, "routine", 0, False)
+            if got != want:
+                bad.append(f"{it.name}: {got} vs {want}")
+        c("routine catalog: the pow family's 36 items have the 21's fields (parcel M3X2: the `all` mode, exact, five checks over 2^32 encodings, tile, fp32, no seed, group routine, so that "
+          "no figure of the report, the reducer or the page moves for them), and are 18 an op: every y at each of nine x, then every x at each of nine y, pow then powr",
+          not bad and len(pw) == 36 and [it.op for it in pw] == DOC_POW_OPS and len(set(DOC_POW_OPS)) == 36, "; ".join(bad[:2]))
+        c("routine catalog: the n-keyed names have no item (ROUTINE_N_DIGESTS is empty until parcel M3F2 has merged), and --sweep-items names of them are refused by name; "
+          "ROUTINE_NS is the seven n of the study, in the generator's order",
+          L2.ROUTINE_N_DIGESTS == {} and not any(it.op.split("-")[0] in DOC_NKEYED for it in full) and list(L2.ROUTINE_NS) == [2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63]
+          and L2.ROUTINE_NKEYED == DOC_NKEYED and all(L2.routine_op_parts(f"{n}-f32-n3") for n in DOC_NKEYED), str(L2.ROUTINE_N_DIGESTS))
+        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the 57 op words (the 21 and the pow family's 36), both built from the digest table (a new digest needs no third edit)",
+          all(L2.OP_REACH.get(it.op) == "tile" and L2.OP_FORMAT.get(it.op) == "fp32" for it in rs + pw)
+          and {op for op in L2.OP_REACH if L2.ROUTINE_OP.match(op)} == {it.op for it in rs + pw} == {op for op in L2.OP_FORMAT if L2.ROUTINE_OP.match(op)})
         # the digests: the real tool's own `list` (the box's, at c99df121) and the generator's manifest (the same run's), parsed here, never read from the table they test
         lst = [re.fullmatch(r"(\w+)-f32: (images rne rtz rdn rup rmm, digest ([0-9a-f]{8})|no image)", ln) for ln in fixture("rs-list.txt").splitlines()]
         listed = [(m.group(1), m.group(3)) for m in lst if m and m.group(3)]
         noimg = [m.group(1) for m in lst if m and not m.group(3)]
         man = fixture("rs-images-manifest.txt")
         mdig = re.findall(r"^digest (\w+) ([0-9a-f]{8})$", man, re.M)
-        c("routine catalog: ROUTINE_DIGESTS is the real tool's `list` (rs-list.txt: thirteen routines with five images and a digest each, none with no image), in its order; and the "
+        c("routine catalog: ROUTINE_DIGESTS' first thirteen rows are the real tool's `list` (rs-list.txt: thirteen routines with five images and a digest each, none with no image), in its order; and the "
           "generator's manifest of the same run (rs-images-manifest.txt) has the same thirteen `digest` lines",
-          len(lst) == 13 and all(lst) and list(L2.ROUTINE_DIGESTS.items()) == listed == mdig == DOC_ROUTINE_DIGESTS
+          len(lst) == 13 and all(lst) and list(L2.ROUTINE_DIGESTS.items())[:13] == listed == mdig == DOC_ROUTINE_DIGESTS
           and noimg == [] and len(listed) == 13, f"{listed} {mdig}")
-        c("routine catalog: every routine item's op word is the tool's op grammar - <name>-f32, then -x<8 hex> (atan2 alone) and -d<8 hex> - and its digest is the table's",
-          all(L2.ROUTINE_OP.match(it.op) and L2.ROUTINE_OP.match(it.op).group(3) == L2.ROUTINE_DIGESTS[it.op.split("-")[0]] for it in rs)
-          and not L2.ROUTINE_OP.match("exp-f32-d043b3b") and not L2.ROUTINE_OP.match("exp-f32-d043b3bb5-all") and not L2.ROUTINE_OP.match("nosuch-f32"))
+        # parcel M3X2: the fifteen and the three with no image, from the real tool's `list` and the generator's manifest of a later run (rs3-*, made by the parcel from its build)
+        lst3 = [re.fullmatch(r"(\w+)-f32: (images rne rtz rdn rup rmm, digest ([0-9a-f]{8})|no image)", ln) for ln in fixture("rs3-list.txt").splitlines()]
+        listed3 = [(m.group(1), m.group(3)) for m in lst3 if m and m.group(3)]
+        noimg3 = [m.group(1) for m in lst3 if m and not m.group(3)]
+        mdig3 = re.findall(r"^digest (\S+) ([0-9a-f]{8})$", fixture("rs3-images-manifest.txt"), re.M)
+        skip3 = re.findall(r"^skipped (\S+) not built at fp32$", fixture("rs3-images-manifest.txt"), re.M)
+        c("routine catalog: ROUTINE_DIGESTS is the real tool's `list` at parcel M3X2 (rs3-list.txt: eighteen rows, the fifteen with five images and a digest each in the tool's order, pown, rootn and "
+          "compound `no image`), and the generator's manifest of the same run (rs3-images-manifest.txt) has the same fifteen `digest` lines, `skipped` lines for the three, and no digest line for them",
+          len(lst3) == 18 and all(lst3) and list(L2.ROUTINE_DIGESTS.items()) == listed3 == mdig3 == DOC_ROUTINE_DIGESTS + DOC_POW_DIGESTS and noimg3 == list(DOC_NKEYED) == skip3
+          and L2.ROUTINE_NAMES == tuple(m.group(1) for m in lst3), f"{listed3} {mdig3} {noimg3} {skip3}")
+        c("routine catalog: every routine item's op word is the tool's op grammar - <name>-f32, then -x<8 hex> (atan2), -x or -y <8 hex> (pow and powr, one of them) or -n<token> (pown, rootn, compound), "
+          "and -d<8 hex> - and its digest is the table's",
+          all(L2.ROUTINE_OP.match(it.op) and L2.ROUTINE_OP.match(it.op).group("d") == L2.ROUTINE_DIGESTS[it.op.split("-")[0]] for it in rs + pw)
+          and not L2.ROUTINE_OP.match("exp-f32-d043b3b") and not L2.ROUTINE_OP.match("exp-f32-d043b3bb5-all") and not L2.ROUTINE_OP.match("nosuch-f32")
+          and not L2.ROUTINE_OP.match("atan2-f32-d043b3bb5") and not L2.ROUTINE_OP.match("pow-f32-x3f000000-y3f000000-d7043fd38") and not L2.ROUTINE_OP.match("pow-f32-n3")
+          and not L2.ROUTINE_OP.match("pow-f32-d7043fd38") and not L2.ROUTINE_OP.match("pown-f32-x3f000000") and not L2.ROUTINE_OP.match("pown-f32-n03")
+          and L2.routine_op_parts("pown-f32-nm9223372036854775808-dffffffff") == ("pown", ("n", -2 ** 63), "ffffffff")
+          and L2.routine_op_parts("pow-f32-y3f000000") == ("pow", ("y", 0x3f000000), None))
         # claims: by space and level, never "swept", none with ", under " (the wide claims block takes those), the images' digest named
         c("routine catalog: each of the twelve claims of the one-op routines (atan2's nine are checked below) names the space (every fp32 x), the routine as the compiled program, its images' digest, the five attributes, the unmarked lanes' bits and "
           "flags equal to MPFR's, the marked lanes counted and their guess compared, not decided, and the level (L1 over the fp32 slice); none says 'swept' or contains ', under '",
@@ -6674,7 +6720,23 @@ def routine_catalog_checks(src: str = HERE) -> list:
         c("routine catalog: ROUTINE_DIGESTS holds atan2, whose nine items the checks below read", a2d is not None and len(at) == 9, f"digest {a2d}, {len(at)} atan2 items")
         c("routine catalog: the real table makes nine atan2 items, one an x, op atan2-f32-x<x>-d<digest>, named ...-all, in the lead's order, each in group routine",
           [it.op for it in at] == [f"atan2-f32-x{x:08x}-d{a2d}" for x in xs] and [it.name for it in at] == [f"atan2-f32-x{x:08x}-d{a2d}-all" for x in xs]
-          and all(it.group == "routine" and it.exact and it.per_encoding == 5 for it in at) and rs[-9:] == at, str([it.name for it in at][:2]))
+          and all(it.group == "routine" and it.exact and it.per_encoding == 5 for it in at) and rs[-9:] == at and len(at) == 9, str([it.name for it in at][:2]))
+        # the pow family: the study's lists typed in this file, each item's claim says its operand, what it is, the digest and that it is not the whole space of pairs
+        c("routine catalog: POW_X and POW_Y are the study's nine x and nine y in the lead's order, typed here from docs/studies/M3-pow.md question 5 (0.5, 1 - 2^-24, 1 + 2^-23, 1.5, 2, 3, 10, 2^-126, "
+          "the largest normal; -2, -1, -0.5, 0.5, 1.5, 2, 3, 2^-20, 2^20)",
+          [x for x, _ in L2.POW_X] == DOC_POW_XS and [y for y, _ in L2.POW_Y] == DOC_POW_YS and len(set(DOC_POW_XS)) == len(set(DOC_POW_YS)) == 9)
+        pd = dict(L2.ROUTINE_DIGESTS)
+        c("routine catalog: a pow or powr claim says every fp32 y for that x (or every fp32 x for that y) and what it is, the routine as the compiled program with its images' digest, that it is not the "
+          "whole space of (x, y) pairs, the five attributes, that a mark on an exact lane is counted apart; never 'swept' or ', under '",
+          all((f"every fp32 y for x = 0x{w:08x} ({dict(L2.POW_X)[w]}) through {it.op.split('-')[0]} as the compiled program (its images' digest {pd[it.op.split('-')[0]]})" in it.claim
+               if "-f32-x" in it.op else
+               f"every fp32 x for y = 0x{w:08x} ({dict(L2.POW_Y)[w]}) through {it.op.split('-')[0]} as the compiled program (its images' digest {pd[it.op.split('-')[0]]})" in it.claim)
+              and "not the whole space of (x, y) pairs" in it.claim and "each of the five attributes" in it.claim and "counted apart" in it.claim
+              and ", under " not in it.claim and "swept" not in it.claim and it.claim.count("(L1 over the fp32 slice)") == 1
+              for it in pw for w in [int(re.search(r"-f32-[xy]([0-9a-f]{8})-d", it.op).group(1), 16)]) and len(pw) == 36,
+          pw[0].claim if pw else "no pow item")
+        c("routine catalog: the claims of the 21 older routine items are the base's words, with no sentence of the pow family's added",
+          all("counted apart" not in it.claim for it in rs) and rs[0].claim.endswith("(L1 over the fp32 slice)") and at[0].claim.endswith("(L1 over the fp32 slice)"))
         c("routine catalog: an atan2 claim says every fp32 y for that x and what x is, and not the whole space of (y, x) pairs (Logan's answer 1), and never ', under '",
           all(f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest {a2d})" in it.claim
               and "not the whole space of (y, x) pairs" in it.claim and ", under " not in it.claim and "swept" not in it.claim
@@ -6686,9 +6748,9 @@ def routine_catalog_checks(src: str = HERE) -> list:
         sp = importlib.util.spec_from_file_location("rs_standin_copy", os.path.join(src, "card_stress_standin.py"))
         sm = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(sm)
-        c("routine catalog: the stand-in's own table of digests (the thirteen) and its list of the thirteen names are the library's and the real tool's `list`",
-          sm.ROUTINE_STANDIN_DIGESTS == dict(L2.ROUTINE_DIGESTS) and list(sm.ROUTINE_NAMES) == list(L2.ROUTINE_NAMES) == [n for n, _ in listed] + noimg
-          and list(sm.ROUTINE_ATTRS) == list(L2.ROUTINE_ATTRS))
+        c("routine catalog: the stand-in's own table of digests (the fifteen) and its list of the eighteen names are the library's and the real tool's `list` (rs3-list.txt), and its op pattern is the library's",
+          sm.ROUTINE_STANDIN_DIGESTS == dict(L2.ROUTINE_DIGESTS) and list(sm.ROUTINE_NAMES) == list(L2.ROUTINE_NAMES) == [n for n, _ in listed3] + noimg3
+          and list(sm.ROUTINE_ATTRS) == list(L2.ROUTINE_ATTRS) and sm.ROUTINE_OP.pattern == L2.ROUTINE_OP.pattern and tuple(sm.ROUTINE_FAMILY) == ("pow", "powr") + tuple(DOC_NKEYED))
     return out
 
 
@@ -6896,7 +6958,8 @@ def routine_parser_checks(src: str = HERE) -> list:
         c("routine stand-in: under one attribute (rtz) it prints the real tool's lines (rs-exp-rtz): one image line, nine cases, the four dashes",
           rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-exp-rtz.txt")), "\n".join(rs_mask(txt)[:10]))
         rc, txt = rs_standin(["list"], src=src)
-        c("routine stand-in: `list` prints the real tool's thirteen lines (rs-list)", rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-list.txt")), txt[:200])
+        c("routine stand-in: `list` prints the real tool's eighteen lines (rs3-list: the fifteen with digests, pown, rootn and compound `no image`), the first thirteen the older rs-list's",
+          rc == 0 and rs_mask(txt) == rs_mask(fixture("rs3-list.txt")) and rs_mask(txt)[:len(rs_mask(fixture("rs-list.txt")))] == rs_mask(fixture("rs-list.txt")), txt[:200])
         rc, txt = rs_standin(["exp-f32-d00000000", "0x33fffffb", "0x34000004", "all"], src=src)
         c("routine stand-in: a digest that is not the images' is refused as the real tool refuses it (rs-exp-d-wrong), exit 2, no verdict",
           rc == 2 and rs_mask(txt) == rs_mask(fixture("rs-exp-d-wrong.txt")), txt[:200])
@@ -7253,9 +7316,10 @@ def routine_fe_checks(src: str = HERE) -> list:
     spec = importlib.util.spec_from_file_location("m4x2_figure_extracts", fe_path)
     fe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fe)
-    ops = [op for _n, _d in DOC_ROUTINE_DIGESTS for op in [f"{_n}-f32-d{_d}"]]
-    c("routine figure_extracts: the rule - each of the thirteen routines' op words (and an atan2 word with its x) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
+    ops = list(DOC_ROUTINE_OPS) + list(DOC_POW_OPS)
+    c("routine figure_extracts: the rule - each of the 57 routine op words (the 21 and the pow family's 36, atan2's with its x, pow's and powr's with their x or y) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
       all(fe.is_tile_op(op) and op not in fe.STRESS_TILE_OPS for op in ops) and fe.is_tile_op("atan2-f32-x3f800000-d12345678") and not fe.is_tile_op("exp-f32-d043b3bb")
+      and not fe.is_tile_op("pow-f32-x3f000000-y3f000000") and fe.is_tile_op("pown-f32-nm3") and not fe.is_tile_op("pow-f32-n3")
       and not fe.is_tile_op("exp-f32-d043b3bb5-all") and not fe.is_tile_op("sqrt33") and fe.is_tile_op("sqrt32"), str([op for op in ops if not fe.is_tile_op(op)]))
     served = set(ops) | {"sqrt32", "rem32"}
     c("routine figure_extracts: tile_ops_served names the routine ops a run served after the table's, a run that served none gives exactly the table's, and the host ops are the rest",

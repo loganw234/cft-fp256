@@ -1,0 +1,1 @@
+routine-sweep: pow-f32-x3f800000-y40000000-d7043fd38: an op word fixes one operand: exactly one of -x and -y for pow and powr, -x for atan2, -n for pown, rootn and compound, given once and before -d

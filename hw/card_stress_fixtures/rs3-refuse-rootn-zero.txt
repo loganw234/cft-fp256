@@ -1,0 +1,1 @@
+routine-sweep: rootn-f32-n0: rootn's n = 0 is invalid for every x (a constant the compiler refuses), and there is no sweep of it

@@ -1,0 +1,16 @@
+soaking the software backend
+oracle: MPFR 4.2.2 with GMP 6.3.0, mpfr_ieee.h's emulation
+image pow rne: sha256 3911ec5c65c24d3358475c17e6f81f07fd686a2b029ce72fe20e6379d30fed71, 930 instructions, 143 words
+image pow rtz: sha256 4012745cc8229e99fdbf6b88976a1a4d0665d4a2f5c0b1de595e448b576d9d12, 925 instructions, 145 words
+image pow rdn: sha256 637d8465bd89eb0e093552caeca0b0b02ccf7fd9e595ab9798d37b1987da01a1, 926 instructions, 146 words
+image pow rup: sha256 a06bf6dfbec16f1cc1fd2982e253155ab36115eddafc400bf5202d97887e3525, 926 instructions, 144 words
+image pow rmm: sha256 1a5c5e5f8060112dd14dd62e377d14bcee70973ff1b8f0a5e7785c778def9915, 930 instructions, 143 words
+pow-f32-y40000000-d7043fd38 all: device 0.208 s, oracle 0.001 s, 16384 lanes a call
+  MARK rne a=0x40400000 guess=0x41100000 WRONG (exact lane)
+  MARK rtz a=0x40400000 guess=0x410fffff WRONG (exact lane)
+  MARK rdn a=0x40400000 guess=0x410fffff WRONG (exact lane)
+  MARK rup a=0x40400000 guess=0x41100000 WRONG (exact lane)
+  MARK rmm a=0x40400000 guess=0x41100000 WRONG (exact lane)
+pow-f32-y40000000-d7043fd38 all: 1280 cases, 0 value mismatches, 0 flag mismatches, 256 encodings, 0 skipped
+pow-f32-y40000000-d7043fd38 all: 5 marked (rne 1, rtz 1, rdn 1, rup 1, rmm 1), 0 off the list, 5 guesses wrong
+pow-f32-y40000000-d7043fd38 all: 5 marked on an exact lane

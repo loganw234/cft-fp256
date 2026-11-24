@@ -1,0 +1,7 @@
+oracle: MPFR 4.2.2 with GMP 6.3.0, mpfr_ieee.h's emulation
+40400000 exact
+40800000 inlane
+3fc00000 exact
+40000000 inlane
+3f800000 inlane
+40490fdb none
