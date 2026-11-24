@@ -1791,7 +1791,7 @@ def cmd_pow_rate(a):
         if fmt.name == "fp32":
             raise SystemExit("--formats fp32: the triple word has no rate "
                              "check here (parcel M3F2's)")
-        count = a.n if a.n else (60 if a.quick else _RATE_SIZES[fmt.name])
+        count = a.n if a.n else (150 if a.quick else _RATE_SIZES[fmt.name])
         for fn in fns:
             for region in regions[fn]:
                 for rnd in rnds:
@@ -2535,7 +2535,8 @@ def main(argv=None):
     p.add_argument("--alpha", type=float, default=H.RATE_ALPHA,
                    help="the run's chance of a false flag (0.001)")
     p.add_argument("--quick", action="store_true",
-                   help="60 lanes a cell, fp128 only by default")
+                   help="150 lanes a cell (the least that reaches 30 expected "
+                        "marks at fp128), fp128 only by default")
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_pow_rate)
