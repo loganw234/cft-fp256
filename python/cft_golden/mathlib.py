@@ -8781,6 +8781,19 @@ POW_PLANTS.update({
                   "compound): the answer right, a flag raised",
 })
 
+# Faults of the first-order budget (parcel M3G3), a table of its own and not
+# POW_PLANTS' keys: build, fragment and build_pow_core accept a key of either
+# (_pow_args), and the tests of the other parcels read POW_PLANTS whole. They
+# act where the plan has B1 or B2 (fp64: plan_pow gives both 0 at fp128 and
+# fp256), by _pow_setup, and are refused by name where they do not
+# (_check_pow_plant_fired).
+_POW_BUDGET_PLANTS = {
+    "bound_tight": "Bv's |t| and |Y k| terms dropped at fp64 (a uniform "
+                   "2^-(p+G)): the plan's B1 and B2 set to 0",
+    "zone_bound_off": "the design before send-back 1 at fp64: Bv's |Y k| term "
+                      "dropped (B2 set to 0, B1 kept)",
+}
+
 
 # ---- fp32: the triple word, pow and powr (parcel M3F1) builds here ----
 
@@ -8817,7 +8830,10 @@ def _check_pow_plant_fired(b: Build):
     plant = b.meta.get("plant")
     if plant == "two_sum_all" and b._eft["two_sum"]:
         b._fired.add(plant)          # Build.fast_two_sum acts on it itself
-    if plant in POW_PLANTS and plant not in b._fired:
+    # parcel M3G3: the budget's two plants (_POW_BUDGET_PLANTS) are refused
+    # the same way where B1 and B2 are 0 (fp128 and fp256)
+    if (plant in POW_PLANTS or plant in _POW_BUDGET_PLANTS) \
+            and plant not in b._fired:
         raise ValueError(f"plant {plant!r} does not apply to "
                          f"{b.meta['fn']} at {b.fmt.name}: the fault is not "
                          f"reached")
@@ -8829,8 +8845,11 @@ def _pow_args(name, fmt, rnd, plant, guard, n):
     if rnd not in sf.RND_NAMES:
         raise ValueError(f"rounding attribute {rnd!r} is not one of the five")
     _pow_refuse(name, fmt, n)
-    if plant is not None and plant not in POW_PLANTS:
-        raise ValueError(f"unknown plant {plant!r}: {', '.join(POW_PLANTS)}")
+    # parcel M3G3: a key of POW_PLANTS or of _POW_BUDGET_PLANTS
+    if plant is not None and plant not in POW_PLANTS \
+            and plant not in _POW_BUDGET_PLANTS:
+        raise ValueError(f"unknown plant {plant!r}: "
+                         f"{', '.join(list(POW_PLANTS) + list(_POW_BUDGET_PLANTS))}")
     return GUARD[fmt.name] if guard is None else guard
 
 
@@ -8841,6 +8860,14 @@ def _pow_setup(name, fmt, rnd, G, shift, plant, n=None):
         P.GL = P.G
         P.KL, P.DL = plan_log(fmt, P.G)
         b._fired.add(plant)          # the plan is where the fault is
+    # parcel M3G3: the budget's plants act on the plan's B1 and B2, which are
+    # not 0 at fp64 alone (a fault of a coefficient that is 0 is not reached)
+    if plant == "bound_tight" and (P.B1 or P.B2):
+        P.B1 = P.B2 = Fraction(0)
+        b._fired.add(plant)
+    if plant == "zone_bound_off" and P.B2:
+        P.B2 = Fraction(0)
+        b._fired.add(plant)
     b.meta.update(fn=name, G=P.G, GL=P.GL, GE=P.GE, KL=P.KL, DL=P.DL, KE=P.KE,
                   DE=P.DE, B1=P.B1, B2=P.B2, shift=shift, plant=plant,
                   family="double word", N=N, n=n)
