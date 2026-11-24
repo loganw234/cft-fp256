@@ -39,7 +39,14 @@ against the contract and against divfull.
   format (a row of LIVE_CAP each, which mathlib.INV_LIVE_CAP views); atan2
   is the first routine of two inputs beside division, ("a", "b") = (y, x);
   and their 80 fragments are what they were at 21b98aec, digest for digest
-  (routine_digests_inv.py), beside the 220 of the eleven at 19de866c.
+  (routine_digests_inv.py), beside the 220 of the eleven at 19de866c;
+* the twenty (M3's build, parcel M3C): pow, powr, pown, rootn and compound
+  join ROUTINES after atan2, in the language's order; pow and powr take
+  atan2's two inputs, the three ONE and an integer n that keys their
+  fragment (N_KEYED, tied to the language's two-operand nodes); their cap
+  rows are pinned (the three with no fp32 key until parcel M3F2) and
+  mathlib.POW_LIVE_CAP is a view of them; and their 205 fragments are what
+  they were at f7a1ce95, digest for digest (routine_digests_pow.py).
 """
 
 import hashlib
@@ -59,6 +66,7 @@ from cft_golden.softfloat import RND_MODES  # noqa: E402
 
 from routine_digests import DIGESTS  # noqa: E402
 from routine_digests_inv import DIGESTS_INV  # noqa: E402
+from routine_digests_pow import DIGESTS_POW  # noqa: E402
 from routine_pools import div_pairs, sqrt_xs  # noqa: E402
 
 FORMATS = (FP32, FP64, FP128, FP256)
@@ -194,6 +202,10 @@ ELEVEN = ("div", "sqrt", *NINE)
 FOUR = ("atan", "asin", "acos", "atan2")
 THIRTEEN = NINE + FOUR
 FIFTEEN = ("div", "sqrt", *THIRTEEN)
+FIVE = ("pow", "powr", "pown", "rootn", "compound")
+N_KEYED = ("pown", "rootn", "compound")
+EIGHTEEN = THIRTEEN + FIVE
+TWENTY = ("div", "sqrt", *EIGHTEEN)
 HAVE_MPMATH = importlib.util.find_spec("mpmath") is not None
 needs_mpmath = pytest.mark.skipif(
     not HAVE_MPMATH, reason="the thirteen's fragments are built through mpmath "
@@ -202,26 +214,34 @@ RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
 
 
-def test_the_fifteen_are_routines():
+def test_the_twenty_are_routines():
     """ROUTINES, the arity map, is division, root, the six, sin, cos and
-    tan, and atan, asin, acos and atan2, in that order; cftc's ir.ROUTINES
-    is the same set; the thirteen take one input, `a`, but atan2's two, `a`
-    and `b`, as division's; division's and root's are read from divfull's
-    programs and the thirteen's are not (read() refuses them by name); and a
-    name that is no routine, `sinh`, is refused by name by fragment()."""
+    tan, atan, asin, acos and atan2, and pow, powr, pown, rootn and
+    compound, in that order; cftc's ir.ROUTINES is the same set; the
+    thirteen of them take one input, `a`, but atan2's, pow's and powr's two,
+    `a` and `b`, as division's, and pown's, rootn's and compound's ONE (their
+    integer operand is a key, N_KEYED, not an input); division's and root's
+    are read from divfull's programs and the eighteen's are not (read()
+    refuses them by name); and a name that is no routine, `sinh`, is refused
+    by name by fragment()."""
     from cftc import ir
-    assert list(R.ROUTINES) == list(FIFTEEN)
+    assert list(R.ROUTINES) == list(TWENTY)
     assert R.ROUTINES == {"div": 2, "sqrt": 1, **{op: 1 for op in NINE},
-                          "atan": 1, "asin": 1, "acos": 1, "atan2": 2}
+                          "atan": 1, "asin": 1, "acos": 1, "atan2": 2,
+                          "pow": 2, "powr": 2, "pown": 1, "rootn": 1,
+                          "compound": 1}
     assert ir.ROUTINES == frozenset(R.ROUTINES)
-    assert R.READ == ("div", "sqrt") and R.BUILT == THIRTEEN
+    assert R.READ == ("div", "sqrt") and R.BUILT == EIGHTEEN
+    assert R.N_KEYED == N_KEYED
     assert R.INPUTS == {"div": ("a", "b"), "sqrt": ("a",),
                         **{op: ("a",) for op in NINE},
                         "atan": ("a",), "asin": ("a",), "acos": ("a",),
-                        "atan2": ("a", "b")}
+                        "atan2": ("a", "b"), "pow": ("a", "b"),
+                        "powr": ("a", "b"), "pown": ("a",), "rootn": ("a",),
+                        "compound": ("a",)}
     assert all(len(R.INPUTS[op]) == R.ROUTINES[op] for op in R.ROUTINES)
     assert set(R.GOLDEN) == set(R.ROUTINES)
-    for op in THIRTEEN:
+    for op in EIGHTEEN:
         with pytest.raises(ValueError, match="mathlib.py builds"):
             R.read(op, FP64, RNE)
     for call in (R.fragment, R.read):
@@ -234,12 +254,21 @@ def test_the_routines_are_in_the_languages_order():
     lang.graph.OPS filtered to the routines, and cftc's ir.ARITY, whose
     order the manifest's graph_by_op reads, is OPS itself item for item.
     Both hold only with the language that has sin, cos and tan after log2
-    (M2L's) and atan, asin, acos and atan2 after tan (M4L's), so this test
-    is red on a tree without them."""
+    (M2L's), atan, asin, acos and atan2 after tan (M4L's) and pow, powr,
+    pown, rootn and compound after atan2 (M3L's), so this test is red on a
+    tree without them. The three that take an integer n have two operands
+    in the language and ONE input here: the tuple N_KEYED is exactly the
+    routines whose arity differs, and ir.ARITY's is routines.ROUTINES'
+    plus one for them and equal for the other seventeen."""
     from cft_golden import lang
     from cftc import ir
     assert list(R.ROUTINES) == [op for op in lang.OPS if op in R.ROUTINES]
     assert list(ir.ARITY.items()) == list(lang.OPS.items())
+    assert [op for op in lang.OPS
+            if op in R.ROUTINES and lang.OPS[op] != R.ROUTINES[op]] == \
+        list(R.N_KEYED)
+    assert all(ir.ARITY[op] == R.ROUTINES[op] + (op in R.N_KEYED)
+               for op in R.ROUTINES)
 
 
 @needs_mpmath
@@ -324,11 +353,13 @@ def test_one_statement_per_routine():
         assert ml.flag_words is R.flag_words
 
 
-@pytest.mark.parametrize("op", FIFTEEN)
+@pytest.mark.parametrize("op", FIFTEEN + ("pow", "powr"))
 def test_every_cap_row_names_all_four_formats(op):
     """A format left out of a row is no cap at that format, silently:
     invariants() holds a fragment to LIVE_CAP.get(op, {}).get(format) only
-    if it finds one. So each row names exactly the four formats."""
+    if it finds one. So each row names exactly the four formats - all but
+    pown's, rootn's and compound's, which name the three they are built at
+    (test_the_threes_rows_name_the_three_formats_they_are_built_at)."""
     assert set(R.LIVE_CAP[op]) == {f.name for f in FORMATS}
     assert all(isinstance(v, int) and v > 0 for v in R.LIVE_CAP[op].values())
 
@@ -371,15 +402,18 @@ def test_the_fours_caps_are_the_measured_maximum_with_no_slack(op, fmt):
         f"{cap} values live at once, past {cap - 1}"]
 
 
-def test_atan2_is_the_one_built_routine_of_two_inputs():
-    """The inputs of the thirteen built routines: atan2's are ("a", "b") -
-    y, then x, mathlib's own names - and the other twelve's ("a",); the
-    golden function of atan2 takes (fmt, a, b, rnd) as sf.div's does and
-    the others (fmt, a, rnd) (R.GOLDEN's shapes, checked by calling them,
-    atan2 with one operand short)."""
+def test_atan2_pow_and_powr_are_the_built_routines_of_two_inputs():
+    """The inputs of the eighteen built routines: atan2's, pow's and powr's
+    are ("a", "b") - atan2's y, then x, pow's and powr's x, then y, mathlib's
+    own names - and the other fifteen's ("a",); the golden function of atan2
+    takes (fmt, a, b, rnd) as sf.div's does and so do pow's and powr's, the
+    twelve one-input ones' (fmt, a, rnd) (R.GOLDEN's shapes, checked by
+    calling them, atan2 with one operand short; the three keyed by an n
+    have their own third shape, test_the_three_are_keyed_by_n)."""
     two = [op for op in R.BUILT if len(R.INPUTS[op]) == 2]
-    assert two == ["atan2"] and R.INPUTS["atan2"] == ("a", "b")
-    assert all(R.INPUTS[op] == ("a",) for op in R.BUILT if op != "atan2")
+    assert two == ["atan2", "pow", "powr"] and R.INPUTS["atan2"] == ("a", "b")
+    assert all(R.INPUTS[op] == ("a",) for op in R.BUILT
+               if op not in ("atan2", "pow", "powr"))
     one = sf.one_bits(FP64)
     twice = one + (1 << 52)            # 2: the exponent one above
     if HAVE_MPMATH:
@@ -519,7 +553,7 @@ def test_a_fragment_of_no_routine_is_refused_by_name():
     assert R.invariants(f) == ["'sinh' is not a routine, so no statement "
                                "holds it: div, sqrt, exp, expm1, exp2, log, "
                                "log1p, log2, sin, cos, tan, atan, asin, acos, "
-                               "atan2"]
+                               "atan2, pow, powr, pown, rootn, compound"]
     assert R.invariants(f, contract=R.C4_CONTRACT) == []
 
 
@@ -548,3 +582,200 @@ def test_the_fragments_are_what_they_were_at_19de866c(op):
             got = fragment_digest(R.fragment(op, fmt, rnd))
             assert got == DIGESTS[op][fmt.name][rnd], \
                 f"{op} {fmt.name} {sf.RND_NAMES[rnd]}"
+
+
+# ---- the twenty (M3's build, parcel M3C) -------------------------------------
+
+N_SET = (2, 3, -2, -2 ** 63)     # the n whose fragments reach the caps
+
+
+def test_the_five_have_their_cap_rows_pinned():
+    """Logan's answer 8 of 2026-11-19: pow 30 at fp64, fp128 and fp256 and 32
+    at fp32 (parcel M3F1's), powr 23, 22 and 22 and 29 at fp32, pown 21, rootn
+    19 and compound 22 at fp64, fp128 and fp256, each row's values pinned; the
+    five are under the six's contract; and the three (pown, rootn, compound)
+    have NO fp32 key until parcel M3F2 - a format left out of a row is no
+    cap there, silently, so the absence is itself pinned."""
+    assert R.LIVE_CAP["pow"] == {"fp32": 32, "fp64": 30, "fp128": 30,
+                                 "fp256": 30}
+    assert R.LIVE_CAP["powr"] == {"fp32": 29, "fp64": 23, "fp128": 22,
+                                  "fp256": 22}
+    assert R.LIVE_CAP["pown"] == {"fp64": 21, "fp128": 21, "fp256": 21}
+    assert R.LIVE_CAP["rootn"] == {"fp64": 19, "fp128": 19, "fp256": 19}
+    assert R.LIVE_CAP["compound"] == {"fp64": 22, "fp128": 22, "fp256": 22}
+    six = R.Contract(R.MARKED_FLAG_WORDS, (RNE, RTZ, RDN, RUP), True)
+    for op in FIVE:
+        assert R.CONTRACT[op] == six
+    for op in N_KEYED:
+        assert "fp32" not in R.LIVE_CAP[op]
+
+
+@needs_mpmath
+def test_mathlibs_pow_live_cap_is_a_view_of_the_five_rows():
+    """mathlib.POW_LIVE_CAP is {name: routines.LIVE_CAP[name]} for the five:
+    the same dicts, so that a cap is stated once - and a write to one is
+    seen through the other. mathlib.py's two fp32 assignments write the
+    values the rows already hold (idempotent)."""
+    from cft_golden import mathlib as ml
+    assert list(ml.POW_LIVE_CAP) == list(ml.POW_NAMES) == list(FIVE)
+    for op in FIVE:
+        assert ml.POW_LIVE_CAP[op] is R.LIVE_CAP[op]
+    old = R.LIVE_CAP["pown"]["fp64"]
+    try:
+        R.LIVE_CAP["pown"]["fp64"] = old - 1
+        assert ml.POW_LIVE_CAP["pown"]["fp64"] == old - 1
+    finally:
+        R.LIVE_CAP["pown"]["fp64"] = old
+    assert ml.POW_LIVE_CAP["pown"]["fp64"] == old
+    assert ml.POW_LIVE_CAP["pow"]["fp32"] == 32
+    assert ml.POW_LIVE_CAP["powr"]["fp32"] == 29
+
+
+def test_the_threes_rows_name_the_three_formats_they_are_built_at():
+    """pown, rootn and compound are built at fp64, fp128 and fp256 alone
+    (mathlib.fragment refuses them at fp32 by name, parcel M3F2's), so their
+    rows name those three formats and no cap exists at fp32: when parcel M3F2
+    builds them this test and the rows change together."""
+    for op in N_KEYED:
+        assert set(R.LIVE_CAP[op]) == {"fp64", "fp128", "fp256"}
+        assert all(isinstance(v, int) and v > 0
+                   for v in R.LIVE_CAP[op].values())
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt", FORMATS, ids=lambda f: f.name)
+@pytest.mark.parametrize("op", FIVE)
+def test_the_fives_caps_are_the_measured_maximum_with_no_slack(op, fmt):
+    """The cap of each of the five at a format is the most values live any
+    of its fragments there keeps over the five attributes (pown, rootn and
+    compound at n = 2, 3, -2 and -2^63 as well; MEASURED at the base, f7a1ce95:
+    30, 23, 21, 19 and 22 at fp64, 30, 22, 21, 19 and 22 at fp128 and fp256,
+    and 32 and 29 at fp32 for pow and powr), and that fragment fails a cap
+    one under by name - so a cap row lowered by one, or a fragment growing
+    past it, is red here and in routines.fragment()."""
+    if op in N_KEYED and fmt.name == "fp32":
+        pytest.skip(f"{op} has no fp32 fragment: parcel M3F2's")
+    cap = R.LIVE_CAP[op][fmt.name]
+    ns = N_SET if op in N_KEYED else (None,)
+    frags = [R.fragment(op, fmt, rnd, n) for rnd in RND_MODES for n in ns]
+    most = max(f.live_max() for f in frags)
+    assert most == cap, (op, fmt.name, sorted({f.live_max() for f in frags}))
+    f = next(f for f in frags if f.live_max() == cap)
+    assert R.invariants(f) == []
+    assert R.invariants(f, live_cap=cap - 1) == [
+        f"{cap} values live at once, past {cap - 1}"]
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op", ("pow", "powr"))
+def test_pow_and_powr_are_mathlibs_fragments_by_name(op):
+    """routines.fragment hands out mathlib.fragment's own object for pow and
+    powr, unchanged, at all four formats and five attributes (fp32's the
+    triple word, parcel M3F1's), under the routine's statement, inputs ("a",
+    "b") = (x, y); the golden function takes (fmt, a, b, rnd) as atan2's
+    does, transcend's, and x first (pow(2, 1.5) is not pow(1.5, 2))."""
+    from cft_golden import mathlib as ml
+    from cft_golden import transcend
+    for fmt in FORMATS:
+        for rnd in RND_MODES:
+            f = R.fragment(op, fmt, rnd)
+            assert f is ml.fragment(op, fmt, rnd)
+            assert (f.op, f.fmt, f.rnd, f.inputs) == (op, fmt, rnd,
+                                                      ("a", "b"))
+            assert R.invariants(f) == []
+            assert R.invariants(f) == ml.invariants(f)
+    two = sf.one_bits(FP64) + (1 << 52)            # 2
+    one_and_half = sf.one_bits(FP64) + (1 << 51)   # 1.5
+    assert R.GOLDEN[op](FP64, two, one_and_half, RDN) == transcend.compute(
+        FP64, op, two, one_and_half, RDN)
+    assert R.GOLDEN[op](FP64, two, one_and_half, RDN) != R.GOLDEN[op](
+        FP64, one_and_half, two, RDN)
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op", N_KEYED)
+def test_the_three_are_keyed_by_n(op):
+    """pown, rootn and compound take the integer n, required: a fragment is
+    mathlib.fragment's own object FOR THAT n (a Fragment holds no n, so the
+    cache's key does), two n are two fragments and one n one, a bool or a
+    float is refused by name before any key is made (True, 1.0 and 1 are
+    one dict key: M3G2's finding), n outside int64 is refused, fp32 is
+    refused by name (parcel M3F2's), and the golden function takes
+    (fmt, a, rnd, n) with n a Python int."""
+    from cft_golden import mathlib as ml
+    from cft_golden import transcend
+    with pytest.raises(ValueError, match="needs its integer operand"):
+        R.fragment(op, FP64, RNE)
+    f3, f5 = R.fragment(op, FP64, RNE, 3), R.fragment(op, FP64, RNE, 5)
+    assert f3 is ml.fragment(op, FP64, RNE, n=3)
+    assert f5 is ml.fragment(op, FP64, RNE, n=5)
+    assert f3 is not f5 and fragment_digest(f3) != fragment_digest(f5)
+    assert R.fragment(op, FP64, RNE, 3) is f3
+    assert not hasattr(f3, "n")
+    assert (f3.op, f3.inputs) == (op, ("a",))
+    assert (op, "fp64", RNE, 3) in R._HELD
+    assert (op, "fp64", RNE, 5) in R._HELD
+    R.fragment(op, FP64, RNE, 1)         # n = 1 held: True is the same key
+    for bad in (True, 1.0, 3.0, "3", 2 ** 63, -2 ** 63 - 1):
+        with pytest.raises(ValueError):
+            R.fragment(op, FP64, RNE, bad)
+    for edge in (-2 ** 63, 2 ** 63 - 1):
+        assert R.fragment(op, FP128, RNE, edge) is ml.fragment(
+            op, FP128, RNE, n=edge)
+    with pytest.raises(ValueError, match="parcel M3F2's"):
+        R.fragment(op, FP32, RNE, 3)
+    x = sf.one_bits(FP64) + 12345
+    assert R.GOLDEN[op](FP64, x, RDN, 3) == transcend.compute(
+        FP64, op, x, 0, RDN, 3)
+    assert R.GOLDEN[op](FP64, x, RDN, 3) != R.GOLDEN[op](FP64, x, RDN, 5)
+    with pytest.raises(TypeError):
+        R.GOLDEN[op](FP64, x, RDN)             # n is required
+
+
+@needs_mpmath
+def test_rootn_of_order_zero_and_the_small_fragments():
+    """rootn(x, 0) is refused by name (it has no value for any x: the
+    language refuses it before the compiler sees it), and the n = 0 and
+    n = 1 fragments of the others are the small ones mathlib.py builds
+    (6, 6 and 6 instructions for pown at 0, pown at 1 and rootn at 1, and 9
+    and 25 for compound at 0 and 1: MEASURED at f7a1ce95, fp64, rne)."""
+    with pytest.raises(ValueError, match="invalid for every x"):
+        R.fragment("rootn", FP64, RNE, 0)
+    assert [len(R.fragment("pown", FP64, RNE, n)) for n in (0, 1)] == [6, 6]
+    assert len(R.fragment("rootn", FP64, RNE, 1)) == 6
+    assert [len(R.fragment("compound", FP64, RNE, n)) for n in (0, 1)] == \
+        [9, 25]
+
+
+@pytest.mark.parametrize("op", [op for op in TWENTY if op not in N_KEYED])
+def test_n_is_refused_by_name_for_the_other_seventeen(op):
+    """A routine that is not keyed by an integer takes none: the other
+    seventeen refuse n by name, before anything is built or asked."""
+    with pytest.raises(ValueError, match="takes no integer operand"):
+        R.fragment(op, FP64, RNE, 3)
+
+
+@needs_mpmath
+@pytest.mark.parametrize("key", sorted(DIGESTS_POW, key=repr), ids=repr)
+def test_the_five_fragments_are_what_they_were_at_f7a1ce95(key):
+    """All 205 fragments of pow, powr, pown, rootn and compound, digest for
+    digest as the tree at f7a1ce95 made them (routine_digests_pow.py: that
+    commit's mathlib.fragment, which routines.fragment hands out unchanged):
+    pow and powr at the four formats and five attributes (40), pown at
+    n = 0, 1, 3 and -2^63, rootn at 1, 3 and -2^63 and compound at 0, 1, 3
+    and -2^63 at fp64, fp128 and fp256 (165). Adding the five to the
+    routines moved no fragment. (The 220 of the eleven are held at
+    19de866c and the 80 of the four at 21b98aec.)"""
+    assert len(DIGESTS_POW) == 13
+    assert sum(len(rows) for by in DIGESTS_POW.values()
+               for rows in by.values()) == 205
+    op, n = key
+    for fmt in FORMATS:
+        if fmt.name not in DIGESTS_POW[key]:
+            assert n is not None and fmt.name == "fp32", (key, fmt.name)
+            continue
+        assert len(DIGESTS_POW[key][fmt.name]) == len(RND_MODES)
+        for rnd in RND_MODES:
+            got = fragment_digest(R.fragment(op, fmt, rnd, n))
+            assert got == DIGESTS_POW[key][fmt.name][rnd], \
+                f"{op} n={n} {fmt.name} {sf.RND_NAMES[rnd]}"

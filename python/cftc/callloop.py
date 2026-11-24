@@ -15,7 +15,10 @@ looped, the largest first, until the step fits or none is left.
 
 A BATCH is the routine nodes of one operation at one routine depth - the
 most routine nodes on a path from the step's inputs to the node, itself
-included - so no call of a batch reads another's result, and every value
+included - and, for pown, rootn and compound, of one integer n (a loop is one
+copy of ONE fragment, and a fragment is a function of n: pown(x, 3) and
+pown(y, 5) at one depth are two batches) - so no call of a batch reads
+another's result, and every value
 a call reads exists before the first of them runs. Planar N bodies under
 rk4 give four: the first two stages' roots (their positions need no
 acceleration), their divisions, the last two stages' roots, their
@@ -23,17 +26,20 @@ divisions. The largest is the one whose calls, inlined, are the most
 instructions (calls times the fragment's size); ties go to the shallower,
 then by the routines' one order, cft_golden/routines.py's ROUTINES, the
 language's own (lang.graph.OPS filtered; div, sqrt, exp, expm1, exp2, log,
-log1p, log2, sin, cos, tan at M2's build, atan, asin, acos, atan2 at M4's)
-- so div before sqrt, as C4 had them, and a step without the six, the three
-or the four orders its batches as it did. batches() lists them in the same
-order, by depth and then by it. A batch is one operation at one depth, so
-the order is total and no tie is left to the order of a list. A batch of
+log1p, log2, sin, cos, tan at M2's build, atan, asin, acos, atan2 at M4's,
+pow, powr, pown, rootn, compound at M3's) - so div before sqrt, as C4 had
+them, and a step without the six, the three, the four or the five orders its
+batches as it did - and then by n, signed, within one of the three. batches()
+lists them in the same order, by depth and then by it. A batch is one
+operation (and n) at one depth, so the order is total and no tie is left to
+the order of a list. A batch of
 one call is never looped: its loop would be its inlined copy and the
 loop's own instructions besides.
 
 A looped batch of K calls has its own RECORDS, K of them, contiguous in
 the scratch: a division's record is two slots, a and b, as atan2's (y,
-then x), and a root's - or any of the other twelve's - one, a. The allocator places them where the loop
+then x), pow's and powr's (x, then y), and a root's - or any of the other
+thirteen's, pown's, rootn's and compound's among them - one, a. The allocator places them where the loop
 stands, in the lowest
 run of slots free there - the spill pool's, which may be slots dead
 values used before - so a loop costs the scratch only what is live
@@ -71,7 +77,7 @@ inlined one (check.py).
 
 from cft_golden import routines as R
 
-from .check import held_fragment
+from .check import fragment_args, held_fragment
 from .ir import ROUTINES
 from .refusals import InternalError, refuse
 
@@ -81,11 +87,13 @@ WORDS = (("LOOP_STEP", STEP_BITS),)     # a looped step's, before its bases
 
 
 class Batch:
-    """The routine nodes of one operation at one routine depth."""
-    __slots__ = ("op", "depth", "calls")
+    """The routine nodes of one operation (and, of pown, rootn or compound,
+    one integer n) at one routine depth."""
+    __slots__ = ("op", "n", "depth", "calls")
 
-    def __init__(self, op, depth, calls):
+    def __init__(self, op, depth, calls, n=None):
         self.op = op
+        self.n = n
         self.depth = depth
         self.calls = list(calls)        # lowered node indices, ascending
 
@@ -97,7 +105,11 @@ class Batch:
         return self.arity * len(self.calls)
 
     def key(self):
-        return (self.op, self.depth)
+        return (self.op, self.n, self.depth)
+
+    @property
+    def instance(self):
+        return R.instance(self.op, self.n)
 
 
 def depths(low):
@@ -113,20 +125,29 @@ def depths(low):
     return out
 
 
-ORDER = {op: k for k, op in enumerate(R.ROUTINES)}   # the fifteen's one order
+ORDER = {op: k for k, op in enumerate(R.ROUTINES)}   # the twenty's one order
+
+
+def _order(op, n, depth=0):
+    """A batch's place: by depth, the routine's place in ORDER, then n
+    signed (None, which no routine but the three has, as 0)."""
+    return (depth, ORDER[op], 0 if n is None else n)
 
 
 def batches(low):
     """[Batch]: every routine node in its batch, the batches by depth,
     then in the routines' one order (ORDER: div before sqrt, then the
-    six, then sin, cos and tan, then atan, asin, acos and atan2)."""
+    six, then sin, cos and tan, then atan, asin, acos and atan2, then pow,
+    powr, pown, rootn and compound), then by n."""
     groups = {}
     for j, d in depths(low).items():
-        groups.setdefault((d, low.nodes[j].op), []).append(j)
-    return [Batch(op, d, sorted(calls))
-            for (d, op), calls in sorted(groups.items(),
-                                         key=lambda kv: (kv[0][0],
-                                                         ORDER[kv[0][1]]))]
+        nd = low.nodes[j]
+        groups.setdefault((d, nd.op, nd.n), []).append(j)
+    return [Batch(op, d, sorted(calls), n)
+            for (d, op, n), calls in sorted(groups.items(),
+                                            key=lambda kv: _order(
+                                                kv[0][1], kv[0][2],
+                                                kv[0][0]))]
 
 
 def by_size(low):
@@ -134,14 +155,15 @@ def by_size(low):
     docstring): a batch of one call is never looped, since its loop would
     be its one inlined copy and the loop's own instructions besides. The
     fragments are those of the routines the step holds - a step without
-    the thirteen never builds one, and so never needs mpmath."""
+    the eighteen never builds one, and so never needs mpmath."""
     g = low.graph
     found = batches(low)
-    size = {op: len(held_fragment(op, g.fmt, g.rnd))
-            for op in {b.op for b in found}}
+    size = {(b.op, b.n): len(held_fragment(*fragment_args(b.op, g.fmt, g.rnd,
+                                                          b.n)))
+            for b in found}
     return sorted((b for b in found if len(b.calls) > 1),
-                  key=lambda b: (-len(b.calls) * size[b.op], b.depth,
-                                 ORDER[b.op]))
+                  key=lambda b: (-len(b.calls) * size[(b.op, b.n)], b.depth,
+                                 ORDER[b.op], 0 if b.n is None else b.n))
 
 
 def fixed_inputs(low, batch):
@@ -177,11 +199,15 @@ def declined(low, batch):
     allocator has (plan()'s n, against room()). The batch stays inlined,
     where the allocator spills."""
     g = low.graph
-    need = plan(batch.op, g.fmt, g.rnd, tuple(fixed_inputs(low, batch)))[1]
+    need = plan(batch.op, g.fmt, g.rnd, tuple(fixed_inputs(low, batch)),
+                batch.n)[1]
     if need <= room():
         return None
-    return {"op": batch.op, "depth": batch.depth, "calls": len(batch.calls),
-            "registers": need, "room": room()}
+    out = {"op": batch.op, "depth": batch.depth, "calls": len(batch.calls),
+           "registers": need, "room": room()}
+    if batch.n is not None:
+        out["n"] = batch.n          # only the three's entries gain the key
+    return out
 
 
 def select(low, keys, sizes):
@@ -280,10 +306,11 @@ def contracted(low, order, looped):
 _PLANS = {}
 
 
-def plan(op, fmt, rnd, fixed=()):
-    """The loop body of a routine, on virtual registers: (code, n) where n
-    is the registers it needs, register 0 the record index, live
-    throughout. `fixed` names the inputs every call of the loop takes
+def plan(op, fmt, rnd, fixed=(), n=None):
+    """The loop body of a routine, on virtual registers: (code, need) where
+    need is the registers it needs, register 0 the record index, live
+    throughout. `n` is the integer operand of pown, rootn or compound, whose
+    fragment it is the body of. `fixed` names the inputs every call of the loop takes
     from one bank slot (a division of 1, or by a constant): those are no
     part of a record, and the body reads the slot itself. Each item of
     code:
@@ -301,10 +328,10 @@ def plan(op, fmt, rnd, fixed=()):
     instruction may write the register of an operand it reads last."""
     import heapq
     fixed = tuple(sorted(fixed))
-    key = (op, fmt.name, rnd, fixed)
+    key = (op, fmt.name, rnd, fixed, n)
     if key in _PLANS:
         return _PLANS[key]
-    f = held_fragment(op, fmt, rnd)
+    f = held_fragment(*fragment_args(op, fmt, rnd, n))
     if all(name in fixed for name in f.inputs):
         raise InternalError(f"a {op} loop with every input fixed")
     end = len(f.body)

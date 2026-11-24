@@ -6,7 +6,12 @@ Three things happen here and nothing else, because the language allows
 nothing else (docs/ROADMAP.md, step 3: literal evaluation):
 
 1. SHARING. The step is hash-consed in the graph's node order. A node's
-   key is its op and its operands' keys, the two operands of add and
+   key is its op and its operands' keys - and, for pown, rootn and
+   compound, the integer n, which is no operand here: the node's second
+   operand, a const entry read as n alone, is dropped from its args before
+   anything allocates a slot to it (a const read as an n only is in no
+   bank), and kept as the node's n, so pown(x, 3) and pown(x, 5) are two
+   nodes and pown(x, 3) twice is one - the two operands of add and
    mul and fma's two multiplicands in a fixed order - the plan allows
    commuting + and *, and verifier-P1 measured both, and fma's
    multiplicands swapped, bit for bit with NaN payloads. Two nodes with
@@ -43,15 +48,19 @@ nothing else (docs/ROADMAP.md, step 3: literal evaluation):
    Only slots an instruction addresses are in it. The halved bank halves
    every h-scaled slot exactly and leaves every other one alone.
    Then, where the step divides, takes a root (C4) or computes one of
-   the math library's thirteen (M1's build, item 4, M2's and M4's), the
-   WORDS its routines read (cft_golden/routines.py): one slot for each
-   distinct bit pattern, routine by routine in the fifteen's one order -
+   the math library's eighteen (M1's build, item 4, M2's, M4's and M3's),
+   the WORDS its routines read (cft_golden/routines.py): one slot for each
+   distinct bit pattern, routine by routine in the twenty's one order -
    routines.ROUTINES', the language's (lang.graph.OPS filtered): div, sqrt,
    exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos,
-   atan2 - each routine's words in its fragment's own order (divfull's for
-   the division) and only those not already in a slot: so the division's
-   words come first, then the root's that are new, as before the six, and a
-   step without the three or the four has the bank it had. They are
+   atan2, pow, powr, pown, rootn, compound - each routine's words in its
+   fragment's own order (divfull's for the division) and only those not
+   already in a slot: so the division's words come first, then the root's
+   that are new, as before the six, and a step without the three, the four
+   or the five has the bank it had. A routine of the five keyed by an
+   integer n (pown, rootn, compound) is one INSTANCE a distinct n, in n's
+   signed order within its routine, and each instance's fragment is its
+   own. They are
    raw encodings at the format, an infinity,
    -0, NaNs and integers among them, which no constant of the language
    can be. A word is never h-scaled, never halved, never a param and
@@ -77,6 +86,7 @@ the bank's bytes and halving-underflow.
 from fractions import Fraction
 
 from cft_golden import chars
+from cft_golden import routines as R
 from cft_golden import softfloat as sf
 
 from .refusals import InternalError, refuse
@@ -85,13 +95,20 @@ BANK_MAX = 512           # a constant index is nine bits (KADDR_KX)
 
 
 class LNode:
-    __slots__ = ("op", "args", "labels", "origin")
+    __slots__ = ("op", "args", "labels", "origin", "n")
 
-    def __init__(self, op, args, labels, origin):
+    def __init__(self, op, args, labels, origin, n=None):
         self.op = op
         self.args = tuple(args)
         self.labels = list(labels)      # the graph's labels it carries
         self.origin = list(origin)      # the graph nodes it stands for
+        self.n = n                      # pown, rootn, compound: the integer
+
+    @property
+    def instance(self):
+        """The routine instance this node is, as every message and
+        manifest key spells it: `pown(3)`, or the op for any other."""
+        return R.instance(self.op, self.n)
 
     @property
     def label(self):
@@ -175,13 +192,20 @@ def share(graph):
     nodes, keyed, remap = [], {}, {}
     merged = 0
     for k, (op, args, label) in enumerate(graph.nodes):
+        n = None
+        if op in R.N_KEYED:
+            n = graph.integer(args[1], f"step node {k} ({op})")
+            if op == "rootn" and n == 0:
+                raise InternalError(f"step node {k}: rootn of order 0 has no "
+                                    f"value, and the language refuses it")
+            args = args[:1]
         a = tuple(remap[r[1]] if r[0] == "n" else r for r in args)
-        key = (op, _canon(op, a))
+        key = (op, _canon(op, a), n)
         j = keyed.get(key)
         if j is None:
             j = len(nodes)
             keyed[key] = j
-            nodes.append(LNode(op, a, [label] if label else [], [k]))
+            nodes.append(LNode(op, a, [label] if label else [], [k], n))
         else:
             merged += 1
             nodes[j].origin.append(k)
@@ -315,13 +339,26 @@ def layout(graph, nodes, outs, param_bits=None, words=()):
     return slots
 
 
+def instances_of(nodes):
+    """[(op, n)]: the routine instances a step holds, in the twenty's one
+    order (cft_golden/routines.py's ROUTINES: div, sqrt, the six, sin, cos
+    and tan, atan, asin, acos and atan2, then pow, powr, pown, rootn and
+    compound), n ascending - signed - within an op; n is None for every
+    routine but the three of N_KEYED."""
+    held = {(nd.op, nd.n) for nd in nodes}
+    out = []
+    for op in R.ROUTINES:
+        if op in R.N_KEYED:
+            out += [(op, n) for n in sorted(k for o, k in held if o == op)]
+        elif (op, None) in held:
+            out.append((op, None))
+    return out
+
+
 def routines_of(nodes):
-    """The routines a step holds, in the fifteen's one order
-    (cft_golden/routines.py's ROUTINES: div, sqrt, the six, then sin, cos
-    and tan, then atan, asin, acos and atan2)."""
-    from cft_golden import routines as R
-    held = {nd.op for nd in nodes}
-    return [op for op in R.ROUTINES if op in held]
+    """The routine instances a step holds, named as `R.instance` names them
+    (the op, or `pown(3)`), in instances_of's order."""
+    return [R.instance(op, n) for op, n in instances_of(nodes)]
 
 
 def names_and(names):
@@ -334,11 +371,11 @@ def names_and(names):
 
 def routine_words(graph, nodes, loop_words=()):
     """[Slot]: the words the step's routines read, one slot a bit pattern
-    - routine by routine in the fifteen's order, each one's in its
-    fragment's order (the division's in divfull's), then the call loop's
+    - instance by instance in the twenty's order (instances_of), each one's
+    in its fragment's order (the division's in divfull's), then the call loop's
     that are new (module docstring) - each naming every (routine, word) it
     is; a call loop's as ("loop", name)."""
-    from .check import held_fragment
+    from .check import fragment_args, held_fragment
     slots, at = [], {}
 
     def add(op, name, bits):
@@ -346,10 +383,10 @@ def routine_words(graph, nodes, loop_words=()):
             at[bits] = len(slots)
             slots.append(Slot("word", None, None, None, bits, 0, names=[]))
         slots[at[bits]].names.append((op, name))
-    for op in routines_of(nodes):
-        f = held_fragment(op, graph.fmt, graph.rnd)
+    for op, n in instances_of(nodes):
+        f = held_fragment(*fragment_args(op, graph.fmt, graph.rnd, n))
         for name, bits in f.words.items():
-            add(op, name, bits)
+            add(R.instance(op, n), name, bits)
     for name, bits in loop_words:
         add("loop", name, bits)
     return slots

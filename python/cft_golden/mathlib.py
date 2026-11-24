@@ -7694,18 +7694,15 @@ POW_FORMATS = (FP64, FP128, FP256)
 
 # The most values a pow-family routine may keep live at once, by function and
 # format (the plan's values; the study's 5.1): pow 30; powr 23 at fp64, 22 at
-# fp128 and fp256; pown 21, rootn 19, compound 22. One row each: invariants()
-# holds a pow-family fragment to its own row and falls back to no other. A dict
-# of its own, as M4 kept INV_LIVE_CAP's before M4C moved the rows to
-# routines.py: routines.LIVE_CAP names exactly the fifteen routines cftc knows,
-# and parcel M3C moves these.
-POW_LIVE_CAP = {
-    "pow": {"fp64": 30, "fp128": 30, "fp256": 30},
-    "powr": {"fp64": 23, "fp128": 22, "fp256": 22},
-    "pown": {"fp64": 21, "fp128": 21, "fp256": 21},
-    "rootn": {"fp64": 19, "fp128": 19, "fp256": 19},
-    "compound": {"fp64": 22, "fp128": 22, "fp256": 22},
-}
+# fp128 and fp256; pown 21, rootn 19, compound 22; fp32's two are written
+# below, beside the triple word's. One row each: invariants() holds a
+# pow-family fragment to its own row and falls back to no other. The table is
+# routines.LIVE_CAP's five rows since M3's build (parcel M3C): routines.py
+# names the five among its twenty routines, one statement per routine, and
+# this is a VIEW of those rows - the same dicts, under the name this module's
+# tests have always read - so a cap is stated once and the two cannot part
+# (as TRIG_LIVE_CAP's and INV_LIVE_CAP's are).
+POW_LIVE_CAP = {name: routines.LIVE_CAP[name] for name in POW_NAMES}
 
 # who builds what: a name of POW_NAMES in neither _POW_BUILDERS nor
 # _POW_N_BUILDERS is refused by name, saying whose it is (at fp64, fp128 and

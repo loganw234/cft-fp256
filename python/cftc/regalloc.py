@@ -530,7 +530,7 @@ class _Alloc:
                 self.release(a)
         # 2. the registers the body needs, freed as any are
         code, need = callloop.plan(nd.op, self.low.graph.fmt, self.rnd,
-                                   tuple(nd.fixed))
+                                   tuple(nd.fixed), nd.n)
         held, regs = [], []
         for i in range(need):
             r = self.take_reg(q, set(held))

@@ -3,20 +3,24 @@
 """Routines inlined (C4): a division's, a square root's and - since M1's
 build, item 4 - each of the math library's six's nodes, and - since M2's
 build - its sin's, cos's and tan's, and - since M4's build - its atan's,
-asin's, acos's and atan2's, replaced by their fragments
-(cft_golden/routines.py, which hands out the thirteen's from mathlib.py).
+asin's, acos's and atan2's, and - since M3's - its pow's, powr's, pown's,
+rootn's and compound's, replaced by their fragments
+(cft_golden/routines.py, which hands out the eighteen's from mathlib.py;
+a pown, rootn or compound node's fragment is its integer n's, which the
+lowering kept as the node's n: lower.py).
 
 A tile has no divide, square-root, exponential, logarithm or radian
 instruction. The compiler carries the language's `div` and `sqrt` nodes, and
 `exp`, `expm1`, `exp2`, `log`, `log1p`, `log2`, `sin`, `cos`, `tan`, `atan`,
-`asin`, `acos` and `atan2`, as ROUTINES: the schedulers
+`asin`, `acos`, `atan2`, `pow`, `powr`, `pown`, `rootn` and `compound`, as
+ROUTINES: the schedulers
 order the lowered step with each routine node one node, and then, for
 each candidate order, expand() replaces each routine node at its place by
 its fragment - divfull's or sqrtfull's instructions, specialised at the
 program's attribute, or the math library's fragment, built at it - bound
 to the node's operands, followed by a RAISE of the fragment's flag word
-(which, for one of the thirteen, may carry the mark in bit 7, and so mark the
-lane). The allocator takes the result as the
+(which, for one of the eighteen, may carry the mark in bit 7, and so mark
+the lane). The allocator takes the result as the
 straight-line step it always takes, so a routine's registers come from
 it like any value's, and Belady's rule spills around a routine what the
 step keeps live across it.
@@ -31,7 +35,7 @@ step keeps live across it.
 * SHARING: a routine's instructions are hash-consed across instances by
   opcode, attribute and operands - two divisions by one divisor share
   its classification, seed and Newton steps, every division of 1 its
-  dividend's, and two of the math library's thirteen of one operand what
+  dividend's, and two of the math library's eighteen of one operand what
   their fragments compute alike of it (exp(x) and expm1(x) a
   classification, say; sin(x), cos(x) and tan(x) their reduction and
   polynomials) - after routines.simplify, which binding a
@@ -62,7 +66,7 @@ from cft_golden import routines as R
 from cft_golden import softfloat as sf
 
 from . import callloop
-from .check import held_fragment
+from .check import fragment_args, held_fragment
 from .ir import ROUTINES
 from .lower import LNode
 from .refusals import InternalError
@@ -75,8 +79,8 @@ class XNode(LNode):
     __slots__ = ("rnd", "kind", "block", "routine", "at")
 
     def __init__(self, op, args, labels, origin, rnd=None, kind="lang",
-                 block=None, routine=None, at=None):
-        super().__init__(op, args, labels, origin)
+                 block=None, routine=None, at=None, n=None):
+        super().__init__(op, args, labels, origin, n)
         self.rnd = rnd          # a routine instruction's own attribute
         self.kind = kind
         self.block = block      # the routine instance, for quiet and raise;
@@ -93,8 +97,8 @@ class LoopNode(XNode):
     one bank slot, which no record holds (callloop.plan)."""
     __slots__ = ("calls", "arity", "depth", "base", "stride", "fixed")
 
-    def __init__(self, op, args, block, calls, arity, depth):
-        super().__init__(op, args, [], [], kind="loop", block=block)
+    def __init__(self, op, args, block, calls, arity, depth, n=None):
+        super().__init__(op, args, [], [], kind="loop", block=block, n=n)
         self.calls = list(calls)        # the lowered routine nodes
         self.arity = arity
         self.depth = depth
@@ -150,7 +154,7 @@ def expand(low, order, looped=()):
                          for a in low.nodes[c].args]
             li = len(nodes)
             nodes.append(LoopNode(batch.op, args, len(loops), batch.calls,
-                                  batch.arity, batch.depth))
+                                  batch.arity, batch.depth, batch.n))
             loops.append(li)
             for k, c in enumerate(batch.calls):
                 nodes.append(XNode("result", (), [], [], kind="result",
@@ -164,7 +168,11 @@ def expand(low, order, looped=()):
             nodes.append(XNode(nd.op, args, nd.labels, nd.origin))
             map_low[j] = ("n", len(nodes) - 1)
             continue
-        f = held_fragment(nd.op, fmt, rnd)
+        f = held_fragment(*fragment_args(nd.op, fmt, rnd, nd.n))
+        if len(args) != len(f.inputs):
+            raise InternalError(f"{nd.instance} node {j} has {len(args)} "
+                                f"operands and its fragment "
+                                f"{len(f.inputs)} inputs")
         inputs = dict(zip(f.inputs, args))
         vals = {}
         first = len(nodes)
@@ -188,7 +196,7 @@ def expand(low, order, looped=()):
             vals[("v", i)] = keyed[key] = ("n", len(nodes) - 1)
         res, flags = vals[f.result], vals[f.flags]
         if res[0] != "n" or flags[0] != "n":
-            raise InternalError(f"{nd.op} node {j}: its result or flag word "
+            raise InternalError(f"{nd.instance} node {j}: its result or flag word "
                                 f"is not one of its values")
         nodes.append(XNode("raise", (flags,), [], [], kind="raise",
                            block=len(blocks), routine=j))
