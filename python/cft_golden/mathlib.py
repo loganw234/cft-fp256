@@ -7723,8 +7723,10 @@ _POW_PARCEL = {"pow": "M3G1", "powr": "M3G1", "pown": "M3G2",
 # _check_pow_plant_fired. The harness (python/tests/mathlib_pow_harness.py) and
 # test_mathlib_pow.py's PLANTED say which check each is red in. M3G2 assigns its
 # own keys at its anchor, below; the budget's two (bound_tight, zone_bound_off)
-# are parcel M3G3's: they are red in the first-order budget alone. log_short is
-# in this table and tested here.
+# are parcel M3G3's, in a table of their own (_POW_BUDGET_PLANTS, after M3G2's
+# POW_PLANTS.update) with their rows in test_mathlib_pow_budget.py's matrix:
+# both red in the budget, bound_tight in the direct bound too. log_short is in
+# this table and tested here.
 POW_PLANTS = {
     "exact_unmarked": "the RNE/RMM 'may be exact' test removed: an exact "
                       "representable result is left to the enclosure",

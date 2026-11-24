@@ -23,8 +23,8 @@ tuple (x, y) of encodings, in the build's inputs' order.
                bits AND flag word; the lanes marked COUNTED and pinned to the
                model's (POOL_MARKS: a count that differs is a finding, since the
                port is the model; a marked lane's guess is counted, not a
-               failure; the rule "a mark off a list fails" is parcel M3G3's, from
-               the study's 3.5)
+               failure; the rule "a mark off a list fails" is parcel M3G3's,
+               from the study's 3.5: mathlib_pow_family.py's committed list)
   regions      the study's placed regions (3.3) as committed sets, every lane
                against transcend.py, 0 wrong unmarked; and the first design's
                lanes by name (the study's 3.6, items 1, 2 and 7)
@@ -44,7 +44,7 @@ tuple (x, y) of encodings, in the build's inputs' order.
   bound        |V - f| / Bv under 1, mpmath at 4p + 200 bits, over the regions'
                lanes (48 points a region), each lane also against transcend.py.
                The largest is a sampled lower bound; the study's budget is
-               parcel M3G3's, this is the direct error
+               parcel M3G3's (mathlib_pow_budget.py), this is the direct error
   shape        instructions, words and live pinned per fragment; instructions by
                phase and the Fast2Sum and TwoSum counts the model's; the flag
                word's values; the scheduled fragment the design's reordered;
@@ -234,7 +234,8 @@ def check_pools(f, xs=None, results=None, marks=None, size=None):
     the pinned count of marked lanes and `size` the pinned count of lanes (the
     function's POOL_MARKS and POOL_SIZES entries by default, when the whole pool
     is run; None where `xs` is a part of it). The rule "a mark off a list
-    fails" is parcel M3G3's: the count here is the model's, not a list."""
+    fails" is parcel M3G3's (mathlib_pow_family.py): the count here is the
+    model's, not a list."""
     fmt, rnd, fn = f.fmt, f.rnd, f.op
     whole = xs is None
     xs = pool(fn, fmt) if whole else xs
@@ -1191,7 +1192,7 @@ def check_bound(b, lanes, label="random", need=1):
     in bits and flag word or marked; fewer than `need` main-path lanes is a
     finding (the region measures nothing: BOUND_NO_MAIN's are exempt, and the
     caller says so). The worst is the largest found, a lower bound on the true
-    worst; the study's budget is parcel M3G3's."""
+    worst; the study's budget is parcel M3G3's (mathlib_pow_budget.py)."""
     fmt, fn = b.fmt, b.meta["fn"]
     worst, n, over, differ = -1e9, 0, [], []
     for lane in lanes:
@@ -2317,7 +2318,8 @@ def check_bound_n(fn, fmt, rnd, name, count=8, plant=None, lanes=None):
     """[finding], (worst, main-path lanes, lanes): bound, over one region's
     lanes at each of its n (check_bound on the build of that n). The worst is
     the largest found over THESE lanes; the zone's and int1000's direct errors
-    are a sample (the budget at 10,000 lanes is parcel M3G3's)."""
+    are a sample (the budget at 10,000 lanes is parcel M3G3's: `pow-budget
+    --set box`)."""
     lanes = region_n_cached(fmt, fn, name, count, 11) if lanes is None \
         else lanes
     out, worst, main, total = [], -1e9, 0, 0
@@ -2524,7 +2526,8 @@ def check_constants_n_cli():
 # ("does not apply") where it does not: PLANT_N says, for each, which (function,
 # n) it is shown at; the plants of pow's front (pow_zero_nan, pow_one_nan,
 # sign_even, integrality_wide, sign_odd_lost, y_one_loud) and powr's are not
-# reached by any of the three, and the plants of the budget are parcel M3G3's.
+# reached by any of the three, and the plants of the budget are parcel M3G3's
+# (_POW_BUDGET_PLANTS).
 
 POW_FRONT_ONLY = {"pow_zero_nan", "pow_one_nan", "sign_even",
                   "integrality_wide", "sign_odd_lost", "y_one_loud",

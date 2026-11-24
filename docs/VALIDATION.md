@@ -29247,3 +29247,30 @@ The first runs of the same executor plants through the whole gate command at the
 **Known limits.** The part is a sample, about 63 lanes a program; M3G3's committed lanes are not on this base (the struct lanes are the harness's rows of waves 1 and 2); the committed rows do not depend on the attribute; the edge pool has no lane for n = 0 and 1 and no marked or midpoint row exists for several n (the line says which); a comparison emptied with its tally left, and a fragment's lanes cut, are not seen (above); MUL under rdn is green at fp256, and the bound's fixed-attribute instructions are reached and unseen (above); `--formats fp32` alone still fails on the trig part's reach check, as at the base; the memory of a run and a run without mpmath were not examined; fp32's pow and powr are built and not run in this part until M3F2. **What the brief got wrong:** REGS32 is not needed by every program but the small fragments (12 programs of rootn n = -2^63 do not); the pow program's most instructions are 545 (rmm), not 543 (rne); the gate's cost came out near the top of the estimate and past the 60 s line; "every opcode is one of the 22 the six's programs use" held as "none is new to the other three parts together" (the pow part uses 19 instructions and 5 control codes).
 
 **Addendum to M3P's entry: the WSL suites** (MEASURED, 2026-11-23, WSL distro cft2204 booked exclusive, a clone of branch m3p at 67d945e5 - the records commit, code daecb193 - made from a bundle under the distro's home and removed after; the Git Bash lines are in the entry). `bash hw/test-card-stress.sh --no-plants` (17:44:15 to 17:59:21, rc 0), last line: `card-stress test: 1378 checks, 0 failed, 4 skipped, 906 s` (M4P's 1,358 and 783 s; M4RR's 1,378, 0, 4 and 811 s: the same check count as M4RR's; the time is longer on the shared desktop, its load not read). `CARD_STRESS_PLANT_APPLY_ONLY=1 bash hw/test-card-stress.sh --only plants` (rc 0), last line: `card-stress test: 478 checks, 0 failed, 0 skipped, 0 s` (M4P's 475). The two ran as two scripts, one after the other.
+
+## 2026-11-24 - wave 3's merge (parcels M3G3 and M3P), the lead's: the merges, a rewrite of comments, and the verifiers' readings (the lead)
+
+**The merges**, on branch merge-m3w3 from wave 2's verified tip 60e8b9eb:
+- c8011320 merges M3G3 at 776aa48c; 8553b4bf merges M3P at 77c6b70c.
+- **The code merged without a conflict.** host/tests/seq_check.py is M3P's file byte for byte.
+- **docs/VALIDATION.md** in each merge is this branch's file plus the parcel's block (its file less 6eec2e3e's, the parcels' common base). val_merge4.py refused, rightly: after 6eec2e3e, 351e9db1 corrected sentences in place (one in M3G2's addendum, one in the lead's own entry).
+- **docs/README.md's counts** are set by check_docs_index.
+
+**The lead's rewrite** (the lead's script rewrite_w3.py, W1 to W9) of comments and docstrings that called M3G3's work absent, in files M3G3 was forbidden to edit:
+- **W1, mathlib.py, POW_PLANTS' comment.** It said the budget's two plants "are red in the first-order budget alone". M3G3's matrix has bound_tight red in the direct bound too (and both red in shape and constants), so the sentence was false. It now names _POW_BUDGET_PLANTS and test_mathlib_pow_budget.py's matrix, with both red in the budget and bound_tight in the direct bound too.
+- **W2 to W8:** "parcel M3G3's" in the harness and in mathlib_runs.py now names where each is built: mathlib_pow_family.py's committed list, mathlib_pow_budget.py, `pow-budget --set box` and _POW_BUDGET_PLANTS.
+- **W9:** M3G3's study note said "the census's `_y_is_one`", a helper of the port's (VM3G3's pass-2 note).
+- The code outside literals and comments is token for token unchanged in mathlib.py, the harness and mathlib_runs.py (the lead's tokcmp.py).
+
+**VM3P's two (b), as the lead reads them:**
+- **"One fragment's lanes cut to one" not caught.** This is M3P's own stricter plant, disclosed green as a known limit: no check holds the lanes a fragment drew.
+  - The brief's item-12 plant, "one fragment's lanes dropped", is M3P's "a fragment dropped", which is red. The must-have asks for a red plant in every check, not for every plant red.
+  - **A known limit.** A per-fragment compared-lane floor in the reach check goes to parcel M3F2's brief.
+- **The gate's cost: two pairs on a shared desktop.**
+  - M3P: 194.5 s at 61827207, its first code commit, against 118.2 and 112.7 s at the base, its load not read; its report also gives 231 s at its tip's code, daecb193, on a busier desktop.
+  - VM3P: 174 s against 113 and 103 s, at 20 to 33 % total CPU.
+  - The added cost is +61 to +82 s.
+
+**M3P's FMA-under-rup finding, reproduced by VM3P:** 10,088 lane executions at fp64, 4,657 with a value other than rne's, 0 with differing flags. That is reached, with no compared output changed, the bound's last ulp moving a mark only within an ulp of a boundary: **a known limit.**
+
+**Corrected before the push, from verifier-VM3W3R** (its one (b) and two of its notes): the 194.5 s is 61827207's, not the tip's; val_merge4.py's reason names both in-place corrections; and a scratch folder's name, which the pre-push scan refuses, is gone from the rewrite's line.

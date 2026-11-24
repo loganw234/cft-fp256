@@ -1487,7 +1487,8 @@ def cmd_pow_pools(a):
 def cmd_pow_bound(a):
     """|V - f(x, y)| / Bv at placed points of the harness's regions, for pow and
     powr (and what is built beyond them), each lane also against transcend.py;
-    the study's budget is parcel M3G3's, this is the direct error.
+    the study's budget is parcel M3G3's (`pow-budget`), this is the direct
+    error.
 
     MEASURED by parcel M3G1 at full size (the defaults: 3,000 points a region
     at fp64, 1,000 at fp128 and fp256, seed 121, rne; --fn pow and powr, the
