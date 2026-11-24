@@ -491,11 +491,14 @@ def test_the_tangent_is_the_derivative():
     assert tot > 300 and bad == 0, (tot, bad)
     # every operation but the math library's six, which have systems of
     # their own (test_m1_the_fourth_check_on_the_six, below), and sin, cos
-    # and tan (M2's build), and atan, asin, acos and atan2 (M4's build),
-    # taken out of this set: their systems, and the same check on them, are
-    # test_lang_trig.py's and test_lang_invtrig.py's
+    # and tan (M2's build), and atan, asin, acos and atan2 (M4's build), and
+    # pow, powr, pown, rootn and compound (M3's build), taken out of this
+    # set: their systems, and the same check on them, are test_lang_trig.py's,
+    # test_lang_invtrig.py's and test_lang_pow.py's
     assert ops == set(lang.OPS) - set(TL.SIX) - {"sin", "cos", "tan", "atan",
-                                                 "asin", "acos", "atan2"}
+                                                 "asin", "acos", "atan2",
+                                                 "pow", "powr", "pown",
+                                                 "rootn", "compound"}
 
 
 def test_ties_and_zeros_are_placed_where_they_decide():

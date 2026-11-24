@@ -803,8 +803,8 @@ class Parser:
     @staticmethod
     def _power(t):
         return Refusal("power", f"{t.text} is not an operator: write x * x "
-                       f"for a square, and a longer product in the order "
-                       f"you mean", t.line)
+                       f"for a square (or pow(x, y)), and a longer product in "
+                       f"the order you mean", t.line)
 
     def unary(self):
         negs = []

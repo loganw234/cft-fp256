@@ -154,11 +154,12 @@ CFT_API uint32_t cft_abi_version(void);
  * log2 in the language, which this library does not evaluate), and so did
  * 1.2 (2026-11-02, M2's build: sin, cos and tan in the language, likewise),
  * and so did 1.3 (2026-11-11, M4's build: atan, asin, acos and atan2 in the
- * language, likewise). */
+ * language, likewise), and so did 1.4 (2026-11-24, M3's build: pow, powr,
+ * pown, rootn and compound in the language, likewise). */
 #define CFT_PROFILE_MAJOR  3
 #define CFT_PROFILE_MINOR  1
 #define CFT_LANGUAGE_MAJOR 1
-#define CFT_LANGUAGE_MINOR 3
+#define CFT_LANGUAGE_MINOR 4
 
 /* Which source tree this library was built from   (ABI 0.15, 2026-09-28)
  *

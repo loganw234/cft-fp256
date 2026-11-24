@@ -2845,8 +2845,9 @@ Operations v1 does not have:
 
 | name | what it refuses |
 |---|---|
-| `transcendental` | a transcendental function the language does not have (`pow`, `sinh` and the rest of the reserved list, the later rounds'), at run time |
-| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`); exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos or atan2 of constants whose value is irrational or not real (`exp(1)`, `log(2)`, `log(-4)`, `sin(1)`, `atan(1)`, `asin(2)`, `atan2(1, 1)`); or any other transcendental of a constant, which the language does not have yet |
+| `transcendental` | a transcendental function the language does not have (`sinh` and the rest of the reserved list, the later rounds'), at run time |
+| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`); exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos, atan2, pow, powr, pown, rootn or compound of constants whose value is irrational or not real (`exp(1)`, `log(2)`, `log(-4)`, `sin(1)`, `atan(1)`, `asin(2)`, `atan2(1, 1)`, `pow(2, 1/2)`, `pow(-8, 1/2)`, `rootn(2, 2)`, `rootn(x, 0)`); or any other transcendental of a constant, which the language does not have yet |
+| `integer-operand` | the second operand of `pown`, `rootn` or `compound` that is not an integer constant within int64 (a state, a param, a lane param, a let of one, `h` or a multiple of `h`, `5/2`, `2^63`): the three take an integer, which a lane does not hold |
 | `power` | `^` or `**` |
 | `not-equal` | `!=` |
 | `chained-comparison` | a comparison of a comparison, unparenthesised |
@@ -2861,7 +2862,7 @@ The values a rational cannot carry, and the one rounding:
 | `constant-negative-zero` | a minus written on a zero literal (`-0`, `-0.0`, `-(0)`) |
 | `constant-infinity` | `inf` or `infinity` |
 | `constant-nan` | `nan` or `snan` |
-| `constant-division-by-zero` | a constant divided by a constant zero, or a logarithm of a constant at its pole: `log(0)`, `log2(0)`, `log1p(-1)` (M1's build, item 3; they were `irrational-constant` before) |
+| `constant-division-by-zero` | a constant divided by a constant zero, or a logarithm or a power of a constant at its pole: `log(0)`, `log2(0)`, `log1p(-1)` (M1's build, item 3; they were `irrational-constant` before), `pow(0, -1)`, `pown(0, -1)` |
 | `constant-overflow` | a constant whose one rounding overflows |
 | `constant-rounds-to-zero` | a nonzero constant whose one rounding is zero |
 

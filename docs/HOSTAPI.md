@@ -4139,7 +4139,7 @@ the library's, in one block below `cft_abi_version`:
     CFT_PROFILE_MAJOR   3    the conformance profile (CONFORMANCE.md,
     CFT_PROFILE_MINOR   1    "Versioning"): python/cft_golden/profile.py
     CFT_LANGUAGE_MAJOR  1    the language's version: python/cft_golden/
-    CFT_LANGUAGE_MINOR  3    lang/version.py (1.3 since 2026-11-11)
+    CFT_LANGUAGE_MINOR  4    lang/version.py (1.4 since 2026-11-24)
 
 - **Integers, not strings.** A version is spelt `2`, or `2.1` once a
   minor step is taken (cert2.version_text). A definition covers a
