@@ -587,9 +587,11 @@ def mode_rate_wide(args):
                     pm = min(1.0, 2 * Bvq / s)
                     mk = bool(fl & MARK)
                     if fl & sf.FLAG_OVERFLOW:
-                        # an overflowed answer is decided by the final
-                        # scaling's screen and carries no mark (rate capped
-                        # shows it): it is outside the law's population
+                        # a lane with the overflow flag: under rne most are
+                        # not marked (the answer is +-inf from the final
+                        # scaling) and some are (rate capped counts each);
+                        # under rtz the answer is a finite saturated value.
+                        # Left out of the law's population and counted
                         nov += 1
                         continue
                     used += 1
@@ -608,7 +610,9 @@ def mode_rate_wide(args):
                         wrong += 1
                 zb = (obs_u - exp_u) / math.sqrt(var_u) if var_u > 0                     else float("nan")
                 print(f"  {AN[rnd]}: {used} main-path lanes (and {nov} "
-                      f"whose answer overflows, left out: never marked); "
+                      f"with the overflow flag, left out of the law's "
+                      f"population: most unmarked under rne, see rate "
+                      f"capped); "
                       f"{capped} at "
                       f"the cap (p = 1; {cap_marked} of them marked; left "
                       f"out of the judgement); judged cell: {used - capped} "
@@ -624,10 +628,12 @@ def mode_rate_wide(args):
 def mode_rate_capped(args):
     """rate capped [LANES]: where the lanes at the cap that are NOT marked
     come from. The lanes of mode_rate_wide's cell, split by (at the cap or
-    not, marked or not, the answer's kind): an unmarked lane at the cap whose
-    answer is an overflow (+-inf under rne) was decided by the overflow
-    screen of the final scaling and carries no mark by design; the law's
-    population (regions.main_lane) includes it."""
+    not, marked or not, the answer's kind): an unmarked lane at the cap carries
+    the overflow flag (every one does, MEASURED here); under rne a lane with
+    the flag is mostly unmarked (its answer is +-inf from the final
+    scaling) and some are marked, under rtz its answer is a finite
+    saturated value; the law's population (regions.main_lane) includes them
+    and the cell of mode_rate_wide leaves them out."""
     nl = int(args[0]) if args else 2000
     shift = pw32n.GUARD - 6
     t0 = time.time()
@@ -651,7 +657,10 @@ def mode_rate_capped(args):
                     (0.5 if rnd == RNE else 1)
                 capped = 2 * Bvq >= s
                 ab = bits & ~fmt.sign_mask
-                kind = ("overflow flag set" if fl & sf.FLAG_OVERFLOW else
+                kind = (("overflow flag, answer +-inf"
+                         if ab == sf.inf_bits(fmt) else
+                         "overflow flag, finite answer")
+                        if fl & sf.FLAG_OVERFLOW else
                         "+-inf" if ab == sf.inf_bits(fmt) else
                         "zero or subnormal" if ab < (1 << 23) else "normal")
                 c[("at the cap" if capped else "p < 1",
@@ -897,41 +906,80 @@ def _ins_all(fn, n):
     return cnt[0], sum(cnt)
 
 
-def mode_slice():
+ORACLE_RUNS = (("run 1", "pw32n_slice-oracle-run1.out.txt"),
+               ("run 2", "pw32n_slice-oracle-run2.out.txt"))
+ORACLE_FIRST = ("the first rows (measured once, 11:35, WALL-clock, load "
+                "unmeasured)", "pw32n_slice-oracle-first.out.txt")
+ORACLE_WALL = (("wall-clock run 1 (12:48)",
+                "pw32n_slice-oracle-wall-run1.out.txt"),
+               ("wall-clock run 2 (12:51)",
+                "pw32n_slice-oracle-wall-run2.out.txt"))
+
+
+def _read_oracle(path):
     rows = {}
-    for ln in open("pw32n_slice-oracle.out.txt").read().splitlines():
+    for ln in open(path).read().splitlines():
         m = ORACLE_ROW.match(ln)
         if m:
             rows[(m.group(1), int(m.group(2)))] = (
                 float(m.group(4)), float(m.group(5)), float(m.group(6)))
-    print(f"oracle rows read from pw32n_slice-oracle.out.txt: {len(rows)} "
-          "(function, n) pairs (raw_tfn us, oracle x1 us, oracle x5 us a "
-          "lane; MEASURED by the C timer in the parcel's scratch folder, "
-          "not committed; n a C long, 32 bits here: -2^63 does not fit and "
-          "is not timed)")
-    dev = {}                         # (fn, n) -> instructions, five attrs
-    print("\nper (function, n): instructions + 5 (rne) and over the five "
-          "attributes (COMPUTED from pw32n.build at this tree); device `all` "
-          "us a lane = five-attribute instructions x 0.98 ns")
-    slices = []                      # (fn, n, ins_all, O1, O5, source)
+    return rows
+
+
+def _fill(rows):
+    """(function, n) -> (x1, x5, source): a timed pair's own, else the mean
+    of the function's timed n (an ESTIMATE: -2^63 does not fit a C long)."""
+    out = {}
     for fn in FNS:
         have = [rows[(fn, n)] for n in SWEEP_N if (fn, n) in rows]
-        mean1 = sum(r[1] for r in have) / len(have)
-        mean5 = sum(r[2] for r in have) / len(have)
+        m1 = sum(r[1] for r in have) / len(have)
+        m5 = sum(r[2] for r in have) / len(have)
+        for n in SWEEP_N:
+            if (fn, n) in rows:
+                out[(fn, n)] = (rows[(fn, n)][1], rows[(fn, n)][2],
+                                "MEASURED")
+            else:
+                out[(fn, n)] = (m1, m5, "ESTIMATE")
+    return out
+
+
+def mode_slice():
+    runs = [(lab, _fill(_read_oracle(path)), path)
+            for lab, path in ORACLE_RUNS]
+    first = (ORACLE_FIRST[0], _fill(_read_oracle(ORACLE_FIRST[1])),
+             ORACLE_FIRST[1])
+    walls = [(lab, _fill(_read_oracle(path)), path)
+             for lab, path in ORACLE_WALL]
+    mean = {k: tuple((runs[0][1][k][i] + runs[1][1][k][i]) / 2
+                     for i in (0, 1)) + (runs[0][1][k][2],)
+            for k in runs[0][1]}
+    runs.append(("the mean of run 1 and run 2", mean, "(computed)"))
+    print("oracle rows: the 21 (function, n) pairs of each run (oracle x1 "
+          "us and x5 us a lane; MEASURED by pw32n_oracle_timer.c, 2^20 "
+          "random 32-bit x a pair, CPU time of the process (clock_gettime); n a C long, 32 bits "
+          "here: the three n = -2^63 are not timed and take the mean of the "
+          "function's six timed n, an ESTIMATE); files: "
+          + ", ".join(p for _l, _r, p in runs[:2])
+          + "; the first rows (wall-clock) are kept in " + ORACLE_FIRST[1]
+          + ", and two later wall-clock runs in "
+          + ", ".join(p for _l, _r, p in walls))
+    print()
+    print("per (function, n): instructions + 5 (rne) and over the five "
+          "attributes (COMPUTED from pw32n.build at this tree); device `all` "
+          "us a lane = five-attribute instructions x 0.98 ns")
+    ins = {}
+    for fn in FNS:
         for n in SWEEP_N:
             i1, ia = _ins_all(fn, n)
-            if (fn, n) in rows:
-                o1, o5, src = rows[(fn, n)][1], rows[(fn, n)][2], "MEASURED"
-            else:
-                o1, o5, src = mean1, mean5, "ESTIMATE (the mean of the " \
-                    f"function's {len(have)} timed n: this n does not fit " \
-                    "a long)"
+            ins[(fn, n)] = (i1, ia)
+            r1, r2, f0 = (runs[0][1][(fn, n)], runs[1][1][(fn, n)],
+                          first[1][(fn, n)])
             print(f"  {fn:8s} n={nstr(n):12s}: {i1} instructions + 5 rne, "
                   f"five attributes {ia}; device `all` "
-                  f"{ia * TILE_NS / 1000:.3f} us; oracle x1 {o1:.3f} us, x5 "
-                  f"{o5:.3f} us [{src}]")
-            slices.append((fn, n, ia, o1, o5))
-    # M3X's 36: pow and powr, 18 list slices each, their own oracle rows
+                  f"{ia * TILE_NS / 1000:.3f} us; oracle x1 run 1 "
+                  f"{r1[0]:.3f}, run 2 {r2[0]:.3f} (first rows "
+                  f"{f0[0]:.3f}); x5 run 1 {r1[1]:.3f}, run 2 {r2[1]:.3f} "
+                  f"(first {f0[1]:.3f}) us [{r1[2]}]")
     m3x = []
     for ln in open("pw32_slice-oracle.out.txt").read().splitlines():
         m = PR.LINE.match(ln)
@@ -939,36 +987,40 @@ def mode_slice():
             m3x.append((m.group(1), float(m.group(7)), float(m.group(8))))
     ins36 = {fn: sum(len(pw32.build(fn, r).fragment().body) + 5
                      for r in ATTRS) for fn in ("pow", "powr")}
-    print(f"\nM3X's 36 slices: {len(m3x)} oracle rows of pw32_slice-oracle."
-          f"out.txt (pow, powr, 18 each); five-attribute instructions at "
-          f"this tree: pow {ins36['pow']}, powr {ins36['powr']} "
-          f"(COMPUTED from pw32.build)")
-    print("\nTOTALS (COMPUTED; formulas shown). A slice on one tile = "
+    print()
+    print(f"M3X's 36 slices: {len(m3x)} oracle rows of pw32_slice-oracle."
+          f"out.txt (pow, powr, 18 each; M3X's rows, not re-timed here); "
+          f"five-attribute instructions at this tree: pow {ins36['pow']}, "
+          f"powr {ins36['powr']} (COMPUTED from pw32.build)")
+    print()
+    print("TOTALS (COMPUTED; formulas shown). A slice on one tile = "
           "2^32 x (device `all` + O) us, O the oracle's us a lane in that "
           "process; the quad's four tiles run one process each, so a set of "
           "slices takes (sum of slices) / 4")
-    res = {}
-    for lab, k in (("one oracle call (x1)", 0), ("five oracle calls (x5)", 1)):
-        h21 = sum(LANES * (s[2] * TILE_NS / 1000 + s[3 + k]) * 1e-6 / 3600
-                  for s in slices)
-        h36 = sum(LANES * (ins36[r[0]] * TILE_NS / 1000 + r[1 + k]) * 1e-6
-                  / 3600 for r in m3x)
-        res[k] = (h21, h36)
-        print(f"  {lab}: 21 n-keyed slices: sum over (function, n) of 2^32 x "
-              f"(device + O) = {h21:.1f} tile-hours, on the quad "
-              f"{h21 / 4:.1f} h; 36 pow and powr slices (M3X's figures) "
-              f"{h36:.1f} tile-hours, {h36 / 4:.1f} h; the 57 together "
-              f"({h21:.1f} + {h36:.1f}) / 4 = {(h21 + h36) / 4:.1f} h")
-    dev21 = sum(LANES * s[2] * TILE_NS / 1000 * 1e-6 / 3600 for s in slices)
+    h36 = {}
+    for k in (0, 1):
+        h36[k] = sum(LANES * (ins36[r[0]] * TILE_NS / 1000 + r[1 + k]) * 1e-6
+                     / 3600 for r in m3x)
+    for lab, tab, _p in runs + [first] + walls:
+        for k, kl in ((0, "one oracle call (x1)"),
+                      (1, "five oracle calls (x5, the upper bound)")):
+            h21 = sum(LANES * (ins[key][1] * TILE_NS / 1000 + tab[key][k])
+                      * 1e-6 / 3600 for key in ins)
+            print(f"  {lab}, {kl}: 21 n-keyed slices sum over (function, n) "
+                  f"of 2^32 x (device + O) = {h21:.1f} tile-hours = "
+                  f"{h21 / 4:.1f} h on the quad; 36 pow and powr slices "
+                  f"{h36[k]:.1f} tile-hours = {h36[k] / 4:.1f} h; the 57 "
+                  f"together ({h21:.1f} + {h36[k]:.1f}) / 4 = "
+                  f"{(h21 + h36[k]) / 4:.1f} h")
+    dev21 = sum(LANES * ins[key][1] * TILE_NS / 1000 * 1e-6 / 3600
+                for key in ins)
     print(f"  the device alone, 21 slices: {dev21:.1f} tile-hours "
-          f"({dev21 / 4:.1f} h on the quad); instructions per slice "
-          f"(five attributes) from {min(s[2] for s in slices)} to "
-          f"{max(s[2] for s in slices)}")
+          f"({dev21 / 4:.1f} h on the quad); instructions per slice (five "
+          f"attributes) from {min(v[1] for v in ins.values())} to "
+          f"{max(v[1] for v in ins.values())}")
     print("  against: the plan's 200 and 440 h (57 slices), M3X's 133 to "
           "337 h (pow's counts for all 57; M3X's report); the 57 above use "
           "each slice's own counts and oracle rows")
-
-
 
 
 # ---- the n-scan --------------------------------------------------------------
@@ -1002,6 +1054,40 @@ def _scan_xs(fn, count=3000):
     return out
 
 
+def mode_nscan_edge():
+    """The edge of the screens for pown, found by the model's own screens:
+    for x = 1 - 2^-24 and x = 1 + 2^-23 and each sign of n, the largest |n|
+    at which the build's rounded product th0 is inside the main path (not at
+    or past the overflow or underflow thresholds), by bisection on |n|
+    (th0's magnitude grows with |n|, so the edge is one point)."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    lo_t, hi_t = fmt.emin - p - 2, fmt.emax + 2
+
+    def inside(x, n):
+        b = _b("pown", RNE, n)
+        _bits, _fl, pr = b.run(x, ("th0",))
+        t = dec(fmt, pr["th0"]) if (pr["th0"] & ~fmt.sign_mask) <             sf.inf_bits(fmt) else None
+        return t is not None and lo_t < t < hi_t
+    for label, x in (("x = 1 - 2^-24", one - 1), ("x = 1 + 2^-23", one + 1)):
+        lx = abs(math.log2(float(dec(fmt, x))))
+        for sgn in (1, -1):
+            lo, hi = 2, 2 ** 40
+            assert inside(x, sgn * lo) and not inside(x, sgn * hi)
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                if inside(x, sgn * mid):
+                    lo = mid
+                else:
+                    hi = mid
+            tt = -lo_t if (sgn > 0) == (x < one) else hi_t
+            print(f"pown, {label}, n {'>' if sgn > 0 else '<'} 0: the "
+                  f"largest |n| inside the main path is {lo} "
+                  f"(= {lo:.4e}); the formula {tt} / |log2 x| = "
+                  f"{tt / lx:.4e} (COMPUTED); n = {sgn * lo} is inside, "
+                  f"n = {sgn * (lo + 1)} is not", flush=True)
+
+
 def mode_nscan():
     """For each function and n of the list: of the probe set, how many x are
     decided by the screens (the rounded product th0 at or past the overflow
@@ -1014,14 +1100,18 @@ def mode_nscan():
     lmin = min(abs(math.log2(float(dec(fmt, one + 1)))),
                abs(math.log2(float(dec(fmt, one - 1)))))
     tpos, tneg = fmt.emax + 2, p - fmt.emin + 2 + 0
-    print(f"least |log2 |x|| over fp32 x other than +-1: {lmin:.4e} "
-          f"(= 2^{math.log2(lmin):.2f}), at x = 1 - 2^-24 and 1 + 2^-23; "
-          f"the screens answer t >= {tpos} (overflow) and t <= "
-          f"{fmt.emin - p - 2} (underflow), so pown has an unscreened "
-          f"lane with x != +-1 only for |n| below about "
-          f"{min(tpos, -(fmt.emin - p - 2)) / lmin:.3e} "
-          f"(2^{math.log2(min(tpos, -(fmt.emin - p - 2)) / lmin):.2f}); "
-          f"COMPUTED")
+    lneg = abs(math.log2(float(dec(fmt, one - 1))))
+    lpos = abs(math.log2(float(dec(fmt, one + 1))))
+    npos = -(fmt.emin - p - 2) / lneg
+    nneg = tpos / lneg
+    print(f"|log2 x| for x = 1 - 2^-24 is {lneg:.4e} and for x = 1 + 2^-23 "
+          f"{lpos:.4e}; the screens answer t >= {tpos} (overflow) and "
+          f"t <= {fmt.emin - p - 2} (underflow), so the main path is "
+          f"{fmt.emin - p - 2} < t < {tpos}: pown has an unscreened lane "
+          f"with x != +-1 for n > 0 up to about {npos:.3e} (x = 1 - 2^-24, "
+          f"t negative) and for n < 0 up to about {nneg:.3e} (the same x, t "
+          f"positive); COMPUTED here, and the model's own screens find the "
+          f"edges in nscan-edge")
     for fn in FNS:
         xs = _scan_xs(fn)
         print(f"\n{fn}: probe set of {len(xs)} x (neighbours of +-1 to 300 "
@@ -1219,6 +1309,8 @@ def main():
         mode_slice()
     elif mode == "nscan":
         mode_nscan()
+    elif mode == "nscan-edge":
+        mode_nscan_edge()
     elif mode == "finding":
         mode_finding()
     elif mode == "tinyq":

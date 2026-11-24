@@ -1,0 +1,4 @@
+pown, x = 1 - 2^-24, n > 0: the largest |n| inside the main path is 1767619904 (= 1.7676e+09); the formula 152 / |log2 x| = 1.7676e+09 (COMPUTED); n = 1767619904 is inside, n = 1767619905 is not
+pown, x = 1 - 2^-24, n < 0: the largest |n| inside the main path is 1500151104 (= 1.5002e+09); the formula 129 / |log2 x| = 1.5002e+09 (COMPUTED); n = -1500151104 is inside, n = -1500151105 is not
+pown, x = 1 + 2^-23, n > 0: the largest |n| inside the main path is 750075680 (= 7.5008e+08); the formula 129 / |log2 x| = 7.5008e+08 (COMPUTED); n = 750075680 is inside, n = 750075681 is not
+pown, x = 1 + 2^-23, n < 0: the largest |n| inside the main path is 883810143 (= 8.8381e+08); the formula 152 / |log2 x| = 8.8381e+08 (COMPUTED); n = -883810143 is inside, n = -883810144 is not

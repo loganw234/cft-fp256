@@ -8,7 +8,7 @@
 # One job is one run of pw32n_run.py, its output in OUTDIR; JOBS at a time
 # (default 8), each single-threaded. The fourth argument `bad` adds one job
 # that must fail (an unknown region), to show the script's status fails on a
-# doctored job (pw32n_box-demo-fail.out.txt); leave it out for the real run.
+# doctored job (pw32n_box-demo.out.txt); leave it out for the real run.
 #
 # ESTIMATES (the desktop's own times of the 300-lane runs: pw32n_bound-pown.
 # out.txt 254 s for its 13 regions, 9 of them with lanes, so about 0.09 s a
