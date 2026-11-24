@@ -1392,8 +1392,36 @@ def test_the_room_table_of_the_five_pow_is_past_it_at_every_format_and_powr_at_f
 # the language's checker, cftc.compile_text and lang.run - the definition the
 # image is held to.
 
-from test_cftc_invtrig import (NO_FLAG_CONTROL, REV8,       # noqa: E402
-                               held_by_lang_run)
+from test_cftc_invtrig import NO_FLAG_CONTROL, REV8       # noqa: E402
+
+
+def held_by_lang_run(c, rows, steps):
+    """The image on seq.py against lang.run, lane by lane, each lane alone
+    through the interpreter (docs/LANGUAGE.md, "A marked lane"): an unmarked
+    lane's state and its lane byte's five flags equal the interpreter's, bit
+    for bit; a marked lane's value is the routine's best guess, which the
+    definition replays: it is COUNTED and named in the returned list, never
+    required to be within any distance of the definition's value (this
+    file's own comparison; test_cftc_invtrig.py's holds a marked guess to
+    one encoding, which is more than the rule says, and a program that adds
+    two marked guesses can be two away). -> (the seq.py Result, the marked
+    lanes' indices)."""
+    r = c.run([list(x) for x in rows])
+    m = c.ir.m
+    marked = []
+    for k, row in enumerate(rows):
+        byte = r.lane_flags[k]
+        if byte & seq.LANE_MARKED:
+            marked.append(k)
+            continue
+        ref = lang.run(c.graph, [list(row)], steps)
+        out = r.scratch_out[k * m]
+        assert out == ref.states[0][0], (k, row, hex(out),
+                                         hex(ref.states[0][0]))
+        assert byte & seq.LANE_FLAGS_IEEE == ref.flags, (k, row, "flags")
+        assert not byte & (seq.LANE_DEPOSIT_OVERFLOW | seq.LANE_SCRATCH_RANGE)
+    assert bool(r.status & seq.STATUS_MARKED) == bool(marked)
+    return r, marked
 
 
 def source(op, fmt, rnd="rne", n=3, body=None):
@@ -2224,8 +2252,14 @@ def test_one_operand_two_n_is_two_nodes_never_merged_by_sharing(op):
     """`op(x, 3) + op(x, 5)`: the same operand and two n. The hash-consing key
     is (op, operands, n), so the two are two lowered nodes, two instances
     (shared = 0) and two fragments whose results differ - a key without n
-    would merge them into one node and give the second its first's value;
-    the image equals lang.run lane by lane under rne and rdn."""
+    would merge them into one node and give the second its first's value.
+    Under rne and rdn every unmarked lane equals lang.run, every marked
+    lane is counted and named (a marked pair's guesses are summed, so such
+    a lane may be two encodings from lang.run's: pown(-27, 3) is exact and
+    left to the mark, fp64 rdn), and every lane, marked or not, equals bit
+    for bit the program's own composition of its fragments' outputs
+    (routines.run): the add of the two guesses rounded under the attribute,
+    their flag words ORed with the add's."""
     fmt = FORMATS["fp64"]
     ns = (3, 5) if op != "rootn" else (3, 5)
     for rnd in (sf.RND_RNE, sf.RND_RDN):
@@ -2236,4 +2270,20 @@ def test_one_operand_two_n_is_two_nodes_never_merged_by_sharing(op):
         assert [nd.n for nd in c.lowered.nodes if nd.op == op] == list(ns)
         assert c.manifest["routines"]["calls"] == {
             R.instance(op, n): 1 for n in ns}
-        held_by_lang_run(c, [[x] for x in n_lanes(fmt, rnd, f"one{rnd}")], 1)
+        xs = n_lanes(fmt, rnd, f"one{rnd}")
+        r, marked = held_by_lang_run(c, [[x] for x in xs], 1)
+        # the program's own composition of its fragments' outputs: the
+        # image's lane is the program's add of the two fragments' values
+        # (their guesses, where a lane is marked), rounded under the
+        # attribute, flags the fragments' words ORed with the add's
+        outs = [R.run(R.fragment(op, fmt, rnd, n), xs) for n in ns]
+        m = c.ir.m
+        for k in range(len(xs)):
+            want, fl = sf.add(fmt, outs[0][0][k], outs[1][0][k], rnd)
+            flags = (outs[0][1][k] | outs[1][1][k]) & seq.LANE_FLAGS_IEEE
+            assert r.scratch_out[k * m] == want, (op, rnd, k, hex(xs[k]))
+            assert r.lane_flags[k] & seq.LANE_FLAGS_IEEE == flags | fl, \
+                (op, rnd, k, hex(xs[k]))
+        assert sorted(marked) == sorted(
+            k for k in range(len(xs)) if (outs[0][1][k] | outs[1][1][k])
+            & 0x80)
