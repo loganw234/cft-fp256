@@ -64,9 +64,11 @@ CATALOGUE = {
     "bank-capacity": "more than 512 params and constants - and, the "
                      "compiler's count, with the words of the routines it "
                      "inlines for a division, a root (C4) or one of the "
-                     "math library's thirteen (M1's six, M2's sin, cos and "
-                     "tan, M4's atan, asin, acos and atan2): the bank holds "
-                     "512 on every device",
+                     "math library's eighteen (M1's six, M2's sin, cos and "
+                     "tan, M4's atan, asin, acos and atan2, M3's pow, powr, "
+                     "pown, rootn and compound; one instance a distinct n "
+                     "of the last three): the bank holds 512 on every "
+                     "device",
     # -- equations, indices, the step ---------------------------------
     "missing-equation": "a state component with no equation",
     "duplicate-equation": "a state component with two equations",
@@ -202,15 +204,19 @@ COMPILER_REFUSALS = {
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
     # M1's build, item 4 (cftc's output version 6), M2's for sin, cos
-    # and tan (version 7) and M4's for atan, asin, acos and atan2 (version
-    # 8): the one that depends on the host
+    # and tan (version 7), M4's for atan, asin, acos and atan2 (version 8)
+    # and M3's for pow, powr, pown, rootn and compound (version 9, whose
+    # fp32 case is the three's, parcel M3F2's): the one that depends on the
+    # host
     "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p, log2, "
-                           "sin, cos, tan, atan, asin, acos or atan2 on a "
-                           "host without mpmath, "
-                           "through which the routine's fragment is built: "
-                           "it depends on the host, and with mpmath the "
-                           "same source and target compile or are refused "
-                           "by another name",
+                           "sin, cos, tan, atan, asin, acos, atan2, pow, "
+                           "powr, pown, rootn or compound on a host without "
+                           "mpmath, through which the routine's fragment is "
+                           "built: it depends on the host, and with mpmath "
+                           "the same source and target compile or are "
+                           "refused by another name - or a routine the math "
+                           "library has not built at the program's format "
+                           "(pown, rootn and compound at fp32)",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

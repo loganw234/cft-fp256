@@ -792,8 +792,8 @@ def test_each_of_the_four_compiles_and_runs_as_lang_run_at_every_attribute(
     for rnd in sf.RND_MODES:
         text = _one(fn, fmt_name, RND_NAMES[rnd])
         c = cftc.compile_text(text, 2, source="t.cftl")
-        assert c.version == cftc.VERSION == 8
-        assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+        assert c.version == cftc.VERSION == 9
+        assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
         assert c.manifest["routines"]["calls"] == {fn: 1}
         assert "FLAG_CONTROL" in c.features
         assert c.accepted_by == ["sw", *REV8]
@@ -1138,7 +1138,7 @@ def test_the_committed_references_are_what_the_compiler_writes(name):
     for fname, data in files.items():
         assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
             fname
-    assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
     assert c.accepted_by == ["sw", *REV8]
     assert set(c.manifest["routines"]["calls"]) == {*FOUR, "div", "sqrt"}
     assert "the math library's atan, asin, acos and atan2" in \
@@ -1272,7 +1272,7 @@ def test_each_of_the_four_rules_written_otherwise_moves_the_followers_bytes(
     comp = SYSTEMS / "compiled-tangent"
     names = sorted(p.name[:-len(".graph.json")] for p in comp.glob(
         "*.graph.json"))
-    assert set(PF_NAMES) <= set(names) and len(names) == 18
+    assert set(PF_NAMES) <= set(names) and len(names) == 20
     committed = {n: (comp / f"{n}.graph.json").read_bytes() for n in names}
 
     class P(_RulePlant):

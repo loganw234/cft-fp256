@@ -1385,3 +1385,834 @@ def test_the_room_table_of_the_five_pow_is_past_it_at_every_format_and_powr_at_f
     assert {r[1] for r in past["pow"] if r[0] != "fp32"} == \
         {sf.RND_RNE, sf.RND_RMM}
     assert max(r[4] for r in got["powr"] if r[0] != "fp32") <= 24
+
+
+# ---- compiled through the language (needs M3L's nodes: language 1.4) -----------------------
+# From here a source names pow, powr, pown, rootn or compound and goes through
+# the language's checker, cftc.compile_text and lang.run - the definition the
+# image is held to.
+
+from test_cftc_invtrig import (NO_FLAG_CONTROL, REV8,       # noqa: E402
+                               held_by_lang_run)
+
+
+def source(op, fmt, rnd="rne", n=3, body=None):
+    """The one-operation source: x' = op(x, y) with y kept (pow, powr), or
+    x' = op(x, n) (the three), or `body` over the same states."""
+    if op in TWO:
+        return (f"system t\nformat {fmt}\nround {rnd}\nstate x, y\n"
+                f"next x = {body or f'{op}(x, y)'}\nnext y = y\nstep map\n")
+    return (f"system t\nformat {fmt}\nround {rnd}\nstate x\n"
+            f"next x = {body or f'{op}(x, {n})'}\nstep map\n")
+
+
+def rows_for(op, fmt, rnd):
+    """Lanes of states: (x, y) pairs for pow and powr, [x] for the three."""
+    xs = pool(op, fmt, rnd)
+    return [list(x) for x in xs] if op in TWO else [[x] for x in xs]
+
+
+# the marked lanes of each pool (a lane count under each of the five
+# attributes), MEASURED at the commit that wrote this test: pow's pool
+# (pow_pairs, 171 pairs) marks 3 lanes at every format, powr's 2, and the
+# three's (n_lanes, 30 values, n = 3) pown 3, rootn 2 and compound 4 at fp64
+# and 6 at fp128 and fp256
+MARKED = {("pow", "fp32"): 3, ("pow", "fp64"): 3, ("pow", "fp128"): 3,
+          ("pow", "fp256"): 3, ("powr", "fp32"): 2, ("powr", "fp64"): 2,
+          ("powr", "fp128"): 2, ("powr", "fp256"): 2, ("pown", "fp64"): 3,
+          ("pown", "fp128"): 3, ("pown", "fp256"): 3, ("rootn", "fp64"): 2,
+          ("rootn", "fp128"): 2, ("rootn", "fp256"): 2, ("compound", "fp64"): 4,
+          ("compound", "fp128"): 6, ("compound", "fp256"): 6}
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", FMT_NAMES)
+@pytest.mark.parametrize("op", FIVE)
+def test_each_of_the_five_compiles_and_runs_as_lang_run_at_every_attribute(
+        op, fmt_name):
+    """At every format where the routine compiles (the three not at fp32:
+    test_the_three_at_fp32_are_routine_unavailable_on_every_target) under
+    all five attributes: `next x = pow(x, y)` or `next x = pown(x, 3)` through
+    cftc.compile_text, the manifest's routines naming the one instance, the
+    image on seq.py against lang.run lane by lane - an unmarked lane's state
+    and its five flags equal, a marked lane compared only as a guess within
+    an encoding and counted - and, under rne, the same image bank for bank
+    on sw, sw:4096 and revision 8's three targets, and refused
+    `target-feature` on revision 7's four (the sentence naming the
+    routine)."""
+    if op in N_KEYED and fmt_name == "fp32":
+        pytest.skip("pown, rootn and compound have no fp32 until M3F2")
+    fmt = FORMATS[fmt_name]
+    name = R.instance(op, 3 if op in N_KEYED else None)
+    marks = {}
+    for rnd in sf.RND_MODES:
+        text = source(op, fmt_name, RND_NAMES[rnd])
+        c = cftc.compile_text(text, 1, source="t.cftl")
+        assert c.version == cftc.VERSION == 9
+        assert c.manifest["routines"]["calls"] == {name: 1}
+        assert "FLAG_CONTROL" in c.features
+        assert c.accepted_by == ["sw", *REV8]
+        _r, marked = held_by_lang_run(c, rows_for(op, fmt, rnd), 1)
+        marks[RND_NAMES[rnd]] = len(marked)
+        if rnd != sf.RND_RNE:
+            continue
+        for t in REV8 + ("sw:4096",):
+            ct = cftc.compile_text(text, 1, target=t, source="t.cftl")
+            assert (ct.image, ct.bank) == (c.image, c.bank), t
+        for t in NO_FLAG_CONTROL:
+            with pytest.raises(lang.Refusal) as e:
+                cftc.compile_text(text, 1, target=t, source="t.cftl")
+            assert e.value.name == "target-feature", (t, str(e.value))
+            assert "FLAG_CONTROL (CAPS2[14])" in e.value.sentence
+            assert name in e.value.sentence
+    # the marked lanes are the exact cases (an exact power, whose in-lane
+    # test cannot decide the last bit: the structured families), counted,
+    # never required: the same count under all five attributes
+    assert marks == {r: MARKED[(op, fmt_name)] for r in RND_NAMES.values()},         marks
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", THREE_FMT)
+@pytest.mark.parametrize("op", N_KEYED)
+def test_the_three_at_the_edges_of_int64_compile_and_run_as_lang_run(
+        op, fmt_name):
+    """n = -2^63, 2^63 - 1, 0 and 1 (not rootn's 0) through the source: the
+    constant is the language's, cftc reads its exact value, and at fp64
+    2^63 - 1 does not even round to itself. Under rne and rdn, the image on
+    seq.py equals lang.run lane by lane (marked lanes as guesses)."""
+    fmt = FORMATS[fmt_name]
+    for n in (-2 ** 63, 2 ** 63 - 1, 0, 1):
+        if op == "rootn" and n == 0:
+            continue
+        for rnd in (sf.RND_RNE, sf.RND_RDN):
+            c = cftc.compile_text(source(op, fmt_name, RND_NAMES[rnd], n), 1,
+                                  source="t.cftl")
+            want = [] if (op, n) in ir.REWRITE else [R.instance(op, n)]
+            assert c.lowered.routines == want, (op, n)
+            held_by_lang_run(c, rows_for(op, fmt, rnd), 1)
+
+
+@needs_mpmath
+def test_two_n_in_one_compiled_source_are_two_keys_one_n_twice_one_key():
+    """pown(x, 3) and pown(y, 5) in one source: two keys in the manifest's
+    calls and per_call, the bank the union of the two fragments' words;
+    pown(x, 3) and pown(y, 3): one key, calls 2; and each result equals
+    lang.run."""
+    fmt = FORMATS["fp64"]
+    t = ("system t\nformat fp64\nround rne\nstate x, y\n"
+         "next x = pown(x, 3)\nnext y = pown(y, 5)\nstep map\n")
+    c = cftc.compile_text(t, 2, source="t.cftl")
+    calls = c.manifest["routines"]["calls"]
+    assert calls == {"pown(3)": 1, "pown(5)": 1}
+    assert set(c.manifest["routines"]["per_call"]) == set(calls)
+    assert c.manifest["routines"]["per_call"]["pown(3)"] == \
+        len(R.fragment("pown", fmt, sf.RND_RNE, 3))
+    xs = [[x, y] for x in n_lanes(fmt, 0, "a")[:12]
+          for y in n_lanes(fmt, 0, "b")[8:14]]
+    held_by_lang_run(c, xs, 2)
+    t2 = t.replace("pown(y, 5)", "pown(y, 3)")
+    c2 = cftc.compile_text(t2, 2, source="t.cftl")
+    assert c2.manifest["routines"]["calls"] == {"pown(3)": 2}
+    assert c2.manifest["routines"]["words"] < c.manifest["routines"]["words"]
+
+
+@needs_mpmath
+def test_a_const_read_as_n_alone_is_no_constant_of_the_manifest_bank():
+    """`pown(x, 3)`: the bank holds the routine's words only (no slot is a
+    const), and the same 3 also read as a multiplier (`y * 3`) is a slot of
+    kind const: the const entry is one, the slot is the use."""
+    t = ("system t\nformat fp64\nround rne\nstate x\n"
+         "next x = pown(x, 3)\nstep map\n")
+    c = cftc.compile_text(t, 1, source="t.cftl")
+    assert {e["kind"] for e in c.manifest["bank"]} == {"word"}
+    t2 = ("system t\nformat fp64\nround rne\nstate x, y\n"
+          "next x = pown(x, 3)\nnext y = y * 3\nstep map\n")
+    c2 = cftc.compile_text(t2, 1, source="t.cftl")
+    assert [e["kind"] for e in c2.manifest["bank"]].count("const") == 1
+
+
+@needs_mpmath
+def test_a_marked_lane_through_a_compiled_image_pow_3_2_under_rtz_at_fp64():
+    """pow(3, 2) with a RUN-TIME exponent 2 at fp64 under rtz is the study's
+    structured example (docs/studies/M3-pow.md, section 8 item 11): the
+    result 9 is exact and the in-lane test cannot decide the last bit of a
+    value that sits on a boundary from below, so the lane is MARKED (R23's
+    byte [7], STATUS[6]); its value is the routine's best guess, within an
+    encoding of the definition's, and an ordinary lane beside it is unmarked
+    and equal to lang.run with its flags. Written `pow(x, 2)` with the
+    constant the compiler rewrites it as x * x: the same lane is 9, exact,
+    unmarked, equal to lang.run - what the rewrite does instead."""
+    fmt = FORMATS["fp64"]
+    three, two, plain = (K.round_once(fmt, sf.RND_RTZ, Fraction(q))[0]
+                         for q in (3, 2, Fraction(7, 3)))
+    c = cftc.compile_text(source("pow", "fp64", "rtz"), 1, source="t.cftl")
+    r, marked = held_by_lang_run(c, [[plain, two], [three, two]], 1)
+    assert marked == [1]
+    assert r.lane_flags[1] & seq.LANE_MARKED and r.status & seq.STATUS_MARKED
+    assert not r.lane_flags[0] & seq.LANE_MARKED
+    ref = lang.run(c.graph, [[three, two]], 1).states[0][0]
+    assert ref == K.round_once(fmt, sf.RND_RTZ, Fraction(9))[0]
+    assert abs(r.scratch_out[c.ir.m] - ref) <= 1
+    t = source("pow", "fp64", "rtz", body="pow(x, 2)").replace(
+        "state x, y", "state x, y")
+    c2 = cftc.compile_text(t, 1, source="t.cftl")
+    assert c2.ir.rewritten == [(0, "pow", 2, "mul")]
+    r2, marked2 = held_by_lang_run(c2, [[three, two], [plain, two]], 1)
+    assert marked2 == [] and r2.scratch_out[0] == ref
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", FMT_NAMES)
+def test_pow_and_powr_of_the_same_operands_share_their_front(fmt_name):
+    """pow(x, y) and powr(x, y) in one source: the routines' instructions
+    are hash-consed across the two (the front: classification, the
+    logarithm, the exponential's reduction), so the quiet instructions of
+    the image are fewer than the two alone's sum, by the same number in
+    either order, MEASURED from the image (program.routine_alu, rne):
+    329, 384, 435 and 800 at fp64, fp128, fp256 and fp32 (the study's
+    section 5.4: 329 to 435); and two powers of one base, pow(x, y) and
+    pow(x, z), share the logarithm: 173, 217, 255 and 434."""
+    def alu(body, states="x, y, z"):
+        ss = states.split(", ")
+        nexts = "".join(f"next {s} = {body if s == 'x' else s}\n"
+                        for s in ss)
+        t = (f"system t\nformat {fmt_name}\nround rne\nstate {states}\n"
+             f"{nexts}step map\n")
+        return cftc.compile_text(t, 1, source="t.cftl").program.routine_alu()
+    p, r = alu("pow(x, y)"), alu("powr(x, y)")
+    both, other = (alu("pow(x, y) + powr(x, y)"),
+                   alu("powr(x, y) + pow(x, y)"))
+    assert both == other
+    assert p + r - both == {"fp64": 329, "fp128": 384, "fp256": 435,
+                            "fp32": 800}[fmt_name]
+    pp = alu("pow(x, y) + pow(x, z)")
+    assert 2 * p - pp == {"fp64": 173, "fp128": 217, "fp256": 255,
+                          "fp32": 434}[fmt_name]
+
+
+# ---- the rewrites, compiled, in the primal and in a tangent section ----------------------------
+
+REWRITES = {("pow", 2): "x * x", ("pown", 2): "x * x", ("pow", 1): "x * 1",
+            ("pown", 1): "x * 1", ("rootn", 1): "x * 1",
+            ("pow", -1): "1 / x", ("pown", -1): "1 / x",
+            ("rootn", -1): "1 / x"}
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", FMT_NAMES)
+@pytest.mark.parametrize("op,n", EIGHT, ids=lambda v: str(v))
+def test_each_of_the_eight_rewrites_compiled_is_lang_run_of_the_node(
+        op, n, fmt_name):
+    """`next x = op(x, n)` through the language: the graph holds the node
+    (the manifest's graph_by_op counts it), the image holds the one
+    multiplication or division (lowering.rewritten says which, and no
+    routine of the five is in it), and the image on seq.py equals lang.run
+    OF THE UNREWRITTEN NODE lane by lane, bits and flags, under all five
+    attributes at every format - fp32 included for the three, where their
+    routines are refused. The pool is n_lanes (28 values)."""
+    fmt = FORMATS[fmt_name]
+    for rnd in sf.RND_MODES:
+        t = (f"system t\nformat {fmt_name}\nround {RND_NAMES[rnd]}\n"
+             f"state x\nnext x = {op}(x, {n})\nstep map\n")
+        c = cftc.compile_text(t, 1, source="t.cftl")
+        assert c.manifest["lowering"]["graph_by_op"] == {op: 1}
+        assert c.manifest["lowering"]["rewritten"] == {
+            f"{op}({n})": {"nodes": 1, "as": ir.REWRITE[(op, n)][0]}}
+        assert "routines" not in c.manifest or \
+            set(c.manifest["routines"]["calls"]) <= {"div"}
+        _r, marked = held_by_lang_run(c, [[x] for x in
+                                          n_lanes(fmt, rnd, f"cr{rnd}")], 1)
+        assert marked == []
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op,n,twin", NOT_PROPOSED, ids=lambda v: str(v))
+def test_the_three_not_proposed_are_compiled_as_routines_and_match_lang_run(
+        op, n, twin):
+    """rootn(x, 2), compound(x, 1) and pow(x, 1/2) are not rewritten: the
+    manifest names the routine and no `rewritten`, and the image equals
+    lang.run on the lanes where the study's two forms differ (rootn(-0, 2)
+    is +0, compound at x < -1 and at -1 under rdn, pow(-0, 1/2) and
+    pow(-inf, 1/2)) under all five attributes at fp64."""
+    fmt = FORMATS["fp64"]
+    for rnd in sf.RND_MODES:
+        body = {"rootn": "rootn(x, 2)", "compound": "compound(x, 1)",
+                "pow": "pow(x, 1/2)"}[op]
+        c = cftc.compile_text(
+            f"system t\nformat fp64\nround {RND_NAMES[rnd]}\nstate x\n"
+            f"next x = {body}\nstep map\n", 1, source="t.cftl")
+        assert "rewritten" not in c.manifest["lowering"]
+        inst = R.instance(op, n if op != "pow" else None)
+        assert c.manifest["routines"]["calls"] == {inst: 1}
+        xs = n_lanes(fmt, rnd, f"np{rnd}") + [
+            K.round_once(fmt, rnd, Fraction(-1))[0],
+            K.round_once(fmt, rnd, Fraction(-3, 2))[0]]
+        held_by_lang_run(c, [[x] for x in xs], 1)
+
+
+# a tangent section's own nodes: the rules write pown(a, n - 1), pow(a,
+# b - 1) and pown(rootn, 1 - n), and where that exponent is 2, 1 or -1 the
+# rewrite applies to them too
+TANGENT_SOURCES = {
+    "pown(x, 3)": "pown(2)", "pown(x, 2)": "pown(1)",
+    "pow(x, 3)": "pow(2)", "pow(x, 2)": "pow(1)", "pow(x, 0)": "pow(-1)",
+    "rootn(x, 2)": "pown(-1)", "rootn(x, -1)": "pown(2)",
+}
+
+
+def _held_tangent(c, xs, steps):
+    """The image with one tangent vector against lang.run, lane by lane:
+    state, tangent and the five flags, a marked lane as a guess. -> the
+    marked lanes."""
+    fmt = c.ir.fmt
+    one = K.round_once(fmt, c.ir.rnd, Fraction(1))[0]
+    rows = [[x] for x in xs]
+    tans = [[[one]] for _ in xs]
+    r = c.run(rows, tangents=tans)
+    m = c.ir.m
+    marked = []
+    for k, row in enumerate(rows):
+        byte = r.lane_flags[k]
+        ref = lang.run(c.graph, [row], steps, tangents=[tans[k]])
+        out, tout = r.scratch_out[k * m], r.scratch_out[k * m + 1]
+        if byte & seq.LANE_MARKED:
+            marked.append(k)
+            continue
+        assert out == ref.states[0][0], (k, row, "state")
+        assert tout == ref.tangents[0][0][0], (k, row, "tangent")
+        assert byte & seq.LANE_FLAGS_IEEE == ref.flags, (k, row, "flags")
+    return marked
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", FMT_NAMES)
+@pytest.mark.parametrize("expr", sorted(TANGENT_SOURCES))
+def test_the_rewrites_apply_in_a_tangent_section_and_equal_lang_run(
+        expr, fmt_name):
+    """A source with one tangent vector: the derivative rules write routine
+    nodes of their own (pown(a, n - 1) for pown, pow(a, b - 1) for pow,
+    pown(root, 1 - n) for rootn), and where the exponent is 2, 1 or -1 the
+    rewrite is applied in the tangent section's nodes as in the step's
+    (the manifest's lowering.rewritten counts them; the graph's own counts,
+    graph_tangent_by_op, are before it). The image on seq.py equals lang.run
+    - states, tangents and flags - lane by lane under all five attributes,
+    at every format where the source compiles: pown(x, 3) and rootn(x, 2)
+    are routines in the step (pown(3), rootn(2)) and so refused at fp32 by
+    name, while rootn(x, -1) is a division in the step and a pown(root, 2),
+    a multiplication, in the tangent, and compiles at fp32 with pown(x, 2),
+    pow(x, 3), pow(x, 2) and pow(x, 0)."""
+    fmt = FORMATS[fmt_name]
+    t3 = lambda rnd: (f"system t\nformat {fmt_name}\nround {rnd}\nstate x\n"
+                      f"tangent w\nnext x = {expr}\nstep map\n")
+    if fmt_name == "fp32" and expr in ("pown(x, 3)", "rootn(x, 2)"):
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_text(t3("rne"), 1, source="t.cftl")
+        assert e.value.name == "routine-unavailable"
+        return
+    want = TANGENT_SOURCES[expr]
+    for rnd in sf.RND_MODES:
+        c = cftc.compile_text(t3(RND_NAMES[rnd]), 1, source="t.cftl")
+        rw = c.manifest["lowering"]["rewritten"]
+        assert want in rw, (expr, rw)
+        # the tangent section has ONE such node a vector: counted twice
+        # where the step's own node is the same instance
+        _t = _held_tangent(c, n_lanes(fmt, rnd, f"tg{rnd}"), 1)
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op", N_KEYED)
+def test_the_three_at_fp32_are_routine_unavailable_on_every_target(op):
+    """pown(x, 3), rootn(x, 3) and compound(x, 3) at fp32 are refused
+    `routine-unavailable` (line None, the sentence naming the instance and
+    parcel M3F2's) on sw and on revision 8's and revision 7's targets alike
+    - BEFORE `target-feature`, which revision 7's targets would otherwise
+    say - and a rewritten n at fp32 (pown(x, 2)) is not refused by name on
+    sw, and is refused nothing on revision 7's, being a multiplication."""
+    t = source(op, "fp32")
+    for target in ("sw", *REV8, *NO_FLAG_CONTROL):
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_text(t, 1, target=target, source="t.cftl")
+        assert (e.value.name, e.value.line) == ("routine-unavailable", None)
+        assert f"{op}(3)" in e.value.sentence
+        assert "parcel M3F2's" in e.value.sentence
+    ok = cftc.compile_text(source("pown", "fp32", n=2), 1,
+                           target="u50-rev7", source="t.cftl")
+    assert ok.manifest["lowering"]["rewritten"]
+
+
+@needs_mpmath
+def test_pow_and_powr_are_target_feature_on_revision_7s_targets():
+    """pow and powr need revision 8's flag control like every routine:
+    revision 7's four targets refuse them `target-feature`, the sentence
+    naming the routine, at fp64 and at fp32."""
+    for fmt_name in ("fp64", "fp32"):
+        for op in TWO:
+            for t in NO_FLAG_CONTROL:
+                if fmt_name == "fp32" and t == "open-core":
+                    continue
+                with pytest.raises(lang.Refusal) as e:
+                    cftc.compile_text(source(op, fmt_name), 1, target=t,
+                                      source="t.cftl")
+                assert e.value.name in ("target-feature", "target-format"), \
+                    (op, fmt_name, t, e.value.name)
+                if e.value.name == "target-feature":
+                    assert op in e.value.sentence
+
+
+# ---- the call loop over batches of the five ---------------------------------------------------
+
+def loop_source(op, fmt, rnd, form):
+    return (f"system loop\nformat {fmt}\nround {rnd}\nstate x[3], y[3]\n"
+            f"next x[i] = {form}\nnext y[i] = y[i]\nstep map\n")
+
+
+def _run_rows(c, seed):
+    rng = random.Random(str(seed))
+    fmt = c.ir.fmt
+    n = c.ir.n_primal
+
+    def val():
+        return K.round_once(fmt, sf.RND_RNE,
+                            Fraction(rng.randint(1, 300), 97))[0]
+    return [[val() for _ in range(n)] for _ in range(4)]
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", ("fp32", "fp64"))
+@pytest.mark.parametrize("op", TWO)
+def test_a_batch_of_pow_or_powr_loops_or_is_declined_as_the_room_says(
+        op, fmt_name, monkeypatch):
+    """Three calls of one routine in one batch, the threshold at 0 (the
+    loop reaches the batch): the loop is the call loop of a routine of TWO
+    inputs - a record is two slots a call, x then y - unless the plan needs
+    more registers than the allocator's 29 (callloop.declined: the same
+    arithmetic as the room table above), in which case the batch stays
+    inlined, the manifest says so (call_loop_declined: op, depth, calls,
+    registers, room), and the step is lang.run's all the same. MEASURED at
+    every attribute: pow is declined at fp32 under all five (33
+    registers), and at fp64 under rne and rmm (31); powr is declined at
+    fp32 (30) under all five and loops at fp64 under all five; and with
+    y one constant for every call (`pow(x[i], 3/2)`: y fixed, one slot a
+    call) pow is still declined where it needs 32 or 30, and powr at fp32,
+    which needs 29 with an input fixed, LOOPS."""
+    monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", 0)
+    fmt = FORMATS[fmt_name]
+    past = {("pow", "fp32"): set(sf.RND_MODES),
+            ("pow", "fp64"): {sf.RND_RNE, sf.RND_RMM},
+            ("powr", "fp32"): set(sf.RND_MODES), ("powr", "fp64"): set()}
+    for rnd in sf.RND_MODES:
+        c = cftc.compile_text(
+            loop_source(op, fmt_name, RND_NAMES[rnd], f"{op}(x[i], y[i])"), 1,
+            source="loop.cftl")
+        rows = _run_rows(c, f"{op}{fmt_name}{rnd}")
+        r = c.run(rows)
+        m = c.ir.m
+        for k, row in enumerate(rows):
+            if r.lane_flags[k] & seq.LANE_MARKED:
+                continue
+            want = lang.run(c.graph, [row], 1)
+            assert r.scratch_out[k * m:k * m + 6] == want.states[0], k
+            assert r.lane_flags[k] & seq.LANE_FLAGS_IEEE == want.flags, k
+        declined = c.manifest["routines"].get("call_loop_declined")
+        if rnd in past[(op, fmt_name)]:
+            assert c.looped == [] and declined is not None, (op, rnd)
+            assert [(d["op"], d["calls"], d["room"]) for d in declined] == \
+                [(op, 3, 29)] and declined[0]["registers"] > 29
+            assert "call_loops" not in c.manifest["routines"]
+        else:
+            assert declined is None and len(c.looped) == 1, (op, rnd)
+            loop = c.manifest["routines"]["call_loops"]["loops"][0]
+            assert (loop["op"], loop["calls"]) == (op, 3)
+            lo, hi = loop["records"]
+            assert hi - lo + 1 == 2 * 3          # two slots a call
+            assert "n" not in loop and loop["fixed"] == {}
+    # y one constant: the room's `fixed` rows
+    for rnd in (sf.RND_RNE, sf.RND_RTZ):
+        c = cftc.compile_text(
+            loop_source(op, fmt_name, RND_NAMES[rnd], f"{op}(x[i], 3/2)"), 1,
+            source="loop.cftl")
+        declined = c.manifest["routines"].get("call_loop_declined")
+        looped = (op == "powr" and fmt_name == "fp32") or \
+            (op == "pow" and fmt_name == "fp64" and rnd != sf.RND_RNE) or \
+            (op == "powr" and fmt_name == "fp64")
+        assert (declined is None) == looped, (op, fmt_name, RND_NAMES[rnd])
+        if looped:
+            loop = c.manifest["routines"]["call_loops"]["loops"][0]
+            lo, hi = loop["records"]
+            assert hi - lo + 1 == 3 and list(loop["fixed"]) == ["b"]
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op", N_KEYED)
+def test_a_batch_of_the_three_is_one_n_a_batch_and_loops(op, monkeypatch):
+    """pown(x[i], 3) and pown(y[i], 5) at one depth are TWO batches: the
+    manifest's loops name each with its n, one slot a call, and a looped
+    call's result is lang.run's - a loop is one copy of ONE fragment, and a
+    fragment is a function of n. The order of two batches of one routine
+    at one depth is by n, signed. The same n in all six calls is one batch
+    of six."""
+    monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", 0)
+    ns = (5, 3) if op != "rootn" else (5, -3)
+    t = (f"system loop\nformat fp64\nround rne\nstate x[3], y[3]\n"
+         f"next x[i] = {op}(x[i], {ns[0]})\n"
+         f"next y[i] = {op}(y[i], {ns[1]})\nstep map\n")
+    c = cftc.compile_text(t, 1, source="loop.cftl")
+    loops = c.manifest["routines"]["call_loops"]["loops"]
+    assert sorted((lp["op"], lp["n"], lp["calls"], lp["depth"])
+                  for lp in loops) == [(op, n, 3, 1) for n in sorted(ns)]
+    # the batches, in callloop's order: by depth, the routines' order, n
+    assert [(bt.op, bt.n) for bt in callloop.batches(c.lowered)] == \
+        [(op, n) for n in sorted(ns)]
+    assert all(lp["records"][1] - lp["records"][0] + 1 == 3 for lp in loops)
+    assert c.manifest["routines"]["calls"] == {
+        R.instance(op, n): 3 for n in sorted(ns)}
+    fmt = FORMATS["fp64"]
+    rows = _run_rows(c, op)
+    r = c.run(rows)
+    m = c.ir.m
+    for k, row in enumerate(rows):
+        if r.lane_flags[k] & seq.LANE_MARKED:
+            continue
+        want = lang.run(c.graph, [row], 1)
+        assert r.scratch_out[k * m:k * m + 6] == want.states[0], (op, k)
+        assert r.lane_flags[k] & seq.LANE_FLAGS_IEEE == want.flags
+    t1 = t.replace(f"{op}(y[i], {ns[1]})", f"{op}(y[i], {ns[0]})")
+    c1 = cftc.compile_text(t1, 1, source="loop.cftl")
+    loops = c1.manifest["routines"]["call_loops"]["loops"]
+    assert [(lp["n"], lp["calls"]) for lp in loops] == [(ns[0], 6)]
+    assert [(bt.n, len(bt.calls)) for bt in callloop.batches(c1.lowered)] \
+        == [(ns[0], 6)]
+    assert fmt.name == "fp64"
+
+
+@needs_mpmath
+def test_the_call_loops_order_is_the_routines_order_then_n(monkeypatch):
+    """Batches at one depth are in R.ROUTINES' order (callloop.ORDER, the
+    language's: ... atan2, pow, powr, pown, rootn, compound), then by n
+    signed: pown(3) and pown(-2) in one source are listed -2 first, and a
+    pow batch comes before a pown batch, before a compound's."""
+    monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", 0)
+    t = ("system loop\nformat fp64\nround rtz\nstate a[2], b[2], c[2], d[2], "
+         "e[2], w[2]\nnext a[i] = pown(a[i], 3)\nnext b[i] = pown(b[i], -2)\n"
+         "next c[i] = compound(c[i], 2)\nnext d[i] = pow(d[i], w[i])\n"
+         "next e[i] = rootn(e[i], 3)\nnext w[i] = w[i]\nstep map\n")
+    c = cftc.compile_text(t, 1, source="loop.cftl")
+    got = [(bt.op, bt.n) for bt in callloop.batches(c.lowered)]
+    assert len(c.manifest["routines"]["call_loops"]["loops"]) == 5
+    want = sorted(got, key=lambda e: (callloop.ORDER[e[0]], e[1] or 0))
+    assert got == want and ("pown", -2) in got and got.index(
+        ("pown", -2)) < got.index(("pown", 3))
+    assert [e[0] for e in got] == ["pow", "pown", "pown", "rootn",
+                                   "compound"]
+
+
+# ---- the manifest ------------------------------------------------------------------------------
+
+@needs_mpmath
+def test_the_manifest_words_the_five_only_where_a_step_holds_one():
+    """The routines block of a step with pown(3) and exp carries the radian
+    -free, inverse-free sentence of the six and, for the five, its own: "the
+    math library's pow, powr, pown, rootn and compound likewise set the
+    raised word's bit 7"; the five are never called the six (a manifest of
+    a step with the five alone has no six's sentence); a step without one of
+    the five carries no such sentence; calls and per_call are keyed by
+    instance (`pown(3)`, `pown(5)`), each per_call the fragment's own
+    length; the 'rewritten' entry is under lowering, only where a rewrite
+    was made, and its absence leaves a manifest as it was."""
+    def flags(t):
+        c = cftc.compile_text(t, 1, source="t.cftl")
+        return c, c.manifest["routines"]["flags"]
+    base = "system t\nformat fp64\nround rne\nstate x\n"
+    c, f = flags(base + "next x = pown(x, 3)\nstep map\n")
+    assert "pow, powr, pown, rootn and compound likewise" in f
+    assert "the math library's six also set" not in f
+    assert "atan, asin, acos and atan2 likewise" not in f
+    c, f = flags(base + "next x = pown(x, 3) + exp(x)\nstep map\n")
+    assert "the math library's six also set" in f and \
+        "pow, powr, pown, rootn and compound likewise" in f
+    c, f = flags(base + "next x = exp(x)\nstep map\n")
+    assert "pow, powr" not in f
+    c, f = flags(base + "next x = x / 3 + pown(x, 5) + pown(x, 3)\n"
+                 "step map\n")
+    assert set(c.manifest["routines"]["calls"]) == {"div", "pown(3)",
+                                                    "pown(5)"}
+    assert "rewritten" not in c.manifest["lowering"]
+    c2 = cftc.compile_text(base + "next x = pown(x, 2) / 3\nstep map\n", 1,
+                           source="t.cftl")
+    assert c2.manifest["lowering"]["rewritten"] == {
+        "pown(2)": {"nodes": 1, "as": "mul"}}
+    assert c2.manifest["lowering"]["graph_by_op"] == {"div": 1, "pown": 1}
+
+
+@needs_mpmath
+def test_every_committed_manifest_without_the_five_says_what_it_said():
+    """A manifest of a step without the five has no `rewritten`, no instance
+    key and none of the five's sentence: the committed ones differ from the
+    base's in the version line alone (python/cftc/__init__.py's VERSION 9
+    paragraph names the sets; here the committed programs/systems/compiled
+    and compiled-tangent manifests are read for the keys)."""
+    import glob
+    seen = 0
+    for path in glob.glob(str(ROOT / "programs" / "systems" / "compiled*" /
+                              "*.manifest.json")):
+        m = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert m["compiler"]["version"] == 9, path
+        if "atmosphere" in path:
+            continue
+        seen += 1
+        assert "rewritten" not in m["lowering"], path
+        flags = m.get("routines", {}).get("flags", "")
+        assert "pow, powr" not in flags, path
+        assert not any("(" in k for k in m.get("routines", {}).get(
+            "calls", {})), path
+    assert seen == 26
+
+
+# ---- the reference: a body falling through a power-law atmosphere -----------------------------
+
+from cft_golden.lang import check as lang_check_mod        # noqa: E402
+from cft_golden.lang import tangent as lang_tangent         # noqa: E402
+from cft_golden.lang.graph import Node                      # noqa: E402
+
+SYSTEMS = ROOT / "programs" / "systems"
+ATM_NAMES = ("atmosphere-rk4-tangent-fp64", "atmosphere-rk4-tangent-fp256")
+# alt in [0, 4] keeps the base 1 + alt / 8 in [1, 3/2]; v in [-1, 1], m in
+# [1, 2] (programs/tangent_check.py's MATH_BOX)
+ATM_BOX = [(0, 4), (-1, 1), (1, 2)]
+
+
+def _tref(name):
+    return lang.load(SYSTEMS / f"{name}.cftl").graph
+
+
+def test_the_two_sources_are_one_system_at_two_formats_and_hold_pow_and_pown():
+    """The fp256 source is the fp64 source with the format line changed,
+    comments too: nothing else differs; it is round rdn, one tangent vector,
+    and holds a pow with a non-integer constant exponent and a pown with
+    n = 3 in its equations."""
+    a = (SYSTEMS / f"{ATM_NAMES[0]}.cftl").read_text(
+        encoding="ascii").splitlines()
+    b = (SYSTEMS / f"{ATM_NAMES[1]}.cftl").read_text(
+        encoding="ascii").splitlines()
+    assert len(a) == len(b)
+    assert [(x, y) for x, y in zip(a, b) if x != y] == \
+        [("format fp64", "format fp256")]
+    code = [ln for ln in a if ln and not ln.startswith(";")]
+    assert code.count("tangent w") == 1 and "round  rdn" in code
+    eqs = " ".join(ln for ln in code if ln.startswith("d/dt"))
+    assert "pow(1 + alt / H, -4.5)" in eqs and "pown(v, 3)" in eqs
+
+
+@needs_mpmath
+@pytest.mark.parametrize("name", ATM_NAMES)
+def test_the_committed_atmosphere_is_what_the_compiler_writes(name):
+    """Eight files each, byte for byte what cftc writes for the committed
+    source at 10 steps (tangent_check.py --write made them), the manifest
+    saying version 9; the image calls pow (the primal's four and the
+    tangent's four, pow(a, -5.5), each a routine of its own exponent, a
+    routine node with a constant exponent that no rewrite takes), pown(3)
+    four times and division - and no pown(2): the rule's pown(v, 2) is
+    written as the product v * v (lowering.rewritten counts the four), so
+    the compiled bytes hold a mul where the graph holds a pown."""
+    c = cftc.compile_file(SYSTEMS / f"{name}.cftl", 10,
+                          source=f"programs/systems/{name}.cftl")
+    files = c.files()
+    assert len(files) == 8
+    for fname, data in files.items():
+        assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
+            fname
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
+    assert c.accepted_by == ["sw", *REV8]
+    calls = c.manifest["routines"]["calls"]
+    assert calls == {"div": 8, "pow": 8, "pown(3)": 4}, calls
+    assert c.manifest["lowering"]["rewritten"] == {
+        "pown(2)": {"nodes": 4, "as": "mul"}}
+    assert c.manifest["lowering"]["graph_tangent_by_op"]["pown"] == 4
+    assert c.manifest["lowering"]["graph_by_op"]["pown"] == 4
+    assert "pow, powr, pown, rootn and compound" in \
+        c.manifest["routines"]["flags"]
+    g = _tref(name)
+    assert g.to_bytes() == (SYSTEMS / "compiled-tangent" /
+                            f"{name}.graph.json").read_bytes()
+
+
+def _atm_rows(fmt, rnd, n, seed):
+    rng = random.Random(seed)
+
+    def val(lo, hi):
+        q = lo + (hi - lo) * Fraction(rng.randint(1, 10 ** 6 - 1), 10 ** 6)
+        return K.round_once(fmt, rnd, q)[0]
+    states = [[val(lo, hi) for lo, hi in ATM_BOX] for _ in range(n)]
+    tans = [[[K.round_once(fmt, rnd, Fraction(rng.randint(-100, 100), 53))[0]
+              for _ in ATM_BOX]] for _ in states]
+    return states, tans
+
+
+@needs_mpmath
+@pytest.mark.parametrize("name", ATM_NAMES)
+def test_the_atmospheres_lanes_mark_none_and_are_the_interpreters(name):
+    """The reference's lanes - 24 in ATM_BOX, with tangents, at 10 steps -
+    mark no lane (leg G of tangent_check.py fails a marked segment by name:
+    the pow family marks the exact cases by design, and the box has none),
+    and every lane's states, tangent and flags are lang.run's, bit for bit.
+    It is 0 of 24 marked."""
+    fmt_name = name.rsplit("-", 1)[1]
+    fmt, rnd = FORMATS[fmt_name], sf.RND_RDN
+    c = cftc.compile_file(SYSTEMS / f"{name}.cftl", 10,
+                          source=f"programs/systems/{name}.cftl")
+    states, tans = _atm_rows(fmt, rnd, 24, "atmosphere " + fmt_name)
+    r = c.run(states, tangents=tans)
+    m, n, N = c.ir.m, c.ir.n_primal, c.ir.n_state
+    marked = [k for k, b in enumerate(r.lane_flags) if b & seq.LANE_MARKED]
+    assert marked == [], f"{len(marked)} of {len(states)} lanes marked"
+    assert not r.status & seq.STATUS_MARKED
+    for k, st in enumerate(states):
+        want = lang.run(c.graph, [st], 10, tangents=[tans[k]])
+        out = r.scratch_out[k * m:(k + 1) * m]
+        assert out[:n] == want.states[0], (name, k, "states")
+        assert out[n:N] == [v for vec in want.tangents[0] for v in vec], \
+            (name, k, "tangents")
+        assert r.lane_flags[k] & seq.LANE_FLAGS_IEEE == want.flags, (name, k)
+
+
+class _RulePlant(lang_tangent.Derivation):
+    """The derivation with the rule of `kind` = (op, how) written in
+    another shape: how "commuted" has the rule's outermost product's
+    operands (or, for rootn, the numerator's) the other way round - another
+    node shape, the same value; how "regrouped" is (n * pown(a, n - 1)) *
+    da written n * (pown(a, n - 1) * da) - another shape and, under rdn,
+    another value where the two roundings differ."""
+    kind = None
+
+    def rule(self, node):
+        res = super().rule(node)
+        op, how = self.kind
+        if node.op != op or res is None:
+            return res
+        line = node.line
+
+        def N(o, *args):
+            return Node(o, args, line)
+        if how == "commuted":
+            if res.op in ("mul", "add"):
+                return N(res.op, res.args[1], res.args[0])
+            top = res.args[0]
+            return N("div", N(top.op, top.args[1], top.args[0]),
+                     res.args[1])
+        if how == "regrouped" and res.op == "mul" and res.args[0].op == "mul":
+            return N("mul", res.args[0].args[0],
+                     N("mul", res.args[0].args[1], res.args[1]))
+        return res
+
+
+@pytest.mark.parametrize("kind", [("pow", "commuted"), ("pown", "commuted"),
+                                  ("pow", "regrouped"),
+                                  ("pown", "regrouped")], ids=str)
+def test_the_rules_of_pow_and_pown_written_otherwise_move_the_atmospheres_bytes(
+        kind, monkeypatch):
+    """The pow rule and the pown rule, each written in another shape (the
+    product's operands commuted, or regrouped), move the committed graph of
+    the atmosphere at fp64 and fp256 and of no other committed variational
+    reference - none holds a pow or a pown: under any attribute a node shape
+    moves the graph's bytes (M2C's finding). Checking a source needs no
+    mpmath, so neither does this."""
+    comp = SYSTEMS / "compiled-tangent"
+    names = sorted(p.name[:-len(".graph.json")] for p in comp.glob(
+        "*.graph.json"))
+    assert set(ATM_NAMES) <= set(names) and len(names) == 20
+    committed = {n: (comp / f"{n}.graph.json").read_bytes() for n in names}
+
+    class P(_RulePlant):
+        pass
+    P.kind = kind
+    monkeypatch.setattr(lang_check_mod, "Derivation", P)
+    moved = sorted(n for n in names if _tref(n).to_bytes() != committed[n])
+    assert moved == sorted(ATM_NAMES), (kind, moved)
+
+
+@pytest.mark.parametrize("kind", [("powr", "commuted"),
+                                  ("rootn", "commuted"),
+                                  ("compound", "commuted"),
+                                  ("powr", "regrouped"),
+                                  ("compound", "regrouped")], ids=str)
+def test_the_other_three_rules_written_otherwise_move_a_graph_but_no_committed_one(
+        kind, monkeypatch):
+    """powr's, rootn's and compound's rules are held by no committed
+    reference (the atmosphere holds pow and pown alone, as the study's
+    reference does), so a rule of those three written in another shape moves
+    no committed graph - MEASURED: none of the 20 - but does move the
+    graph of a one-operation system with a tangent, which is where their
+    rules' bytes are held (test_lang_pow.py holds their text)."""
+    comp = SYSTEMS / "compiled-tangent"
+    names = sorted(p.name[:-len(".graph.json")] for p in comp.glob(
+        "*.graph.json"))
+    committed = {n: (comp / f"{n}.graph.json").read_bytes() for n in names}
+    body = {"powr": "powr(x, 3/2)", "rootn": "rootn(x, 3)",
+            "compound": "compound(x, 3)"}[kind[0]]
+    text = ("system t\nformat fp64\nround rdn\nstate x\ntangent w\n"
+            f"next x = {body}\nstep map\n")
+    good = lang.compile_text(text, "t.cftl").graph.to_bytes()
+
+    class P(_RulePlant):
+        pass
+    P.kind = kind
+    monkeypatch.setattr(lang_check_mod, "Derivation", P)
+    assert [n for n in names if _tref(n).to_bytes() != committed[n]] == []
+    planted = lang.compile_text(text, "t.cftl").graph.to_bytes()
+    assert planted != good, kind
+
+
+# the lanes (of 60, 10 steps, round rdn) in which the planted rule's value
+# differs from the committed rule's, by rule, format and the shape written,
+# MEASURED at the commit that wrote this test (also under rne, in a scratch
+# run: the same counts but for pow's regrouped rule, which is none under rne
+# at fp64): the commuted shapes are the same value on every lane; the
+# regrouped pown rule is the same value on all 60 as well, at both formats,
+# and the regrouped pow rule is another value on ONE lane at fp64 and on none
+# at fp256
+VARIANT_LANES = {("pown", "fp64"): {"commuted": 0, "regrouped": 0},
+                 ("pown", "fp256"): {"commuted": 0, "regrouped": 0},
+                 ("pow", "fp64"): {"commuted": 0, "regrouped": 1},
+                 ("pow", "fp256"): {"commuted": 0, "regrouped": 0}}
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", ("fp64", "fp256"))
+@pytest.mark.parametrize("op", ("pown", "pow"))
+def test_the_rules_written_otherwise_are_other_bytes_and_the_values_are_counted(
+        op, fmt_name, monkeypatch):
+    """Value-only variants measured on the atmosphere itself, compiled round
+    rdn, run for 10 steps on 60 lanes of ATM_BOX with
+    tangents, the good and the planted image against each other: each
+    variant is other bytes (the graph and the image), the commuted shapes
+    are the same value on every lane, and the regrouped shapes differ on the
+    number of lanes VARIANT_LANES says - one lane, pow's at fp64 under rdn;
+    pown's rule regrouped is the same value on all 60 here: a fact of these
+    lanes, not a theorem (the two groupings round differently in general)."""
+    src = (SYSTEMS / f"atmosphere-rk4-tangent-{fmt_name}.cftl").read_text(
+        encoding="ascii")
+    fmt = FORMATS[fmt_name]
+    got = {}
+    for how in ("commuted", "regrouped"):
+        class P(_RulePlant):
+            pass
+        P.kind = (op, how)
+        for rname in ("rdn",):
+            rnd = RND_CODE[rname]
+            text = src.replace("round  rdn", f"round  {rname}")
+            good = cftc.compile_text(text, 10, source="f.cftl")
+            monkeypatch.setattr(lang_check_mod, "Derivation", P)
+            planted = cftc.compile_text(text, 10, source="f.cftl")
+            monkeypatch.undo()
+            assert planted.graph_bytes != good.graph_bytes, (how, rname)
+            assert planted.image != good.image, (how, rname)
+            states, tans = _atm_rows(fmt, rnd, 60, "variants")
+            rg = good.run(states, tangents=tans)
+            rp = planted.run(states, tangents=tans)
+            assert not any(b & seq.LANE_MARKED for b in rg.lane_flags +
+                           rp.lane_flags)
+            m = good.ir.m
+            got[how] = sum(
+                rg.scratch_out[k * m:(k + 1) * m] !=
+                rp.scratch_out[k * m:(k + 1) * m] for k in range(len(states)))
+    assert got == VARIANT_LANES[(op, fmt_name)], got

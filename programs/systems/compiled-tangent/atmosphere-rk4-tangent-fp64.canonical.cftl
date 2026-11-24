@@ -1,0 +1,96 @@
+; atmosphere - the canonical form, regenerated from the step graph
+; sha256 0af0301f40fbec9ca0d9531b9b99faa5e539d819e1b30886c2cc56f7a95318e9
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rdn (roundTowardNegative), in binary64.
+;
+; operations: the equations 12 (2 add, 4 mul, 1 div, 1 pow, 1 pown, 2 neg, 1 abs);
+;             a step 66 (15 fma, 11 add, 16 mul, 4 div, 4 pow, 4 pown, 8 neg, 4 abs);
+;             each tangent vector's equations 28 (2 fma, 3 add, 12 mul, 4 div, 3 pow, 1 pown, 1 neg, 1 abs, 1 copysign)
+;             and its step 130 (23 fma, 15 add, 48 mul, 16 div, 12 pow, 4 pown, 4 neg, 4 abs, 4 copysign)
+;
+; constants, exact value -> binary64 under rdn:
+;   h     0.015625   0x3f90000000000000  0x1p-6                exact
+;   h/2   0.0078125  0x3f80000000000000  0x1p-7                exact
+;   h/6   1/384      0x3f65555555555555  0x1.5555555555555p-9  inexact, relative error -5.5511e-17
+;   -5.5  -5.5       0xc016000000000000  -0x1.6p+2             exact
+;   -4.5  -4.5       0xc012000000000000  -0x1.2p+2             exact
+;   1     1          0x3ff0000000000000  0x1p+0                exact
+;   2     2          0x4000000000000000  0x1p+1                exact
+;   3     3          0x4008000000000000  0x1.8p+1              exact
+; h-scaled, halved by a step-halving bank: h, h/2, h/6
+
+system atmosphere
+format fp64
+round  rdn
+state  alt, v, m
+tangent w
+param  g = 1.25      ; 0x3ff4000000000000  0x1.4p+0  exact
+param  H = 8         ; 0x4020000000000000  0x1p+3  exact
+param  k = 0.0625    ; 0x3fb0000000000000  0x1p-4  exact
+param  c = 0.03125   ; 0x3fa0000000000000  0x1p-5  exact
+
+d/dt alt = v
+d/dt v = (-g) + (k * pow(1 + (alt / H), -4.5) * v * abs(v))
+d/dt m = -(c * pown(v, 3))
+
+d/dt w.alt = w.v
+d/dt w.v = fma(fma(k * ((-4.5) * pow(1 + (alt / H), -5.5) * (w.alt / H)), v, k * pow(1 + (alt / H), -4.5) * w.v), abs(v), k * pow(1 + (alt / H), -4.5) * v * (copysign(1, v) * w.v))
+d/dt w.m = -(c * (3 * pown(v, 2) * w.v))
+
+step rk4, h = 0.015625
+expansion
+  let k1.v = (-g) + (k * pow(1 + (alt / H), -4.5) * v * abs(v))
+  let k1.m = -(c * pown(v, 3))
+  let Y2.alt = fma(h/2, v, alt)
+  let Y2.v = fma(h/2, k1.v, v)
+  let k2.v = (-g) + (k * pow(1 + (Y2.alt / H), -4.5) * Y2.v * abs(Y2.v))
+  let k2.m = -(c * pown(Y2.v, 3))
+  let Y3.alt = fma(h/2, Y2.v, alt)
+  let Y3.v = fma(h/2, k2.v, v)
+  let k3.v = (-g) + (k * pow(1 + (Y3.alt / H), -4.5) * Y3.v * abs(Y3.v))
+  let k3.m = -(c * pown(Y3.v, 3))
+  let Y4.alt = fma(h, Y3.v, alt)
+  let Y4.v = fma(h, k3.v, v)
+  let k4.v = (-g) + (k * pow(1 + (Y4.alt / H), -4.5) * Y4.v * abs(Y4.v))
+  let k4.m = -(c * pown(Y4.v, 3))
+  let S2.alt = fma(2, Y2.v, v)
+  let S2.v = fma(2, k2.v, k1.v)
+  let S2.m = fma(2, k2.m, k1.m)
+  let S3.alt = fma(2, Y3.v, S2.alt)
+  let S3.v = fma(2, k3.v, S2.v)
+  let S3.m = fma(2, k3.m, S2.m)
+  let S4.alt = S3.alt + Y4.v
+  let S4.v = S3.v + k4.v
+  let S4.m = S3.m + k4.m
+  next alt = fma(h/6, S4.alt, alt)
+  next v = fma(h/6, S4.v, v)
+  next m = fma(h/6, S4.m, m)
+  let w.k1.v = fma(fma(k * ((-4.5) * pow(1 + (alt / H), -5.5) * (w.alt / H)), v, k * pow(1 + (alt / H), -4.5) * w.v), abs(v), k * pow(1 + (alt / H), -4.5) * v * (copysign(1, v) * w.v))
+  let w.k1.m = -(c * (3 * pown(v, 2) * w.v))
+  let w.Y2.alt = fma(h/2, w.v, w.alt)
+  let w.Y2.v = fma(h/2, w.k1.v, w.v)
+  let w.k2.v = fma(fma(k * ((-4.5) * pow(1 + (Y2.alt / H), -5.5) * (w.Y2.alt / H)), Y2.v, k * pow(1 + (Y2.alt / H), -4.5) * w.Y2.v), abs(Y2.v), k * pow(1 + (Y2.alt / H), -4.5) * Y2.v * (copysign(1, Y2.v) * w.Y2.v))
+  let w.k2.m = -(c * (3 * pown(Y2.v, 2) * w.Y2.v))
+  let w.Y3.alt = fma(h/2, w.Y2.v, w.alt)
+  let w.Y3.v = fma(h/2, w.k2.v, w.v)
+  let w.k3.v = fma(fma(k * ((-4.5) * pow(1 + (Y3.alt / H), -5.5) * (w.Y3.alt / H)), Y3.v, k * pow(1 + (Y3.alt / H), -4.5) * w.Y3.v), abs(Y3.v), k * pow(1 + (Y3.alt / H), -4.5) * Y3.v * (copysign(1, Y3.v) * w.Y3.v))
+  let w.k3.m = -(c * (3 * pown(Y3.v, 2) * w.Y3.v))
+  let w.Y4.alt = fma(h, w.Y3.v, w.alt)
+  let w.Y4.v = fma(h, w.k3.v, w.v)
+  let w.k4.v = fma(fma(k * ((-4.5) * pow(1 + (Y4.alt / H), -5.5) * (w.Y4.alt / H)), Y4.v, k * pow(1 + (Y4.alt / H), -4.5) * w.Y4.v), abs(Y4.v), k * pow(1 + (Y4.alt / H), -4.5) * Y4.v * (copysign(1, Y4.v) * w.Y4.v))
+  let w.k4.m = -(c * (3 * pown(Y4.v, 2) * w.Y4.v))
+  let w.S2.alt = fma(2, w.Y2.v, w.v)
+  let w.S2.v = fma(2, w.k2.v, w.k1.v)
+  let w.S2.m = fma(2, w.k2.m, w.k1.m)
+  let w.S3.alt = fma(2, w.Y3.v, w.S2.alt)
+  let w.S3.v = fma(2, w.k3.v, w.S2.v)
+  let w.S3.m = fma(2, w.k3.m, w.S2.m)
+  let w.S4.alt = w.S3.alt + w.Y4.v
+  let w.S4.v = w.S3.v + w.k4.v
+  let w.S4.m = w.S3.m + w.k4.m
+  next w.alt = fma(h/6, w.S4.alt, w.alt)
+  next w.v = fma(h/6, w.S4.v, w.v)
+  next w.m = fma(h/6, w.S4.m, w.m)
+end

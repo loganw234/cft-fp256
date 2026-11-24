@@ -638,8 +638,8 @@ def test_each_of_the_three_compiles_and_runs_as_lang_run_at_every_attribute(
     for rnd in sf.RND_MODES:
         text = _one(fn, fmt_name, RND_NAMES[rnd])
         c = cftc.compile_text(text, 2, source="t.cftl")
-        assert c.version == cftc.VERSION == 8
-        assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+        assert c.version == cftc.VERSION == 9
+        assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
         assert c.manifest["routines"]["calls"] == {fn: 1}
         assert "FLAG_CONTROL" in c.features
         assert c.accepted_by == ["sw", *REV8]
@@ -1076,7 +1076,7 @@ def test_the_committed_references_are_what_the_compiler_writes(name):
     for fname, data in files.items():
         assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
             fname
-    assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
     assert c.accepted_by == ["sw", *REV8]
     base, fmt = name.rsplit("-", 1)
     assert set(_calls(c)) == M2_CALLS[base.replace("-tangent", "")], \

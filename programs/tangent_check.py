@@ -60,7 +60,10 @@ lang_check.py, whose helpers this reuses), with tangents:
      and atan2 since M4's build (the phase follower at round rdn, whose
      lanes keep the oscillator in the half plane c > 0, so that atan2's
      primal never meets its jump, and q and v inside [-2, 2], asin's and
-     acos's domain); the golden reader and audit and
+     acos's domain), and the one holding pow and pown since M3's build (the
+     atmosphere at round rdn, whose lanes keep the base 1 + alt / 8 in
+     [1, 3/2] and v and m off the exact cases the pow family marks by
+     design); the golden reader and audit and
      cft-audit accept each. A segment that marks a lane (STATUS[6]) fails
      here by name: version 1 holds the machine's guess, STATUS[6] on the
      segment; cft-segrun's version-2 writer, which this leg does not use,
@@ -84,7 +87,8 @@ lang_check.py, whose helpers this reuses), with tangents:
      bytes - every committed graph holding a product of two tangent-
      carrying operands, and only those (Lotka-Volterra's, the diodes', the
      pendulum's and the phase follower's multiply a state value only by a
-     param, as its atan2 and the unary three are of one); three in a
+     param, as its atan2 and the unary three are of one; the atmosphere's
+     holds one, v * abs(v)); three in a
      copy of the compiler, each stopped by its internal check and, with
      that off, red on seq.py
   K  coverage: every operation the rules write, every activity pattern
@@ -289,9 +293,15 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
          # phase follower, atan2 of two state components and each of the
          # unary three of one, at round rdn, where acos's and atan2's rules
          # rounded otherwise are other bytes (and other values)
-         "phasefollower-rk4-tangent": 10}
+         "phasefollower-rk4-tangent": 10,
+         # pow, powr, pown, rootn and compound and their rules (M3's build):
+         # a body falling through a power-law atmosphere, pow with a
+         # non-integer constant exponent of a state-dependent base and
+         # pown with n = 3, at round rdn (the pown rule's pown(v, 2) is
+         # written by the compiler as v * v)
+         "atmosphere-rk4-tangent": 10}
 # The references holding the math library's routines, the six, sin, cos and
-# tan, and atan, asin, acos and atan2: compiled only where mpmath imports,
+# tan, atan, asin, acos and atan2, and pow and pown: compiled only where mpmath imports,
 # since the routines' generator derives their constants through it (a leg
 # that compiles them skips them by name elsewhere), and run on lanes whose
 # boxes keep the logarithms in their domains, the angles away from tan's
@@ -299,7 +309,8 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
 # none, and the leg fails by name a segment that marks one
 MATH_TREFS = ("lotkavolterra-rk4-tangent", "diode-rk4-tangent",
               "culture-rk4-tangent", "pendulum-rk4-tangent",
-              "attitude-rk4-tangent", "phasefollower-rk4-tangent")
+              "attitude-rk4-tangent", "phasefollower-rk4-tangent",
+              "atmosphere-rk4-tangent")
 MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
             "diode-rk4": [(0, 4), (0, 4)],
             "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)],
@@ -313,7 +324,12 @@ MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
             # segment that marks one)
             "phasefollower-rk4": [(Fraction(1, 2), 1),
                                   (-Fraction(1, 2), Fraction(1, 2)),
-                                  (-1, 1), (-1, 1), (-1, 1)]}
+                                  (-1, 1), (-1, 1), (-1, 1)],
+            # the atmosphere: alt in [0, 4] keeps the base 1 + alt / 8 in
+            # [1, 3/2], v in [-1, 1] and m in [1, 2]; no lane is an exact
+            # power, a zero or an infinity, the cases the pow family marks
+            # by design (leg G fails a segment that marks one)
+            "atmosphere-rk4": [(0, 4), (-1, 1), (1, 2)]}
 # Lorenz-63's largest Lyapunov exponent at sigma 10, rho 28, beta 8/3, as
 # the round's brief gives it (the figure commonly quoted, to four places)
 LITERATURE = Fraction(9056, 10000)

@@ -278,9 +278,10 @@ def build(c):
         # without them is what it was; atan, asin, acos and atan2 (M4's
         # build) likewise add a sentence of their own
         math = [op for op in calls if op not in ("div", "sqrt")]
-        six = [op for op in math if op not in RADIAN + INVERSE + POWER]
-        radian = [op for op in math if op in RADIAN]
-        inverse = [op for op in math if op in INVERSE]
+        six = [op for op in math
+               if inst[op][0] not in RADIAN + INVERSE + POWER]
+        radian = [op for op in math if inst[op][0] in RADIAN]
+        inverse = [op for op in math if inst[op][0] in INVERSE]
         power = [op for op in math if inst[op][0] in POWER]
         source, flags = [], ("each runs in a quiet region and raises exactly "
                              "its operation's flags: revision 8's flag "

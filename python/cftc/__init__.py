@@ -102,6 +102,37 @@ refusals, identical; the generated sources are tools of the parcel's
 scratch, not committed). The pack's 21 sources were not compiled at both
 trees, and for them, as for any other source outside those sets, it is
 believed, not shown (2026-11-11).
+9 is the math library's pow, powr, pown, rootn and compound (M3's build,
+2026-11-24; the language at 1.4): a source that names any of them - at run
+time, or folded where its operands are constants that give an exact value -
+which 8 refused, compiles, each run-time call an inlined routine,
+mathlib.py's fragment; pow and powr are routines of two inputs, x then y;
+pown, rootn and compound take an integer constant n, the second operand of
+their node, which keys the fragment (an instance a distinct n: `pown(3)`)
+and is in no bank slot; the exponents 2, 1 and -1 of pow, pown and rootn
+are written as one multiplication or division before the lowering; and
+pown, rootn and compound at fp32, which the math library has not built
+(parcel M3F2's), are `routine-unavailable` unless a rewrite takes them. For
+each source of the sets measured below, 9 writes the same images, banks and
+text files as 8, and its manifests say version 9; nothing else in them moved
+(a manifest's routines block carries the five's own sentence, and
+instance-keyed entries, only where its step holds one of the five, and
+`lowering.rewritten` only where a rewrite was made). That is what parcel M3C
+measured at both trees (the base f7a1ce95's python and the tip's, the
+language's 1.4 merged): the 55 .cftl files committed at f7a1ce95 outside
+the hard-workload pack (165 compiles on sw, u50-rev8 and u50-rev7 at 3
+steps: 124 images, only each manifest's version line moving, and 41
+refusals, identical; the 26 committed manifests of programs/systems/compiled
+and compiled-tangent change in that line alone, and the atmosphere
+reference adds 16 files) and 440 compiles of 110 generated sources without
+the five (330 on the three targets and 110 on sw with the call loop's
+constant lowered to 400: 362 images, 25 of them looped, only that line
+moving, and 78 refusals, identical; the generated sources are the
+generators of programs/lang_check.py at fixed seeds - corpus_texts(40),
+g_routine 25, g_six 20, g_three 13 and g_four 12 - and the script is a tool
+of the parcel's scratch, not committed). The pack's 21 sources were not
+compiled at both trees, and for them, as for any other source outside those
+sets, it is believed, not shown (2026-11-24).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -320,7 +351,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 8               # the output version: the module docstring, outputs.py
+VERSION = 9               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
