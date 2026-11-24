@@ -1,0 +1,32 @@
+oracle rows read from pw32n_slice-oracle.out.txt: 18 (function, n) pairs (raw_tfn us, oracle x1 us, oracle x5 us a lane; MEASURED by the C timer in the parcel's scratch folder, not committed; n a C long, 32 bits here: -2^63 does not fit and is not timed)
+
+per (function, n): instructions + 5 (rne) and over the five attributes (COMPUTED from pw32n.build at this tree); device `all` us a lane = five-attribute instructions x 0.98 ns
+  pown     n=2           : 870 instructions + 5 rne, five attributes 4329; device `all` 4.242 us; oracle x1 0.609 us, x5 3.703 us [MEASURED]
+  pown     n=-2          : 870 instructions + 5 rne, five attributes 4332; device `all` 4.245 us; oracle x1 0.829 us, x5 4.455 us [MEASURED]
+  pown     n=3           : 882 instructions + 5 rne, five attributes 4392; device `all` 4.304 us; oracle x1 0.875 us, x5 4.321 us [MEASURED]
+  pown     n=-3          : 882 instructions + 5 rne, five attributes 4395; device `all` 4.307 us; oracle x1 1.057 us, x5 5.891 us [MEASURED]
+  pown     n=17          : 882 instructions + 5 rne, five attributes 4392; device `all` 4.304 us; oracle x1 1.057 us, x5 4.964 us [MEASURED]
+  pown     n=2^31-1      : 894 instructions + 5 rne, five attributes 4452; device `all` 4.363 us; oracle x1 3.173 us, x5 14.491 us [MEASURED]
+  pown     n=-2^63       : 870 instructions + 5 rne, five attributes 4332; device `all` 4.245 us; oracle x1 1.267 us, x5 6.304 us [ESTIMATE (the mean of the function's 6 timed n: this n does not fit a long)]
+  rootn    n=2           : 876 instructions + 5 rne, five attributes 4359; device `all` 4.272 us; oracle x1 0.814 us, x5 3.509 us [MEASURED]
+  rootn    n=-2          : 876 instructions + 5 rne, five attributes 4362; device `all` 4.275 us; oracle x1 0.767 us, x5 3.580 us [MEASURED]
+  rootn    n=3           : 897 instructions + 5 rne, five attributes 4467; device `all` 4.378 us; oracle x1 1.029 us, x5 4.962 us [MEASURED]
+  rootn    n=-3          : 897 instructions + 5 rne, five attributes 4470; device `all` 4.381 us; oracle x1 1.180 us, x5 6.186 us [MEASURED]
+  rootn    n=17          : 897 instructions + 5 rne, five attributes 4467; device `all` 4.378 us; oracle x1 1.464 us, x5 7.702 us [MEASURED]
+  rootn    n=2^31-1      : 897 instructions + 5 rne, five attributes 4467; device `all` 4.378 us; oracle x1 2.746 us, x5 17.205 us [MEASURED]
+  rootn    n=-2^63       : 876 instructions + 5 rne, five attributes 4362; device `all` 4.275 us; oracle x1 1.333 us, x5 7.191 us [ESTIMATE (the mean of the function's 6 timed n: this n does not fit a long)]
+  compound n=2           : 923 instructions + 5 rne, five attributes 4597; device `all` 4.505 us; oracle x1 3.528 us, x5 15.645 us [MEASURED]
+  compound n=-2          : 923 instructions + 5 rne, five attributes 4594; device `all` 4.502 us; oracle x1 1.223 us, x5 6.562 us [MEASURED]
+  compound n=3           : 923 instructions + 5 rne, five attributes 4597; device `all` 4.505 us; oracle x1 3.446 us, x5 16.060 us [MEASURED]
+  compound n=-3          : 923 instructions + 5 rne, five attributes 4594; device `all` 4.502 us; oracle x1 1.675 us, x5 8.801 us [MEASURED]
+  compound n=17          : 923 instructions + 5 rne, five attributes 4597; device `all` 4.505 us; oracle x1 3.306 us, x5 16.603 us [MEASURED]
+  compound n=2^31-1      : 935 instructions + 5 rne, five attributes 4657; device `all` 4.564 us; oracle x1 2.722 us, x5 13.416 us [MEASURED]
+  compound n=-2^63       : 923 instructions + 5 rne, five attributes 4594; device `all` 4.502 us; oracle x1 2.650 us, x5 12.848 us [ESTIMATE (the mean of the function's 6 timed n: this n does not fit a long)]
+
+M3X's 36 slices: 36 oracle rows of pw32_slice-oracle.out.txt (pow, powr, 18 each); five-attribute instructions at this tree: pow 4637, powr 4522 (COMPUTED from pw32.build)
+
+TOTALS (COMPUTED; formulas shown). A slice on one tile = 2^32 x (device `all` + O) us, O the oracle's us a lane in that process; the quad's four tiles run one process each, so a set of slices takes (sum of slices) / 4
+  one oracle call (x1): 21 n-keyed slices: sum over (function, n) of 2^32 x (device + O) = 153.5 tile-hours, on the quad 38.4 h; 36 pow and powr slices (M3X's figures) 328.6 tile-hours, 82.1 h; the 57 together (153.5 + 328.6) / 4 = 120.5 h
+  five oracle calls (x5): 21 n-keyed slices: sum over (function, n) of 2^32 x (device + O) = 329.7 tile-hours, on the quad 82.4 h; 36 pow and powr slices (M3X's figures) 825.1 tile-hours, 206.3 h; the 57 together (329.7 + 825.1) / 4 = 288.7 h
+  the device alone, 21 slices: 109.7 tile-hours (27.4 h on the quad); instructions per slice (five attributes) from 4329 to 4657
+  against: the plan's 200 and 440 h (57 slices), M3X's 133 to 337 h (pow's counts for all 57; M3X's report); the 57 above use each slice's own counts and oracle rows

@@ -1,0 +1,25 @@
+n_word3_dropped where the third word of n matters: compound at n = 2^62 + 2^37 + 1, whose x are tiny (cint region) so that t = n log2(1 + x) is in range; the pools of the first plants run (pw32n_plants.out.txt) did not see it, the budget does
+  bound mode, fp32 compound n=2^62+2^37+1 region cint4611686155866341377, 100 lanes, seed 1, rne, plant None: bound + residual 0.052739 Bv over 97 lanes, measured worst 0.00980441 Bv -> green (under 1)
+  bound mode, fp32 compound n=2^62+2^37+1 region cint4611686155866341377, 100 lanes, seed 1, rne, plant n_word3_dropped: bound + residual 10.842 Bv over 97 lanes, measured worst 10.7924 Bv -> RED (over 1 Bv)
+n_word3_dropped on pown at n = 2^62 + 2^37 + 1 (region int4611686155866341377): every lane but x = +-1 is screened, so there is nothing to measure
+  bound mode, fp32 pown n=2^62+2^37+1 region int4611686155866341377, plant n_word3_dropped: 0 measured lanes of 100 -> NOT MEASURED (no lane: the plant is not red here, and says so)
+
+control shown red before it is relied on green (the brief): the fp64 pown region int control with 119 lanes, not 120, against the same reference file
+fp64 pown n=3 region int: 116 measured lanes of 119 (left out: 3, of them 0 by the tinyt gate), Y words n/a, G 44, GL 47, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 145
+  M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03)
+  measured worst 0.005090 Bv at x=0xaeb06509adbf5947 n=3
+  residual (second order, measured) 1.083e-06 Bv; bound + residual 0.015354 Bv
+    product      capacity 0.009000  observed 0.004500
+    log-sum      capacity 0.005191  observed 0.004056
+    exp-recon    capacity 0.000753  observed 0.000527
+    exp-poly     capacity 0.000112  observed 0.000056
+    log-poly     capacity 0.000070  observed 0.000040
+    exp-reduce   capacity 0.000020  observed 0.000006
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  3 s
+  reference: M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03)
+  this tool: M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03)
+  -> GREEN on 119 lanes: the control cannot tell 119 from 120
+17 s

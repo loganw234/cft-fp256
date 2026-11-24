@@ -1,0 +1,5 @@
+demo with a scratch copy of pw32n_box.sh (one function, two regions, 20 lanes), run from docs/studies/m3:
+every job good: script status 0
+done 2026-11-24 12:00:44 xargs status 0 (every job exited 0)
+job made to fail (an unknown region): script status 123
+done 2026-11-24 12:00:48 xargs status 123 (AT LEAST ONE JOB FAILED: read OUTDIR and the run log)

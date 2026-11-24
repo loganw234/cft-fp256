@@ -1,0 +1,43 @@
+least |log2 |x|| over fp32 x other than +-1: 8.5991e-08 (= 2^-23.47), at x = 1 - 2^-24 and 1 + 2^-23; the screens answer t >= 129 (overflow) and t <= -152 (underflow), so pown has an unscreened lane with x != +-1 only for |n| below about 1.500e+09 (2^30.48); COMPUTED
+
+pown: probe set of 4741 x (neighbours of +-1 to 300 ulp, +-2^E, 3000 random patterns)
+  n=2            Y words 1: MAIN PATH 2822, exact rule 280, screened 1639
+  n=-2           Y words 1: MAIN PATH 2842, exact rule 280, screened 1619
+  n=3            Y words 1: MAIN PATH 2290, exact rule 186, screened 2265
+  n=-3           Y words 1: MAIN PATH 2310, exact rule 186, screened 2245
+  n=17           Y words 1: MAIN PATH 1376, exact rule 32, screened 3333
+  n=2^31-1       Y words 2: exact rule 2, screened 4739
+  n=-2^63        Y words 1: exact rule 2, screened 4739
+  n=1000         Y words 1: MAIN PATH 1201, exact rule 2, screened 3538
+  n=16777217     Y words 2: MAIN PATH 298, exact rule 2, screened 4441
+  n=1099511627776 Y words 1: exact rule 2, screened 4739
+  n=2^48+1       Y words 2: exact rule 2, screened 4739
+  n=2^62+2^37+1  Y words 3: exact rule 2, screened 4739
+
+rootn: probe set of 4741 x (neighbours of +-1 to 300 ulp, +-2^E, 3000 random patterns)
+  n=2            Y words 1: MAIN PATH 2205, exact rule 138, special row 2398
+  n=-2           Y words 1: MAIN PATH 2205, exact rule 138, special row 2398
+  n=3            Y words 3: MAIN PATH 4557, exact rule 184
+  n=-3           Y words 3: MAIN PATH 4557, exact rule 184
+  n=17           Y words 3: MAIN PATH 4707, beside 1 (tinyt) 2, exact rule 32
+  n=2^31-1       Y words 3: MAIN PATH 3115, beside 1 (tinyt) 1624, exact rule 2
+  n=-2^63        Y words 1: beside 1 (tinyt) 2342, exact rule 1, special row 2398
+  n=1000         Y words 3: MAIN PATH 2213, beside 1 (tinyt) 129, exact rule 1, special row 2398
+  n=16777217     Y words 3: MAIN PATH 3538, beside 1 (tinyt) 1201, exact rule 2
+  n=1099511627776 Y words 1: beside 1 (tinyt) 2342, exact rule 1, special row 2398
+  n=2^48+1       Y words 3: beside 1 (tinyt) 4739, exact rule 2
+  n=2^62+2^37+1  Y words 3: beside 1 (tinyt) 4739, exact rule 2
+
+compound: probe set of 5247 x (neighbours of +-1 to 300 ulp, +-2^E, tiny x of compound, 3000 random patterns)
+  n=2            Y words 1: MAIN PATH 1761, beside 1 (tinyt) 1832, exact rule 11, screened 435, special row 1208
+  n=-2           Y words 1: MAIN PATH 1832, beside 1 (tinyt) 1832, exact rule 11, screened 364, special row 1208
+  n=3            Y words 1: MAIN PATH 1622, beside 1 (tinyt) 1823, exact rule 11, screened 583, special row 1208
+  n=-3           Y words 1: MAIN PATH 1684, beside 1 (tinyt) 1823, exact rule 11, screened 521, special row 1208
+  n=17           Y words 1: MAIN PATH 1108, beside 1 (tinyt) 1784, exact rule 2, screened 1145, special row 1208
+  n=2^31-1       Y words 2: MAIN PATH 592, beside 1 (tinyt) 1317, screened 2130, special row 1208
+  n=-2^63        Y words 1: MAIN PATH 603, beside 1 (tinyt) 757, screened 2679, special row 1208
+  n=1000         Y words 1: MAIN PATH 529, beside 1 (tinyt) 1675, screened 1835, special row 1208
+  n=16777217     Y words 2: MAIN PATH 588, beside 1 (tinyt) 1442, screened 2009, special row 1208
+  n=1099511627776 Y words 1: MAIN PATH 590, beside 1 (tinyt) 1168, screened 2281, special row 1208
+  n=2^48+1       Y words 2: MAIN PATH 571, beside 1 (tinyt) 1037, screened 2431, special row 1208
+  n=2^62+2^37+1  Y words 3: MAIN PATH 606, beside 1 (tinyt) 773, screened 2660, special row 1208

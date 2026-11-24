@@ -80,7 +80,16 @@ def nstr(n):
 # almost none: x = 2^(t / n) - 1 for t uniform in the main path's range, so
 # 1 + x is formed exactly by TwoSum and x is far below 2^-24 for n past 2^24.
 
+def _check_region(name):
+    """regions.py's region() takes any name of an n-keyed function for its
+    int branch; a name no region has is refused here, by name, so that a
+    misspelt job fails."""
+    if name not in RG.INT_NS and name != "zone" and             not re.fullmatch(r"(?:int|zone|cint)-?\d+", name):
+        raise ValueError(f"no region named {name!r}")
+
+
 def rg_n(fn, name):
+    _check_region(name)
     m = re.fullmatch(r"cint(-?\d+)", name)
     if m:
         return int(m.group(1))
@@ -88,6 +97,7 @@ def rg_n(fn, name):
 
 
 def rg_region(fn, name, count, seed=1):
+    _check_region(name)
     m = re.fullmatch(r"cint(-?\d+)", name)
     if not m:
         return RG.region(fmt, fn, name, count, seed)
@@ -471,7 +481,10 @@ def mode_pools(args):
                               f"n={lane[1]} got ({bits:#x},{fl:#x}) want "
                               f"({want[0]:#x},{want[1]:#x})")
     elif which == "agree":
-        _agree(fns)
+        nd = _agree(fns)
+        print(f"agree: {nd} differing lanes in all (each listed above), "
+              f"{time.time() - t0:.0f} s")
+        return
     print(f"{which}: {total} wrong unmarked lanes in all; "
           f"{time.time() - t0:.0f} s")
 
@@ -484,7 +497,9 @@ def _agree(fns):
     too, but rootn(-inf, even n) is invalid where pow(-inf, 1/n) is +inf, and
     rootn(-0, 2) is +0 where pow(-0, 0.5) is +0 and the odd n of pown carry
     x's sign. Lanes unmarked in both are compared, bits and flags; the
-    differing ones are printed with their class. compound has no pow twin."""
+    differing ones are printed with their class. compound has no pow twin.
+    Returns the number of differing lanes."""
+    nd = 0
     for fn in fns:
         if fn == "compound":
             print("compound: no pow twin (1 + x is not an operand of pow); "
@@ -514,12 +529,14 @@ def _agree(fns):
                         same += 1
                     else:
                         diffs.append((x, bits, fl, pb, pf))
+                nd += len(diffs)
                 print(f"{fn} n={nstr(n)} {AN[rnd]}: {both} lanes unmarked "
                       f"in both, equal {same}, different {len(diffs)}",
                       flush=True)
                 for x, bits, fl, pb, pf in diffs[:6]:
                     print(f"    x={x:#010x}: {fn} ({bits:#x},{fl:#x}) pow "
                           f"({pb:#x},{pf:#x})")
+    return nd
 
 
 # ---- the mark-rate law ------------------------------------------------------
@@ -529,7 +546,11 @@ X_N2 = {"pown": (3, 17), "rootn": (3, 17), "compound": (3, 1000)}
 
 def mode_rate_wide(args):
     """rate wide [LANES] [FN]: the law at bound_shift = G - 6, two n per
-    function, the main region (regions.py int at that n), rne and rtz."""
+    function, the main region (regions.py int at that n), rne and rtz. A lane
+    whose p = min(1, 2 Bv / s) is 1 is AT THE CAP: it is marked for sure and
+    says nothing about the law, so it is counted and left out of the judged
+    cell: the cell is the lanes with p < 1, observed marks against the sum of
+    p, variance the Bernoulli's, the sum of p (1 - p)."""
     nl = int(args[0]) if args else 2000
     fns = [args[1]] if len(args) > 1 else list(FNS)
     G = pw32n.GUARD
@@ -537,25 +558,24 @@ def mode_rate_wide(args):
     t0 = time.time()
     for fn in fns:
         for n in X_N2[fn]:
-            lanes = rg_region(fn, f"int{n}" if n not in (3,) else "int", nl, 3)
-            print(f"fp32 {fn} n={n} region int: {len(lanes)} lanes, seed 3, "
-                  f"G' = 6 (the bound 2^{shift} times its own, B1 and B2 "
-                  f"with it)")
+            rname = {3: "int", 17: "int17", 1000: "int1000"}[n]
+            lanes = rg_region(fn, rname, nl, 3)
+            print(f"fp32 {fn} n={n} region {rname}: {len(lanes)} lanes, "
+                  f"seed 3, G' = 6 (the bound 2^{shift} times its own, B1 "
+                  f"and B2 with it)")
             for rnd in (RNE, RTZ):
                 b = _b(fn, rnd, n, bound_shift=shift)
-                used = obs = wrong = gw = 0
-                exp = var = 0.0
-                capped = 0
+                used = capped = cap_marked = wrong = gw = nov = 0
+                obs_u = 0
+                exp_u = var_u = 0.0
                 for lane in lanes:
                     bits, fl, pr = b.run(lane[0], ("R", "Bv", "ex", "tinyt"))
-                    if pr["ex"] & ~fmt.sign_mask or \
-                            pr["tinyt"] & ~fmt.sign_mask:
+                    if pr["ex"] & ~fmt.sign_mask or                             pr["tinyt"] & ~fmt.sign_mask:
                         continue
                     if not RG.main_lane(fmt, fn, lane):
                         continue
                     inf = sf.inf_bits(fmt)
-                    if (pr["R"] & ~fmt.sign_mask) >= inf or \
-                            not (pr["R"] & ~fmt.sign_mask):
+                    if (pr["R"] & ~fmt.sign_mask) >= inf or                             not (pr["R"] & ~fmt.sign_mask):
                         continue
                     Rq = abs(float(dec(fmt, pr["R"])))
                     Bvq = float(dec(fmt, pr["Bv"]))
@@ -565,27 +585,84 @@ def mode_rate_wide(args):
                     ulp = 2.0 ** (e - fmt.prec + 1)
                     s = ulp / 2 if rnd in (RNE, RMM) else ulp
                     pm = min(1.0, 2 * Bvq / s)
-                    exp += pm
-                    var += pm * (1 - pm)
-                    capped += pm == 1.0
                     mk = bool(fl & MARK)
-                    obs += mk
+                    if fl & sf.FLAG_OVERFLOW:
+                        # an overflowed answer is decided by the final
+                        # scaling's screen and carries no mark (rate capped
+                        # shows it): it is outside the law's population
+                        nov += 1
+                        continue
                     used += 1
+                    if pm >= 1.0:
+                        capped += 1
+                        cap_marked += mk
+                    else:
+                        exp_u += pm
+                        var_u += pm * (1 - pm)
+                        obs_u += mk
                     want = golden(fmt, fn, lane, rnd)
                     same = (bits, fl & ~MARK) == want
                     if mk and not same:
                         gw += 1
                     if not mk and not same:
                         wrong += 1
-                zb = (obs - exp) / math.sqrt(var) if var > 0 else float("nan")
-                judged = "NOT JUDGED (a lane at the cap, p = 1)" if capped \
-                    else "judged"
-                print(f"  {AN[rnd]}: {used} lanes, marked {obs}, the law "
-                      f"predicts {exp:.1f}, Bernoulli z = {zb:+.2f} "
-                      f"(variance sum p(1-p) = {var:.1f}; {capped} of "
-                      f"{used} lanes have p = 1; {judged}); wrong guesses "
-                      f"{gw}, WRONG UNMARKED {wrong}", flush=True)
+                zb = (obs_u - exp_u) / math.sqrt(var_u) if var_u > 0                     else float("nan")
+                print(f"  {AN[rnd]}: {used} main-path lanes (and {nov} "
+                      f"whose answer overflows, left out: never marked); "
+                      f"{capped} at "
+                      f"the cap (p = 1; {cap_marked} of them marked; left "
+                      f"out of the judgement); judged cell: {used - capped} "
+                      f"lanes with p < 1, marked {obs_u}, the law predicts "
+                      f"{exp_u:.1f}, observed / predicted "
+                      f"{obs_u / exp_u if exp_u else float('nan'):.3f}, "
+                      f"Bernoulli z = {zb:+.2f} (variance sum p(1-p) = "
+                      f"{var_u:.1f}); wrong guesses {gw}, WRONG UNMARKED "
+                      f"{wrong}", flush=True)
     print(f"{time.time() - t0:.0f} s")
+
+
+def mode_rate_capped(args):
+    """rate capped [LANES]: where the lanes at the cap that are NOT marked
+    come from. The lanes of mode_rate_wide's cell, split by (at the cap or
+    not, marked or not, the answer's kind): an unmarked lane at the cap whose
+    answer is an overflow (+-inf under rne) was decided by the overflow
+    screen of the final scaling and carries no mark by design; the law's
+    population (regions.main_lane) includes it."""
+    nl = int(args[0]) if args else 2000
+    shift = pw32n.GUARD - 6
+    t0 = time.time()
+    for fn, n in (("pown", 3), ("rootn", 3), ("compound", 3)):
+        lanes = rg_region(fn, "int", nl, 3)
+        for rnd in (RNE, RTZ):
+            b = _b(fn, rnd, n, bound_shift=shift)
+            c = Counter()
+            for ln in lanes:
+                bits, fl, pr = b.run(ln[0], ("R", "Bv", "ex", "tinyt"))
+                if pr["ex"] & ~fmt.sign_mask or pr["tinyt"] & ~fmt.sign_mask:
+                    continue
+                if not RG.main_lane(fmt, fn, ln):
+                    continue
+                if (pr["R"] & ~fmt.sign_mask) >= sf.inf_bits(fmt) or \
+                        not (pr["R"] & ~fmt.sign_mask):
+                    continue
+                Rq = abs(float(dec(fmt, pr["R"])))
+                Bvq = float(dec(fmt, pr["Bv"]))
+                s = 2.0 ** (math.floor(math.log2(Rq)) - 23) * \
+                    (0.5 if rnd == RNE else 1)
+                capped = 2 * Bvq >= s
+                ab = bits & ~fmt.sign_mask
+                kind = ("overflow flag set" if fl & sf.FLAG_OVERFLOW else
+                        "+-inf" if ab == sf.inf_bits(fmt) else
+                        "zero or subnormal" if ab < (1 << 23) else "normal")
+                c[("at the cap" if capped else "p < 1",
+                   "marked" if fl & MARK else "unmarked", kind)] += 1
+            print(f"fp32 {fn} n={n} region int, {len(lanes)} lanes, seed 3, "
+                  f"G' = 6, {AN[rnd]}: "
+                  + "; ".join(f"{'/'.join(k)} {v}"
+                              for k, v in sorted(c.items())), flush=True)
+    print(f"{time.time() - t0:.0f} s")
+
+
 
 
 def mode_rate_lists(args):
@@ -628,6 +705,8 @@ def mode_rate_lists(args):
 def mode_rate(args):
     if args[0] == "wide":
         mode_rate_wide(args[1:])
+    elif args[0] == "capped":
+        mode_rate_capped(args[1:])
     else:
         mode_rate_lists(args[1:])
 
@@ -972,6 +1051,156 @@ def mode_nscan():
 
 
 
+# ---- the tool's finding and the same question of pow and powr ----------------
+
+def mode_finding():
+    """TWBudget's (M3X's tool's) bound on compound n = 3, region int, 30
+    lanes, seed 1, rne: 7468 Bv, from ONE lane; the terms that made it."""
+    t0 = time.time()
+    n = 3
+    lanes = RG.region(fmt, "compound", "int", 30, 1)
+    b = _b("compound", RNE, n)
+    tw = PB.TWBudget(b).add(lanes)
+    s = tw.summary()
+    print(f"TWBudget (pw32_budget.py, M3X's tool, unchanged) on fp32 "
+          f"compound n={n} region int, {len(lanes)} lanes, seed 1, rne: "
+          f"{s['lanes']} lanes, M max {s['Mmax']:.6f} Bv, capacities "
+          f"{s['S_cap']:.6f} Bv, BOUND {s['bound']:.6f} Bv")
+    nb = NB.NBudget(b).add(lanes)
+    sn = nb.summary()
+    print(f"NBudget (pw32n_budget.py) on the same lanes: {sn['lanes']} "
+          f"lanes measured, {nb.skipped_tiny} left out by the tinyt gate, "
+          f"M max {sn['Mmax']:.6f}, capacities {sn['S_cap']:.6f}, BOUND "
+          f"{sn['bound']:.6f} Bv")
+    act = [i for i in range(len(tw.cap)) if tw.active[i]]
+    top = sorted(act, key=lambda i: -tw.cap[i])[:4]
+    body = tw.an.body
+    print("the active instructions with the largest capacity (index, "
+          "label, op, the capacity the tool sums, the largest observed "
+          "contribution):")
+    for i in top:
+        best = None
+        rounds_in = []
+        for ln in lanes:
+            if not tw.in_main(ln):
+                continue
+            one = PB.TWBudget(b).add([ln])
+            if best is None or one.cap[i] > best[0]:
+                best = (one.cap[i], ln)
+            if one.active[i]:
+                rounds_in.append(ln)
+        print(f"  instruction {i}: label {b.label_of[i]}, op {body[i][0]}, "
+              f"sources {body[i][2]}, capacity {tw.cap[i]:.6g} Bv, "
+              f"observed {tw.obs[i]:.3g} Bv; the capacity comes from "
+              f"x={best[1][0]:#010x} n={best[1][1]} (largest over the "
+              f"lanes, {best[0]:.6g} Bv); the instruction rounds (is "
+              f"active) in {len(rounds_in)} lane(s): "
+              + ", ".join(f"x={ln[0]:#010x}" for ln in rounds_in[:4]))
+    tl = [ln for ln in lanes if tw.in_main(ln) and
+          M.run(b, "compound", ln, ("tinyt",))[2]["tinyt"] & ~fmt.sign_mask]
+    for ln in tl:
+        nbu = NB.NBudget(b)
+        nbu._direct(ln)
+        print(f"  the lane x={ln[0]:#010x} (x = {float(dec(fmt, ln[0])):.4e}"
+              f"), n={n}, rne: |t0| < 2^-27 (tinyt set); its DIRECT error "
+              f"(V against the true value) is {nbu.tiny_E[0]:.3e} Bv; "
+              f"alone, TWBudget's own bound on it is "
+              f"{PB.TWBudget(b).add([ln]).summary()['bound']:.3e} Bv")
+    print(f"{time.time() - t0:.0f} s")
+
+
+def mode_tinyq(args):
+    """The same question of M3X's pow and powr: do M3X's regions draw lanes
+    with |t0| < 2^-27, and does TWBudget's bound differ from NBudget's
+    there? pw32.build, rne, 300 lanes a region, seed 1."""
+    t0 = time.time()
+    nl = int(args[0]) if args else 300
+    for fn in ("pow", "powr"):
+        b = pw32.build(fn, RNE)
+        for name in ("wide", "small", "tinyy", "near1", "sub"):
+            lanes = RG.region(fmt, fn, name, nl, 1)
+            tw = PB.TWBudget(b).add(lanes)
+            nb = NB.NBudget(b).add(lanes)
+            st, sn = tw.summary(), nb.summary()
+            print(f"fp32 {fn} region {name}: {len(lanes)} lanes; TWBudget "
+                  f"measures {st['lanes']} (bound {st['bound']:.6f} + "
+                  f"residual {st['resid']:.2e} Bv); NBudget measures "
+                  f"{sn['lanes']} and leaves out {nb.skipped_tiny} by the "
+                  f"tinyt gate (bound {sn['bound']:.6f} + residual "
+                  f"{sn['resid']:.2e} Bv)"
+                  + (f"; the tinyt lanes' direct error, largest "
+                     f"{max(nb.tiny_E):.3e} Bv" if nb.tiny_E else ""),
+                  flush=True)
+    print(f"{time.time() - t0:.0f} s")
+
+
+
+
+# ---- plants the first run left for a second mode, and the control shown red ---
+
+def mode_plants_extra():
+    t0 = time.time()
+    print("n_word3_dropped where the third word of n matters: compound at "
+          "n = 2^62 + 2^37 + 1, whose x are tiny (cint region) so that "
+          "t = n log2(1 + x) is in range; the pools of the first plants run "
+          "(pw32n_plants.out.txt) did not see it, the budget does")
+    n3 = 2 ** 62 + 2 ** 37 + 1
+    for p_ in (None, "n_word3_dropped"):
+        tot, ln, em = _bound_tot("compound", n3, f"cint{n3}", 100, p_)
+        print(f"  bound mode, fp32 compound n={nstr(n3)} region cint{n3}, "
+              f"100 lanes, seed 1, rne, plant {p_}: bound + residual "
+              f"{tot:.6g} Bv over {ln} lanes, measured worst {em:.6g} Bv -> "
+              f"{_verdict(tot >= 1, 'over 1 Bv', 'green (under 1)')}",
+              flush=True)
+    print("n_word3_dropped on pown at n = 2^62 + 2^37 + 1 (region "
+          f"int{n3}): every lane but x = +-1 is screened, so there is "
+          "nothing to measure")
+    b = _b("pown", RNE, n3, plant="n_word3_dropped")
+    lanes = rg_region("pown", f"int{n3}", 100, 1)
+    bud = NB.NBudget(b).add(lanes)
+    s = bud.summary()
+    print(f"  bound mode, fp32 pown n={nstr(n3)} region int{n3}, plant "
+          f"n_word3_dropped: {s['lanes']} measured lanes of {len(lanes)} -> "
+          + ("NOT MEASURED (no lane: the plant is not red here, and says so)"
+             if s["lanes"] == 0 else "measured"), flush=True)
+    print("\ncontrol shown red before it is relied on green (the brief): "
+          "the fp64 pown region int control with 119 lanes, not 120, against "
+          "the same reference file")
+    lanes = RG.region(FP64, "pown", "int", 119, 1)
+    b = M.build("pown", FP64, RNE, n=3)
+    s = NB.report(b, lanes, "int", time.time())
+    ref = open("budget.fp64-pown-int.out.txt").read().splitlines()
+    want = [ln for ln in ref if "M max" in ln][0].strip()
+    got = (f"M max {s['Mmax']:.6f} Bv; capacities {s['S_cap']:.6f} Bv; "
+           f"BOUND {s['bound']:.6f} Bv (2^{lg(s['bound']):.2f})")
+    print(f"  reference: {want}\n  this tool: {got}\n  -> "
+          + ("RED: the control does not reproduce a doctored lane count "
+             "(it can fail)" if got != want else
+             "GREEN on 119 lanes: the control cannot tell 119 from 120"))
+    print(f"{time.time() - t0:.0f} s")
+
+
+
+
+def mode_control_red():
+    """The control shown red: the fp64 pown region int control on 120 lanes
+    of seed 2 (not seed 1) against the same reference file; plants-extra's
+    119-lane doctoring was GREEN (the 120th lane moves no figure), so the
+    control's sensitivity is to which lanes, not to one lane."""
+    lanes = RG.region(FP64, "pown", "int", 120, 2)
+    b = M.build("pown", FP64, RNE, n=3)
+    s = NB.report(b, lanes, "int", time.time())
+    ref = open("budget.fp64-pown-int.out.txt").read().splitlines()
+    want = [ln for ln in ref if "M max" in ln][0].strip()
+    got = (f"M max {s['Mmax']:.6f} Bv; capacities {s['S_cap']:.6f} Bv; "
+           f"BOUND {s['bound']:.6f} Bv (2^{lg(s['bound']):.2f})")
+    print(f"  reference: {want}")
+    print(f"  this tool: {got}")
+    print("  -> " + ("RED: the control does not reproduce on other lanes "
+                     "(seed 2)" if got != want else
+                     "GREEN on seed 2: the control cannot fail"))
+
+
 def main():
     mode, args = sys.argv[1], sys.argv[2:]
     if mode == "costs":
@@ -990,6 +1219,14 @@ def main():
         mode_slice()
     elif mode == "nscan":
         mode_nscan()
+    elif mode == "finding":
+        mode_finding()
+    elif mode == "tinyq":
+        mode_tinyq(args)
+    elif mode == "plants-extra":
+        mode_plants_extra()
+    elif mode == "control-red":
+        mode_control_red()
     elif mode == "control":
         if not mode_control():
             raise SystemExit(1)

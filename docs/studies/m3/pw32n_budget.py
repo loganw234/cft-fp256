@@ -29,9 +29,33 @@ import pw32n
 
 
 class NBudget(PB.TWBudget):
+    """TWBudget with one predicate added to in_main. THE PREDICATE, exactly:
+    a lane is left out when the build's probe `tinyt` is nonzero, `tinyt`
+    being b.icmplt(|t0|, TINYT) with t0 the first word of t = Y L and TINYT
+    the encoding of 2^-(p+3) = 2^-27: an integer compare of |t0|'s encoding
+    against 2^-27's, so |t0| < 2^-27 (t0 = 0 included). Those lanes are
+    answered by the rule beside 1 (mark cleared, the side of 1 from the
+    operands' signs), not by the in-lane test, so Bv plays no part in their
+    answer. WHY the first-order model does not hold there: t is that small
+    only where L or Y is, and then the logarithm's words (a word of L is
+    2^-24 of the one above it, F's lowest 2^-72 of F) fall into the
+    subnormals, 2^-126 to 2^-149, where a rounding is an ABSOLUTE error
+    (at most 2^-150) and not a relative one, so the capacity the tool takes
+    for an instruction (a half ulp of its value) is not that error, and the
+    tool's sum over every instruction that rounds in any lane, each at its
+    worst capacity over all lanes, is dominated by instructions that round
+    only in these lanes. This is a LIMIT of the budget, not coverage: the
+    budget says nothing about the left-out lanes. What is printed for them
+    instead is each one's DIRECT error (V against the true value, in Bv; the
+    measured worst of the set, a sample, not a bound), and what covers them
+    is the pools and regions on seq.py (their answers are the rule's) and
+    the card's sweeps to come."""
+
     def __init__(self, build):
         super().__init__(build)
         self.skipped_tiny = 0
+        self.tiny_E = []                 # direct error of each, in Bv
+        self.tiny_worst = None
 
     def in_main(self, lane):
         if not super().in_main(lane):
@@ -40,8 +64,24 @@ class NBudget(PB.TWBudget):
         _b, _f, pr = M.run(self.b, fn, lane, ("tinyt",))
         if pr["tinyt"] & ~fmt.sign_mask:
             self.skipped_tiny += 1
+            self._direct(lane)
             return False
         return True
+
+    def _direct(self, lane):
+        """The left-out lane's own error: |V - T| / Bv, V the model's three
+        words summed, T the true value scaled by 2^-k, as add() has it."""
+        import mpmath
+        from m3core import true_value
+        an, fmt, fn = self.an, self.b.fmt, self.b.meta["fn"]
+        L = an.analyze(M.lane_of(fn, lane))
+        k = (L.vals[self.b.probes["Ek"][1]] - fmt.bias - self.b.meta["OFF"])
+        with mpmath.workprec(an.prec):
+            T = true_value(fmt, fn, lane, an.prec) * mpmath.mpf(2) ** (-k)
+            E = float(abs((L.V - T) / L.Bv)) if L.Bv else float("inf")
+        self.tiny_E.append(E)
+        if self.tiny_worst is None or E >= max(self.tiny_E):
+            self.tiny_worst = lane
 
 
 def report(bld, lanes, label, t0):
@@ -52,6 +92,7 @@ def report(bld, lanes, label, t0):
     bud = NBudget(bld).add(lanes)
     s = bud.summary()
     s["tiny"] = bud.skipped_tiny
+    s["tiny_E"] = max(bud.tiny_E) if bud.tiny_E else None
     print(f"{bld.fmt.name} {fn} n={bld.meta.get('n')} region {label}: "
           f"{s['lanes']} measured lanes of {len(lanes)} (left out: "
           f"{s['skipped']}, of them {bud.skipped_tiny} by the tinyt gate), "
@@ -59,6 +100,13 @@ def report(bld, lanes, label, t0):
           f"{bld.meta['GL']}, B1 "
           f"2^{lg(bld.meta['B1']) if bld.meta['B1'] else '-inf'}, B2 "
           f"2^{lg(bld.meta['B2']) if bld.meta['B2'] else '-inf'}")
+    if bud.tiny_E:
+        print(f"  left out by the tinyt gate: {bud.skipped_tiny} lanes "
+              f"(|t0| < 2^-27; NOT bounded by this budget); their DIRECT "
+              f"error, V against the true value in Bv: largest "
+              f"{max(bud.tiny_E):.3e} at "
+              f"{RG.show(bud.tiny_worst, fn)}; measured, a sample, not a "
+              f"bound")
     if s["lanes"] == 0:
         print("  NOT MEASURED (0 measured lanes in this region: no bound, "
               "no margin)")

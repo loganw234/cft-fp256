@@ -1,0 +1,110 @@
+PLANTS of pw32n.build; each shown red in a named mode beside the control (plant None) green. A plant's threshold says its sensitivity.
+
+plant l3_dropped (M3X's, red in `bound`): the third word of L dropped: the product's rounded term and L2's share of the sum are left out
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0391185 Bv over 92 lanes, measured worst 0.00499954 Bv -> green (under 1)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant l3_dropped: bound + residual 57827 Bv over 92 lanes, measured worst 52449.7 Bv -> RED (over 1 Bv)
+  bound mode, fp32 rootn n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0610128 Bv over 100 lanes, measured worst 0.00640747 Bv -> green (under 1)
+  bound mode, fp32 rootn n=3 region int, 100 lanes, seed 1, rne, plant l3_dropped: bound + residual 53960.1 Bv over 100 lanes, measured worst 48680.7 Bv -> RED (over 1 Bv)
+  bound mode, fp32 compound n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0763176 Bv over 65 lanes, measured worst 0.00459912 Bv -> green (under 1)
+  bound mode, fp32 compound n=3 region int, 100 lanes, seed 1, rne, plant l3_dropped: bound + residual 56847.5 Bv over 65 lanes, measured worst 49368.3 Bv -> RED (over 1 Bv)
+plant b1_dropped (red in a region other than `edge`): the bound's |t0| B1 term dropped (B1 = 0)
+  bound mode, fp32 pown n=1000 region int1000, 100 lanes, seed 1, rne, plant None: bound + residual 0.156498 Bv over 92 lanes, measured worst 0.0370453 Bv -> green (under 1)
+  bound mode, fp32 pown n=1000 region int1000, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 2.30929 Bv over 92 lanes, measured worst 0.267085 Bv -> RED (over 1 Bv)
+  bound mode, fp32 pown n=1000 region zone1000, 100 lanes, seed 1, rne, plant None: bound + residual 0.17234 Bv over 100 lanes, measured worst 0.0393092 Bv -> green (under 1)
+  bound mode, fp32 pown n=1000 region zone1000, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 1.72171 Bv over 100 lanes, measured worst 0.116395 Bv -> RED (over 1 Bv)
+  bound mode, fp32 pown n=17 region int17, 100 lanes, seed 1, rne, plant None: bound + residual 0.0726491 Bv over 92 lanes, measured worst 0.00859058 Bv -> green (under 1)
+  bound mode, fp32 pown n=17 region int17, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.201399 Bv over 92 lanes, measured worst 0.0317818 Bv -> green (under 1)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0391185 Bv over 92 lanes, measured worst 0.00499954 Bv -> green (under 1)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.0967166 Bv over 92 lanes, measured worst 0.0140946 Bv -> green (under 1)
+  bound mode, fp32 rootn n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0610128 Bv over 100 lanes, measured worst 0.00640747 Bv -> green (under 1)
+  bound mode, fp32 rootn n=3 region int, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.135369 Bv over 100 lanes, measured worst 0.0147374 Bv -> green (under 1)
+  bound mode, fp32 rootn n=17 region int17, 100 lanes, seed 1, rne, plant None: bound + residual 0.0546145 Bv over 100 lanes, measured worst 0.00884923 Bv -> green (under 1)
+  bound mode, fp32 rootn n=17 region int17, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.0788619 Bv over 100 lanes, measured worst 0.0102971 Bv -> green (under 1)
+  bound mode, fp32 compound n=1000 region int1000, 100 lanes, seed 1, rne, plant None: bound + residual 0.0826504 Bv over 55 lanes, measured worst 0.0146915 Bv -> green (under 1)
+  bound mode, fp32 compound n=1000 region int1000, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.84453 Bv over 55 lanes, measured worst 0.199995 Bv -> green (under 1)
+  bound mode, fp32 compound n=1000 region zone1000, 100 lanes, seed 1, rne, plant None: bound + residual 0.32768 Bv over 100 lanes, measured worst 0.0440733 Bv -> green (under 1)
+  bound mode, fp32 compound n=1000 region zone1000, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 4.29917 Bv over 100 lanes, measured worst 0.715907 Bv -> RED (over 1 Bv)
+  bound mode, fp32 compound n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0763176 Bv over 65 lanes, measured worst 0.00459912 Bv -> green (under 1)
+  bound mode, fp32 compound n=3 region int, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.11521 Bv over 65 lanes, measured worst 0.0126004 Bv -> green (under 1)
+  bound mode, fp32 compound n=17 region int17, 100 lanes, seed 1, rne, plant None: bound + residual 0.130305 Bv over 61 lanes, measured worst 0.0065713 Bv -> green (under 1)
+  bound mode, fp32 compound n=17 region int17, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 0.307386 Bv over 61 lanes, measured worst 0.0284008 Bv -> green (under 1)
+  bound mode, fp32 compound n=16777217 region cint16777217, 100 lanes, seed 1, rne, plant None: bound + residual 0.119555 Bv over 97 lanes, measured worst 0.0132235 Bv -> green (under 1)
+  bound mode, fp32 compound n=16777217 region cint16777217, 100 lanes, seed 1, rne, plant b1_dropped: bound + residual 3.32275 Bv over 97 lanes, measured worst 0.44063 Bv -> RED (over 1 Bv)
+plant mark_silenced (red in `rate` and `pools`): the mark never set; the rate cell is RED when the plant's marks are under half the control's, so a silencing of under half is NOT seen by it (sensitivity); the pools cell is red at any wrong unmarked lane
+  rate mode, fp32 pown n=3 region int, 600 lanes, seed 3, G' = 6, rne, plant None: 600 main-path lanes, marked 429, the law predicts 480.0, WRONG UNMARKED 0 -> green (the control)
+  rate mode, fp32 pown n=3 region int, 600 lanes, seed 3, G' = 6, rne, plant mark_silenced: 600 main-path lanes, marked 0, the law predicts 480.0, WRONG UNMARKED 0 -> RED (under half the control marks)
+  pools mode (model), fp32 pown n in 3, 2, -3 x rne, rtz, rdn, 340 x operands, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n in 3, 2, -3 x rne, rtz, rdn, 340 x operands, plant mark_silenced: WRONG UNMARKED 642 -> RED (wrong unmarked lanes)
+  rate mode, fp32 rootn n=3 region int, 600 lanes, seed 3, G' = 6, rne, plant None: 600 main-path lanes, marked 256, the law predicts 256.2, WRONG UNMARKED 0 -> green (the control)
+  rate mode, fp32 rootn n=3 region int, 600 lanes, seed 3, G' = 6, rne, plant mark_silenced: 600 main-path lanes, marked 0, the law predicts 256.2, WRONG UNMARKED 0 -> RED (under half the control marks)
+  pools mode (model), fp32 rootn n in 3, 2, -3 x rne, rtz, rdn, 340 x operands, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n in 3, 2, -3 x rne, rtz, rdn, 340 x operands, plant mark_silenced: WRONG UNMARKED 114 -> RED (wrong unmarked lanes)
+  rate mode, fp32 compound n=3 region int, 600 lanes, seed 3, G' = 6, rne, plant None: 377 main-path lanes, marked 85, the law predicts 92.9, WRONG UNMARKED 0 -> green (the control)
+  rate mode, fp32 compound n=3 region int, 600 lanes, seed 3, G' = 6, rne, plant mark_silenced: 377 main-path lanes, marked 0, the law predicts 92.9, WRONG UNMARKED 0 -> RED (under half the control marks)
+  pools mode (model), fp32 compound n in 3, 2, -3 x rne, rtz, rdn, 340 x operands, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n in 3, 2, -3 x rne, rtz, rdn, 340 x operands, plant mark_silenced: WRONG UNMARKED 441 -> RED (wrong unmarked lanes)
+plant n_word_ulp: the first word of n (pown, compound) or of 1/n (rootn) one ulp off
+  pools mode (model), fp32 pown n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=3, 340 x operands, rne + rtz, plant n_word_ulp: WRONG UNMARKED 522 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 rootn n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n=3, 340 x operands, rne + rtz, plant n_word_ulp: WRONG UNMARKED 487 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant n_word_ulp: WRONG UNMARKED 390 -> RED (wrong unmarked lanes)
+plant n_low_dropped: the words of n below the first left out (pown, compound): the same fragment where n has one word
+  pools mode (model), fp32 pown n=16777217, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=16777217, 340 x operands, rne + rtz, plant n_low_dropped: WRONG UNMARKED 50 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 compound n=16777217, 540 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=16777217, 540 x operands, rne + rtz, plant n_low_dropped: WRONG UNMARKED 360 -> RED (wrong unmarked lanes)
+plant n_word3_dropped: the THIRD word of n (pown, compound) or of 1/n (rootn) dropped
+  pools mode (model), fp32 rootn n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n=3, 340 x operands, rne + rtz, plant n_word3_dropped: WRONG UNMARKED 36 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 rootn n=17, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n=17, 340 x operands, rne + rtz, plant n_word3_dropped: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=2^62+2^37+1, 540 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=2^62+2^37+1, 540 x operands, rne + rtz, plant n_word3_dropped: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=2^62+2^37+1, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=2^62+2^37+1, 340 x operands, rne + rtz, plant n_word3_dropped: WRONG UNMARKED 0 -> green
+plant n_row_loud: the x = +-inf row's flag word left inexact (the answer right, a flag raised)
+  pools mode (model), fp32 pown n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=3, 340 x operands, rne + rtz, plant n_row_loud: WRONG UNMARKED 4 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 rootn n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n=3, 340 x operands, rne + rtz, plant n_row_loud: WRONG UNMARKED 4 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant n_row_loud: WRONG UNMARKED 2 -> RED (wrong unmarked lanes)
+plant rootn_m0_neg: rootn(-0, 2) answered -0 (squareRoot's row): the sign of x, not +0, for an even n
+  pools mode (model), fp32 rootn n=2, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n=2, 340 x operands, rne + rtz, plant rootn_m0_neg: WRONG UNMARKED 2 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 rootn n=-2, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 rootn n=-2, 340 x operands, rne + rtz, plant rootn_m0_neg: WRONG UNMARKED 2 -> RED (wrong unmarked lanes)
+plant compound_onep_rounded: 1 + x rounded before the logarithm, its low word u_l dropped
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant compound_onep_rounded: WRONG UNMARKED 19 -> RED (wrong unmarked lanes)
+  pools mode (model), fp32 compound n=17, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=17, 340 x operands, rne + rtz, plant compound_onep_rounded: WRONG UNMARKED 26 -> RED (wrong unmarked lanes)
+plant exact_rule_no_tl: the power-of-two rule without t_l = 0 (pown and compound: rootn's own rule is that already): an inexact t is called exact
+  pools mode (model), fp32 pown n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=3, 340 x operands, rne + rtz, plant exact_rule_no_tl: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=17, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=17, 340 x operands, rne + rtz, plant exact_rule_no_tl: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=16777217, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 pown n=16777217, 340 x operands, rne + rtz, plant exact_rule_no_tl: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=3, 340 x operands, rne + rtz, plant exact_rule_no_tl: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=1000, 340 x operands, rne + rtz, plant None: WRONG UNMARKED 0 -> green
+  pools mode (model), fp32 compound n=1000, 340 x operands, rne + rtz, plant exact_rule_no_tl: WRONG UNMARKED 0 -> green
+  bound mode, fp32 rootn n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0610128 Bv over 100 lanes, measured worst 0.00640747 Bv -> green (under 1)
+  bound mode, fp32 rootn n=3 region int, 100 lanes, seed 1, rne, plant n_word3_dropped: bound + residual 28700.6 Bv over 100 lanes, measured worst 28700.6 Bv -> RED (over 1 Bv)
+  bound mode, fp32 compound n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0763176 Bv over 65 lanes, measured worst 0.00459912 Bv -> green (under 1)
+  bound mode, fp32 compound n=3 region int, 100 lanes, seed 1, rne, plant compound_onep_rounded: bound + residual 1.27122e+12 Bv over 65 lanes, measured worst 1.27122e+12 Bv -> RED (over 1 Bv)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0391185 Bv over 92 lanes, measured worst 0.00499954 Bv -> green (under 1)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant n_word_ulp: bound + residual 2.67174e+12 Bv over 92 lanes, measured worst 2.67174e+12 Bv -> RED (over 1 Bv)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant None: bound + residual 0.0391185 Bv over 92 lanes, measured worst 0.00499954 Bv -> green (under 1)
+  bound mode, fp32 pown n=3 region int, 100 lanes, seed 1, rne, plant exact_rule_no_tl: bound + residual 0.0391185 Bv over 92 lanes, measured worst 0.00499954 Bv -> green (under 1)
+rootn's 1/n at two words (words=2) against three (the default): bound mode, region int, 100 lanes, seed 1
+  rootn n=3 words=2: bound + residual 28700.6 Bv over 100 lanes, measured worst 28700.6 Bv -> RED (over 1 Bv)
+  rootn n=3 words=3: bound + residual 0.0610128 Bv over 100 lanes, measured worst 0.00640747 Bv -> green (under 1)
+  rootn n=17 words=2: bound + residual 360.733 Bv over 100 lanes, measured worst 360.681 Bv -> RED (over 1 Bv)
+  rootn n=17 words=3: bound + residual 0.0546145 Bv over 100 lanes, measured worst 0.00884923 Bv -> green (under 1)
+  rootn n=-3 words=2: bound + residual 28700.6 Bv over 100 lanes, measured worst 28700.6 Bv -> RED (over 1 Bv)
+  rootn n=-3 words=3: bound + residual 0.0609157 Bv over 100 lanes, measured worst 0.00671867 Bv -> green (under 1)
+591 s

@@ -1,0 +1,17 @@
+fp64 pown n=3 region int: 116 measured lanes of 120 (left out: 4, of them 0 by the tinyt gate), Y words n/a, G 44, GL 47, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 145
+  M max 0.000108 Bv; capacities 0.014703 Bv; BOUND 0.014810 Bv (2^-6.08)
+  measured worst 0.008291 Bv at x=0xaec28e0b44b5674d n=3
+  residual (second order, measured) 2.447e-06 Bv; bound + residual 0.014813 Bv
+    product      capacity 0.009067  observed 0.008909
+    log-sum      capacity 0.004780  observed 0.003599
+    exp-recon    capacity 0.000707  observed 0.000338
+    exp-poly     capacity 0.000114  observed 0.000097
+    log-poly     capacity 0.000024  observed 0.000013
+    exp-reduce   capacity 0.000011  observed 0.000007
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  5 s
+  reference: M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03)
+  this tool: M max 0.000108 Bv; capacities 0.014703 Bv; BOUND 0.014810 Bv (2^-6.08)
+  -> RED: the control does not reproduce on other lanes (seed 2)
