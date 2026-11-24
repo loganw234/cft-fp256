@@ -2216,3 +2216,24 @@ def test_the_rules_written_otherwise_are_other_bytes_and_the_values_are_counted(
                 rg.scratch_out[k * m:(k + 1) * m] !=
                 rp.scratch_out[k * m:(k + 1) * m] for k in range(len(states)))
     assert got == VARIANT_LANES[(op, fmt_name)], got
+
+
+@needs_mpmath
+@pytest.mark.parametrize("op", N_KEYED)
+def test_one_operand_two_n_is_two_nodes_never_merged_by_sharing(op):
+    """`op(x, 3) + op(x, 5)`: the same operand and two n. The hash-consing key
+    is (op, operands, n), so the two are two lowered nodes, two instances
+    (shared = 0) and two fragments whose results differ - a key without n
+    would merge them into one node and give the second its first's value;
+    the image equals lang.run lane by lane under rne and rdn."""
+    fmt = FORMATS["fp64"]
+    ns = (3, 5) if op != "rootn" else (3, 5)
+    for rnd in (sf.RND_RNE, sf.RND_RDN):
+        t = (f"system t\nformat fp64\nround {RND_NAMES[rnd]}\nstate x\n"
+             f"next x = {op}(x, {ns[0]}) + {op}(x, {ns[1]})\nstep map\n")
+        c = cftc.compile_text(t, 1, source="t.cftl")
+        assert c.lowered.shared == 0
+        assert [nd.n for nd in c.lowered.nodes if nd.op == op] == list(ns)
+        assert c.manifest["routines"]["calls"] == {
+            R.instance(op, n): 1 for n in ns}
+        held_by_lang_run(c, [[x] for x in n_lanes(fmt, rnd, f"one{rnd}")], 1)
