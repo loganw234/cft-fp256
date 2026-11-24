@@ -630,7 +630,7 @@ def test_the_pool_word_of_ns_is_the_pools_own_n():
 #                  constants
 #   zone_bound_off red in the budget alone among the new checks (compound's
 #                  zone1000, the analytic leg: 1.426 Bv for the sum, the
-#                  direct bound never: 2^-5.5 and under) and in shape and
+#                  direct bound at pow's edge, near1 and wide, seeds 1, 2 and 11: 2^-5.46 and under; at seed 7 up to 2^-1.68) and in shape and
 #                  constants (its words)
 #   log_short      red in the budget at fp128's rhoedge (26 Bv at 12 lanes),
 #                  shape and constants; green in bound and rate at fp64, where
