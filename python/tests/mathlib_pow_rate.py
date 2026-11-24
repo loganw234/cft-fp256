@@ -78,8 +78,10 @@ RATE_TOOL_PLANTS = {
                      "terms of Bv ignored): red at fp64, where they are most "
                      "of Bv",
     "poisson_variance": "the statistic's variance the Poisson form's (the "
-                        "mean, the model's rate.py): red where lanes sit near "
-                        "the cap, green where p is small",
+                        "mean, the model's rate.py): red in the variance leg "
+                        "wherever sum p^2 is not negligible; the z it gives "
+                        "is off by sqrt(1 - mean p), -0.95 for -1.67 at the "
+                        "study's fp64 cell",
     "cap_dropped": "p not capped at 1: red where 2 Bv / s is over 1",
 }
 
@@ -307,7 +309,7 @@ def leg_of(finding):
     return None
 
 
-def lanes_to_see(silenced, mean_p, level=RATE_ALPHA, lo=10, hi=100000):
+def lanes_to_see(silenced, mean_p, level=RATE_ALPHA, lo=10, hi=1500):
     """The least number of lanes at which a build that silences the fraction
     `silenced` of its marks (the fragment mark_silenced is 1.0) is red to the
     law: lanes of probability `mean_p` each, the silenced count's EXPECTED

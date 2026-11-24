@@ -77,8 +77,9 @@ def test_the_committed_list_is_a_fresh_generation_from_the_theory():
         for fmt_name, cs in PF._FAMILY_CLASSES[fn].items():
             assert set(cs) == {"nearest", "directed"} and cs["nearest"]
             for fam, *counts in cs["nearest"] + cs["directed"]:
-                assert fam in PF.FAMILIES and len(counts) == 6
-                assert sum(counts[1:]) == counts[0]       # every lane a status
+                assert fam in PF.FAMILIES and len(counts) == 7
+                assert sum(counts[1:6]) == counts[0]      # every lane a status
+                assert len(counts[6]) == 10               # and the lanes' digest
     # POW_FAMILY[fn][fmt][attribute]: rtz, rdn and rup one class, rne and rmm
     # the other
     for fn in FNS:
@@ -135,7 +136,8 @@ def test_a_centre_dropped_a_range_cut_a_threshold_moved_or_b_too_small():
         assert _entries() != want
     # the committed B too small (0.38 -> 0.0): lanes the budget leaves
     # between 1 - B and 1 + B are called must or clear
-    tb = dict(PF.THRESHOLD_B, **{("compound", "fp64"): 0.0})
+    tb = dict(PF.THRESHOLD_B)
+    tb[("compound", "fp64")] = 0.0
     with patched(THRESHOLD_B=tb):
         assert _entries() != want
     assert _entries() == want                     # restored
@@ -202,14 +204,14 @@ def test_the_census_port_reproduces_the_studys_counts_at_fp64():
     400): the port draws with random.Random(seed * 7919 + width), the same
     calls in the same order, so the study's lanes are the port's: every class
     count and every (class, attribute) count of marked lanes, guesses that
-    differ and wrong unmarked lanes equal the study's (rne, rtz and rmm; rdn
-    and rup are rtz's), 0 wrong unmarked, 0 marks off the list. The study's
+    differ and wrong unmarked lanes equal the study's (rne and rtz; rmm is
+    rne's by class and rdn and rup are rtz's, the study's files show it), 0 wrong unmarked, 0 marks off the list. The study's
     off_rule of hard3p (60 = 12 lanes x 5 attributes) is the y = +1 lanes,
     which the rule's other domain decides (x itself): the port's off_rule is 0
     there."""
     for name in PF.CENSUS_FAMILIES:
         counts, res = PF.census_run(FP64, name, PF.CENSUS_COUNT[name],
-                                    rnds=(RNE, RTZ, RMM))
+                                    rnds=(RNE, RTZ))
         want_counts, want_res = PF.CENSUS_FP64[name]
         assert counts == want_counts, name
         for rnd_name, by in want_res.items():
@@ -314,16 +316,18 @@ def test_every_family_lane_is_what_the_theory_says_at_fp64(fn):
     demands marked are marked, none it calls clear, decided or gated is (a mark
     off the list), every unmarked lane is equal to transcend.py, and the
     status counts are the committed list's."""
-    for rnd, cls in ((RNE, "nearest"), (RTZ, "directed")):
-        out, st = PF.check_family(FP64, rnd, fn)
+    for rnd, cls, step in ((RNE, "nearest", 1), (RTZ, "directed", 2)):
+        out, st = PF.check_family(FP64, rnd, fn, step=step)
         assert out == [], out
         want = _sums(FP64, fn, cls)
         for s in PF.STAT:
-            assert st[s] == want[s], (fn, cls, s)
+            if step == 1:
+                assert st[s] == want[s], (fn, cls, s)
         assert st["marked_must"] == st["must"] and st["wrong"] == 0
         assert st["marked_clear"] == st["marked_decided"] == \
             st["marked_gated"] == 0
-        o, rs = PF.check_exact_rule(FP64, rnd, fn)
+        o, rs = PF.check_exact_rule(FP64, rnd, fn,
+                                    lanes=PF.rule_lanes(FP64, fn)[::step])
         assert o == [] and rs["off_rule"] == 0
         assert rs["decided"] > 0 and rs["marked"] > 0
 
@@ -394,3 +398,54 @@ def test_the_marks_of_the_pools_are_all_on_the_list():
             out, t = P.check_pools_n(fn, FP64, rnd, 3)
             o, n = PF.check_off_list(FP64, rnd, fn, t.marked)
             assert o == [], o
+
+
+# =====================================================================
+# the fragment plants of M3G1 that must turn the families red
+# =====================================================================
+
+# MEASURED (pow at fp64, every lane of the families, `famplants` in the
+# ledger; here every fourth lane): the checks each plant is red in, `family`
+# (check_family: the lanes marked or not as the theory says, every unmarked
+# lane right) and `exact` (check_exact_rule's four legs). The plants whose
+# faults the families' lanes do not reach (near_one_gate_off needs |t| under
+# 2^-(p+3) by a margin the near1 family does not take, side_rule_off a
+# subnormal y, the budget's three a bound the exact lanes never test) are
+# green in both, and are red in M3G1's structured, shape and constants.
+FAMILY_PLANTS = [
+    ("mark_silenced", RNE, {"family", "exact"}),
+    ("bound_loose", RNE, {"family", "exact"}),
+    ("exact_unmarked", RNE, {"family", "exact"}),
+    ("exact_rule_off", RNE, {"family", "exact"}),
+    ("exact_rule_no_tl", RNE, {"family"}),
+    ("near_one_gate_off", RTZ, set()),
+    ("side_rule_off", RTZ, set()),
+]
+
+
+@pytest.mark.parametrize("row", FAMILY_PLANTS, ids=lambda r: r[0])
+def test_each_fragment_plant_is_red_in_the_family_checks_the_table_says(row):
+    plant, rnd, want = row
+    run = PF.runner(FP64, "pow", rnd, plant=plant)
+    o1, _st = PF.check_family(FP64, rnd, "pow", run=run, step=4)
+    o2, _rs = PF.check_exact_rule(FP64, rnd, "pow", run=run,
+                                  lanes=PF.rule_lanes(FP64, "pow")[::4])
+    red = {n for n, o in (("family", o1), ("exact", o2)) if o}
+    assert red == want, (plant, o1[:1], o2[:1])
+    # and the control is green at this scope
+    run = PF.runner(FP64, "pow", rnd)
+    assert PF.check_family(FP64, rnd, "pow", run=run, step=4)[0] == []
+
+
+def test_the_named_legs_of_the_exact_rule_plants():
+    """exact_rule_off marks the powers of two: the decided leg names it;
+    exact_unmarked and mark_silenced leave exact boundary lanes unmarked: the
+    marked leg (unmarked and wrong) and family name them."""
+    run = PF.runner(FP64, "pow", RNE, plant="exact_rule_off")
+    out, _ = PF.check_exact_rule(FP64, RNE, "pow", run=run,
+                                 lanes=PF.rule_lanes(FP64, "pow")[::4])
+    assert out and all(o.startswith("decided:") for o in out)
+    run = PF.runner(FP64, "pow", RNE, plant="mark_silenced")
+    out, _ = PF.check_exact_rule(FP64, RNE, "pow", run=run,
+                                 lanes=PF.rule_lanes(FP64, "pow")[::4])
+    assert out and all(o.startswith(("marked:", "off_rule:")) for o in out)

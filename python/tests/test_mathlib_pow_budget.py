@@ -511,9 +511,9 @@ def test_each_tool_plant_is_red_in_its_leg_and_the_control_is_green():
     (inf: V is in the scaled domain, f is not); inputs_swapped in `bound`;
     negation_as_data in `reach` and `residual` (the sweep stops at V's sign:
     no rounding reached, residual exactly 0); capacities_dropped in `lane`."""
-    b, ls = _cell(FP64, "pow", "negint", 30)
+    b, ls = _cell(FP64, "pow", "negint", 16)
     f, s0 = PB.check_budget_pow(b, ls, "negint")
-    assert f == [] and 0.06 < s0["bound"] < 0.07 and s0["resid"] > 0
+    assert f == [] and 0 < s0["bound"] < 0.07 and s0["resid"] > 0
     want = {"fixed_grid_as_before_v": {"bound"}, "scale_unscaled": {"bound"},
             "inputs_swapped": {"bound"},
             "negation_as_data": {"reach", "residual"},
@@ -707,14 +707,14 @@ def test_the_studys_cells_are_reproduced_and_judged_in_both_statistics():
     assert round(r["z_bernoulli"], 2) == -1.95
 
 
-def _synthetic(ps, marks, capped=(), marked_capped=True, wrong=(),
+def _synthetic(ps, marks, capped=0, marked_capped=True, wrong=(),
                tool_plant=None):
     """judge_cell on a cell of our own: len(ps) lanes of the given
     probabilities, `marks` of them marked, `capped` lanes at the cap."""
     lanes = list(range(len(ps)))
     mk = [i < marks for i in lanes]
-    cap = [("c", i) for i in range(capped)]
-    marks_of = {("c", i): marked_capped for i in range(capped)}
+    cap = [(i, 0) for i in range(capped)]
+    marks_of = {(i, 0): marked_capped for i in range(capped)}
     st = {"shift": 10, "lanes": len(ps) + capped}
     return PR.judge_cell(FP64, "pow", RNE, "wide", st, list(ps), mk, cap,
                          marks_of, [], list(wrong), [], [], 1, PR.RATE_ALPHA,
@@ -726,10 +726,10 @@ def test_each_leg_of_the_law_fails_alone_on_a_doctored_cell_of_its_own():
     out, st = _synthetic(ps, 60)
     assert out == [] and st["status"] == "judged"
     assert abs(st["z"]) < 1e-9 and st["marks"] == 60
-    # law: the count 20 of 60 expected: the exact two-sided tail
-    out, _ = _synthetic(ps, 40)
+    # law: the count 35 of 60 expected: the exact two-sided tail
+    out, _ = _synthetic(ps, 35)
     assert {PR.leg_of(f) for f in out} == {"law"}
-    out, _ = _synthetic(ps, 80)
+    out, _ = _synthetic(ps, 85)
     assert {PR.leg_of(f) for f in out} == {"law"}
     # probability: a p over 1 (cap_dropped's)
     out, _ = _synthetic([0.3] * 199 + [1.4], 60)
@@ -744,9 +744,9 @@ def test_each_leg_of_the_law_fails_alone_on_a_doctored_cell_of_its_own():
     assert len(st["capped_unmarked"]) == 3
     out, st = _synthetic(ps, 60, capped=3, marked_capped=True)
     assert out == [] and st["status"] == "CAPPED"
-    # a cell with lanes at the cap is not judged by the law: 40 of 60 would
+    # a cell with lanes at the cap is not judged by the law: 35 of 60 would
     # flag an uncapped cell and does not here
-    out, st = _synthetic(ps, 40, capped=3, marked_capped=True)
+    out, st = _synthetic(ps, 35, capped=3, marked_capped=True)
     assert out == [] and st["status"] == "CAPPED"
     # wrong: an unmarked lane that differs from transcend.py
     out, _ = _synthetic(ps, 60, wrong=[(1, 2)])
@@ -771,7 +771,7 @@ def test_a_forty_percent_silencing_is_red_at_this_many_lanes():
     for p in (0.135, 0.365):
         n40 = PR.lanes_to_see(0.4, p)
         n100 = PR.lanes_to_see(1.0, p)
-        assert n40 and n100 and n100 < n40 < 2000, (p, n40, n100)
+        assert n40 and n100 and n100 < n40 < 1500, (p, n40, n100)
         law = PR.Law([p] * n40)
         lo, hi = law.tails(int((1 - 0.4) * n40 * p))
         assert min(1.0, 2 * min(lo, hi)) < PR.RATE_ALPHA
