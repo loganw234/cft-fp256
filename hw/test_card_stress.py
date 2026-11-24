@@ -7473,8 +7473,17 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     c("routine build: a manifest digest the table lacks (a name that is none of the eighteen) is SAID in the step, with its digest, and does not fail it",
       s.get("ok") is True and "also has digests for nosuch 12345678" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
     # the n-keyed rows: a copy of the code whose ROUTINE_N_DIGESTS has one row (pown at n = 3), on the driver's real path
-    srcn = make_plant_copy(env, "routine-n-table", [("card_stress_lib.py", "ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}",
-                                                   'ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {("pown", 3): "0123abcd"}')])
+    srcn = make_plant_copy(env, "routine-n-table", [])           # the directory (and the python/ beside it), then the code UNDER TEST copied over it, so that a plant of `src` acts here too
+    for f in os.listdir(src):
+        if f.endswith((".py", ".sh")):
+            shutil.copy(os.path.join(src, f), os.path.join(srcn, f))
+    lib_n = os.path.join(srcn, "card_stress_lib.py")
+    with open(lib_n, "r", encoding="utf-8", newline="") as fh:
+        text_n = fh.read()
+    old_n = "ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}"
+    if text_n.count(old_n) == 1:
+        with open(lib_n, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text_n.replace(old_n, 'ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {("pown", 3): "0123abcd"}'))
     rootn_, fbn, pfxn, driven = fake_build_tree(env, srcn, "routine-n")
     envn = {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd", "CFT_STANDIN_LIST_N": "pown:3:0123abcd"}
     G = driven("routine-n-green", ["--mpfr-prefix", pfxn], envn, names)
