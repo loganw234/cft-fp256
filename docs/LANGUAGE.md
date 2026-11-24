@@ -537,6 +537,56 @@ eighteen, named as `python/cft_golden/transcend.py` names the functions.
     folded by the language - `atan(0)`, `asin(0)` and `acos(1)` to their
     values, `atan2(0, c)` for a constant c >= 0 - and compiles as the
     constant it is, with no mpmath.
+  - **pow, powr, pown, rootn and compound in the compiler** (M3's build,
+    2026-11-24, cftc's output version 9) are carried the same way, eighteen
+    routines in all, in `routines.py`'s one order, the step graph's `OPS`
+    (div, sqrt, exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan,
+    asin, acos, atan2, pow, powr, pown, rootn, compound): the same quiet
+    region and raise of a flag word that may carry the mark, the same
+    refusals - `target-feature` on revision 7's four targets,
+    `routine-unavailable` without mpmath - and the same images for `sw`
+    and revision 8's three. Several things differ. pow and powr are routines
+    of TWO inputs, x then y, bound in that order to the node's operands,
+    and a call loop's record is two slots for each. pown, rootn and
+    compound take ONE input and an INTEGER n, the second operand of their
+    node, a constant of the step graph read from its exact value alone
+    (never its encoding, which at fp32 and fp64 does not carry n): n keys
+    the fragment, so pown(x, 3) and pown(x, 5) are two instances,
+    `pown(3)` and `pown(5)`, two fragments, two keys in the manifest and
+    two call-loop batches, and a const read as an n alone is in no bank
+    slot. The exponents 2, 1 and -1 are rewritten before the lowering, in
+    the step and in a tangent section alike: pow(x, 2) and pown(x, 2) as
+    x * x, pow(x, 1), pown(x, 1) and rootn(x, 1) as x * 1, pow(x, -1),
+    pown(x, -1) and rootn(x, -1) as 1 / x, each bit for bit and flag for
+    flag the node's value at every format where the node compiles; powr,
+    rootn(x, 2), compound(x, 1) and pow(x, 1/2) are not rewritten, and the
+    manifest says what was written (`lowering.rewritten`, only where
+    there is one; `graph_by_op` stays the graph's). Their fragments keep
+    30, 23, 21, 19 and 22 values live at fp64 (30, 22, 21, 19 and 22 at
+    fp128 and fp256) for pow, powr, pown, rootn and compound, and pow 32
+    and powr 29 at fp32, so the internal check holds each to a cap of its
+    own (`routines.LIVE_CAP`, which `mathlib.POW_LIVE_CAP` views); the
+    first value spilled beside a call comes with 0, 7, 9, 11 and 8 other
+    values live at fp64 (30 less the cap; pown at n = -2^63, 10 at fp128
+    and fp256 for n = 3 whose fragment keeps 20), -2 for pow at fp32
+    (spilling 3 slots at k = 0) and +1 for powr, measured at every k from
+    0 to 20. pown, rootn and compound have no fp32 until parcel M3F2: at
+    fp32 a node of them that no rewrite takes is `routine-unavailable`,
+    first of all, before the mpmath test; pow and powr are built at fp32.
+    The fragments are 434, 489, 540 and 925 instructions (pow), 413, 468,
+    519 and 903 (powr) at fp64, fp128, fp256 and fp32, and 386, 442 and
+    493 (pown at n = 3), 387, 443 and 494 (rootn), 410, 469 and 520
+    (compound) at the first three. pow(x, y) and powr(x, y) of the same
+    operands share their front: 329, 384, 435 and 800 instructions at
+    fp64, fp128, fp256 and fp32, and two powers of one base share the
+    logarithm, 173, 217, 255 and 434 (measured, python/tests/
+    test_cftc_pow.py). The atmosphere - a body falling through a power-law
+    atmosphere, pow with a non-integer constant exponent and pown with n =
+    3, with a tangent vector - is committed at fp64 and fp256 with its
+    compiled bytes (`programs/systems/compiled-tangent/`); the rule of
+    pown writes pown(v, 2), which the compiler writes as v * v. A function
+    of constants is folded by the language and compiles as the constant it
+    is, with no mpmath.
   - **A marked lane** (the structured families; M1's question 4). A
     compiled routine of the six, since M2's build of sin, cos and tan,
     and since M4's build of atan, asin, acos and atan2, decides its last
@@ -839,11 +889,14 @@ eighteen, named as `python/cft_golden/transcend.py` names the functions.
   size is its calls times its routine's fragment; ties go to the
   shallower, then by the routines' one order, that of the step graph's
   `OPS` (lang/graph.py) - div, sqrt, exp, expm1, exp2, log, log1p, log2,
-  sin, cos, tan, atan, asin, acos, atan2, also that of the routines'
+  sin, cos, tan, atan, asin, acos, atan2, pow, powr, pown, rootn,
+  compound, also that of the routines'
   words in the bank - so a step of division and root alone loops as it
   did before the six (M1's build, item 4), a step without sin, cos or tan
-  as it did before them (M2's build), and a step without atan, asin, acos
-  or atan2 as it did before them (M4's build). A
+  as it did before them (M2's build), a step without atan, asin, acos
+  or atan2 as it did before them (M4's build), and a step without the five
+  as it did before them (M3's build), a batch of pown, rootn or compound
+  being the calls of one n (and then by n, signed). A
   batch of the six loops as a root's does, one slot a record (with the
   constant at 32,768, 72 components each calling expm1, exp, exp2 and
   log1p loop the log1p and the exp batches, the records taking 398
@@ -870,7 +923,12 @@ eighteen, named as `python/cft_golden/transcend.py` names the functions.
   on to the next batch, and the manifest's `routines.call_loop_declined`
   lists it (op, depth, calls, registers, room); a step that no loop could
   shorten enough is then held to the target's own capacities (M4's
-  build, parcel M4LF). A batch of one call is never looped - its loop would only add the
+  build, parcel M4LF). pow and powr are records of two slots (x, then y)
+  and, MEASURED over every attribute, a batch of them is declined at fp32
+  (pow: 33 registers, or 32 with y one constant; powr: 30, and 29 with one
+  input fixed, which loops), and pow's also at fp64, fp128 and fp256 under
+  rne and rmm (31, or 30 with y fixed); pown, rootn and compound, one slot
+  a call and at most 23 registers, always loop (M3's build). A batch of one call is never looped - its loop would only add the
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled
   inlined past the constant: the software targets, whose instruction
@@ -3032,7 +3090,7 @@ The text and its declarations:
 | `unused` | a const, param, lane param, let or h that nothing uses; h is used only where a constant of the step scales with it, so a map whose every use of h folds away is `unused` |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
-| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division, a root (C4) or one of the math library's thirteen (M1's six, M2's sin, cos and tan, M4's atan, asin, acos and atan2) take the bank past 512 |
+| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division, a root (C4) or one of the math library's eighteen (M1's six, M2's sin, cos and tan, M4's atan, asin, acos and atan2, M3's pow, powr, pown, rootn and compound, one instance a distinct n of the last three) take the bank past 512 |
 
 Equations, indices and the step:
 
@@ -3107,8 +3165,10 @@ The compiler's, reserved for it (L2).
   raises that one itself as `bank-capacity` - for params and constants.
   The words of the routines the compiler inlines for a division or a
   root (C4), for the math library's six (M1's build, item 4), for its
-  sin, cos and tan (M2's build) and for its atan, asin, acos and atan2
-  (M4's build), live in the bank too, which the checker
+  sin, cos and tan (M2's build), for its atan, asin, acos and atan2
+  (M4's build) and for its pow, powr, pown, rootn and compound (M3's
+  build; a const read only as the integer n of the last three is in no
+  slot), live in the bank too, which the checker
   cannot see, so the compiler raises the same name where they take the
   bank past 512, its sentence counting the params, the constants and the
   words and naming the routines in their one order: one limit, one
@@ -3119,9 +3179,10 @@ The compiler's, reserved for it (L2).
   routines are built by the golden model's generator
   (`python/cft_golden/mathlib.py`), which derives every constant through
   mpmath, so on a host where mpmath does not import, a source whose
-  graph holds one of the thirteen at run time - the six, since M2's
-  build (cftc's output version 7) sin, cos and tan, and since M4's
-  (version 8) atan, asin, acos and atan2 - is refused by this
+  graph holds one of the eighteen at run time - the six, since M2's
+  build (cftc's output version 7) sin, cos and tan, since M4's
+  (version 8) atan, asin, acos and atan2, and since M3's (version 9) pow,
+  powr, pown, rootn and compound - is refused by this
   name - never an ImportError, never an internal error - with no line,
   the cause being the host. A fold of the thirteen is a constant, built by
   nothing, and compiles there. The same source and target on a host
@@ -3169,7 +3230,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos or atan2 on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4; M2's for sin, cos and tan; M4's for atan, asin, acos and atan2) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
+| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos, atan2, pow, powr, pown, rootn or compound on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4; M2's for sin, cos and tan; M4's for atan, asin, acos and atan2; M3's for the five) - or a routine the math library has not built at the program's format (pown, rootn and compound at fp32, parcel M3F2's, unless a rewrite takes them) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
 
 ## The gate
 
@@ -3572,7 +3633,7 @@ and their inlining and their loops by `python/tests/test_cftc.py`.
   atan, asin, acos and atan2 (M4's build), and pow, powr, pown, rootn and
   compound (M3's build); the rest of the reserved list (sinh, cbrt and the
   others) is the later rounds', refused `transcendental` until then. The compiler carries the six since item 4, sin, cos and tan
-  since M2's build, and atan, asin, acos and atan2 since M4's, as routines.
+  since M2's build, atan, asin, acos and atan2 since M4's, and pow, powr, pown, rootn and compound since M3's, as routines.
 - **A built-in time, adaptive steps and events.** There is no reserved
   `t`: a system carries time in its state or counts its steps, and sin
   and cos of t are operations of it ("Time").
