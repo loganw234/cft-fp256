@@ -1313,14 +1313,16 @@ class Definition:
 # The language's node operations whose golden function is decided through
 # mpmath (transcend.py): the math library's six since M1's build, item 3
 # (2026-10-15), sin, cos and tan since M2's build (2026-11-02), and atan,
-# asin, acos and atan2 since M4's build. The compiler carries the six since
+# asin, acos and atan2 since M4's build, and pow, powr, pown, rootn and
+# compound since M3's. The compiler carries the six since
 # item 4, so a certificate can name a compiled
 # source holding one (python/tests/test_cert2.py makes some); no committed
 # corpus case holds one. python/tests/test_cert2.py pins it to the language's
 # own list, lang.graph.TRANSCEND.
 TRANSCEND_OPS = frozenset({"exp", "expm1", "exp2", "log", "log1p", "log2",
                            "sin", "cos", "tan", "atan", "asin", "acos",
-                           "atan2"})
+                           "atan2", "pow", "powr", "pown", "rootn",
+                           "compound"})
 
 
 def _mpmath_version():

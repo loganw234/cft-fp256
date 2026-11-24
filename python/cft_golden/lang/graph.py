@@ -43,7 +43,8 @@ and sqrt, the run-time division and square root (L4, 2026-10-02), the
 math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
 item 3, 2026-10-15), its sin, cos and tan (M2's build, 2026-11-02) and its
 atan, asin, acos and atan2 (M4's build, atan2 of two operands, y first),
-among them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
+and its pow, powr, pown, rootn and compound (M3's build: two operands, the
+second of the last three an integer constant), among them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
 (a const) or nN (a node of the same section, always an earlier one). In
 a tangent section nN is a LABELLED node of the section it differentiates
 (a tangent reads an unlabelled primal value by writing it again), dN a
@@ -73,25 +74,35 @@ from .refusals import Refusal
 VERSION = 1
 
 # The math library's six (M1's build, item 3), its sin, cos and tan (M2's
-# build, 2026-11-02) and its atan, asin, acos and atan2 (M4's build): each a
-# node named as transcend.py names the function, its golden function
+# build, 2026-11-02), its atan, asin, acos and atan2 (M4's build) and its pow,
+# powr, pown, rootn and compound (M3's build): each a node named as
+# transcend.py names the function, its golden function
 # transcend.compute(fmt, name, a, b, rnd) under the program's attribute, b the
-# second operand where the node has two (atan2's, y first) and 0 where it has
-# one. The order is the one the nodes are counted in (OPS, below): sin, cos
-# and tan directly after log2, then atan, asin, acos and atan2, before neg,
-# which the canonical form's "; operations:" line shows and cftc's ir.ARITY
-# mirrors.
+# second operand where the node has two (atan2's, y first; pow's and powr's y)
+# and 0 where it has one; for pown, rootn and compound the second operand is
+# the integer n, a const entry whose exact value is n, and the golden
+# function is transcend.compute(fmt, name, a, 0, rnd, n), n the exact
+# integer (INT_OPERAND, below). The order is the one the nodes are counted in
+# (OPS, below): sin, cos and tan directly after log2, then atan, asin, acos
+# and atan2, then pow, powr, pown, rootn and compound, before neg, which the
+# canonical form's "; operations:" line shows and cftc's ir.ARITY mirrors.
 TRANSCEND = ("exp", "expm1", "exp2", "log", "log1p", "log2",
-             "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
+             "sin", "cos", "tan", "atan", "asin", "acos", "atan2",
+             "pow", "powr", "pown", "rootn", "compound")
 
-# The operands of a TRANSCEND node: atan2's two, every other one's one.
-TRANSCEND_ARITY = {fn: 2 if fn == "atan2" else 1 for fn in TRANSCEND}
+# The nodes whose second operand is an integer constant, n (M3's build).
+INT_OPERAND = ("pown", "rootn", "compound")
+
+# The operands of a TRANSCEND node: the two of atan2 and the five of M3's
+# build, every other one's one.
+TRANSCEND_ARITY = {fn: 2 if fn in ("atan2", "pow", "powr", *INT_OPERAND)
+                   else 1 for fn in TRANSCEND}
 
 # The operations a node may be, in the order counts are written, with
 # each one's operand count. The names are softfloat.OP_NAMES' spellings
 # and the operand order is the golden function's (asm.py's OP_FIELDS) -
 # but for div and sqrt, which no tile instruction is: their names are the
-# golden functions' own, sf.div and sf.sqrt (L4); and the thirteen of
+# golden functions' own, sf.div and sf.sqrt (L4); and the eighteen of
 # TRANSCEND, whose names are transcend.py's. Count lines write only the operations a section
 # has, so a graph without these writes what it wrote before them.
 OPS = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
@@ -153,10 +164,12 @@ def exact_root(value):
 
 def _mp(fn, value, value2=None):
     """exp, exp2, log, log2, sin, cos, tan, atan, asin or acos of a rational,
-    or atan2 of two (value is y, value2 is x), by mpmath at TRANS_BITS, as
-    the exact rational the result is (its _mpf_ tuple, read)."""
+    or atan2 of two (value is y, value2 is x), or pow or powr of two (x then
+    y), or rootn of a rational (value2 the integer order n), by mpmath at
+    TRANS_BITS, as the exact rational the result is (its _mpf_ tuple,
+    read). pown and compound are never irrational, so never here."""
     if not _TRANS:
-        import mpmath            # only a graph holding one of the thirteen needs it
+        import mpmath            # only a graph holding one of the eighteen needs it
         ctx = mpmath.MPContext()
         ctx.prec = TRANS_BITS
         _TRANS.append((mpmath.libmp, ctx))
@@ -168,6 +181,22 @@ def _mp(fn, value, value2=None):
             value2.numerator, value2.denominator, TRANS_BITS,
             lib.round_nearest))
         y = ctx.atan2(x, x2)
+    elif fn in ("pow", "powr"):
+        # only a positive base reaches here (power_fold): a negative one
+        # with a non-integer power has no value, and an integer power is
+        # rational
+        x2 = ctx.make_mpf(lib.from_rational(
+            value2.numerator, value2.denominator, TRANS_BITS,
+            lib.round_nearest))
+        y = ctx.power(x, x2)
+    elif fn == "rootn":
+        # |value|'s |n|-th root, the sign of an odd root and the reciprocal
+        # of a negative order applied after, at TRANS_BITS
+        y = ctx.root(abs(x), abs(int(value2)))
+        if value < 0:
+            y = -y
+        if value2 < 0:
+            y = 1 / y
     elif fn in ("atan", "asin", "acos"):
         y = getattr(ctx, fn)(x)
     elif fn == "exp":
@@ -195,8 +224,20 @@ def exact_transcendental(op, value, value2=None):
     function of its exact argument. Undefined at a logarithm's pole or
     below its domain, for asin and acos outside [-1, 1], and for a value
     beyond 2^+-1048576. atan2 takes both operands, y as `value` and x as
-    `value2`; every other one takes `value` alone."""
+    `value2`; pow and powr take x then y, and pown, rootn and compound x and
+    the exact integer n (never an encoding of it); every other one takes
+    `value` alone. The five of M3's build are exact where
+    constants.power_fold says the value is rational, mpmath's where it is
+    irrational (pow, powr and rootn only), and Undefined where it is no real
+    number, at a pole, or beyond the range."""
     v = K_.exact(value)
+    if op in K_.POWER_OPS:
+        kind, got = K_.power_fold(op, v, K_.exact(value2))
+        if kind == "value":
+            return got
+        if kind != "irrational":
+            raise Undefined(got)
+        return _mp(op, v, K_.exact(value2))
     if op == "atan2":
         w = K_.exact(value2)
         # rational only where y is 0 and x is not negative (Lindemann: a
@@ -753,10 +794,10 @@ class StepGraph:
         root is exact_root's: the exact root where its argument is a
         rational's square, and otherwise a fixed function of its exact
         argument - the root rounded down to 2^-ROOT_BITS - so that two
-        evaluations of the same root agree exactly (L4). The thirteen
+        evaluations of the same root agree exactly (L4). The eighteen
         transcendentals are exact_transcendental's, alike: exact where the
         value is rational, otherwise mpmath's at TRANS_BITS, a fixed
-        function of the exact argument (M1's build, item 3, M2's and M4's),
+        function of the exact argument (M1's build, item 3, M2's, M4's and M3's),
         so a graph holding one needs mpmath here. A division by zero, a
         negative root's argument, a logarithm at or below its pole, asin or
         acos of a value outside [-1, 1] and a value beyond 2^+-1048576

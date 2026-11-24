@@ -493,7 +493,7 @@ a source states it on its `language` line.
   certificates' 24 sourced cases were made again at `language 1.2`, only
   their `language` and `hash` lines and their manifest digests moving (72
   lines: 24 of each).
-- **It is 1.3 since 2026-11-11** (M4's build): atan, asin, acos and
+- **It was 1.3 from 2026-11-11** (M4's build): atan, asin, acos and
   atan2, each an operation with transcend.py's golden function, atan2 the
   language's first of two operands, their folds at 0 (atan(0), asin(0),
   acos(1) and atan2(0, c) for a constant c >= 0 are 0), and their tangent
@@ -501,6 +501,19 @@ a source states it on its `language` line.
   so a minor step again (Logan's answer 12 to the M4 study, 2026-10-23).
   `cft.h`'s `CFT_LANGUAGE_MINOR` stepped with it, and the golden
   certificates' 24 sourced cases were made again at `language 1.3`, only
+  their `language` and `hash` lines and their manifest digests moving.
+- **It is 1.4 since 2026-11-24** (M3's build): pow, powr, pown, rootn and
+  compound, each an operation with transcend.py's golden function, two
+  operands, x first, the second of pown, rootn and compound an integer
+  constant within int64 (`integer-operand` otherwise), their folds (exact
+  where the value is rational: pow(4, 1/2) is 2), and their tangent rules -
+  functions the language refused before only for not having them, so a minor
+  step again (Logan's answer 10 to the M3 study, 2026-11-19), with one
+  exception to "a source accepted at 1.3 is accepted at 1.4": `compound`
+  is reserved from 1.4, and a source naming a value `compound` is refused
+  `reserved-name` (no committed source does: none of the 76 `.cftl`).
+  `cft.h`'s `CFT_LANGUAGE_MINOR` stepped with it, and the golden
+  certificates' 24 sourced cases were made again at `language 1.4`, only
   their `language` and `hash` lines and their manifest digests moving.
 - **Its rule is the profile's.** A major step whenever an accepted source
   is refused, or computes another thing: a new keyword an old source used

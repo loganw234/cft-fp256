@@ -30,7 +30,8 @@ from .. import softfloat as sf
 from ..formats import FORMATS
 from ..seq import SCRATCH_D_MAX
 from . import constants as C
-from .graph import PRIMAL_OF, Node, StepGraph, canonical
+from .graph import (INT_OPERAND, PRIMAL_OF, TRANSCEND_ARITY, Node,
+                    StepGraph, canonical)
 from .refusals import Refusal, too_deep
 from .syntax import (KEYWORDS, MAX_NESTING, Bin, Call, Cmp, Index, Name,
                      Neg, Num, Target, parse)
@@ -58,22 +59,30 @@ from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
 # they fold where the value is 0 - atan(0), asin(0), acos(1) and atan2(0, c)
 # for a constant c >= 0, c = 0 included - and are `irrational-constant`
 # elsewhere, asin and acos outside [-1, 1] as "not a real number"; none is
-# `constant-division-by-zero`. atan2 takes two arguments, y first, the one
-# of the math library's thirteen that does.
+# `constant-division-by-zero`. atan2 takes two arguments, y first. pow,
+# powr, pown, rootn and compound joined them in M3's build, by Logan's
+# answers 2, 4, 7 and 10 to the M3 study's questions (docs/studies/M3-pow.md,
+# section 6): each takes two arguments, x first, the second of pown, rootn and
+# compound an integer constant within int64 (`integer-operand` otherwise);
+# of constants they fold exactly where the value is rational and are refused
+# by name elsewhere (power_fold in constants.py); and `compound`, which was no
+# name the language refused, is reserved from 1.4.
 MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan",
-        "atan", "asin", "acos", "atan2")
+        "atan", "asin", "acos", "atan2",
+        "pow", "powr", "pown", "rootn", "compound")
 BUILTINS = {"fma": 3, "abs": 1, "copysign": 2, "min": 2, "max": 2,
             "minnum": 2, "maxnum": 2, "select": 3, "sqrt": 1,
-            **{fn: 2 if fn == "atan2" else 1 for fn in MATH}}
+            **{fn: 2 if fn in ("atan2", "pow", "powr", *INT_OPERAND) else 1
+               for fn in MATH}}
 
 # Refused by name in v1 (`transcendental`, `irrational-constant`), and so
 # reserved: a value cannot be named after one. The six built-ins above
-# left this list in M1's build, item 3, sin, cos and tan in M2's, and atan,
-# asin, acos and atan2 in M4's; the later rounds take the rest (M3's pow
-# family).
+# left this list in M1's build, item 3, sin, cos and tan in M2's, atan,
+# asin, acos and atan2 in M4's, and pow, pown, powr and rootn in M3's (with
+# compound, which it never held); the later rounds take the rest.
 TRANSCENDENTAL = frozenset({
     "exp10", "log10",
-    "pow", "pown", "powr", "rootn", "hypot", "sinpi",
+    "hypot", "sinpi",
     "cospi", "tanpi", "asinpi", "acospi",
     "atanpi", "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh",
     "atanh", "cbrt", "rsqrt",
@@ -227,8 +236,29 @@ def _fold_inverse(op, c, c2, line):
                   f"transcendental), {_REWRITE}", line)
 
 
+def _fold_power(op, c, d, line):
+    """pow, powr, pown, rootn or compound of the constants c and d (x then
+    y for pow and powr, x then the integer n for the others), folded where
+    constants.power_fold gives a rational, and refused by name where it
+    does not, with its sentence: `irrational-constant` where the value is
+    irrational or no real number, `constant-division-by-zero` at a pole,
+    `constant-range` past 2^+-2^20 (Logan's answer 7 to the M3 study's
+    questions)."""
+    kind, what = C.power_fold(op, c, d)
+    if kind == "value":
+        return what
+    if kind == "unreal":
+        raise Refusal("irrational-constant", what, line)
+    if kind == "irrational":
+        raise Refusal("irrational-constant", f"{what}, {_REWRITE}", line)
+    if kind == "pole":
+        raise Refusal("constant-division-by-zero", what, line)
+    raise Refusal("constant-range", what, line)
+
+
 def _fold_math(op, c, line, c2=None):
-    """One of the thirteen of the constant c (atan2 of c and c2, y and x),
+    """One of the eighteen of the constant c (atan2 of c and c2, y and x; pow
+    and powr, x and y; pown, rootn and compound, c and the integer c2),
     folded exactly where its value is
     rational - exp(0) = 1, expm1(0) = 0, exp2(n) = 2^n for an integer n,
     log(1) = 0, log1p(0) = 0, log2(2^k) = k, sin(0) = 0, cos(0) = 1,
@@ -242,6 +272,8 @@ def _fold_math(op, c, line, c2=None):
     rational, so they have no `constant-division-by-zero` at all."""
     if op in ("atan", "asin", "acos", "atan2"):
         return _fold_inverse(op, c, c2, line)
+    if op in C.POWER_OPS:
+        return _fold_power(op, c, c2, line)
     shown = C.brief(c)
     if op in ("sin", "cos", "tan"):
         if c == 0:
@@ -1154,7 +1186,16 @@ class Checker:
                               f"{len(e.args)} {'is' if len(e.args) == 1 else 'are'}"
                               f" given", e.line)
             vals = [self.eval(a, ctx) for a in e.args]
-            if name == "select":
+            if name in INT_OPERAND:
+                self.integer_operand(name, vals[1], e.line)
+            if name == "log" and ctx.tvec is not None and                     all(isinstance(x, K) for x in vals):
+                # a written tangent equation's log of a constant is the
+                # node pow's and powr's rules derive for a constant base
+                # (tangent.py), never folded: the canonical form writes it
+                # as a call, and reads back the graph it came from. Only
+                # in a tangent equation: a primal log(2) is still refused
+                v = Node("log", [self.leaf(vals[0], e.line)], e.line)
+            elif name == "select":
                 c, a, b = vals
                 v = self.apply("select", [a, b, c], e.line)
             else:
@@ -1164,8 +1205,8 @@ class Checker:
             return v
         if name in TRANSCENDENTAL:
             # the names no round has built yet; the six left this list in
-            # M1's build, item 3, sin, cos and tan in M2's, and atan, asin,
-            # acos and atan2 in M4's
+            # M1's build, item 3, sin, cos and tan in M2's, atan, asin,
+            # acos and atan2 in M4's, and pow, pown, powr and rootn in M3's
             vals = [self.eval(a, ctx) for a in e.args]
             if vals and all(isinstance(v, K) for v in vals):
                 raise Refusal(
@@ -1182,7 +1223,41 @@ class Checker:
         raise Refusal("unknown-function", f"{name} is not a built-in: fma, "
                       f"abs, copysign, min, max, minnum, maxnum, select, "
                       f"sqrt, exp, expm1, exp2, log, log1p, log2, sin, cos, "
-                      f"tan, atan, asin, acos and atan2 are", e.line)
+                      f"tan, atan, asin, acos, atan2, pow, powr, pown, "
+                      f"rootn and compound are", e.line)
+
+    @staticmethod
+    def integer_operand(name, v, line):
+        """The second operand of pown, rootn or compound: an integer constant
+        of degree 0 within [-2^63, 2^63 - 1], else `integer-operand` (the
+        one name for every shape that is not one; rootn of order 0 is
+        `irrational-constant`, whatever the first operand). What is refused,
+        by the check below (python/tests/test_lang_pow.py holds each):
+          - a run-time value: a state, a param, a lane param, a let of
+            any of them (a node, or one of those leaves);
+          - a constant of any degree but 0: h or a multiple of h;
+          - a constant that is no integer (5/2, 0.5, 1e-1) or lies outside
+            int64 (2^63, -2^63 - 1, 1e30);
+        and what is accepted: a literal, a `const` holding an integer, and
+        any expression of constants that folds to one (2 + 1, 6/2, h/h).
+        `-0` is `constant-negative-zero` before this check is reached."""
+        if not isinstance(v, K):
+            what = "a value that is not a constant"
+        elif v.deg != 0:
+            what = f"{C.brief(v.coef)}, a multiple of h"
+        elif v.coef.denominator != 1:
+            what = f"{C.brief(v.coef)}, which is no integer"
+        elif not -(1 << 63) <= v.coef.numerator < (1 << 63):
+            what = f"{C.brief(v.coef)}, which lies outside int64"
+        else:
+            if name == "rootn" and v.coef == 0:
+                raise Refusal("irrational-constant", "rootn(x, 0) is not a "
+                              "real number: rootn of order 0 has no value",
+                              line)
+            return
+        raise Refusal("integer-operand", f"n must be an integer constant "
+                      f"within int64: {name} takes an integer, which a lane "
+                      f"does not hold; this is {what}", line)
 
     def name_value(self, name, index, ctx, line):
         if index is None and name in ctx.env:
@@ -1634,7 +1709,7 @@ class Checker:
                 # would round twice, and spend a routine on a value fixed
                 # when compiled
                 r = K(_fold_math(op, v[0], line,
-                                 v[1] if op == "atan2" else None))
+                                 v[1] if TRANSCEND_ARITY[op] == 2 else None))
             else:
                 raise AssertionError(op)
         if not C.in_range(r.coef):
@@ -1955,8 +2030,13 @@ class Checker:
             # constant like any other - made only where a rule reads it
             return self.leaf(K(C.ln2_value(self.fmt, self.rnd)), line)
 
+        def const(m):
+            # the leaf of an exact integer: n - 1 and 1 - n, the rules of
+            # pown, rootn and compound (M3's build)
+            return self.leaf(K(m), line)
+
         def derived(outs):
-            ts = Derivation(zero, one, fold, two, ln2).derive(outs)
+            ts = Derivation(zero, one, fold, two, ln2, const).derive(outs)
             return [K(0) if t is None else t for t in ts]
         tf = derived(field_outs) if self.is_flow else None
         ts = derived(step_outs)
