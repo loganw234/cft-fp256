@@ -635,9 +635,18 @@ def test_plants_the_pow_front_owns_are_refused_on_the_three_by_name():
         for fn in INT_FUNCS:
             with pytest.raises(ValueError, match="does not apply"):
                 ml.build(fn, FP64, RNE, n=3, plant=plant)
+    # the lead's departure of 2026-11-23: the budget plants act on the three
+    # at fp64 (parcel M3G3)
     for plant in ("bound_tight", "zone_bound_off"):
-        with pytest.raises(ValueError, match="unknown plant"):
-            ml.build("pown", FP64, RNE, n=3, plant=plant)       # M3G3's
+        for fn in INT_FUNCS:
+            b = ml.build(fn, FP64, RNE, n=3, plant=plant)
+            assert b.meta["plant"] == plant and plant in b._fired
+            assert b.meta["B2"] == 0
+            for fmt in (FP128, FP256):
+                with pytest.raises(ValueError, match=f"plant {plant!r} does "
+                                   f"not apply to {fn} at {fmt.name}: the "
+                                   f"fault is not reached"):
+                    ml.build(fn, fmt, RNE, n=3, plant=plant)
     # rootn's plant at an odd n, and the core plants of the others
     with pytest.raises(ValueError, match="does not apply"):
         ml.build("rootn", FP64, RNE, n=3, plant="rootn_m0_neg")
