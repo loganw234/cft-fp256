@@ -218,10 +218,14 @@ def _routine(sviews: List[Dict[str, Any]], bad_ids: Any) -> List[Dict[str, Any]]
                                   "off_list": 0, "guesses_wrong": 0, "named": [], "named_other": 0, "not_named": 0, "device_s": 0.0, "oracle_s": 0.0,
                                   "has_rule": item.startswith("atan2-f32-"), "rule_slices": 0, "before_rule": 0, "rule_must": 0, "rule_band": 0,
                                   "must_unmarked": 0})
+        if re.match(r"^(?:pow|powr|pown|rootn|compound)-f32-", item) and "exact_marked" not in a:
+            a["exact_marked"] = 0          # the pow family's exact class (parcel M3X2): the key exists for those items only, so an item and a run without one report as they did
         a["slices"] += 1
         counts = v["counts"] or {}
         for k in ("marked", "off_list", "guesses_wrong"):
             a[k] += _int(counts.get(k)) or 0
+        if "exact_marked" in a:
+            a["exact_marked"] += _int(counts.get("exact_marked")) or 0
         if a["has_rule"]:
             if all(_int(counts.get(k)) is not None for k in ("rule_must", "rule_band", "must_unmarked")):
                 a["rule_slices"] += 1
@@ -239,7 +243,7 @@ def _routine(sviews: List[Dict[str, Any]], bad_ids: Any) -> List[Dict[str, Any]]
             if isinstance(n, dict) and (n.get("off_list") or n.get("wrong")):
                 a["named"].append({"attr": n.get("attr"), "lane": n.get("lane"), "guess": n.get("guess"), "wrong": bool(n.get("wrong")),
                                    "off_list": bool(n.get("off_list")), "rule": n.get("rule") if n.get("rule") in ("must mark", "band") else None,
-                                   "slice": [sw.get("lo"), sw.get("hi")]})
+                                   "slice": [sw.get("lo"), sw.get("hi")], **({"exact": True} if n.get("exact") else {})})
             else:
                 a["named_other"] += 1
         tm = extra.get("times") if isinstance(extra.get("times"), dict) else {}
@@ -1935,7 +1939,9 @@ def _routine_text(rows: Any) -> List[str]:
     for a in rows:
         L.append(f"    {a['item']}: {a['claim'] or 'no claim (an item the catalog does not name)'}")
         by = ", ".join(k + " " + str(a["by_attr"][k]) for k in ROUTINE_ATTRS)
-        L.append(f"      {a['slices']} slice(s); marked {a['marked']} ({by}); off the list "
+        L.append(f"      {a['slices']} slice(s); marked {a['marked']} ({by})"
+                 + (f", {a['exact_marked']} of them on an exact lane (the routine's design: a lane whose result is exact, counted apart from off the list)" if "exact_marked" in a else "")
+                 + f"; off the list "
                  f"{a['off_list']}; guesses wrong {a['guesses_wrong']}; marks no MARK line named {a['not_named']}; device {a['device_s']:.3f} s, "
                  f"oracle {a['oracle_s']:.3f} s")
         if a.get("has_rule"):
@@ -1944,7 +1950,7 @@ def _routine_text(rows: Any) -> List[str]:
                      f"it, whose off-the-list marks include the rule's lanes (their off the list above is not the rule's remainder)")
         for n in a["named"][:ROUTINE_NAMED_SHOWN]:
             L.append(f"      {n['attr']} a=0x{int(n['lane']):08x} guess=0x{int(n['guess']):08x} {'WRONG' if n['wrong'] else 'right'}"
-                     f"{' (off the list)' if n['off_list'] else ''}{' (in the rule: ' + n['rule'] + ')' if n.get('rule') else ''}")
+                     f"{' (off the list)' if n['off_list'] else ''}{' (exact lane)' if n.get('exact') else ''}{' (in the rule: ' + n['rule'] + ')' if n.get('rule') else ''}")
         if len(a["named"]) > ROUTINE_NAMED_SHOWN:
             L.append(f"      ... and {len(a['named']) - ROUTINE_NAMED_SHOWN} more named lanes (--json has all)")
     return L

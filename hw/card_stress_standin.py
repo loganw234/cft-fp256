@@ -179,7 +179,10 @@ def routine_main(real, do: str) -> int:
             if item:
                 nm, tok, dg = item.split(":")
                 nrows.setdefault(nm, []).append((tok, dg))
+        dropped = [x for x in (os.environ.get("CFT_STANDIN_LIST_DROP") or "").split(",") if x]       # a `list` that leaves a name's row out altogether
         for n in ROUTINE_NAMES:
+            if n in dropped:
+                continue
             if n in missing:                                # routine_sweep.c:830, some of the five images not found
                 out(f"{n}-f32: 4 of 5 images found (cannot read {os.environ.get('CFT_SWEEP_IMAGES') or 'sweep-images'}/{n}-fp32-rmm.cftp)")
             elif n in nrows:

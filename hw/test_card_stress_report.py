@@ -1864,7 +1864,7 @@ def build_reach_run():
     return fx.records()
 
 
-def build_routine_run(item="exp-f32-d043b3bb5-all", group="routine"):
+def build_routine_run(item="exp-f32-d043b3bb5-all", group="routine", exact=False):
     """A one-cycle run of routine slices, records as the driver writes them (parcel M4X2): exp over three slices of 2^20 encodings on the quad's tile 1 -
     the first with exp's three right marks on the list, the second with twenty marks off the list, sixteen of them named (one WRONG among the sixteen; the
     counts say two guesses wrong, the second among the four marks no line named), the third with none - and, apart, a sweep leg of an item the catalog does
@@ -1886,6 +1886,12 @@ def build_routine_run(item="exp-f32-d043b3bb5-all", group="routine"):
         (2 * E, 3 * E, {"marked": 0, "off_list": 0, "guesses_wrong": 0},
          {"marks": {"by_attr": {"rne": 0, "rtz": 0, "rdn": 0, "rup": 0, "rmm": 0}, "named": [], "not_named": 0}, "times": {"device_s": 0.5, "oracle_s": 0.5, "lanes_a_call": 16384}}),
     ]
+    if exact:          # parcel M3X2: a pow-family item's records carry exact_marked (marks on an exact lane, apart from off the list) and its named lanes' `exact`
+        slices[0][2]["exact_marked"] = 3
+        for n in slices[0][3]["marks"]["named"]:
+            n["exact"] = True
+        slices[1][2]["exact_marked"] = 0
+        slices[2][2]["exact_marked"] = 0
     for lo, hi, mk, extra in slices:
         sw = {"item": item, "tool": "routine", "op": op, "mode": "all", "reach": "tile", "lo": lo, "hi": hi, "tile": 1, "jobs": 1,
               "expected_cases": 5 * (hi - lo), "expected_encodings": hi - lo}
@@ -2013,6 +2019,45 @@ def group_routine():
     cls = [c for k in S["trees"]["classes"] for c in [k]] if isinstance(S.get("trees"), dict) and S["trees"].get("classes") else []
     check(all(any(g["group"] == "routine" for g in (c["total"].get("by_group") or [])) and all(e["group"] == "routine" for e in c["exhaustive"])
               for c in cls if c["exhaustive"]), "routine: every tree class that served the item has the routine group in its totals and on its rows", [c["exhaustive"][:1] for c in cls][:1])
+
+
+def group_routine_pow():
+    """Parcel M3X2: the report over a pow-family item - its block gives the marks on an exact lane apart from off the list (the pow family's records carry exact_marked), a lane named
+    as exact says so, an item without the exact class (exp, and every record made before it) reports exactly as before, and the figures of the run are the exp run's shape."""
+    group("routine pow")
+    item = "pow-f32-y40000000-d7043fd38-all"
+    recs, op = build_routine_run(item, "routine", exact=True)
+    S = R.summarize(recs, rev=None)
+    T = R.render(S)
+    rr = S["sweep"]["routine"]
+    check(len(rr) == 1 and rr[0]["item"] == item and rr[0]["exact_marked"] == 3 and rr[0]["marked"] == 23 and rr[0]["off_list"] == 20 and rr[0]["claim"] is not None
+          and "every fp32 x for y = 0x40000000 (2) through pow" in rr[0]["claim"], "routine pow: the block has the item's claim, 23 marked, 20 off the list and 3 on an exact lane", rr[:1])
+    check("marked 23 (rne 20, rtz 1, rdn 1, rup 1, rmm 0), 3 of them on an exact lane (the routine's design" in T and "off the list 20" in T,
+          "routine pow: the text's marks sentence says the exact class apart from off the list", T[T.find("a routine item"):][:700])
+    check(all(n.get("off_list") or n.get("wrong") for n in rr[0]["named"]) and sum(1 for n in rr[0]["named"] if n.get("exact")) == 0 and rr[0]["named"],
+          "routine pow: the named lanes are those off the list or wrong, as for any item (the right exact lanes are counted, not named)")
+    # an exact lane whose guess was wrong is named, and says so
+    recs2, _ = build_routine_run(item, "routine", exact=True)
+    for r in recs2:
+        mk = ((r.get("extra") or {}).get("marks") or {}) if isinstance(r, dict) else {}
+        for n in mk.get("named") or []:
+            if n.get("exact"):
+                n["wrong"] = True
+    S2 = R.summarize(recs2, rev=None)
+    T2 = R.render(S2)
+    check(any(n.get("exact") and n["wrong"] for n in S2["sweep"]["routine"][0]["named"]) and "(exact lane)" in T2,
+          "routine pow: a wrong guess on an exact lane is named and marked '(exact lane)' in the text and in the JSON")
+    json.dumps(S2["sweep"]["routine"], allow_nan=False)
+    # an exp item reports exactly as before: no exact key, no sentence
+    recs3, _ = build_routine_run()
+    S3 = R.summarize(recs3, rev=None)
+    T3 = R.render(S3)
+    check("exact_marked" not in S3["sweep"]["routine"][0] and "exact lane" not in T3 and "on an exact" not in T3,
+          "routine pow: an exp item's block has no exact key and no exact sentence (a run without a pow-family item reports as it did)")
+    # records of a pow item made without the key (the driver before it): the key is there, 0, and the run reports
+    recs4, _ = build_routine_run(item, "routine", exact=False)
+    S4 = R.summarize(recs4, rev=None)
+    check(S4["sweep"]["routine"][0]["exact_marked"] == 0, "routine pow: a pow item's records without exact_marked add 0 to it")
 
 
 def group_reach():
@@ -3377,8 +3422,8 @@ def group_rates():
     # -- the other levels' items are out of the rows by the catalog, not by luck: no class or random or host item has an op in the table
     check(not any(it.op in R.RATE_OP for it in cat if it.level in ("class", "random") or it.reach != "tile"), "rates: no class-level, random or host item's op has a rate op")
     # -- parcel M4X2: the routine items (tile, exhaustive) are left out of the rates by a bucket of their own: no routine op has a rate op, and the catalog has them
-    check(sum(1 for it in cat if it.tool == "routine") == 21 and not any(it.op in R.RATE_OP for it in cat if it.tool == "routine"),
-          "rates: the 21 routine items' ops (twelve routines one each, atan2 nine x; parcel M4CAT) have no rate op (their slices are the 'routine' bucket of left_out)")
+    check(sum(1 for it in cat if it.tool == "routine") == 57 and not any(it.op in R.RATE_OP for it in cat if it.tool == "routine"),
+          "rates: the 57 routine items' ops (twelve routines one each, atan2 nine x, parcel M4CAT; pow and powr eighteen each, parcel M3X2) have no rate op (their slices are the 'routine' bucket of left_out)")
     # -- no probe: the card-alone cells are '-' and the text says so; nothing is put in their place
     eq(X["probe"], None, "rates: a run with no probe leg has probe None, not zeros")
     check(all(r["card"] is None for r in X["rows"]) and all(r["card_alone"] == "-" and r["ratio"] == "-" for r in tab if r["tile"] in ("all", "only")),
@@ -3486,6 +3531,7 @@ def main():
         group_reach()
         group_routine()
         group_routine_rule()
+        group_routine_pow()
         group_wide()
         group_rates()
         group_left_out(base)

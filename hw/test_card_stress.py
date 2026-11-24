@@ -71,6 +71,10 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             the stand-in as routine-sweep; POSIX): `routine images` and `mpfr routine-sweep`, red for a moved digest, a missing digest, another commit, a generator that fails or writes no manifest,
             a missing image, an oracle naming MPFR 4.1.0, a tool with no `list` and marks that are not the smoke's; python/figure_extracts.py's rule for the routine op words and host/Makefile's
             rule for routine-sweep. Plants: CARD_STRESS_PLANT='M4X2: ' (some also run the report's and the page's tests, as HXd's do).
+            Parcel M3X2 (2026-11-24) added the pow family: the catalog is 344 with mpfr (the first 308 held by hash of vars() to f7a1ce95's, pow's and powr's 36 typed in this file from the study's lists, the n-keyed names
+            having no item while ROUTINE_N_DIGESTS is empty), the digests of the fifteen held to rs3-list.txt and rs3-images-manifest.txt, parse_routine_marks on the real pow logs (rs3-*) and its exact line (every damage refused,
+            the line refused for any other op), the stand-in's lines for pow ops held to the real ones and each of its misbehaviours through the parser, the build step red by name on a moved pow digest, a `list` that lacks a pow row or an
+            n-keyed row, and a table of n-keyed rows (a copy of the code whose ROUTINE_N_DIGESTS has a row), and `--sweep-items pown-f32-n3-...` refused naming the table. Plants: CARD_STRESS_PLANT='M3X2: '.
 
   probe    (parcel TP, 2026-10-28) the card's rates and the probe leg: the driver's dry run with --rate-probe (the quad's tile 1 alone, then its four tiles together, one
             process a tile; the single's and the deep's one; kind `probe`, no sweep, no rate, no skipped leg), the same run without the flag (nothing recorded, built or
@@ -5745,9 +5749,9 @@ def format_table_checks(src: str = HERE) -> list:
           str(sorted(Counter(wide_c5.values()).items())))
         c("format: the table names every op of the full catalog (80 ops) and no other, and the documents' table is over the same 80",
           set(L2.OP_FORMAT) - routine_ops == ops and len(ops) == 80 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
-        c("format: the routine ops (parcels M4X2, M4CAT: twelve routines one op each and atan2 at nine x, 21 op words) are the table's other 21 - 101 ops in all - and each is fp32, the format of the programs they run",
-          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) == 21
-          and routine_ops == {n.rsplit("-all", 1)[0] for n in DOC_ROUTINE_NAMES} and all(L2.OP_FORMAT[op] == "fp32" for op in routine_ops),
+        c("format: the routine ops (parcels M4X2, M4CAT: twelve routines one op each and atan2 at nine x, 21 op words; parcel M3X2: pow and powr at eighteen each, 36 more) are the table's other 57 - 137 ops in all - and each is fp32, the format of the programs they run",
+          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) == 57
+          and routine_ops == {n.rsplit("-all", 1)[0] for n in DOC_ROUTINE_NAMES + DOC_POW_NAMES} and all(L2.OP_FORMAT[op] == "fp32" for op in routine_ops),
           str(sorted(routine_ops)))
         want.update({op: "fp32" for op in routine_ops})
         ops = ops | routine_ops
@@ -5980,7 +5984,7 @@ def wide_c5_catalog_checks(src: str = HERE) -> list:
         c("wide c5 catalog: the 60 wide clause-5 items follow the 227 - the 125 and HXc's 102, every one a divsqrt item - in the study's order "
           "(rank 3: the class modes of rint and scaleB; rank 5: the fp32 slice through the wide rint; then the wide conversions), each under "
           "all five attributes (parcel M4X2: the 287 are the first 287 of the catalog, the routine items follow them; the routine group's own count is "
-          "its catalog check)", len(full) == 287 + len(DOC_ROUTINE_NAMES) and [it.name for it in full[227:287]] == DOC_WIDE_C5_NAMES
+          "its catalog check)", len(full) == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) and [it.name for it in full[227:287]] == DOC_WIDE_C5_NAMES
           and [it.name for it in full[125:227]] == DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]),
           f"{len(full)}: {[it.name for it in full[227:]][:3]}")
         bad = []
@@ -6146,9 +6150,9 @@ def wide_driver_checks(env: Env, src: str = HERE) -> list:
             q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
             c("wide driver: with it the make lines gain MPFR=1 MPFR_PREFIX=<the prefix> and the catalog the 102 wide items after the 125, "
               "and parcel HXb's 60 wide clause-5 items after those",
-              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287 + len(DOC_ROUTINE_NAMES)
+              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES)
               and [it.name for it in d.items[125:227]] == DOC_WIDE_NAMES and [it.name for it in d.items[227:287]] == DOC_WIDE_C5_NAMES
-              and [it.name for it in d.items[287:]] == DOC_ROUTINE_NAMES)       # parcel M4X2: the routine items after the 287
+              and [it.name for it in d.items[287:]] == DOC_ROUTINE_NAMES + DOC_POW_NAMES)       # parcel M4X2: the routine items after the 287; parcel M3X2: the pow family's 36 after them
             j = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
             b = d.soak_binary(j["item"])
             c("wide plan: div256-hard-rtz's first slice is `divsqrt-soak div256-hard 0 2^20 rtz`, four checks an index, no fixed case count, "
@@ -6403,8 +6407,8 @@ def scn_wide_c5_refused(env: Env, src: str = HERE) -> list:
 
 
 FAKE_GEN = """import os, subprocess, sys
-# a test double for host/tools/gen_sweep_images.py (parcel M4X2): writes the manifest of the box's real generation (FAKE_GEN_MANIFEST: the suite's
-# rs-images-manifest.txt) with this tree's HEAD as its commit, into the --out directory it is given, which it refuses to find there already.
+# a test double for host/tools/gen_sweep_images.py (parcel M4X2): writes the manifest of a real generation (FAKE_GEN_MANIFEST: the suite's
+# rs3-images-manifest.txt since parcel M3X2, the fifteen digests and the three skipped names) with this tree's HEAD as its commit, into the --out directory it is given, which it refuses to find there already.
 # FAKE_GEN_FAIL=<rc> exits so; FAKE_GEN_MOVE=<name> changes that routine's digest; FAKE_GEN_DROP=<name> leaves its digest line out;
 # FAKE_GEN_EXTRA=<line> adds a line; FAKE_GEN_COMMIT=<sha> says another commit; FAKE_GEN_NOMAN=1 writes no manifest.
 out = sys.argv[sys.argv.index("--out") + 1]
@@ -6484,7 +6488,7 @@ def fake_build_tree(env: Env, src: str, tag: str):
                "--build-jobs", "2", "--make-xrt-flags", "XRT=0", "--sweep-items", items]
         for n, pth in env.imgs.items():
             cmd += ["--image", f"{n}={pth}", "--sha", f"{n}={env.shas[n]}"]
-        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, FAKE_GEN_MANIFEST=os.path.join(FIX, "rs-images-manifest.txt"),
+        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, FAKE_GEN_MANIFEST=os.path.join(FIX, "rs3-images-manifest.txt"),
                  **(env_extra or {}))
         p = subprocess.run(cmd + extra, capture_output=True, text=True, env=e, cwd=ROOT, timeout=300)
         r = Run(o)
@@ -7015,6 +7019,145 @@ def routine_parser_checks(src: str = HERE) -> list:
                          '"  MARK %s a=0x%08lx guess=0x%08lx %s%s\\n"', "%s %s: device %.3f s, oracle %.3f s, %lu lanes a call", "#define SHOW 16"))
     return out
 
+def routine_pow_checks(src: str = HERE) -> list:
+    """The pow family's marks and exact line (parcel M3X2): parse_routine_marks and parse_routine on the real logs of the tool (rs3-*), every damage of the exact line and of the MARK lines it must
+    refuse, the exact line absent for the other thirteen, the stand-in's lines held to the real ones for the pow ops, each of its misbehaviours through the parser, and the tool's printf lines
+    quoted at the text the library's comment cites."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = fixture_index()
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+        mk = lambda v: (v.extra.get("marks") if v is not None else None) or {"by_attr": {}, "named": [], "not_named": None}      # noqa: E731
+
+        def job(nm):
+            op, lo, hi, mode = fixture_job(index, nm)
+            return op, hi - lo, mode
+
+        def whole(nm, text=None, rc=None):
+            op, n, mode = job(nm)
+            k = 5 if mode == "all" else 1
+            return L2.parse_routine(text if text is not None else fixture(nm), index[nm][0] if rc is None else rc, op, mode, None, n * k, {"encodings": n, "per_encoding": k})
+        v, why = parse_ok(lambda: whole("rs3-pow-y-exact-all.txt"))
+        c("routine real log (pow, y = 2 fixed, 256 x from 3.0 under all): passes - 1,280 cases, 256 encodings - with 5 marked (one under each attribute), 0 off the list, 5 guesses wrong, "
+          "5 marked on an exact lane (counts.exact_marked), every named lane (exact lane) and the guesses compared",
+          v is not None and v.ok and v.counts == {"cases": 1280, "value_mismatches": 0, "flag_mismatches": 0, "encodings": 256, "skipped": 0, "marked": 5, "off_list": 0, "guesses_wrong": 5, "exact_marked": 5}
+          and mk(v)["by_attr"] == {"rne": 1, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 1} and mk(v)["not_named"] == 0 and len(mk(v)["named"]) == 5
+          and all(n["exact"] and n["lane"] == 0x40400000 and not n["off_list"] and n["wrong"] for n in mk(v)["named"]), why or str(v))
+        v, why = parse_ok(lambda: whole("rs3-pow-x-all.txt"))
+        c("routine real log (pow, x = 2 fixed, 256 y from 1.0 under all): passes with 0 marked, 0 on an exact lane (the exact line is there and says 0)",
+          v is not None and v.ok and v.counts["marked"] == 0 and v.counts["exact_marked"] == 0 and v.counts["encodings"] == 256 and "marked on an exact lane" in fixture("rs3-pow-x-all.txt"), why or str(v))
+        v, why = parse_ok(lambda: whole("rs3-pow-y-exact-rtz.txt"))
+        c("routine real log (the same slice under rtz alone): 256 cases, 1 marked (rtz 1, the other four `-`), 1 on an exact lane",
+          v is not None and v.ok and v.counts["cases"] == 256 and v.counts["marked"] == 1 and v.counts["exact_marked"] == 1
+          and mk(v)["by_attr"] == {"rne": None, "rtz": 1, "rdn": None, "rup": None, "rmm": None}, why or str(v))
+        # damage of the exact line and its MARK lines, each on the real log
+        nm = "rs3-pow-y-exact-all.txt"
+        op, n, mode = job(nm)
+        real = fixture(nm)
+        damage = {
+            "the exact line gone": re.sub(r"^.*marked on an exact lane\n", "", real, flags=re.M),
+            "the exact count above the total": real.replace(": 5 marked on an exact lane", ": 6 marked on an exact lane"),
+            "the exact count and the off-list count above the total": real.replace("0 off the list", "1 off the list"),
+            "the exact line of another op": real.replace(f"{op} all: 5 marked on", f"{op}0 all: 5 marked on"),
+            "the exact line of another mode": real.replace(f"{op} all: 5 marked on", f"{op} rtz: 5 marked on"),
+            "a second exact line": real + f"{op} all: 5 marked on an exact lane\n",
+            "an exact lane's MARK line without its suffix": real.replace(" (exact lane)", "", 1),
+            "a MARK line fewer": real.replace("  MARK rup", "  MARKX rup", 1),
+            "the exact count lower than the MARK lines it names": real.replace(": 5 marked on an exact lane", ": 4 marked on an exact lane"),
+        }
+        for what, t in damage.items():
+            c(f"routine exact damage: {what} - refused by the marks parser",
+              raises(lambda t=t: L2.parse_routine_marks(t, op, "all")) and not raises(lambda: L2.parse_routine_marks(real, op, "all")), what)
+        e_exp = fixture("rs-exp-all-marks.txt") + "exp-f32 all: 3 marked on an exact lane\n"
+        c("routine exact damage: an exact line in the log of exp (an op that has none) - refused, and the real exp log is read as it was",
+          raises(lambda: L2.parse_routine_marks(e_exp, "exp-f32", "all")) and not raises(lambda: L2.parse_routine_marks(fixture("rs-exp-all-marks.txt"), "exp-f32", "all")))
+        c("routine exact damage: an exact-lane MARK suffix in the log of exp - refused",
+          raises(lambda: L2.parse_routine_marks(fixture("rs-exp-all-marks.txt").replace("  MARK rtz a=0x33ffffff guess=0x3f800000 right", "  MARK rtz a=0x33ffffff guess=0x3f800000 right (exact lane)"), "exp-f32", "all")))
+        c("routine exact damage: a rule line for pow (the tiny-quotient rule is atan2's alone) - refused",
+          raises(lambda: L2.parse_routine_marks(real + f"{op} all: 5 in the rule (must mark 5, band 0), 0 must-mark lanes not marked\n", op, "all")))
+        c("routine exact: the old logs of atan2 and exp are read as before - no key `exact` in their counts (rs-exp-all-marks), and the pow log's keys are the old ones plus exact_marked",
+          "exact_marked" not in whole("rs-exp-all-marks.txt").counts and "exact_marked" in whole(nm).counts)
+        c("routine exact: routine_has_exact is the pow family's four-name rule (pow, powr, pown, rootn, compound op words), and no other op's",
+          all(L2.routine_has_exact(f"{k}-f32-x3f800000-d00000000") for k in ("pow", "powr")) and all(L2.routine_has_exact(f"{k}-f32-n3") for k in ("pown", "rootn", "compound"))
+          and not any(L2.routine_has_exact(f"{k}-f32") for k in ("exp", "atan", "log1p")) and not L2.routine_has_exact("atan2-f32-x3f800000-da86a60d8") and not L2.routine_has_exact("powx"))
+        # the tool's own printf lines, at the text the library cites
+        c("routine exact: the patterns quote the tool's printf lines (the exact line, the exact-lane MARK suffix and its budget of sixteen)",
+          not source_has("host/tools/routine_sweep.c", '"%s %s: %llu marked on an exact lane\\n"', '" (exact lane)"', "shown_e++ < SHOW"))
+        # the stand-in prints the real tool's lines for the pow ops
+        rc, txt = rs_standin(["pow-f32-y40000000-d7043fd38", "0x40400000", "0x40400100", "all"], src=src)
+        c("routine stand-in: for the pow slice at y = 2 (rs3-pow-y-exact-all) it prints exactly the real tool's lines (the hashes, instruction counts and times masked), the exact line included",
+          rc == 0 and [x for x in rs_mask(txt) if not x.startswith("image ")] == [x for x in rs_mask(fixture("rs3-pow-y-exact-all.txt")) if not x.startswith("image ")], "\n".join(rs_mask(txt)[:14]))
+        rc, txt = rs_standin(["pow-f32-x40000000-d7043fd38", "0x3f800000", "0x3f800100", "all"], src=src)
+        c("routine stand-in: for the pow slice at x = 2 with no mark (rs3-pow-x-all) it prints the real tool's lines, the exact line saying 0",
+          rc == 0 and [x for x in rs_mask(txt) if not x.startswith("image ")] == [x for x in rs_mask(fixture("rs3-pow-x-all.txt")) if not x.startswith("image ")], "\n".join(rs_mask(txt)[:14]))
+        rc, txt = rs_standin(["pow-f32-y40000000-d7043fd38", "0x40400000", "0x40400100", "rtz"], src=src)
+        c("routine stand-in: the same slice under rtz (rs3-pow-y-exact-rtz): one image line, the four dashes, one mark",
+          rc == 0 and [x for x in rs_mask(txt) if not x.startswith("image ")] == [x for x in rs_mask(fixture("rs3-pow-y-exact-rtz.txt")) if not x.startswith("image ")], "\n".join(rs_mask(txt)[:10]))
+        for fname, args in (("rs3-refuse-pown-no-image.txt", ["pown-f32-n3", "0", "5", "all"]),):
+            rc, txt = rs_standin(args, src=src)
+            c(f"routine stand-in: pown, which has no image until parcel M3F2 has merged, is refused as the real tool refuses a name with no image ({fname}): exit 2, 'cannot read ...pown-n3-fp32-rne.cftp', no verdict",
+              rc == 2 and "pown-n3-fp32-rne.cftp" in txt and "pown-n3-fp32-rne.cftp" in fixture(fname) and "cannot read" in txt and " cases," not in txt, txt[:200])
+        # each misbehaviour of the stand-in for a pow op, through the driver's parser
+        POP = "pow-f32-y40000000-d7043fd38"
+
+        def via(do, *, mode="all", lo="0x40400000", hi="0x40400100", op=POP):
+            with tempfile.TemporaryDirectory() as td:
+                sc = os.path.join(td, "sc.json")
+                with open(sc, "w") as fh:
+                    json.dump([{"leg": "soak", "nth": [1], "do": do}], fh)
+                e = {"CFT_STANDIN_SCENARIO": sc, "CFT_STANDIN_STATE": td}
+                p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_standin.py"), "soak", "--", "host/routine-sweep", op, lo, hi, mode],
+                                   capture_output=True, text=True, env=dict(os.environ, **e), timeout=120)
+            n = int(hi, 0) - int(lo, 0)
+            return p.returncode, p.stderr + p.stdout, (n, 5 if mode == "all" else 1)
+        parse = lambda txt, rc, n, k: L2.parse_routine(txt, rc, POP, "all", None, n * k, {"encodings": n, "per_encoding": k})        # noqa: E731
+        for do, want in (("marks", (3, 0, 0, 3)), ("offlist", (1, 1, 0, 0)), ("wrongguess", (1, 0, 1, 1)), ("exactmarks", (3, 0, 0, 3)), ("manymarks", (40, 3, 2, 37))):
+            rc, txt, (n, k) = via(do)
+            v, why = parse_ok(lambda txt=txt, rc=rc, n=n, k=k: parse(txt, rc, n, k))
+            c(f"routine stand-in (pow) `{do}`: parsed ok, {want[0]} marked, {want[1]} off the list, {want[2]} guesses wrong, {want[3]} on an exact lane (never a failure of the slice)",
+              v is not None and v.ok and rc == 0 and (v.counts["marked"], v.counts["off_list"], v.counts["guesses_wrong"], v.counts["exact_marked"]) == want, why or str(v))
+        rc, txt, _ = via("manymarks")
+        c("routine stand-in (pow) `manymarks`: 40 marks, 37 on an exact lane: sixteen exact-lane MARK lines and the three off-list ones (their own budgets, so the off-list ones are not hidden "
+          "behind the exact ones), 21 not named",
+          txt.count("(exact lane)") == 16 and txt.count("(off the list)") == 3 and "40 marked" in txt and "37 marked on an exact lane" in txt
+          and L2.parse_routine_marks(txt, POP, "all")["not_named"] == 21, txt[-300:])
+        for do, want in (("exactmissing", "no exact line"), ("nomarks", "found 0"), ("badmarks", "sum to")):
+            rc, txt, (n, k) = via(do)
+            try:
+                parse(txt, rc, n, k)
+                got = "accepted"
+            except L2.VerdictError as e:
+                got = str(e)
+            c(f"routine stand-in (pow) `{do}`: refused by the marks parser, naming it", want in got, got[:160])
+        for do in ("fail", "mismatch"):
+            rc, txt, (n, k) = via(do)
+            v, why = parse_ok(lambda txt=txt, rc=rc, n=n, k=k: parse(txt, rc, n, k))
+            c(f"routine stand-in (pow) `{do}`: a failing verdict (ok False, exit 1) with a MISMATCH line", v is not None and not v.ok and rc == 1 and "  MISMATCH " in txt, why or str(v))
+        for do in ("short", "shortcase", "badenc"):
+            rc, txt, (n, k) = via(do)
+            c(f"routine stand-in (pow) `{do}`: refused by the soak's cover rule", raises(lambda txt=txt, rc=rc, n=n, k=k: parse(txt, rc, n, k)))
+        for do, want in (("digest", "names digest"), ("noimage", "cannot read")):
+            rc, txt, (n, k) = via(do)
+            c(f"routine stand-in (pow) `{do}`: exit 2 with the tool's refusal ({want}) and no verdict - a parse_error", rc == 2 and want in txt and raises(lambda txt=txt, rc=rc, n=n, k=k: parse(txt, rc, n, k)), txt[-200:])
+        # the stand-in's op grammar is the tool's: a pow op word the tool refuses is refused by it
+        for bad_op in ("pow-f32-x3f800000-y40000000", "pow-f32", "pow-f32-n3", "pown-f32-x3f800000", "atan2-f32-y3f800000"):
+            rc, txt = rs_standin([bad_op, "0", "5", "all"], src=src)
+            c(f"routine stand-in: the op word {bad_op} is refused as the tool's grammar refuses it (exit 2, no verdict)", rc == 2 and " cases," not in txt and "unknown op" in txt, txt[:160])
+        # the real logs of the refusals (rs3-refuse-*) are exit 2 with no verdict line and a message that names the rule
+        for fname, word in (("rs3-refuse-x-and-y.txt", "exactly one"), ("rs3-refuse-n-on-pow.txt", "only pown, rootn and compound take -n"), ("rs3-refuse-y-on-atan2.txt", "only pow and powr take -y"),
+                            ("rs3-refuse-pown-past-int64.txt", "does not fit int64"), ("rs3-refuse-rootn-zero.txt", "n = 0"), ("rs3-refuse-pow-no-suffix.txt", "exactly one of"),
+                            ("rs3-refuse-pown-no-image.txt", "cannot read")):
+            t = fixture(fname)
+            c(f"routine real log ({fname}): exit {index[fname][0]}, the tool's message names the rule ({word!r}) and there is no verdict line",
+              index[fname][0] == 2 and word in t and L2.SOAK_LINE.search(t) is None, t[:160])
+    return out
+
+
 def routine_driver_checks(env: Env, src: str = HERE) -> list:
     """The driver's side, in-process (parcel M4X2): the routine items in the run's catalog only with --mpfr-prefix, the plan of a slice (argv, cover, expected cases, the group in
     its record), no -cN tool under --sweep-chunk, the guard's rule for a routine-sweep that holds an image, and the host pool never planning a routine item."""
@@ -7254,8 +7397,10 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
       "lines against the table, and kept the directory; the step `mpfr routine-sweep` listed the thirteen with five images and the table's digests and passed the smoke job (45 cases, 3 marked lanes) with "
       "the oracle line at the pin - while the driver itself held an image in its environment (the job was started without it, or the soak's CPU rule would have refused its DEVICE line)",
       s1.get("ok") is True and s2.get("ok") is True and os.path.basename(d1).startswith("sweep-images-") and os.path.dirname(d1) == os.path.abspath(A.out) and os.path.isdir(d1)
-      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 13 routines" in s1.get("detail", "")
-      and "names the 13 routines with five images" in s2.get("detail", "") and "45 cases, 3 marked lanes right and on the list" in s2.get("detail", "")
+      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 15 routines and ROUTINE_N_DIGESTS' 0 rows" in s1.get("detail", "")
+      and "the generator skipped pown, rootn, compound by name (not built at fp32)" in s1.get("detail", "")
+      and "names the 15 routines with five images" in s2.get("detail", "") and "45 cases, 3 marked lanes right and on the list" in s2.get("detail", "")
+      and "pow job pow-f32-y40000000-d7043fd38 0x40400000 0x40400100 all passed (1280 cases, 5 marked lanes, all on an exact lane)" in s2.get("detail", "")
       and "names MPFR 4.2.2 with GMP 6.3.0" in s2.get("detail", "") and A.rc == 0, f"rc {A.rc}: {s1} {s2}")
     c("routine build A: the xrt step holds routine-sweep to ldd after the literal list (links libxrt_coreutil), and the run served the routine item and a wide one and passed them",
       (A.steps.get("xrt routine-sweep") or {}).get("ok") is True and {x["sweep"]["item"] for x in A.legs(kind="sweep", status="pass")} >= {item, "sqrt128-f32-rne"},
@@ -7284,6 +7429,18 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     red("moved-atan", {"FAKE_GEN_MOVE": "atan"}, "routine images", ("atan: the generator's digest is d22abd20", "ROUTINE_DIGESTS has d22abd22", "fragment moved"),
         "a moved fragment (the generator's atan digest is not the table's)")
     red("dropped-atan2", {"FAKE_GEN_DROP": "atan2"}, "routine images", ("atan2: the generator's digest is not given", "ROUTINE_DIGESTS has a86a60d8"), "atan2, whose digest line the manifest lacks")
+    # parcel M3X2: pow and powr, and the rows of the n-keyed names
+    red("moved-pow", {"FAKE_GEN_MOVE": "pow"}, "routine images", ("pow: the generator's digest is 7043fd30", "ROUTINE_DIGESTS has 7043fd38", "fragment moved"),
+        "a moved fragment (the generator's pow digest is not the table's)")
+    red("dropped-powr", {"FAKE_GEN_DROP": "powr"}, "routine images", ("powr: the generator's digest is not given", "ROUTINE_DIGESTS has 8aefb175"), "powr, whose digest line the manifest lacks")
+    red("missing-pow", {"CFT_STANDIN_LIST_MISSING": "pow"}, "mpfr routine-sweep", ("pow: `routine-sweep list` says", "4 of 5 images found"), "an image of pow the tool cannot find (list: four of the five)")
+    red("list-lacks-powr", {"CFT_STANDIN_LIST_DROP": "powr"}, "mpfr routine-sweep", ("powr: `routine-sweep list` says 'nothing'",), "a `list` that lacks powr's row (a name with a row in the table)")
+    red("list-lacks-nkeyed", {"CFT_STANDIN_LIST_DROP": "rootn"}, "mpfr routine-sweep", ("rootn: `routine-sweep list` has neither a row of an n nor `rootn-f32: no image`",),
+        "a `list` that lacks rootn's row (an n-keyed name with neither a row of an n nor `no image`)")
+    with open(os.path.join(env.tmp, "routine-pow-scenario.json"), "w") as fh:
+        json.dump([{"leg": "soak", "op": "pow-f32-y40000000-d7043fd38", "nth": [1], "do": "offlist"}], fh)
+    red("pow-marks", {"CFT_STANDIN_SCENARIO": os.path.join(env.tmp, "routine-pow-scenario.json"), "CFT_STANDIN_STATE": os.path.join(env.tmp, "routine-pow-scenario-state")},
+        "mpfr routine-sweep", ("marks", "off the list"), "marks that are not the pow smoke's (one lane off the list where the smoke has five on an exact lane)")
     red("commit", {"FAKE_GEN_COMMIT": "0" * 40}, "routine images", ("the manifest's commit is", "this checkout's HEAD is"), "a manifest made from another commit")
     red("genfail", {"FAKE_GEN_FAIL": "1"}, "routine images", ("gen_sweep_images.py --out <dir>` exited 1",), "a generator that exits 1")
     red("noman", {"FAKE_GEN_NOMAN": "1"}, "routine images", ("no readable manifest.txt",), "a generator that writes no manifest")
@@ -7297,8 +7454,40 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
         "marks that are not the smoke's (one lane off the list, where the smoke has three right ones on it)")
     E = rd("routine-build-extra", ["--mpfr-prefix", pfx], {"FAKE_GEN_EXTRA": "digest nosuch 12345678"})
     s = E.steps.get("routine images") or {}
-    c("routine build: a manifest digest the table lacks (a name that is none of the thirteen) is SAID in the step and does not fail it",
-      s.get("ok") is True and "also has digests for nosuch" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
+    c("routine build: a manifest digest the table lacks (a name that is none of the eighteen) is SAID in the step, with its digest, and does not fail it",
+      s.get("ok") is True and "also has digests for nosuch 12345678" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
+    # the n-keyed rows: a copy of the code whose ROUTINE_N_DIGESTS has one row (pown at n = 3), on the driver's real path
+    srcn = make_plant_copy(env, "routine-n-table", [("card_stress_lib.py", "ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}",
+                                                   'ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {("pown", 3): "0123abcd"}')])
+    rootn_, fbn, pfxn, driven = fake_build_tree(env, srcn, "routine-n")
+    envn = {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd", "CFT_STANDIN_LIST_N": "pown:3:0123abcd"}
+    G = driven("routine-n-green", ["--mpfr-prefix", pfxn], envn, names)
+    sg1, sg2 = G.steps.get("routine images") or {}, G.steps.get("mpfr routine-sweep") or {}
+    c("routine build (n-keyed): with a row (pown, 3) in ROUTINE_N_DIGESTS, a manifest `digest pown-n3 0123abcd` line and a `list` row `pown-f32-n3: ... digest 0123abcd`, both steps pass and name the row",
+      sg1.get("ok") is True and sg2.get("ok") is True and "ROUTINE_N_DIGESTS' 1 rows" in sg1.get("detail", "") and "(1) or `no image`" in sg2.get("detail", "") and G.rc == 0, f"rc {G.rc}: {sg1} {sg2}")
+
+    def redn(name, envx, step, want, why):
+        X = driven(f"routine-n-{name}", ["--mpfr-prefix", pfxn], envx, names)
+        s = X.steps.get(step) or {}
+        c(f"routine build red (n-keyed): {why} - the step `{step}` fails, by name ({want}), the run stops before any leg (build_failed, exit 3)",
+          s.get("ok") is False and all(w in s.get("detail", "") for w in want) and X.rc == 3 and not X.legs(kind="sweep"), f"rc {X.rc}: {s}")
+    redn("no-digest", {"CFT_STANDIN_LIST_N": "pown:3:0123abcd"}, "routine images", ("pown-n3: the generator's digest is not given", "ROUTINE_N_DIGESTS has 0123abcd"),
+         "the manifest has no digest line for a (name, n) of the table")
+    redn("moved", {"FAKE_GEN_EXTRA": "digest pown-n3 0123abce", "CFT_STANDIN_LIST_N": "pown:3:0123abcd"}, "routine images", ("pown-n3: the generator's digest is 0123abce", "ROUTINE_N_DIGESTS has 0123abcd"),
+         "the manifest's digest of a (name, n) is not the table's")
+    redn("no-row", {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd"}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says 'nothing'", "ROUTINE_N_DIGESTS"),
+         "a `list` with no row for a (name, n) of the table (the row `pown-f32-n3: ...` is one the pattern `^(\\S+)-f32: ` does not read)")
+    redn("row-digest", {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd", "CFT_STANDIN_LIST_N": "pown:3:ffffffff"}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says", "digest ffffffff"),
+         "a `list` row of a (name, n) whose digest is not the table's")
+    # --sweep-items names an n-keyed op while the table is empty: refused by name by the command itself
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", os.path.join(env.tmp, "routine-nkeyed-refused"), "--quick", "--legs", "api-test",
+                        "--sweep-items", "pown-f32-n3-d00000000-all"], capture_output=True, text=True, timeout=120, cwd=ROOT)
+    c("routine items: --sweep-items pown-f32-n3-d00000000-all is refused by name - the table ROUTINE_N_DIGESTS and parcel M3F2 are named - exit 2 (argparse), nothing run",
+      p.returncode == 2 and "ROUTINE_N_DIGESTS" in p.stderr and "parcel M3F2" in p.stderr and "refused" in p.stderr, p.stderr[-300:])
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", os.path.join(env.tmp, "routine-nosuch-refused"), "--quick", "--legs", "api-test",
+                        "--sweep-items", "pow-f32-x3f000000-d00000000-all"], capture_output=True, text=True, timeout=120, cwd=ROOT)
+    c("routine items: ... and a pow op word with the wrong digest is refused as any name that is not an item (not by the n-keyed message)",
+      p.returncode == 2 and "not an item" in p.stderr and "ROUTINE_N_DIGESTS" not in p.stderr, p.stderr[-300:])
     return out
 
 
@@ -7373,7 +7562,7 @@ def routine_makefile_checks(src: str = HERE) -> list:
 def group_routine(env: Env, src: str = HERE) -> list:
     """Parcel M4X2, the routine items: the catalog and its digests, the marks' parser on the real logs and every damage, the stand-in, the driver's plans and guard, the items served
     and covered in a dry run with their report and reduced night, refused without --mpfr-prefix, and the build step over test doubles (POSIX)."""
-    return (routine_catalog_checks(src) + routine_parser_checks(src) + routine_fe_checks(src) + routine_makefile_checks(src) + routine_driver_checks(env, src)
+    return (routine_catalog_checks(src) + routine_parser_checks(src) + routine_pow_checks(src) + routine_fe_checks(src) + routine_makefile_checks(src) + routine_driver_checks(env, src)
             + scn_routine_items(env, src) + scn_routine_build(env, src))
 
 
@@ -9804,7 +9993,7 @@ def plants(env: Env) -> None:
          [("card_stress_lib.py", '"asin": "005fc862", "acos": "2f8ca421"', '"acos": "2f8ca421", "asin": "005fc862"')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list`"]),
         ("M4X2: a routine claim says 'under' an attribute",
-         [("card_stress_lib.py", '    return (f"{space}, each of the five attributes: an unmarked', '    return (f"{space}, under each of the five attributes: an unmarked')],
+         [("card_stress_lib.py", '    tail = (f", each of the five attributes: an unmarked', '    tail = (f", under each of the five attributes: an unmarked')],       # re-anchored by parcel M3X2: the same defect in the claim's new text
          lambda env, src: routine_catalog_checks(src), ["routine catalog: each of the twelve claims"]),
         ("M4X2: an atan2 claim forgets that it is not the whole space of pairs",
          [("card_stress_lib.py", '                 f"not the whole space of (y, x) pairs")', '                 f"")')],
@@ -9833,7 +10022,7 @@ def plants(env: Env) -> None:
            '    v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])\n    if r["off_list"] or r["wrong"]:\n        v.ok = False\n')],
          lambda env, src: routine_parser_checks(src), ["routine: an off-list mark and a wrong guess leave the verdict ok"]),
         ("M4X2: the stand-in prints every attribute's image line under one attribute",
-         [("card_stress_standin.py", "    for a in attrs:\n        ninsn, nwords = ROUTINE_EXP_SIZES[a]", "    for a in ROUTINE_ATTRS:\n        ninsn, nwords = ROUTINE_EXP_SIZES[a]")],
+         [("card_stress_standin.py", "    for a in attrs:\n        ninsn, nwords = (ROUTINE_POW_SIZES", "    for a in ROUTINE_ATTRS:\n        ninsn, nwords = (ROUTINE_POW_SIZES")],       # re-anchored by parcel M3X2: the same defect
          lambda env, src: routine_parser_checks(src), ["routine stand-in: under one attribute (rtz)"]),
         ("M4X2: the stand-in's smoke marks are not the real tool's",
          [("card_stress_standin.py", '("rup", 0x3f800001))', '("rup", 0x3f800002))')],
@@ -9921,6 +10110,66 @@ def plants(env: Env) -> None:
         ("M4X2: the page lists the wide items inside the base group again",
          [("nightly.html", '      function part(isWide) { return pick(isWide ? "wide" : "base"); }', '      function part(isWide) { return pick("base"); }')],
          plant_progress, ["routine page: a class with all three groups", "wide page:"]),
+        # -- parcel M3X2 (2026-11-24): the pow family's items, the exact line, the n-keyed rows (CARD_STRESS_PLANT='M3X2: ' runs just these)
+        ("M3X2: pow's digest in the table is not the tool's",
+         [("card_stress_lib.py", '    "pow": "7043fd38", "powr": "8aefb175",', '    "pow": "7043fd39", "powr": "8aefb175",')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_DIGESTS is the real tool's `list` at parcel M3X2"]),
+        ("M3X2: the pow items' x are not the study's order",
+         [("card_stress_lib.py", "    (0x3f000000, \"0.5\"), (0x3f7fffff, \"1 - 2^-24, the float below 1\"), (0x3f800001, \"1 + 2^-23, one ulp above 1\"), (0x3fc00000, \"1.5\"),",
+           "    (0x3f7fffff, \"1 - 2^-24, the float below 1\"), (0x3f000000, \"0.5\"), (0x3f800001, \"1 + 2^-23, one ulp above 1\"), (0x3fc00000, \"1.5\"),")],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: POW_X and POW_Y are the study's"]),
+        ("M3X2: a pow claim forgets that it is not the whole space of pairs",
+         [("card_stress_lib.py", '                 f"not the whole space of (x, y) pairs")\n    elif fixed[0] == "y":', '                 f"")\n    elif fixed[0] == "y":')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: a pow or powr claim says"]),
+        ("M3X2: the n-keyed names have items before parcel M3F2",
+         [("card_stress_lib.py", "ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}", 'ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {("pown", 3): "0123abcd"}')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: the n-keyed names have no item"]),
+        ("M3X2: the marks parser does not need the exact line of a pow op",
+         [("card_stress_lib.py", "    elif routine_has_exact(op):\n        raise VerdictError(", "    elif False:\n        raise VerdictError(")],
+         lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact line gone"]),
+        ("M3X2: the marks parser lets the exact count exceed the total",
+         [("card_stress_lib.py", "        if exact > total:\n", "        if False:\n")],
+         lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact count above the total"]),
+        ("M3X2: the marks parser lets exp have an exact line",
+         [("card_stress_lib.py", "        if not routine_has_exact(op):\n            raise VerdictError(", "        if False:\n            raise VerdictError(")],
+         lambda env, src: routine_pow_checks(src), ["routine exact damage: an exact line in the log of exp"]),
+        ("M3X2: the marks parser lets an exact-lane MARK line lose its suffix",
+         [("card_stress_lib.py", "        n_ex = sum(1 for n in named if n[\"exact\"])\n        if n_ex != min(exact, ROUTINE_SHOW)", "        n_ex = min(exact, ROUTINE_SHOW)\n        if n_ex != min(exact, ROUTINE_SHOW)")],
+         lambda env, src: routine_pow_checks(src), ["routine exact damage: an exact lane's MARK line without its suffix"]),
+        ("M3X2: the stand-in leaves the exact line out of a pow slice",
+         [("card_stress_standin.py", "        if fam and do != \"exactmissing\":", "        if False:")],
+         lambda env, src: routine_pow_checks(src), ["routine stand-in: for the pow slice at y = 2"]),
+        ("M3X2: the stand-in's exact marks share the other marks' sixteen",
+         [("card_stress_standin.py", "        if shown[ex and fam] < 16:\n            shown[ex and fam] += 1", "        if shown[False] < 16:\n            shown[False] += 1")],
+         lambda env, src: routine_pow_checks(src), ["routine stand-in (pow) `manymarks`"]),
+        ("M3X2: the stand-in's pow smoke marks are not the real tool's",
+         [("card_stress_standin.py", "POW_SMOKE_GUESS = {\"rne\": 0x41100000,", "POW_SMOKE_GUESS = {\"rne\": 0x41100001,")],
+         lambda env, src: routine_pow_checks(src), ["routine stand-in: for the pow slice at y = 2"]),
+        ("M3X2: the build step does not hold the n-keyed digests",
+         [("card_stress.py", "                for (name, nn), want in L.ROUTINE_N_DIGESTS.items():       # parcel M3X2: pown, rootn, compound at each n a row names (empty until M3F2's merge)",
+           "                for (name, nn), want in []:       # parcel M3X2")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red (n-keyed): the manifest has no digest line"]),
+        ("M3X2: the build step does not hold the n-keyed rows of `list`",
+         [("card_stress.py", "        for (name, nn), want in L.ROUTINE_N_DIGESTS.items():\n            lab = ", "        for (name, nn), want in []:\n            lab = ")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red (n-keyed): a `list` with no row"]),
+        ("M3X2: the build step lets an n-keyed name have neither a row nor `no image`",
+         [("card_stress.py", "        for name in L.ROUTINE_NKEYED:\n", "        for name in ():\n")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red: a `list` that lacks rootn's row"]),
+        ("M3X2: the build step runs no pow job",
+         [("card_stress.py", "        rc, pout = runr([pop, plo, phi, pmode])", "        rc, pout = 0, \"\"\n        if False:\n            pass")],
+         lambda env, src: scn_routine_build(env, src), ["routine build red: marks that are not the pow smoke's"]),
+        ("M3X2: --sweep-items accepts an n-keyed op word with a message that names no table",
+         [("card_stress.py", "            if n and n not in known and re.match(r\"^(?:pown|rootn|compound)-f32-n\", n):", "            if False and re.match(r\"^(?:pown|rootn|compound)-f32-n\", n):")],
+         lambda env, src: scn_routine_build(env, src), ["routine items: --sweep-items pown-f32-n3-d00000000-all is refused by name"]),
+        ("M3X2: the report leaves the exact class out of its marks sentence",
+         [("card_stress_report.py", "+ (f\", {a['exact_marked']} of them on an exact lane (the routine's design: a lane whose result is exact, counted apart from off the list)\" if \"exact_marked\" in a else \"\")", "+ \"\"")],
+         plant_report, ["routine pow: the text's marks sentence says the exact class"]),
+        ("M3X2: the report gives an exp item the exact key",
+         [("card_stress_report.py", "        if re.match(r\"^(?:pow|powr|pown|rootn|compound)-f32-\", item) and \"exact_marked\" not in a:", "        if \"exact_marked\" not in a:")],
+         plant_report, ["routine pow: an exp item's block has no exact key"]),
+        ("M3X2: the routine rule accepts a pow word with both -x and -y",
+         [("figure_extracts.py", "r\"|powr?-f32-[xy][0-9a-f]{8}\"", "r\"|powr?-f32-(?:-?[xy][0-9a-f]{8})+\"")],
+         lambda env, src: routine_fe_checks(src), ["routine figure_extracts: the rule"]),
     ]
     where = {"nightly.html": os.path.join(ROOT, "site", "nightly.html"), "rate_probe.c": os.path.join(ROOT, "host", "tools", "rate_probe.c"),
              "Makefile": os.path.join(ROOT, "host", "Makefile"), "figure_extracts.py": os.path.join(ROOT, "python", "figure_extracts.py")}

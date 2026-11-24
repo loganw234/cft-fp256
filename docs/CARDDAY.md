@@ -1993,7 +1993,7 @@ until then the generator skips and names them, and the tool says `no image`.
 
     routine-sweep <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>
     routine-sweep oracle <op> <rne|rtz|rdn|rup|rmm>     hex lanes on stdin; "lane bits flags" a line out; no device, no image
-    routine-sweep list                                  the thirteen, each with its digest or `no image`
+    routine-sweep list                                  the eighteen, each with its digest or `no image` (a row for each n of pown, rootn, compound)
 
 `<op>` is `<name>-f32` (exp, exp2, expm1, log, log2, log1p, sin, cos, tan, atan, asin, acos) or `atan2-f32-x<8 hex digits>` (x
 fixed, y swept: r0 the lanes' y, r1 the fixed x), and may end `-d<8 hex digits>`, the first 32 bits of the sha256 of the five
@@ -2571,6 +2571,62 @@ MARK line's suffix `(in the rule: must mark)` or `(in the rule: band)`), "off th
 mismatch, so the slice fails. A record made before the rule has no rule counts (the key is absent, never zero) and its atan2 "off the list" holds the rule's lanes, which cannot be told
 apart afterwards; the report counts those slices apart. Every atan2 item was fully swept before the rule, so none has a record with it until the items are swept again (docs/VALIDATION.md,
 the entry of 2026-11-16, has the accounting and the cost).
+
+### The pow family's items (added 2026-11-24, parcel M3X2): fp32's pow and powr in the catalog, pown, rootn and compound held
+
+Parcel M3F1 built fp32's pow and powr (the triple word); this parcel taught `routine-sweep` to sweep them and put them in the nightly catalog, as parcel M4X2 did the twelve and M4CAT the four.
+What this section states about the card is the lead's runs' to make: nothing of this parcel ran on the card, and a pass of one of its slices will be "no disagreement on that slice", never "pow is correct".
+
+**The op words** (host/tools/routine_sweep.c, `parse_op`; one grammar by the routine's kind, each refusal exit 2 with a message that names the rule, each shown by a real log, `rs3-refuse-*`):
+
+| routine | op word | what is fixed, what is swept |
+|---|---|---|
+| exp ... acos | `<name>-f32[-d<8 hex>]` | every x |
+| atan2 | `atan2-f32-x<8 hex>[-d..]` | x fixed (its second operand), every y: stream a the swept y, stream b the fixed x |
+| pow, powr | `pow-f32-x<8 hex>[-d..]` | x fixed, **every y**: stream a holds the fixed x, stream b the swept lanes |
+| pow, powr | `pow-f32-y<8 hex>[-d..]` | y fixed, **every x**: stream a the swept lanes, stream b the fixed y (atan2's own shape) |
+| pown, rootn, compound | `pown-f32-n<token>[-d..]` | n fixed, every x; the token is decimal with an `m` for a minus: `n3`, `nm3`, `n17`, `n2147483647`, `nm9223372036854775808`; no leading zero, no `m0` |
+
+Exactly one of `-x` and `-y` for pow and powr; `-x` keeps atan2's meaning (the fixed second operand of atan2(y, x)) and no other op takes it; `-y` is the pow family's alone; `-n` is the three's alone.
+An n beyond int64 is exit 2 naming it, and so is an n beyond the host's `long` (MPFR's integer operand: 32 bits on Windows, where the tool builds and runs, 64 on Linux, where the sweeps run); rootn's n = 0 is refused by name.
+**`a=` in every verdict line (MISMATCH, FLAGS, MARK) is the swept lane**, whichever stream it is in, so that `SOAK_DISAGREE` and `parse_routine_marks` read the new ops unedited.
+
+**The images** are `<name>-fp32-<attr>.cftp|.bank|.marks` as before; pow and powr have one set of five each, serving both shapes. pown, rootn and compound are one set of five **for each n**, `<name>-n<token>-fp32-<attr>.*`,
+built by `gen_sweep_images.py` at each n of `N_LIST` (2, -2, 3, -3, 17, 2^31 - 1, -2^63), in that order, and their manifest lines and `digest` lines carry the key `pown-n3`, `pown-nm3`. Their fragments are parcel M3F2's: until it has merged the
+generator **skips each of the three by name once** (`skipped pown not built at fp32`), which is not an error, and `routine-sweep list` prints `pown-f32: no image`. **How the tool knows which n to look for:** it holds a table of the same seven n
+(`NLIST`), the generator's `N_LIST` is the other copy and the catalog's `ROUTINE_NS` a third; `hw/test_routine_sweep.py`'s `build` group reads the first two from their sources and holds all three equal. `list` prints one row for each n that has any
+file (`pown-f32-n3: images rne rtz rdn rup rmm, digest ...`) and, for a name with none, the one row `pown-f32: no image`. The `.marks` files of all five names are empty (no lane that must mark is known; the marks are the exact family's, below).
+
+**The exact family, and where it is shown.** At pow(3, 2) = 9 the routine marks by design (docs/studies/M3-pow.md 2.7, question 4 (a): only a power-of-two x at an integer exponent, y = 1, n = 0 and 1 are decided in-lane; every other exact case marks).
+At y = 2 about 2^-13 of the x are such lanes (x with at most 12 significant bits: 2^11 mantissas x 127 exponents x 2 signs = 520,192 lanes a slice, COMPUTED), and counting them "off the list" would bury a real off-list mark. The lead's decision (2026-11-24, question 3 (a)):
+a marked lane whose true result has at most p + 1 = 25 significant bits (MPFR's ternary 0 at 25 bits with the widest exponents: a point or a midpoint of the grid, which is what golden's `_pow_dyadic`, `_pown_dyadic` and `_rootn_dyadic` return an (m, e) for) is **the exact class**,
+counted in the new line `<op> <mode>: X marked on an exact lane` (after the marks line; for pow, powr, pown, rootn and compound ops and no other), not in "off the list". A mark on a lane golden decides in-lane (the class `inlane`: x a power of two with y E an integer, y = 1,
+n = 0 and 1, pown with a power-of-two x, rootn with a power-of-two x and |n| dividing its exponent) is a **fault** and stays "off the list". An unmarked exact lane is judged as any unmarked lane; nothing "must mark". The MARK lines of the exact class end ` (exact lane)` and have a
+budget of sixteen of their own, so that a slice of thousands of them leaves room for the off-list ones. `routine-sweep exact <op>` (lanes on stdin) prints the class of each (`exact`, `inlane`, `none`) with no image, which `hw/test_routine_sweep.py` holds against golden's three predicates on the lanes of its structured lists.
+`parse_routine_marks` requires the line for those ops, refuses it for any other, and the record's counts gain `exact_marked`; the report's routine block adds "N of them on an exact lane" to the marks sentence of those items only, and a run with none of them reports as it did.
+compound has no golden predicate (transcend.py has no `_compound_dyadic`): its exact class is the 25-bit rule alone and its in-lane rule n = 0 and 1.
+
+**The items.** `sweep_items(mpfr=True)` is **344** (COMPUTED by the suite: 308 + 36; 125 without `--mpfr-prefix`): the 308 keep their places, names and fields (their `vars()` hash is the base's: held), and pow's eighteen then powr's eighteen are appended to the routine items:
+for each of the nine x of `POW_X` (0.5, 1 - 2^-24, 1 + 2^-23, 1.5, 2, 3, 10, 2^-126, the largest normal) `pow-f32-x<x>-d7043fd38-all` (every y), then for each of the nine y of `POW_Y` (-2, -1, -0.5, 0.5, 1.5, 2, 3, 2^-20, 2^20) `pow-f32-y<y>-d7043fd38-all` (every x), and the same with
+powr's digest 8aefb175. The study's lists, typed, in the order of the lead's measured slices. Each is in group `routine`, `mpfr=True`, exact, five checks an encoding over 2^32 encodings, tile, fp32: no figure of the report, the reducer or the page moves for a run without one.
+The claim says "every fp32 y for x = 0x... (what it is) through pow as the compiled program (its images' digest d), not the whole space of (x, y) pairs" (or the x for y), the five attributes, and that a mark on an exact lane is counted apart: **a pass is no disagreement on that slice, 2^32 of the 2^64 pairs' line**.
+**The 21 n-keyed items are not items yet.** `ROUTINE_N_DIGESTS` (keyed `(name, n)`) is empty; a row there makes an item (`pown-f32-n3-d<digest>-all`), and `--sweep-items pown-f32-n3-d00000000-all` is refused by name, naming that table and parcel M3F2.
+
+**The digests, and how one moves.** pow 7043fd38 and powr 8aefb175 (the generator's `digest` lines, READ at f7a1ce95 with this parcel's generator, recomputed and approved by the lead). They move as every row does ("HOW A DIGEST MOVES" in hw/card_stress_lib.py): a changed fragment changes the digest, the lead changes the table, the item is new and its coverage starts at nothing.
+The build step (`check_routine`) holds the manifest's `digest` lines to both tables by key (`pown-n3`), says a digest the tables lack (and the names the generator skipped) in its detail without failing, reads `routine-sweep list` with a pattern that reads the n-keyed rows too (`pown-f32-n3: ...`) and **fails by name** on a row of either table that is missing or differs, and on an n-keyed name
+that has neither a row of an n nor `no image`. A second smoke job runs pow (`pow-f32-y40000000-d7043fd38 0x40400000 0x40400100 all`: 5 marks, all on an exact lane, none off the list) beside exp's, because a step that listed the images and ran only exp would not see a broken pow path.
+
+**The hours, COMPUTED, not run.** The device runs a program a lane under each attribute: (instructions + 5) x 0.98 ns, 0.98 ns READ from M3X's measured slice (docs/studies/m3/pw32_slice.out.txt). Pow's five images have 930, 925, 926, 926 and 930 instructions (MEASURED, the tool's image lines, rs3-pow-*): (4,637 + 25) x 0.98 ns = **4.57 us a lane under `all`**
+(the brief's 4.544 us is from M3X's counts; this one from the five counts of the images built here). The oracle is 1.2 to 7.7 us a lane (M3X, one call). A slice of 2^32 lanes is 9.0 to 9.4 hours on one tile at the means of M3X's lists (the brief's COMPUTED figure), so **36 slices are about 82 hours on the quad's four tiles**. pown, rootn and compound have no image yet: their instruction counts
+are **INFERRED** from the double word's ratio to pow (0.89 to 0.94, study 5.1) until parcel M3XN measures them, so their 21 slices (**about 39 hours**, INFERRED: pown 6.5 h and rootn 6.6 h a slice, compound 9.3 h, 7 slices each, over four tiles) and the 57 together (about 121 hours, INFERRED) are estimates. The device sets the pace; a night is 13 h 45 min and a weekend window 61 h 45 min.
+
+**When parcel M3F2 has merged** (the lead's procedure, in this order): (1) on the merged tree on the box (MPFR 4.2.2) `python3 -B hw/test_routine_sweep.py --only build,images,oracle,agree,whole,refuse --names pown,rootn,compound`; the generator then builds the three at the seven n, so
+`routine-sweep list` has **21 rows** `pown-f32-n2 ... pown-f32-nm9223372036854775808` (and `rootn-`, `compound-`) with five images and a digest each and **no `no image` row for them**, 15 + 21 = 36 rows in all; (2) add the 21 rows of `ROUTINE_N_DIGESTS` from the manifest's `digest pown-n2 <8 hex>` lines, each
+approved as the 13's were (the catalog is then 344 + 21 = 365); (3) `bash hw/test-card-stress.sh --only routine,testfiles --no-plants` (its pins `len(full) == 344` and 57 become 365 and 78: the lead's edit with the rows), and the report's and page's tests; (4) the n-keyed slice logs (`rs3-*` of pown, rootn and compound) are made then, from the real tool.
+
+**Known limits.** The sweeps run on Linux: on Windows the tool builds and runs (the desktop's mingw64, MPFR 4.2.2) but n = -2^63 is refused by name (a 32-bit `long`). MPFR below 4.2.0 (WSL cft2204's 4.1.0) refuses powr, rootn and compound at run time (exit 3, `tfn_needs_42`): the tests' legs on them are skipped by name there and run on
+the box. `raw_tfn`'s compound branch is the text it was (mpfr_compound_si is off by one ulp for a negative n). The fast path's classification holds both operands for the two-operand routines, and the lanes where the result is exact take the slow path. An off-list mark and a wrong guess fail nothing, as for every routine item; the exact class is the tool's rule and golden's three predicates its test,
+held in both directions on the structured lists and not on every lane.
 
 ### The card's rates (added 2026-10-28, parcel TP): cases a second a tile by op and format, and the probe leg
 

@@ -5,7 +5,7 @@ image pow rtz: sha256 4012745cc8229e99fdbf6b88976a1a4d0665d4a2f5c0b1de595e448b57
 image pow rdn: sha256 637d8465bd89eb0e093552caeca0b0b02ccf7fd9e595ab9798d37b1987da01a1, 926 instructions, 146 words
 image pow rup: sha256 a06bf6dfbec16f1cc1fd2982e253155ab36115eddafc400bf5202d97887e3525, 926 instructions, 144 words
 image pow rmm: sha256 1a5c5e5f8060112dd14dd62e377d14bcee70973ff1b8f0a5e7785c778def9915, 930 instructions, 143 words
-pow-f32-y40000000-d7043fd38 all: device 0.208 s, oracle 0.001 s, 16384 lanes a call
+pow-f32-y40000000-d7043fd38 all: device 0.223 s, oracle 0.001 s, 16384 lanes a call
   MARK rne a=0x40400000 guess=0x41100000 WRONG (exact lane)
   MARK rtz a=0x40400000 guess=0x410fffff WRONG (exact lane)
   MARK rdn a=0x40400000 guess=0x410fffff WRONG (exact lane)

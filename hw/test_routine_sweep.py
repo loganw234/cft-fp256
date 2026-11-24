@@ -627,6 +627,11 @@ def group_oracle_pow(tool):
             skipped_legs += 1
             continue
         for n in N_LIST:
+            prc, _po, perr = tool.raw("oracle", f"{fn}-f32-n{ntoken(n)}", "rne", stdin="")
+            if prc == 2 and "does not fit this host's long" in perr:
+                skip("oracle", f"{fn} n={n}: an n beyond this host's long (a Windows build: 32 bits), refused by the tool by name; the sweeps run on Linux")
+                skipped_legs += 1
+                continue
             for attr in ATTRS:
                 got, why = tool_oracle(tool, f"{fn}-f32-n{ntoken(n)}", attr, lanes)
                 if fn == "rootn" and n == 0:
@@ -1521,6 +1526,23 @@ def group_legs(tool, imgs, work):
     check("legs: the marks comparison is red when Python counts the plain fragment (0) against the tool's G' = 6 images' marks over "
           f"the same 256 lanes ({mk2 and mk2[1][1]}); its other leg, the wrong-guess count, is the plain fragment's 0 against the tool's "
           f"({mk and mk[3]})", rc2 == 0 and mk2 is not None and py_plain == 0 and mk2[1][1] > 0, f"{mk2} {py_plain}")
+    # the lead's box script (hw/card_stress_fixtures/box_m3x2_fixtures.sh): its exit status fails on a doctored job, and is 0 on the real tool where the tool's MPFR is 4.2.0 or newer
+    script = os.path.join(HERE, "card_stress_fixtures", "box_m3x2_fixtures.sh")
+    bad_tool = os.path.join(work, "not-the-tool.sh")
+    with open(bad_tool, "w", newline="\n") as fh:
+        fh.write("#!/bin/sh\nexit 0\n")
+    os.chmod(bad_tool, 0o755)
+    p1 = subprocess.run(["bash", script, ROOT, bad_tool, os.path.join(work, "box-bad")], capture_output=True, text=True, timeout=600, env=dict(os.environ, PYTHON=sys.executable))
+    check("legs: box_m3x2_fixtures.sh with a tool that is not routine-sweep (it exits 0 and prints nothing) exits 1 and names each log that lacks its line", p1.returncode == 1 and "the log lacks" in p1.stderr, f"rc {p1.returncode} {p1.stderr[-200:]}")
+    if has_42(tool):
+        p3 = subprocess.run(["bash", script, ROOT, tool.path, os.path.join(work, "box-good")], capture_output=True, text=True, timeout=600, env=dict(os.environ, PYTHON=sys.executable))
+        rows = [ln.split("\t") for ln in p3.stdout.splitlines()]
+        check("legs: ... and with the real tool (MPFR 4.2 or newer) exits 0, eight logs and their INDEX rows (name, exit status, command, seconds), the powr slice's exact line 5",
+              p3.returncode == 0 and len(rows) == 8 and all(len(r) == 3 for r in rows) and "5 marked on an exact lane" in open(os.path.join(work, "box-good", "rs3-box-powr-y-exact-all.txt")).read(), f"rc {p3.returncode} {p3.stderr[-200:]}")
+    else:
+        skip("legs: box_m3x2_fixtures.sh with the real tool exits 0", f"needs MPFR 4.2.0, this build has {mpfr_version(tool)[3]}: powr is refused at run time here, and the script exits 1 for it by design (the lead runs it on the box)")
+        p2 = subprocess.run(["bash", script, ROOT, tool.path, os.path.join(work, "box-bad2")], capture_output=True, text=True, timeout=600, env=dict(os.environ, PYTHON=sys.executable))
+        check("legs: ... and with the real tool on an MPFR below 4.2 it exits 1 (powr refused, exit 3, and its log lacks the exact line): a doctored environment is red", p2.returncode == 1, f"rc {p2.returncode}")
     got, _ = tool_oracle(tool, "exp-f32", "rne", [0x3f800000, 0x7fa00001])
     check("legs: tool_oracle's reading of the tool is the transcend value for exp(1) and exp(sNaN)",
           got == {0x3f800000: (0x402df854, 0x10), 0x7fa00001: (0x7fc00000, 0x01)}, f"{got}")
