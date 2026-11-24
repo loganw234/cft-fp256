@@ -334,7 +334,10 @@ def test_a_fold_is_exact_or_refused_by_name(expr, want):
 
 def test_a_fold_of_pow_is_the_exact_rational_not_the_run_time_value():
     """The study's pow(8, 1/3) = 2 (the constant expression is exact) where
-    pow(8, x) at x = RN(1/3), the run-time value, is not 2 at fp64."""
+    pow(8, y) is 2 or not by the attribute, y being the constant 1/3
+    rounded under the program's own attribute: 2 under rne and rmm and not
+    2 under rtz, rdn and rup, at every format (with y = RN(1/3) alone the
+    pattern differs by format: it is VALIDATION's addendum to M3L's entry)."""
     for fmtname in FORMATS:
         fmt = FORMATS[fmtname]
         for rnd in RNDS:
@@ -713,12 +716,14 @@ def test_the_three_not_proposed_differ_on_their_named_lanes(fmtname):
 @pytest.mark.parametrize("fmtname", ["fp32", "fp64", "fp128", "fp256"])
 def test_each_of_the_eleven_is_red_by_a_doctored_form(fmtname):
     """The same comparison (differing_lanes) that finds none for the eight
-    finds one for each doctored form, on the lane named: `a * a` under rup
-    for the node's rne (the lane 1 + one ulp: 1 + 2u against 1 + 3u), `1 / a`
-    under rup (the lane 31), and `a + 0` for `a * 1` (the lane -0: -0 against
-    +0, under rne). The three not proposed are held by lanes that must
-    differ, so each is shown red by the form that equals the node, written
-    again: it differs nowhere, and the test of the named lanes fails."""
+    finds one for each doctored form of the eight, on the lane named: `a * a`
+    under rup for the node's rne (the lane 1 + one ulp: 1 + 2u against 1 +
+    3u), `1 / a` under rup (the lane 31), and `a + 0` for `a * 1` (the lane
+    -0: -0 against +0, under rne). For the three not proposed this test
+    holds only a control: each node compared with itself, written again,
+    differs on its named lane nowhere, so that the assertion of a difference
+    there would be red on it. The three's own difference on their named
+    lanes is test_the_three_not_proposed_differ_on_their_named_lanes's."""
     fmt = FORMATS[fmtname]
     lanes = rewrite_pool(fmt)
     for node, form in REWRITES:

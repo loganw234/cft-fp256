@@ -1125,8 +1125,14 @@ the derivation (n - 1 or 1 - n leaves int64): the primal stands.
   lowest terms with s > 1 it is c^(r/s) where c is a rational's s-th power
   (numerator and denominator both perfect s-th powers: `pow(4, 1/2)` is 2,
   `pow(8, 2/3)` is 4, `pow(8, 1/3)` is 2 - the exact constant, where the
-  run-time `pow(8, y)` of y = RN(1/3) is 2 under rne and rmm and not 2
-  under rtz, rdn and rup) and otherwise `irrational-constant`: `pow(2, 1/2)`
+  run-time `pow(8, y)` is not always 2, and which cells depend on how y
+  is made, MEASURED at all four formats and five attributes: with y =
+  RN(1/3), the one lane, it is 2 under rne, rtz, rdn and rmm and not 2
+  under rup at fp32 (RN(1/3) lies above 1/3 there), and 2 under rne, rup
+  and rmm and not 2 under rtz and rdn at fp64, fp128 and fp256 (RN(1/3)
+  lies below 1/3 there); with y the constant 1/3 rounded under the
+  program's own attribute, it is 2 under rne and rmm and not 2 under rtz,
+  rdn and rup at every format) and otherwise `irrational-constant`: `pow(2, 1/2)`
   (were c^(r/s) rational, c would be a rational's s-th power); `pow(c < 0,
   d)` for a d that is no integer is `irrational-constant` "not a real
   number". `powr` is the same for c > 0, `powr(0, d > 0)` is 0, and `powr(c
@@ -1139,8 +1145,9 @@ the derivation (n - 1 or 1 - n leaves int64): the primal stands.
   2^+-2^20 is `constant-range`, and **so is one whose exact numerator or
   denominator would need more than 2^22 bits** (|n| times the larger bit
   length of the base's numerator and denominator, for a base other than
-  1 and -1: `pown(1 + 2^-1000, 2^63)` has a small value and is refused
-  `constant-range`, the sentence saying so). A minus on a zero literal is
+  1 and -1: `pown(1 + 1e-30, 9223372036854775807)` has a small value and is
+  refused `constant-range`, the sentence saying so, as is n = 2^62; n =
+  2^63 is outside int64 and `integer-operand`). A minus on a zero literal is
   `constant-negative-zero` before any fold; a constant that changes with h
   in operand 2 of the three is `integer-operand`; in any other operand,
   `h-nonlinear`. A call of one constant and one operand that is not is a
