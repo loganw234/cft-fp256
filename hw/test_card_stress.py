@@ -6701,7 +6701,7 @@ def routine_catalog_checks(src: str = HERE) -> list:
           and L2.ROUTINE_NAMES == tuple(m.group(1) for m in lst3), f"{listed3} {mdig3} {noimg3} {skip3}")
         c("routine catalog: every routine item's op word is the tool's op grammar - <name>-f32, then -x<8 hex> (atan2), -x or -y <8 hex> (pow and powr, one of them) or -n<token> (pown, rootn, compound), "
           "and -d<8 hex> - and its digest is the table's",
-          all(L2.ROUTINE_OP.match(it.op) and L2.ROUTINE_OP.match(it.op).group("d") == L2.ROUTINE_DIGESTS[it.op.split("-")[0]] for it in rs + pw)
+          all(L2.ROUTINE_OP.match(it.op) and L2.ROUTINE_OP.match(it.op).group("d") == L2.ROUTINE_DIGESTS.get(it.op.split("-")[0]) for it in rs + pw)
           and not L2.ROUTINE_OP.match("exp-f32-d043b3b") and not L2.ROUTINE_OP.match("exp-f32-d043b3bb5-all") and not L2.ROUTINE_OP.match("nosuch-f32")
           and not L2.ROUTINE_OP.match("atan2-f32-d043b3bb5") and not L2.ROUTINE_OP.match("pow-f32-x3f000000-y3f000000-d7043fd38") and not L2.ROUTINE_OP.match("pow-f32-n3")
           and not L2.ROUTINE_OP.match("pow-f32-d7043fd38") and not L2.ROUTINE_OP.match("pown-f32-x3f000000") and not L2.ROUTINE_OP.match("pown-f32-n03")
@@ -6732,12 +6732,12 @@ def routine_catalog_checks(src: str = HERE) -> list:
         pd = dict(L2.ROUTINE_DIGESTS)
         c("routine catalog: a pow or powr claim says every fp32 y for that x (or every fp32 x for that y) and what it is, the routine as the compiled program with its images' digest, that it is not the "
           "whole space of (x, y) pairs, the five attributes, that a mark on an exact lane is counted apart; never 'swept' or ', under '",
-          all((f"every fp32 y for x = 0x{w:08x} ({dict(L2.POW_X)[w]}) through {it.op.split('-')[0]} as the compiled program (its images' digest {pd[it.op.split('-')[0]]})" in it.claim
+          all((f"every fp32 y for x = 0x{w:08x} ({dict(L2.POW_X).get(w)}) through {it.op.split('-')[0]} as the compiled program (its images' digest {pd.get(it.op.split('-')[0])})" in it.claim
                if "-f32-x" in it.op else
-               f"every fp32 x for y = 0x{w:08x} ({dict(L2.POW_Y)[w]}) through {it.op.split('-')[0]} as the compiled program (its images' digest {pd[it.op.split('-')[0]]})" in it.claim)
+               f"every fp32 x for y = 0x{w:08x} ({dict(L2.POW_Y).get(w)}) through {it.op.split('-')[0]} as the compiled program (its images' digest {pd.get(it.op.split('-')[0])})" in it.claim)
               and "not the whole space of (x, y) pairs" in it.claim and "each of the five attributes" in it.claim and "counted apart" in it.claim
               and ", under " not in it.claim and "swept" not in it.claim and it.claim.count("(L1 over the fp32 slice)") == 1
-              for it in pw for w in [int(re.search(r"-f32-[xy]([0-9a-f]{8})-d", it.op).group(1), 16)]) and len(pw) == 36,
+              for it in pw for w in [int((re.search(r"-f32-[xy]([0-9a-f]{8})-d", it.op) or [0, "-1"])[1], 16)]) and len(pw) == 36,
           pw[0].claim if pw else "no pow item")
         c("routine catalog: the claims of the 21 older routine items are the base's words, with no sentence of the pow family's added",
           all("counted apart" not in it.claim for it in rs) and rs[0].claim.endswith("(L1 over the fp32 slice)") and at[0].claim.endswith("(L1 over the fp32 slice)"))
@@ -7063,6 +7063,7 @@ def routine_pow_checks(src: str = HERE) -> list:
             "the exact line gone": re.sub(r"^.*marked on an exact lane\n", "", real, flags=re.M),
             "the exact count above the total": real.replace(": 5 marked on an exact lane", ": 6 marked on an exact lane"),
             "the exact count and the off-list count above the total": real.replace("0 off the list", "1 off the list"),
+            "the exact line gone from a log with no mark at all": None,
             "the exact line of another op": real.replace(f"{op} all: 5 marked on", f"{op}0 all: 5 marked on"),
             "the exact line of another mode": real.replace(f"{op} all: 5 marked on", f"{op} rtz: 5 marked on"),
             "a second exact line": real + f"{op} all: 5 marked on an exact lane\n",
@@ -7070,12 +7071,23 @@ def routine_pow_checks(src: str = HERE) -> list:
             "a MARK line fewer": real.replace("  MARK rup", "  MARKX rup", 1),
             "the exact count lower than the MARK lines it names": real.replace(": 5 marked on an exact lane", ": 4 marked on an exact lane"),
         }
+        nx_op, _nn, _nm = job("rs3-pow-x-all.txt")
+        no_marks = fixture("rs3-pow-x-all.txt")
+        damage["the exact line gone from a log with no mark at all"] = None
         for what, t in damage.items():
+            if t is None:       # judged on the log of the slice that marks nothing, where no MARK line can give the line's absence away
+                c(f"routine exact damage: {what} - refused by the marks parser",
+                  raises(lambda: L2.parse_routine_marks(re.sub(r"^.*marked on an exact lane\n", "", no_marks, flags=re.M), nx_op, "all")) and not raises(lambda: L2.parse_routine_marks(no_marks, nx_op, "all")), what)
+                continue
             c(f"routine exact damage: {what} - refused by the marks parser",
               raises(lambda t=t: L2.parse_routine_marks(t, op, "all")) and not raises(lambda: L2.parse_routine_marks(real, op, "all")), what)
+        c("routine exact damage: an exact count of 6 over 5 marked, with no off-list lane, on the pow log with no mark (0 marked, 1 exact) - refused: the exact count is held to the total by itself",
+          raises(lambda: L2.parse_routine_marks(no_marks.replace(": 0 marked on an exact lane", ": 1 marked on an exact lane"), nx_op, "all")))
         e_exp = fixture("rs-exp-all-marks.txt") + "exp-f32 all: 3 marked on an exact lane\n"
         c("routine exact damage: an exact line in the log of exp (an op that has none) - refused, and the real exp log is read as it was",
           raises(lambda: L2.parse_routine_marks(e_exp, "exp-f32", "all")) and not raises(lambda: L2.parse_routine_marks(fixture("rs-exp-all-marks.txt"), "exp-f32", "all")))
+        c("routine exact damage: an exact line saying 0 in the log of exp (an op that has none), where no MARK line gives it away - refused",
+          raises(lambda: L2.parse_routine_marks(fixture("rs-exp-all-marks.txt") + "exp-f32 all: 0 marked on an exact lane\n", "exp-f32", "all")))
         c("routine exact damage: an exact-lane MARK suffix in the log of exp - refused",
           raises(lambda: L2.parse_routine_marks(fixture("rs-exp-all-marks.txt").replace("  MARK rtz a=0x33ffffff guess=0x3f800000 right", "  MARK rtz a=0x33ffffff guess=0x3f800000 right (exact lane)"), "exp-f32", "all")))
         c("routine exact damage: a rule line for pow (the tiny-quotient rule is atan2's alone) - refused",
@@ -7144,10 +7156,14 @@ def routine_pow_checks(src: str = HERE) -> list:
         for do, want in (("digest", "names digest"), ("noimage", "cannot read")):
             rc, txt, (n, k) = via(do)
             c(f"routine stand-in (pow) `{do}`: exit 2 with the tool's refusal ({want}) and no verdict - a parse_error", rc == 2 and want in txt and raises(lambda txt=txt, rc=rc, n=n, k=k: parse(txt, rc, n, k)), txt[-200:])
-        # the stand-in's op grammar is the tool's: a pow op word the tool refuses is refused by it
-        for bad_op in ("pow-f32-x3f800000-y40000000", "pow-f32", "pow-f32-n3", "pown-f32-x3f800000", "atan2-f32-y3f800000"):
-            rc, txt = rs_standin([bad_op, "0", "5", "all"], src=src)
-            c(f"routine stand-in: the op word {bad_op} is refused as the tool's grammar refuses it (exit 2, no verdict)", rc == 2 and " cases," not in txt and "unknown op" in txt, txt[:160])
+        # the stand-in's op grammar is the tool's: the op words the tool refuses are none of its ops (its pattern is the library's, held above) and the library's refuses them too
+        import importlib.util as _iu
+        _sp = _iu.spec_from_file_location("rs_standin_copy2", os.path.join(src, "card_stress_standin.py"))
+        _sm = _iu.module_from_spec(_sp)
+        _sp.loader.exec_module(_sm)
+        bad_ops = ("pow-f32-x3f800000-y40000000", "pow-f32", "pow-f32-n3", "pown-f32-x3f800000", "atan2-f32-y3f800000", "pown-f32-n03", "rootn-f32-y3f800000")
+        c("routine stand-in: the op words the tool's grammar refuses (both -x and -y, none, -n on pow, -x on pown, -y on atan2, a leading zero) are matched by neither the stand-in's pattern nor the library's",
+          not any(_sm.ROUTINE_OP.match(o) or L2.ROUTINE_OP.match(o) for o in bad_ops), str([o for o in bad_ops if _sm.ROUTINE_OP.match(o)]))
         # the real logs of the refusals (rs3-refuse-*) are exit 2 with no verdict line and a message that names the rule
         for fname, word in (("rs3-refuse-x-and-y.txt", "exactly one"), ("rs3-refuse-n-on-pow.txt", "only pown, rootn and compound take -n"), ("rs3-refuse-y-on-atan2.txt", "only pow and powr take -y"),
                             ("rs3-refuse-pown-past-int64.txt", "does not fit int64"), ("rs3-refuse-rootn-zero.txt", "n = 0"), ("rs3-refuse-pow-no-suffix.txt", "exactly one of"),
@@ -10127,12 +10143,12 @@ def plants(env: Env) -> None:
         ("M3X2: the marks parser does not need the exact line of a pow op",
          [("card_stress_lib.py", "    elif routine_has_exact(op):\n        raise VerdictError(", "    elif False:\n        raise VerdictError(")],
          lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact line gone"]),
-        ("M3X2: the marks parser lets the exact count exceed the total",
-         [("card_stress_lib.py", "        if exact > total:\n", "        if False:\n")],
-         lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact count above the total"]),
+        ("M3X2: the marks parser lets the exact line be another op's or another mode's",
+         [("card_stress_lib.py", "        if el.group(1) != op or el.group(2) != verdict_mode:\n", "        if False:\n")],
+         lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact line of another op", "routine exact damage: the exact line of another mode"]),
         ("M3X2: the marks parser lets exp have an exact line",
          [("card_stress_lib.py", "        if not routine_has_exact(op):\n            raise VerdictError(", "        if False:\n            raise VerdictError(")],
-         lambda env, src: routine_pow_checks(src), ["routine exact damage: an exact line in the log of exp"]),
+         lambda env, src: routine_pow_checks(src), ["routine exact damage: an exact line saying 0 in the log of exp"]),
         ("M3X2: the marks parser lets an exact-lane MARK line lose its suffix",
          [("card_stress_lib.py", "        n_ex = sum(1 for n in named if n[\"exact\"])\n        if n_ex != min(exact, ROUTINE_SHOW)", "        n_ex = min(exact, ROUTINE_SHOW)\n        if n_ex != min(exact, ROUTINE_SHOW)")],
          lambda env, src: routine_pow_checks(src), ["routine exact damage: an exact lane's MARK line without its suffix"]),
