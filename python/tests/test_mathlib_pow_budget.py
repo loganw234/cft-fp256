@@ -888,3 +888,84 @@ def test_pow_rate_quick_and_a_doctored_job_exits_non_zero(capsys, monkeypatch):
     rc, out = _run(["pow-rate", "--quick", "--fn", "compound", "--attrs",
                     "rne", "--regions", "int", "--n", "30"], capsys)
     assert rc == 0 and "NOT MEASURED" in out
+
+
+# =====================================================================
+# send-back 1: --regions and --quick under every set, and the RESULT line
+# =====================================================================
+
+def _rerun(argv, capsys):
+    R.NOT_MEASURED.clear()
+    return _run(argv, capsys)
+
+
+def test_regions_filters_the_box_and_reference_cells_or_is_refused(capsys):
+    """--regions was read on the desktop branch alone. Under --set box it keeps
+    the cells of the regions it names (the plant's cell of a named region
+    too); under --set reference likewise; a name that is no region of the set
+    is refused by name."""
+    rc, out = _rerun(["pow-budget", "--set", "box", "--fn", "compound",
+                      "--formats", "fp64", "--n", "12", "--regions",
+                      "int1000"], capsys)
+    assert rc == 0
+    heads = [ln for ln in out.splitlines() if "the cell's figure" in ln]
+    assert len(heads) == 2 and all("int1000" in h for h in heads), heads
+    assert "zone12000" not in out
+    assert any("plant zone_bound_off" in h for h in heads)
+    rc, out = _rerun(["pow-budget", "--set", "reference", "--fn", "pow",
+                      "--formats", "fp64", "--regions", "edge"], capsys)
+    heads = [ln for ln in out.splitlines() if "the cell's figure" in ln]
+    assert rc == 0 and len(heads) == 2 and all(" edge " in h for h in heads)
+    assert " zone " not in out
+    with pytest.raises(SystemExit, match="--regions 'nowhere': not a region "
+                       "of --set box"):
+        R.main(["pow-budget", "--set", "box", "--fn", "compound", "--formats",
+                "fp64", "--n", "12", "--regions", "nowhere"])
+    with pytest.raises(SystemExit, match="not a region of --set reference"):
+        R.main(["pow-budget", "--set", "reference", "--fn", "pow",
+                "--formats", "fp64", "--regions", "int1000"])
+
+
+def test_quick_under_box_is_twelve_lanes_and_two_cells_a_function(capsys):
+    rc, out = _rerun(["pow-budget", "--set", "box", "--fn", "compound",
+                      "--formats", "fp64", "--quick"], capsys)
+    assert rc == 0
+    heads = [ln for ln in out.splitlines() if "main lanes of" in ln]
+    assert len(heads) == 2 and all("main lanes of 12," in h for h in heads), \
+        heads
+    assert "2 cells measured (the pass count)" in out
+    # --n still wins over --quick's 12
+    rc, out = _rerun(["pow-budget", "--set", "box", "--fn", "compound",
+                      "--formats", "fp64", "--quick", "--n", "8"], capsys)
+    assert all("main lanes of 8," in ln for ln in out.splitlines()
+               if "main lanes of" in ln)
+    # every box line at --quick runs: the three formats' functions
+    rc, out = _rerun(["pow-budget", "--set", "box", "--fn", "pow",
+                      "--formats", "fp128", "--quick"], capsys)
+    assert rc == 0 and "2 cells measured" in out
+
+
+def test_the_result_line_names_the_cells_that_measured_nothing(capsys):
+    rc, out = _rerun(["pow-budget", "--fn", "pow", "--formats", "fp64",
+                      "--regions", "hugey,edge", "--n", "8"], capsys)
+    last = out.strip().splitlines()[-1]
+    assert rc == 0 and last.endswith(
+        "RESULT: ok (1 NOT MEASURED, outside the pass count: pow-budget pow "
+        "fp64 hugey)"), last
+    rc, out = _rerun(["pow-rate", "--quick", "--fn", "compound", "--attrs",
+                      "rne,rtz", "--regions", "int", "--n", "30"], capsys)
+    last = out.strip().splitlines()[-1]
+    assert rc == 0 and "RESULT: ok (2 NOT MEASURED, outside the pass count: " \
+        "pow-rate compound fp128 rne int; pow-rate compound fp128 rtz int)" \
+        in last, last
+    # a run that measured everything keeps the plain line
+    rc, out = _rerun(["pow-budget", "--fn", "pow", "--formats", "fp64",
+                      "--regions", "edge", "--n", "8"], capsys)
+    assert out.strip().splitlines()[-1].endswith("RESULT: ok")
+    # pow-family has no region that can measure nothing (a family a function
+    # does not have is not listed, the census has its counts): its line is
+    # the plain one, and its lines name what each function ran
+    rc, out = _rerun(["pow-family", "--fn", "pown", "--formats", "fp64",
+                      "--attrs", "rne", "--quick"], capsys)
+    assert rc == 0 and out.strip().splitlines()[-1].endswith("RESULT: ok")
+    assert "pow-family pown fp64 rne: " in out and "5 families" in out

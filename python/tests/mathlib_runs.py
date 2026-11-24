@@ -1608,19 +1608,33 @@ _BOX_PLANTS = {("fp64", "compound"): (("zone12000", 20000),
 _QUICK_REGIONS = {"pow": ("edge", "zone"), "powr": ("wide", "rhoedge")}
 
 
-def _pow_budget_cells(a, P, PB, fmt, fn):
-    """[(region, count, seed, plant)] of fn at fmt: --set's cells."""
+NOT_MEASURED = []   # the cells a command named NOT MEASURED, for RESULT's line
+
+
+def _pow_budget_cells(a, P, PB, fmt, fn, filtered=True):
+    """[(region, count, seed, plant)] of fn at fmt: --set's cells. --regions
+    keeps the cells of the named regions under every set (`filtered` False:
+    the set's own cells, for the check that every name is one of them);
+    --quick under box is 12 lanes a cell (unless --n) and the first two cells
+    of the function; under reference the model's lane counts (a figure at
+    other lanes is not the model's) and fp128 by default."""
     seed = a.seed if a.seed is not None else (3 if a.set == "box" else 1)
+    wanted = a.regions.split(",") if a.regions and filtered else None
     if a.set == "reference":
-        return [(k[2], PB.MODEL_FIGURES[k][0], PB.MODEL_SEED, k[3])
-                for k in PB.MODEL_FIGURES if k[:2] == (fmt.name, fn)]
+        cells = [(k[2], PB.MODEL_FIGURES[k][0], PB.MODEL_SEED, k[3])
+                 for k in PB.MODEL_FIGURES if k[:2] == (fmt.name, fn)]
+        return cells if wanted is None else [c for c in cells
+                                             if c[0] in wanted]
     if a.set == "box":
         names = _BOX_CELLS.get((fmt.name, fn), ())
-        cells = [(r, a.n or 10000, seed, a.plant) for r in names]
+        full = 12 if a.quick else None
+        cells = [(r, a.n or full or 10000, seed, a.plant) for r in names]
         if not a.plant:
-            cells += [(r, a.n or c, seed, "zone_bound_off")
+            cells += [(r, a.n or full or c, seed, "zone_bound_off")
                       for r, c in _BOX_PLANTS.get((fmt.name, fn), ())]
-        return cells
+        if wanted is not None:
+            cells = [c for c in cells if c[0] in wanted]
+        return cells[:2] if a.quick else cells
     names = a.regions.split(",") if a.regions else (
         list(_QUICK_REGIONS.get(fn, ("int", "zone"))) if a.quick else
         list(P.region_names_n(fn, fmt) if fn in P.INT_FUNCS
@@ -1638,6 +1652,10 @@ def cmd_pow_budget(a):
     named for what it is (a budget bounds its own sample; a sampled worst is
     a lower bound). `--set desktop` (the default) is the study's 3.2 table at
     the harness's every region: 120 lanes a cell at fp64 and 40 above, seed 1;
+    `--regions` keeps the cells of the regions it names under EVERY set (a
+    name that is no region of the set is refused by name), and `--quick` is
+    12 lanes a cell (box: and the first two cells of a function; reference:
+    the model's lane counts, fp128 only by default).
     `--set box` the study's box_m3s_sb1.sh cells at 10,000 lanes, seed 3, and
     the plant zone_bound_off (compound's int1000 at 10,000 lanes and zone12000
     at 20,000); `--set reference` the 19 cells whose figures are the model's
@@ -1657,6 +1675,15 @@ def cmd_pow_budget(a):
     if a.set not in ("desktop", "box", "reference"):
         raise SystemExit(f"--set {a.set!r}: desktop, box or reference")
     measured = unmeasured = 0
+    NOT_MEASURED.clear()
+    if a.regions and a.set != "desktop":
+        known = {c[0] for fmt in fmts for fn in fns
+                 for c in _pow_budget_cells(a, P, PB, fmt, fn, False)}
+        for r in a.regions.split(","):
+            if r not in known:
+                raise SystemExit(f"--regions {r!r}: not a region of --set "
+                                 f"{a.set} for these --fn and --formats "
+                                 f"({', '.join(sorted(known))})")
     for fmt in fmts:
         if fmt.name == "fp32":
             raise SystemExit("--formats fp32: the triple word has no "
@@ -1679,12 +1706,18 @@ def cmd_pow_budget(a):
                         f"{seed}{' plant ' + plant if plant else ''}")
                 if rec["status"] == "NOT MEASURED":
                     unmeasured += 1
+                    NOT_MEASURED.append(f"pow-budget {fn} {fmt.name} "
+                                        f"{region}")
                     note(found)
                     say(f"{head}: NOT MEASURED (0 main-path lanes of "
                         f"{rec['lanes']}: the screens or the special rows "
                         f"answer them all), {len(found)} findings")
                     continue
                 if a.set == "reference":
+                    if plant:
+                        # the model's own plant cells are red by design (the
+                        # plant's fault): only the reference leg judges them
+                        found = []
                     found += PB.check_reference(fmt, fn, region, plant)[0]
                 B = PF.THRESHOLD_B[(fn, fmt.name)]
                 if rec["figure"] > B and not plant:
@@ -1753,6 +1786,7 @@ def cmd_pow_rate(a):
     stats = a.statistics or (len(fmts) * cells
                              * len({H.rate_class(r) for r in rnds}))
     judged = capped = unmeasured = 0
+    NOT_MEASURED.clear()
     for fmt in fmts:
         if fmt.name == "fp32":
             raise SystemExit("--formats fp32: the triple word has no rate "
@@ -1770,6 +1804,8 @@ def cmd_pow_rate(a):
                             f"{region} seed {a.seed}")
                     if st["status"] == "NOT MEASURED":
                         unmeasured += 1
+                        NOT_MEASURED.append(f"pow-rate {fn} {fmt.name} "
+                                            f"{sf.RND_NAMES[rnd]} {region}")
                         say(f"{head}: NOT MEASURED ({st['lanes']} lanes, "
                             f"shift {st['shift']} is the rule's largest at "
                             f"which the largest p is under 1/2 and it "
@@ -1844,6 +1880,9 @@ def cmd_pow_family(a):
                 o2, rs = PF.check_exact_rule(
                     fmt, rnd, fn, lanes=PF.rule_lanes(fmt, fn)[::step])
                 note(o2)
+                o4, n4 = PF.check_y_one(fmt, rnd, fn)
+                note(o4)
+                o2 = o2 + o4
                 say(f"pow-family {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
                     f"{sum(v[0] for v in st['per'].values())} lanes of "
                     f"{len(st['per'])} families, "
@@ -1853,7 +1892,8 @@ def cmd_pow_family(a):
                     f"{st['wrong']}; exact-case rule over {rs['lanes']} "
                     f"exact lanes: decided {rs['decided']}, marked "
                     f"{rs['marked']}, replay {rs['replay']}, off_rule "
-                    f"{rs['off_rule']}; {len(out) + len(o2)} findings; "
+                    f"{rs['off_rule']}; y = 1 / n = 0, 1 decided over {n4} "
+                    f"lanes; {len(out) + len(o2)} findings; "
                     f"{time.perf_counter() - t0:.0f}s")
             o3, n3 = PF.check_structured_rows(
                 fmt, fn, ns=P.check_ns(fn, fmt) if fn in P.INT_FUNCS else ())
@@ -2447,9 +2487,11 @@ def main(argv=None):
     p.add_argument("--fn", help="pow,powr,pown,rootn,compound (all by "
                                 "default)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
-    p.add_argument("--regions", help="a comma list of regions (--set "
-                                     "desktop: every region of the "
-                                     "function)")
+    p.add_argument("--regions", help="a comma list of regions: the cells of "
+                                     "these regions only, under every --set "
+                                     "(desktop: default every region of the "
+                                     "function; a name that is no region of "
+                                     "box or reference is refused)")
     p.add_argument("--n", type=int, default=0,
                    help="lanes a cell (default 120 at fp64 and 40 above; "
                         "--set box 10,000)")
@@ -2466,8 +2508,10 @@ def main(argv=None):
                                 "(nlow and m1edge always); 'pool' the pool's "
                                 "31")
     p.add_argument("--quick", action="store_true",
-                   help="12 lanes, two regions a function, fp128 only by "
-                        "default")
+                   help="12 lanes a cell, fp128 only by default; desktop: "
+                        "two regions a function; box: the first two cells "
+                        "of a function; reference: the model's lane counts "
+                        "(a figure at other lanes is not the model's)")
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_pow_budget)
@@ -2520,6 +2564,14 @@ def main(argv=None):
     a = ap.parse_args(argv)
     a.fn_(a)
     verdict = "ok" if not FINDINGS else f"{len(FINDINGS)} findings"
+    if NOT_MEASURED:
+        # parcel M3G3, send-back 1: a run with cells that measured nothing
+        # says so on its RESULT line, naming them (pow-budget, pow-rate)
+        shown = "; ".join(NOT_MEASURED[:8]) + (
+            f"; and {len(NOT_MEASURED) - 8} more"
+            if len(NOT_MEASURED) > 8 else "")
+        verdict += (f" ({len(NOT_MEASURED)} NOT MEASURED, outside the pass "
+                    f"count: {shown})")
     say(f"RESULT: {verdict}")
     return 1 if FINDINGS else 0
 

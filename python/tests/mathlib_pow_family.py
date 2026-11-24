@@ -968,6 +968,55 @@ def check_exact_rule(fmt, rnd, fn, run=None, lanes=None, results=None):
     return out[:8], st
 
 
+def y_one_lanes(fmt, fn):
+    """The rule's cheap exact cases that are not a power-of-two base (Logan's
+    answers of 2026-11-19: y = 1, n = 0 and n = 1 are decided in the lane):
+    pow and powr at y = 1; pown, rootn and compound at n = 1 (compound's is
+    1 + x rounded once); pown and compound at n = 0 (1). Both signs of x where
+    the function has them (powr's x is positive, compound's is above -1), x a
+    short odd part, a power of two, the neighbours of 1, the least subnormal
+    and the largest finite."""
+    one = sf.one_bits(fmt)
+    xs = [_val(fmt, 0, 3, 0), _val(fmt, 0, 5, -7), _val(fmt, 0, 1, 3),
+          one + 1, one - 1, sf.min_subnormal_bits(fmt),
+          sf.max_normal_bits(fmt)]
+    if fn == "compound":
+        xs = [_q(fmt, Fraction(3)), _q(fmt, Fraction(5, 128)), one + 1,
+              _q(fmt, Fraction(-1, 2)), _q(fmt, -Fraction(1, 32)),
+              sf.min_subnormal_bits(fmt) | fmt.sign_mask,
+              sf.max_normal_bits(fmt)]
+    elif fn != "powr":
+        xs += [x | fmt.sign_mask for x in xs]
+    if fn in ("pow", "powr"):
+        ys = (one,)
+    elif fn == "rootn":
+        ys = (1,)
+    else:
+        ys = (1, 0)
+    return [(x, y) for x in xs for y in ys if x is not None]
+
+
+def check_y_one(fmt, rnd, fn, run=None, lanes=None):
+    """[finding], n: decided, for the lanes of y_one_lanes: every one is
+    UNMARKED and equal to transcend.py in bits and flag word (the in-lane
+    rule decides it; both signs of x). Findings begin "decided:"."""
+    run = run or runner(fmt, fn, rnd)
+    lanes = y_one_lanes(fmt, fn) if lanes is None else lanes
+    out = []
+    tag = f"{fn} {fmt.name} {RND_NAMES[rnd]}"
+    for ln in lanes:
+        bits, fw = run(ln)
+        gb, gf = P.golden(fmt, rnd, ln, fn)
+        if fw & MARK:
+            out.append(f"decided: {tag}: {_name(ln)} (y = 1 or n = 0, 1) is "
+                       f"marked: the rule decides it in the lane")
+        elif (bits, fw) != (gb, gf):
+            out.append(f"decided: {tag}: {_name(ln)} (y = 1 or n = 0, 1) is "
+                       f"unmarked and wrong: got ({bits:#x}, {fw:#x}), want "
+                       f"({gb:#x}, {gf:#x})")
+    return out[:8], len(lanes)
+
+
 # ---- the study's census, ported ---------------------------------------------------------------
 
 CENSUS_FAMILIES = ("intpow", "root2k", "pow2", "near1", "dominant", "edges",

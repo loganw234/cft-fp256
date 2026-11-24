@@ -449,3 +449,55 @@ def test_the_named_legs_of_the_exact_rule_plants():
     out, _ = PF.check_exact_rule(FP64, RNE, "pow", run=run,
                                  lanes=PF.rule_lanes(FP64, "pow")[::4])
     assert out and all(o.startswith(("marked:", "off_rule:")) for o in out)
+
+
+# =====================================================================
+# y = 1, n = 0 and n = 1: decided in the lane (send-back 1)
+# =====================================================================
+
+def test_the_cheap_exact_cases_are_decided_unmarked_and_equal_golden():
+    """pow and powr at y = 1, pown, rootn and compound at n = 1, pown and
+    compound at n = 0 (both signs of x where the function has them): unmarked
+    and equal to transcend.py in bits and flag word under every attribute."""
+    for fn in FNS:
+        lanes = PF.y_one_lanes(FP64, fn)
+        assert lanes
+        ys = {ln[1] for ln in lanes}
+        assert ys == ({sf.one_bits(FP64)} if fn in ("pow", "powr") else
+                      {1} if fn == "rootn" else {0, 1}), fn
+        xs = {ln[0] for ln in lanes}
+        negative = [x for x in xs if x & FP64.sign_mask]
+        assert bool(negative) == (fn != "powr"), fn         # both signs
+        for rnd in sf.RND_MODES:
+            out, n = PF.check_y_one(FP64, rnd, fn)
+            assert out == [] and n == len(lanes), (fn, rnd, out)
+    out, n = PF.check_y_one(FP128, RNE, "pow")
+    assert out == [] and n == 14
+    # every one is a special row of the main path: gated by the theory
+    for fn in FNS:
+        assert all(PF.status(FP64, RNE, fn, ln) == "gated"
+                   for ln in PF.y_one_lanes(FP64, fn)), fn
+
+
+def test_the_y_one_leg_is_red_on_a_marked_or_a_wrong_lane():
+    for fn in ("pow", "pown", "compound"):
+        real = PF.runner(FP64, fn, RNE)
+        lanes = PF.y_one_lanes(FP64, fn)
+        target = lanes[1]
+        out, _ = PF.check_y_one(FP64, RNE, fn, run=lambda ln: real(ln),
+                                lanes=lanes)
+        assert out == []
+        # a marked lane
+        out, _ = PF.check_y_one(
+            FP64, RNE, fn, lanes=lanes,
+            run=lambda ln: (lambda r: (r[0], r[1] | MARK) if ln == target
+                            else r)(real(ln)))
+        assert len(out) == 1 and out[0].startswith("decided:") \
+            and "is marked" in out[0], out
+        # an unmarked lane that is wrong (a negative x's sign lost)
+        neg = [ln for ln in lanes if ln[0] & FP64.sign_mask][0]
+        out, _ = PF.check_y_one(
+            FP64, RNE, fn, lanes=lanes,
+            run=lambda ln: (lambda r: (r[0] ^ FP64.sign_mask, r[1])
+                            if ln == neg else r)(real(ln)))
+        assert len(out) == 1 and "unmarked and wrong" in out[0], out
