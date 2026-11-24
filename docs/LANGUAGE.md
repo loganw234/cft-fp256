@@ -20,15 +20,21 @@ by the runner's `lang` stage (docs/VERIFICATION.md); ROADMAP.md's
 "Step 3: the language and its compiler (plan of record, 2026-10-01)" is
 the plan, and this document is its parcel L1.
 
-**This is the language at 1.3** (`python/cft_golden/lang/version.py`;
+**This is the language at 1.4** (`python/cft_golden/lang/version.py`;
 CONFORMANCE.md, "The language's version"). It was 1 from 2026-10-02,
 when certificate format version 2 first named it, became 1.1 on
 2026-10-15, when M1's build, item 3, added the math library's exp, expm1,
 exp2, log, log1p and log2 ("The operations"), became 1.2 on 2026-11-02,
-when M2's build added its sin, cos and tan, and became 1.3 on 2026-11-11,
-when M4's build added its atan, asin, acos and atan2: functions it had
-refused only for not having them, so a minor step each time - every
-source accepted at 1 is accepted at 1.3 and computes the same.
+when M2's build added its sin, cos and tan, became 1.3 on 2026-11-11,
+when M4's build added its atan, asin, acos and atan2, and became 1.4 on
+2026-11-24, when M3's build added its pow, powr, pown, rootn and
+compound: functions it had refused only for not having them, so a minor
+step each time - every source accepted at 1 is accepted at 1.4 and
+computes the same, **with one exception: `compound`**, which no earlier
+version reserved, is a built-in from 1.4, and a source naming a value
+`compound` is refused `reserved-name`. No committed source does
+(`git grep -w -l compound -- '*.cftl'` finds none of the 76 at
+f7a1ce95, M3L's base).
 `cft.h`'s `CFT_LANGUAGE_MAJOR` and `_MINOR` carry the version to the C
 tools that write and audit certificates.
 
@@ -370,7 +376,7 @@ OP_NAMES spelling, and its operands are in the golden function's order,
 which is asm.py's OP_FIELDS order - but for `div` and `sqrt`, which no
 tile instruction is: their names are the golden functions' own, and
 their operands in those functions' order; and for the math library's
-thirteen, named as `python/cft_golden/transcend.py` names the functions.
+eighteen, named as `python/cft_golden/transcend.py` names the functions.
 
 | written | node | golden function | 754-2019 | rounds | flags it can raise |
 |---|---|---|---|---|---|
@@ -393,6 +399,11 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
 | `asin(a)` | `asin(a)`, the same | `transcend.compute(fmt, "asin", a)` | 9.2 asin | once | invalid (outside [-1, 1], an infinity or a signaling NaN), underflow, inexact |
 | `acos(a)` | `acos(a)`, the same | `transcend.compute(fmt, "acos", a)` | 9.2 acos | once | invalid (as asin), inexact |
 | `atan2(y, x)` | `atan2(y, x)`, of operands not both constants | `transcend.compute(fmt, "atan2", y, x)` | 9.2 atan2 | once | invalid (a signaling NaN), underflow, inexact |
+| `pow(a, b)` | `pow(a, b)`, of operands not both constants | `transcend.compute(fmt, "pow", a, b)` | 9.2 pow | once | invalid (a negative base and a non-integer power, a signaling NaN), divideByZero (a zero base, a negative power), overflow, underflow, inexact |
+| `powr(a, b)` | `powr(a, b)`, the same | `transcend.compute(fmt, "powr", a, b)` | 9.2 powr | once | invalid (a base below 0, powr(0, 0), powr(+inf, 0), powr(1, +-inf), a signaling NaN), divideByZero, overflow, underflow, inexact |
+| `pown(a, n)` | `pown(a, n)`, n an integer constant: operand 2 is a const entry whose exact value is n | `transcend.compute(fmt, "pown", a, 0, rnd, n)` | 9.2 pown | once | invalid (a signaling NaN), divideByZero (a zero base, n < 0), overflow, underflow, inexact |
+| `rootn(a, n)` | `rootn(a, n)`, the same | `transcend.compute(fmt, "rootn", a, 0, rnd, n)` | 9.2 rootn | once | invalid (a negative base, n even; a signaling NaN), divideByZero (a zero base, n < 0), underflow, inexact |
+| `compound(a, n)` | `compound(a, n)`, the same | `transcend.compute(fmt, "compound", a, 0, rnd, n)` | 9.2 compound | once | invalid (a base below -1, a signaling NaN), divideByZero (a = -1, n < 0), overflow, underflow, inexact |
 | `-a` | `neg(a)` | `sf.neg` | 5.5.1 negate | no: exact | none, not even on a signaling NaN |
 | `abs(a)` | `abs(a)` | `sf.fabs` | 5.5.1 abs | no | none |
 | `copysign(a, b)` | `copysign(a, b)` | `sf.copysign` | 5.5.1 copySign | no | none |
@@ -407,7 +418,7 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
 | `a == b` | `cmpeq(a, b)` | `sf.cmpeq` | 5.6.1 compareQuietEqual | no | the same |
 | `select(c, a, b)` | `select(a, b, c)` | `sf.select`: a if c's magnitude is not zero, else b | none: the tile's SELECT; quiet like 5.5.1 | no | none |
 
-- The nineteen that round take the program's one attribute; the rest
+- The twenty-four that round take the program's one attribute; the rest
   ignore it, as `softfloat.compute` does.
 - **The math library's six** (M1's build, item 3, 2026-10-15) are each
   one correctly rounded operation, under the program's attribute, with
@@ -673,7 +684,7 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
   appeared, overflow included - this set is not every argument, and
   the binades just above the least normal are not in it). A graph
   holding one needs mpmath exactly
-  as the six do, the one `need_mpmath` for all thirteen. Their derivative
+  as the six do, the one `need_mpmath` for all eighteen. Their derivative
   rules are in "The variational equations". The mathematical form prints
   them as `sin(a)`, `cos(a)` and `tan(a)`.
 - **atan, asin, acos and atan2** (M4's build, 2026-11-11; the language at
@@ -715,6 +726,90 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
   Their derivative rules are in "The variational equations". The
   mathematical form prints them as `arctan(a)`, `arcsin(a)`, `arccos(a)`
   and `atan2(y, x)`.
+- **pow, powr, pown, rootn and compound** (M3's build, 2026-11-24; the
+  language at 1.4) are five more of the math library's, each one
+  correctly rounded operation under the program's attribute with exactly
+  the flags its golden function raises, called as the thirteen are:
+  `transcend.compute(fmt, name, a, b, rnd)` for pow and powr, whose
+  operand order is **x first, then y** (`pow(2, 3)` is 8, and a call with
+  another number of arguments is `arity`), and
+  `transcend.compute(fmt, name, a, 0, rnd, n)` for pown, rootn and
+  compound, whose second operand is the **integer n**. Their nodes stand
+  directly after `atan2` and before `neg` in `OPS`, in the order pow,
+  powr, pown, rootn, compound, which is the order the canonical form's
+  operations line counts them in; **all five have two operands in the
+  graph.**
+  - **n is a constant of the graph.** The second operand of pown, rootn
+    and compound is an integer constant of degree 0 in [-2^63, 2^63 - 1]:
+    a literal, a `const` holding an integer, or any constant expression
+    that folds to one (`pown(x, 2 + 1)`, `rootn(x, sqrt(4))`). The node's
+    operand 2 is then the const entry whose **exact value is n**, and the
+    interpreter takes n from it as an exact integer, **never from the
+    constant's encoding**: at fp32 n = 2^31 - 1 rounds to 2^31 and at fp64
+    n = 2^63 - 1 to 2^63, so an encoding does not hold every int64 (the
+    gate holds both). Every other second operand is refused
+    `integer-operand` ("n must be an integer constant within int64: pown,
+    rootn and compound take an integer, which a lane does not hold"): a
+    state, a param, a lane param or a let of one; `h`, a multiple of `h`
+    (also one whose value is an integer, `8 * h` at h = 1/8) or a const
+    that scales with h; a constant that is no integer, `5/2` or `0.5`; one
+    outside int64, 2^63 (written out: `^` is `power`) or `-2^63 - 1`, and
+    `1e30`. `-0` is `constant-negative-zero` before this check. **`rootn(x,
+    0)` is `irrational-constant`** ("not a real number: rootn of order 0
+    has no value") for every first operand. Measured over the shapes of
+    python/tests/test_lang_pow.py's `N_SHAPES` for each of the three:
+    `2 + 1`, `6/2`, `2.0`, `1e1`, `sqrt(4)`, `exp(0)` and a const holding 3
+    are accepted; `h / h` is `unused` (the fold leaves h used by nothing).
+  - Their special values, MEASURED over the golden functions at the four
+    formats under the five attributes (this set is not every
+    argument - it is the arguments named, with n in 0, 1, 2, 3, -1, -2,
+    -3 for the three; python/tests/test_lang_pow.py's golden test holds
+    the node to transcend.compute over its own pool): `pow(+-0, +-0)` and
+    `pow(x, +-0)` for any x, a quiet NaN included, are 1 with no flag;
+    `pow(1, y)` is 1 for y = +inf and a quiet NaN; `pow(+0, 1)` and
+    `pow(+0, 2)` are +0, `pow(-0, 3)` is -0 and `pow(-0, 2)` is +0, none
+    raising a flag; `pow(+0, -1)` and `pow(+0, -1/2)` are +inf with
+    divideByZero and `pow(-0, -1)` is -inf with divideByZero; `pow(+0,
+    -inf)` is +inf and `pow(+0, +inf)` is +0, with no flag; `pow(-8, 1/2)` is
+    the canonical NaN with invalid; `pow(-inf, 3)` is -inf, `pow(-inf, 2)`
+    +inf, `pow(-inf, -3)` -0 and `pow(-inf, 1/2)` +inf; `pow(-1, +-inf)` is
+    1; a signaling NaN in either operand is the canonical NaN with invalid;
+    `pow(2, 1/2)` and `pow(3, 1/3)` are inexact alone; the greatest normal
+    squared is overflow with inexact (+inf, or the greatest normal under
+    some attributes) and the least subnormal squared underflow with
+    inexact. `powr(+0, +0)`, `powr(+inf, +0)`, `powr(1, +inf)`, `powr(-1,
+    +-inf)` and powr of any base below 0 (of -inf too) are the canonical NaN
+    with invalid; `powr(-0, 3)` is +0 and `powr(-0, -1)` +inf with
+    divideByZero (powr reads -0 as +0); otherwise as pow. `pown(a, 0)` is 1
+    with no flag for every a, a quiet NaN and an infinity included, and
+    `pown(sNaN, 0)` is the canonical NaN with invalid; `pown(+-0, 1)` and `pown(+-0, 3)` are +-0, `pown(+-0, 2)`
+    is +0, `pown(+-0, -1)` is +-inf and `pown(+-0, -2)` is +inf, with
+    divideByZero; `pown(+-inf, n)` is the infinity or zero its sign and n's
+    parity give, no flag; a quiet NaN is the canonical NaN, no flag.
+    `rootn(+-0, n)` is +-0 for odd n > 0 and +0 for even n > 0, and for n
+    < 0 an infinity with divideByZero; `rootn(a < 0, 2)`, `rootn(-8, -2)`
+    and `rootn(-inf, +-2)` are the canonical NaN with invalid; `rootn(-inf,
+    3)` is -inf. `compound(a, 0)` is 1 with no flag for a >= -1 and a quiet NaN, `compound(-1, n)` is +0 for n > 0 and +inf with
+    divideByZero for n < 0; `compound(a < -1, n)` and
+    `compound(-inf, n)` are the canonical NaN with invalid, `compound(+inf,
+    n)` the infinity or zero n's sign gives. No other flag appeared in these
+    arguments (the measuring script is named in docs/VALIDATION.md's M3L entry).
+  - **The constants** are folded where the value is rational, in exact
+    rationals ("Constants"), so `pow(8, 1/3)` is the exact constant 2.
+    At run time `pow(8, y)` with y the constant 1/3 rounded under the
+    program's attribute is 2 under rne and rmm and is **not 2** under rtz,
+    rdn and rup, at all four formats (20 cells measured): the constant
+    expression is the exact one, the run-time operation sees the rounded
+    y.
+  - Their derivative rules are in "The variational equations". The
+    mathematical form prints them as the generic call, `pow(a, b)`,
+    `powr(a, b)`, `pown(a, n)`, `rootn(a, n)` and `compound(a, n)`, as
+    atan2's is: no conventional notation tells pow, powr and pown apart,
+    and `a^n` would also be read for rootn's inverse. `^` and `**` stay
+    refused, as `power`, the sentence now saying "or pow(x, y)".
+  - **The compiler does not carry the five on this branch's tree**
+    (M3C's parcel); a node `pow` reaches `cftc` as an `InternalError`
+    until that parcel merges.
 - **Division and the square root** (L4, 2026-10-02) are each one
   correctly rounded operation, with exactly the flags the golden function
   raises: a quiet NaN in gives the canonical NaN and no flag, as every
@@ -875,8 +970,10 @@ thirteen, named as `python/cft_golden/transcend.py` names the functions.
 | one of the six of a constant whose value is irrational or not real, `exp(1)`, `log(2)`, `log(-4)` | `irrational-constant`; at a logarithm's pole, `log(0)`, `log2(0)`, `log1p(-1)`, `constant-division-by-zero` | a constant is an exact rational; `exp(0)`, `exp2(3)` and `log2(1/8)` are folded ("Constants"), and the function of a param is taken at run time |
 | `sin`, `cos` or `tan` of a nonzero constant, `sin(1)`, `cos(1/2)`, `tan(-3)` | `irrational-constant`, never `constant-division-by-zero` | the sine, cosine and tangent of a nonzero rational are transcendental; `sin(0)`, `cos(0)` and `tan(0)` are folded ("Constants"), no constant is a pole of `tan` (pi/2 is irrational), and the function of a param is taken at run time |
 | `atan`, `asin` or `acos` of a constant other than the fold's, `atan(1)`, `asin(1/2)`, `acos(0)`; `atan2` of constants other than the fold's, `atan2(1, 1)`, `atan2(0, -1)` | `irrational-constant`, never `constant-division-by-zero`; `asin(2)` and `acos(-3/2)`, outside [-1, 1], the same name, the sentence saying "not a real number" | the arcsine, arccosine, arctangent and angle of such rationals are transcendental (Hermite-Lindemann); `atan(0)`, `asin(0)`, `acos(1)` and `atan2(0, c)` for a constant c >= 0 are folded ("Constants"), and the function of a param is taken at run time |
-| `pow`, `sinh` and the rest of the reserved transcendentals | `transcendental` at run time, `irrational-constant` on a constant | the rest of the correctly rounded math library is the later rounds' |
-| `^` or `**` | `power` | write `x * x`, and a longer product in the order meant |
+| `pow`, `powr`, `pown`, `rootn` or `compound` of constants whose value is irrational or not real, `pow(2, 1/2)`, `pow(-8, 1/2)`, `powr(-1, 1)`, `rootn(2, 2)`, `rootn(-8, 2)`, `compound(-2, 3)` | `irrational-constant`, the sentence saying which; at a pole, `pow(0, -1)`, `pown(0, -1)`, `rootn(0, -3)`, `compound(-1, -1)`, `constant-division-by-zero`; past 2^+-2^20, `pow(10, 400000)`, `constant-range` | a constant is an exact rational; `pow(8, 1/3)`, `pown(3, 4)` and `rootn(8, 3)` are folded ("Constants"), and the function of a param is taken at run time |
+| `pown(x, n)`, `rootn(x, n)` or `compound(x, n)` with n that is no integer constant within int64, `pown(x, y)`, `pown(x, 2.5)` | `integer-operand`; `rootn(x, 0)` is `irrational-constant` | the three take an integer, which a lane does not hold |
+| `sinh` and the rest of the reserved transcendentals | `transcendental` at run time, `irrational-constant` on a constant | the rest of the correctly rounded math library is the later rounds' |
+| `^` or `**` | `power` | write `x * x` (or `pow(x, y)`), and a longer product in the order meant |
 | `t`, declared nowhere | `time-dependence` | carry time in the state, `state t` and `d/dt t = 1`, or count steps ("Time") |
 | `h` in a flow's equations | `h-scope` | a step-halving run halves h; the right-hand side must not move with it |
 
@@ -930,6 +1027,40 @@ number"), `atan2(0, -1)` (`irrational-constant` before and after),
 `atan2(-0, 1)` (`constant-negative-zero` before and after, read before
 any fold) and `atan2(0, 0)` (`irrational-constant` before, folded to 0
 now).
+
+Until 2026-11-24 pow, powr, pown and rootn were refused here too,
+`transcendental` at run time and `irrational-constant` of any constant,
+`pow(2, 3)` included, and `compound` was not a name the language knew:
+`unknown-function` for a call, and a valid name for a value. They are
+operations now ("The operations"; M3's build), folded of constants where
+the value is rational and refused of any other by name. What changed,
+MEASURED against a copy of the base's `python/` (f7a1ce95), each source
+written as `x * <call>` or `<call>` in a one-state map at fp64
+(python/tests/test_lang_pow.py's `FOLDS` and `N_SHAPES` hold each row with
+its name after; the name before is the base's):
+
+| source | before | after |
+|---|---|---|
+| `pow(x, 2)`, `pown(x, 3)`, `rootn(x, 3)`, `powr(x, 1/2)`, `pow(x, y)` | `transcendental` | a node |
+| `compound(x, 2)` | `unknown-function` | a node |
+| `x * pow(2, 3)`, `x * pow(0, 0)`, `x * pown(3, 4)`, `x * pown(0, 0)`, `x * rootn(8, 3)`, `x * pow(8, 1/3)` | `irrational-constant` | the exact constant (8, 1, 81, 1, 2, 2) |
+| `x * compound(-1, 0)` | `unknown-function` | the constant 1 |
+| `x * pow(0, -1)`, `x * pown(0, -1)`, `x * rootn(0, -1)` | `irrational-constant` | `constant-division-by-zero` |
+| `x * compound(-1, -1)` | `unknown-function` | `constant-division-by-zero` |
+| `x * pow(10, 400000)`, `x * pown(2, 2000000)` | `irrational-constant` | `constant-range` |
+| `x * compound(-2, 3)` | `unknown-function` | `irrational-constant`, "not a real number" |
+| `rootn(x, 0)` | `transcendental` | `irrational-constant`, "not a real number: rootn of order 0 has no value" |
+| `pown(x, y)`, `pown(x, 2.5)`, `pown(x, 9223372036854775808)` | `transcendental` | `integer-operand` |
+| `pown(x)` | `transcendental` | `arity` |
+| `pown(x, -9223372036854775808)`, `pown(x, 2 + 1)` | `transcendental` | a node |
+| `pow(-8, 1/2)`, `pow(2, 1/2)`, `powr(-1, 1)`, `powr(0, 0)`, `rootn(-8, 2)`, `rootn(2, 2)` | `irrational-constant` | `irrational-constant`, the sentence now saying why (not a real number, or irrational) |
+| `pown(x, -0)` | `constant-negative-zero` | `constant-negative-zero` |
+| a value or param named `compound` | accepted | `reserved-name` |
+
+`pown(x, 2 + 1)` and `rootn(x, sqrt(4))` are accepted: the checker folds
+n. The tangent of `pown(x, n)` and `compound(x, n)` at n = -2^63, and of
+`rootn(x, n)` at n = -2^63 and -2^63 + 1, is refused `integer-operand` by
+the derivation (n - 1 or 1 - n leaves int64): the primal stands.
 
 ## Constants
 
@@ -985,6 +1116,37 @@ now).
   `constant-division-by-zero`. A constant that changes with h's size is
   `h-nonlinear`, as for every function: `sin(h)`. The function of a param
   is taken at run time.
+- **pow, powr, pown, rootn and compound of constants** (Logan's answer 7
+  to the M3 study, 2026-11-19) fold exactly in rationals, wherever the
+  value is rational: `constants.power_fold`, the one function the checker's
+  folds and the exact evaluation of a graph share. `pow(c, d)` is 1 at d =
+  0 (c = 0 included) and at c = 1, 0 at c = 0 for d > 0, and c^d for an
+  integer d (c < 0 too, the sign by d's parity); for c > 0 and d = r/s in
+  lowest terms with s > 1 it is c^(r/s) where c is a rational's s-th power
+  (numerator and denominator both perfect s-th powers: `pow(4, 1/2)` is 2,
+  `pow(8, 2/3)` is 4, `pow(8, 1/3)` is 2 - the exact constant, where the
+  run-time `pow(8, y)` of y = RN(1/3) is 2 under rne and rmm and not 2
+  under rtz, rdn and rup) and otherwise `irrational-constant`: `pow(2, 1/2)`
+  (were c^(r/s) rational, c would be a rational's s-th power); `pow(c < 0,
+  d)` for a d that is no integer is `irrational-constant` "not a real
+  number". `powr` is the same for c > 0, `powr(0, d > 0)` is 0, and `powr(c
+  < 0, d)` and `powr(0, 0)` are "not a real number", as at run time
+  (invalid). `pown(c, n)` is c^n (1 at n = 0, c = 0 included); `rootn(c, n)`
+  is the |n|-th root where it is rational, the sign of c for an odd n, c at
+  n = 1; `compound(c, n)` is (1 + c)^n, 1 at n = 0 for c >= -1. A zero base
+  at a negative power - `pow(0, -1)`, `pown(0, -1)`, `rootn(0, -3)`,
+  `compound(-1, -1)` - is `constant-division-by-zero`; a power past
+  2^+-2^20 is `constant-range`, and **so is one whose exact numerator or
+  denominator would need more than 2^22 bits** (|n| times the larger bit
+  length of the base's numerator and denominator, for a base other than
+  1 and -1: `pown(1 + 2^-1000, 2^63)` has a small value and is refused
+  `constant-range`, the sentence saying so). A minus on a zero literal is
+  `constant-negative-zero` before any fold; a constant that changes with h
+  in operand 2 of the three is `integer-operand`; in any other operand,
+  `h-nonlinear`. A call of one constant and one operand that is not is a
+  node, the constant a bank constant rounded once, except that n (operand
+  2 of the three) is a const entry of exact value n and no bank constant
+  of the compiler's.
 - **atan, asin, acos and atan2 of constants** fold by the same rule
   (Logan's answer 8 to the M4 study, 2026-10-23): `atan(0)` and `asin(0)`
   are 0, `acos(1)` is 0, and `atan2(0, c)` is 0 for a constant c >= 0,
@@ -1035,7 +1197,7 @@ any of these:
   its pole, `log(0)`, `log2(0)`, `log1p(-1)`: `constant-division-by-zero`;
 - the square root of a constant that is no rational's square - an
   irrational one, `sqrt(2)`, or none at all, `sqrt(-4)` - or one of the
-  math library's thirteen of constants whose value is irrational, `exp(1)`
+  math library's eighteen of constants whose value is irrational, `exp(1)`
   or `sin(1)`, or not real, `log(-4)` or `asin(2)`: `irrational-constant`, its
   sentence saying which.
 
@@ -1086,7 +1248,7 @@ param is a run-time neg of its rounded value. For an exact constant
     use of h that folds away (below).
   - Folding constants, a sum of different powers of h, and a min, max,
     minnum, maxnum, comparison, select, square root or one of the math
-    library's thirteen whose operands are all constants, one of them changing
+    library's eighteen whose operands are all constants, one of them changing
     with h's size, are refused where they are folded, whatever surrounds
     them: `(h + 1) - 1` at its sum although its value is h, `min(h, 2*h)`
     although at h's sign it is a multiple of h, `sqrt(h)` and `sqrt(h*h)`
@@ -1651,7 +1813,7 @@ tangent nodes, which only read them.
 
 **What a run does.** Each step, for each lane, every node of the step
 section, in order, is evaluated by its golden function under the
-program's attribute. A graph holding one of the math library's thirteen needs
+program's attribute. A graph holding one of the math library's eighteen needs
 mpmath for theirs; without it the run raises transcend.ZivEscalation,
 naming mpmath and the functions, before any lane runs ("The
 operations").
@@ -1753,6 +1915,10 @@ in UTF-8 plain text.
   call: arctan(a), arcsin(a) and arccos(a) in ISO 80000-2's conventional
   notation, in radians, and atan2(y, x), which has none, by the name
   numerical libraries give it, y first.
+- **pow, powr, pown, rootn and compound** (M3's build), each one
+  operation, as the generic call, pow(a, b), powr(a, b), pown(a, n),
+  rootn(a, n) and compound(a, n), a first and n the integer: no
+  conventional notation tells pow, powr and pown apart.
 - **Parentheses** appear only where exact arithmetic needs them.
 - **Constants.** Each constant is its exact value, and h-multiples print
   as `h/2` with h's value stated.
@@ -1803,13 +1969,16 @@ four written systems and thirty seeded random ones of their own:
      negative number - in a select's discarded arm too, which the reader
      never evaluates - decides nothing and is drawn again; the gate holds
      that most points decide.
-   - The math library's thirteen are exact in rationals only where their
+   - The math library's eighteen are exact in rationals only where their
      value is rational. Both evaluations take the same convention for them, as
      for the root (M1's build, item 3, and M2's;
      `graph.exact_transcendental`, the reader computing its own): exact
      there - exp(0) = 1, exp2(n) = 2^n, log(1) = 0, log2(2^k) = k,
      sin(0) = tan(0) = 0, cos(0) = 1, atan(0) = asin(0) = acos(1) = 0 and
-     atan2(0, c) = 0 for c >= 0 (M4's build) - and otherwise mpmath's value
+     atan2(0, c) = 0 for c >= 0 (M4's build), and pow, powr, pown, rootn and
+     compound wherever the value is rational (M3's build: a perfect power,
+     `constants.power_fold`, the reader computing its own by bisection) -
+     and otherwise mpmath's value
      at 1,024 bits, the argument (atan2's two) rounded to nearest at 1,024
      bits first; asin and acos are undefined outside [-1, 1]; expm1(a)
      is exp(a) - 1 and log1p(a) is log(1 + a) of the same fixed exp and
@@ -2129,8 +2298,54 @@ not differentiable is given its fixed value in the last column.
 | `asin(a)` | `da / sqrt(fma(-a, a, 1))` | zero | at a = ±1 the denominator is the root of an exact zero, +0 (-0 under rdn: IEEE 754 6.3's exact zero sum), and the tangent is an infinity with divideByZero, +inf for da > 0 (-inf under rdn); past ±1, and at ±infinity, r and the tangent are NaNs |
 | `acos(a)` | `da / (-sqrt(fma(-a, a, 1)))` | zero | as asin, the infinity's sign the other way: -inf for da > 0 at a = ±1 (+inf under rdn) |
 | `atan2(a, b)` | `fma(b, da, -(a * db)) / fma(b, b, a * a)` | `b * da / fma(b, b, a * a)` where db is zero; `(-(a * db)) / fma(b, b, a * a)` where da is | at the origin (a, b = ±0) the numerator and the denominator are zeros and the tangent is the NaN with invalid, in each of the three cases; at an infinite operand the rule's own operations give what IEEE 754 gives there, an infinity over an infinity being a NaN with invalid |
+| `pow(a, b)` | `(b * pow(a, b - 1)) * da + select(a == 0, 0, pow(a, b) * log(a)) * db` | the first term alone where db is zero (b a constant: `(K * pow(a, K - 1)) * da`, K - 1 folded); the second alone where da is zero | at a = 0, MEASURED with da = 3 and db = 5 at the four formats under the five attributes (this is not every argument): b = 2 the tangent is +0, b = 1 it is da, b = 1/2 it is +inf, b = -1 it is -inf, and b = 0 it is the NaN (0 times pow(0, -1) = +inf), the rule's one NaN where a derivative exists (the constant 1's is 0); the db term is +0 at a = 0 for every b, and the discarded arm still raises its flags (log(0) is divideByZero, 0 times -inf invalid) |
+| `powr(a, b)` | the same with `powr` | the same | as pow, but powr(0, 1 - 1) = powr(0, 0) is a NaN: at a = 0 and b = 1 the tangent is the NaN (pow's is da) |
+| `pown(a, n)` | `(n * pown(a, n - 1)) * da`, n - 1 an exact integer constant | no tangent where n = 0 (identically zero); n = -2^63: `integer-operand` (n - 1 leaves int64, the primal stands) | at a = 0, MEASURED the same way: n = 1 the tangent is da, n = 2 it is +0, n = -1 it is -inf with divideByZero |
+| `rootn(a, n)` | `(pown(rootn(a, n), 1 - n) * da) / n` | n = -2^63 and -2^63 + 1: `integer-operand` (1 - n leaves int64) | at a = 0, n = 3 the tangent is +inf with divideByZero, n = 1 it is da |
+| `compound(a, n)` | `(n * compound(a, n - 1)) * da` | no tangent where n = 0; n = -2^63: `integer-operand` | at a = -1: n = 2 the tangent is +0, n = 1 it is da, n = -1 it is -inf with divideByZero |
 | a constant, h, a param, a lane param | zero | | |
 | a state component x | the tangent input `v.x` | | |
+
+**pow, powr, pown, rootn and compound** (M3's build, 2026-11-24; the
+design is docs/studies/M3-pow.md, section 7, which Logan approved as
+recommended on 2026-11-19, answer 9). Each rule makes routine nodes of its
+own that the primal need not hold, as sin's `cos(a)` is: `pow(a, b - 1)`
+and `log(a)` in pow's and powr's, `pown(a, n - 1)` in pown's,
+`pown(rootn(a, n), 1 - n)` in rootn's (the rootn node is read by name or
+written again) and `compound(a, n - 1)` in compound's; n - 1 and 1 - n are
+exact integer constants, and a rule that needs one outside int64 is refused
+`integer-operand` by the derivation, the primal standing (tested at n = -2^63
+and, for rootn, 1 - 2^63). **The log is never folded:** `log(a)` in pow's
+and powr's rules is a node even where a is a constant, because the
+logarithm of a constant other than 1 is irrational and the language refuses
+to fold it (`irrational-constant`): without this, `pow(2, x)` could not have
+a tangent, a refusal of an ordinary program. So the tangent of `pow(2, x)`
+holds `log` of the const 2, run at run time, and so does `pow(1, x)`'s of
+the const 1 (the rule's one shape, not folded to 0 either); the canonical
+form writes it as the call `log(2)`, which the tangent equations read back
+as the same node (a written tangent equation's `log` of a constant is a
+node; a primal `log(2)` is `irrational-constant` still), so the derived
+graph reads back byte for byte (python/tests/test_lang_pow.py).
+- **pow, powr:** `(b * pow(a, b - 1)) * da + select(a == 0, 0, pow(a, b) *
+  log(a)) * db`: the first term rounds b - 1, the routine, two products
+  (b * pow first, then the tangent), the second rounds the routine, the
+  log, a product, and a product with db, and the sum rounds once. A term of
+  an identically-zero tangent is left out. The select is the form that
+  keeps the NaN of 0 times log(0) out of the db term at a = 0; without it
+  (`pow(a, b) * log(a) * db`) the term at a = 0 is the NaN where the
+  select's is +0, and the first term is as above (MEASURED, leg M's
+  specials). For a < 0 with an integer b, log(a) is a NaN: pow of a
+  negative base has no derivative in b.
+- **Grouped otherwise,** each rule's other rounding is another rule. MEASURED
+  by programs/tangent_check.py's leg M, over 12 lanes a cell at fp32, fp64
+  and fp256 under each attribute (pow and powr's three cases, n in 2, 3,
+  -2), each rule's second form differs from its first in bits under rne,
+  rtz, rdn, rup and rmm alike, so none is a form the attribute hides:
+  `b * (pow(a, b - 1) * da)` for pow's and powr's first term, `n * (pown(a,
+  n - 1) * da)` for pown's, `pown(r, 1 - n) * (da / n)` for rootn's and the
+  same as pown's for compound's. The exact checks (the dual numbers and the
+  central difference) are green on every one: the forms are equal in
+  rationals and differ in their roundings.
 
 **atan, asin, acos and atan2** (M4's build, 2026-11-11; the design is
 docs/studies/M4-invtrig.md, section 7, which Logan approved as recommended
@@ -3162,6 +3377,35 @@ three were:
   `OPS` giving atan2 one operand, a fold left inexact, a refusal's name
   swapped, `transcendental` raised for asin again.
 
+**`python/tests/test_lang_pow.py`: pow, powr, pown, rootn and compound**
+(parcel M3L, M3's build, 2026-11-24). The five, golden-first:
+- the nodes directly after `atan2` and before `neg` in `lang.OPS`, as the
+  contract's literal, two operands each, in `graph.TRANSCEND` (18),
+  `check.MATH`, `check.BUILTINS` and cert2's list, `check.TRANSCENDENTAL`
+  holding 18 names; `compound` reserved;
+- n a const entry of the graph read exactly (2^31 - 1 at fp32, 2^63 - 1 at
+  fp64, -2^63 at fp128), every shape of operand 2 by its name, `rootn(x, 0)`
+  `irrational-constant`;
+- the folds of constants, each exact or refused by name, and the exact
+  evaluation the same function; `lang.run` equal to `transcend.compute`
+  lane by lane at the four formats under the five attributes, n the exact
+  integer, and refused `ZivEscalation` without mpmath before a lane runs;
+- the renderers, read back at the four formats and five attributes, and the
+  tangent sections' node shapes (programs/tangent_check.py's leg M holds the
+  rules' values and roundings: "The variational equations");
+- the rewrites' proof (docs/studies/M3-pow.md, section 6): the eight
+  equal their nodes bit for bit and flag for flag on every lane of a pool
+  of 78, at each of the four formats and five attributes (pow, powr's
+  none), the three "not proposed" differ on their named lanes, and each of
+  the eleven is shown red by a doctored form: `a * a` and `1 / a` under
+  another attribute, `a * 1` as `a + 0` (which differs at -0 under rne,
+  rtz, rup and rmm, and not under rdn);
+- the plants, red here: `OPS` giving the five arity 1, `integer-operand`
+  removed, a fold left inexact, a refusal's name swapped, `transcendental`
+  raised for pow again, pow's operands swapped in the interpreter, pow's
+  golden function swapped for powr's, n read from the encoding, n off by
+  one, the rule's log left out.
+
 **`python/tests/test_lang_readback.py`: every accepted source reads
 back** (parcel D2, 2026-10-01).
 - a map whose every use of h folds away, in each form the challenge
@@ -3231,9 +3475,12 @@ command line (exit 3, never 70); its leg L holds the call loop - eight
 bodies under rk4, which the constant itself loops, and Kepler under rk4
 with the constant lowered; the `tangent` stage's leg L compiles the
 quotient's and the root's rules the same way, and its leg M holds the
-math library's thirteen rules in the golden model - the six, since M2's
-build sin, cos and tan, and since M4's build atan, asin, acos and atan2 -
-with plants (since item 4
+math library's eighteen rules in the golden model - the six, since M2's
+build sin, cos and tan, since M4's build atan, asin, acos and atan2, and
+since M3's build pow, powr, pown, rootn and compound (n held to 2, 1, 0,
+-1, -2, 3, -3 and 5, and to 2^31 - 1, 2^63 - 1 and 2 - 2^63 in the
+rounding and golden checks; its central difference at 2^-64 within 2^-100,
+the rules holding powers and roots) - with plants (since item 4
 its legs G, H and J read the three committed references that hold the
 six, and leg G fails by name a certified segment that marks a lane); and
 the `lang` stage certifies Kepler's routine images and holds the
@@ -3315,9 +3562,9 @@ and their inlining and their loops by `python/tests/test_cftc.py`.
     stays inlined past the constant.
 - **The rest of the math library.** The language has exp, expm1, exp2,
   log, log1p and log2 (M1's build, item 3), sin, cos and tan (M2's build)
-  and atan, asin, acos and atan2 (M4's build); pow and the rest of the
-  reserved list are the later rounds', refused `transcendental` until
-  then. The compiler carries the six since item 4, sin, cos and tan
+  atan, asin, acos and atan2 (M4's build), and pow, powr, pown, rootn and
+  compound (M3's build); the rest of the reserved list (sinh, cbrt and the
+  others) is the later rounds', refused `transcendental` until then. The compiler carries the six since item 4, sin, cos and tan
   since M2's build, and atan, asin, acos and atan2 since M4's, as routines.
 - **A built-in time, adaptive steps and events.** There is no reserved
   `t`: a system carries time in its state or counts its steps, and sin

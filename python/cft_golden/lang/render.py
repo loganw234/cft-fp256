@@ -18,7 +18,9 @@
                     log1p(a) and log₂(a), its sin, cos and tan (M2's
                     build) as sin(a), cos(a) and tan(a), its atan, asin,
                     acos and atan2 (M4's build) as arctan(a), arcsin(a),
-                    arccos(a) and atan2(a, b), each constant as
+                    arccos(a) and atan2(a, b), its pow, powr, pown,
+                    rootn and compound (M3's build) as the generic call
+                    pow(a, b) and so on, each constant as
                     its exact value, the step as the template's own scheme.
                     Evaluated exactly at random rational points it gives
                     what the step graph gives evaluated exactly

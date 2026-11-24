@@ -1188,7 +1188,14 @@ class Checker:
             vals = [self.eval(a, ctx) for a in e.args]
             if name in INT_OPERAND:
                 self.integer_operand(name, vals[1], e.line)
-            if name == "select":
+            if name == "log" and ctx.tvec is not None and                     all(isinstance(x, K) for x in vals):
+                # a written tangent equation's log of a constant is the
+                # node pow's and powr's rules derive for a constant base
+                # (tangent.py), never folded: the canonical form writes it
+                # as a call, and reads back the graph it came from. Only
+                # in a tangent equation: a primal log(2) is still refused
+                v = Node("log", [self.leaf(vals[0], e.line)], e.line)
+            elif name == "select":
                 c, a, b = vals
                 v = self.apply("select", [a, b, c], e.line)
             else:

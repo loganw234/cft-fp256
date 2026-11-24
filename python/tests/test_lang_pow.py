@@ -903,3 +903,72 @@ def test_a_rewrite_pool_without_the_named_lane_is_red():
     got = differing_lanes("fp64", "rne", "pow(x, 1)", "x + 0",
                           rewrite_pool(fmt))
     assert fmt.sign_mask in [g[0] for g in got]
+
+
+# ---- the log of a constant base in pow's and powr's rules ----------------------
+
+@pytest.mark.parametrize("fn", ["pow", "powr"])
+@pytest.mark.parametrize("base", ["2", "1", "3/2"])
+def test_a_constant_base_has_a_tangent_holding_a_log_of_a_const(fn, base):
+    """pow(c, b) and powr(c, b) of a constant base and a state b derive a
+    tangent whose section holds `log` of the constant, a node and never a
+    fold (the log of a constant other than 1 is irrational, and a fold
+    would refuse the program `irrational-constant`); c = 1 is the same: its
+    log is a node of the const 1, not folded to 0 (the rule is one shape
+    whatever the base). The derived graph reads back from the canonical form
+    byte for byte."""
+    text = ("system r\nformat fp64\nstate b, y\ntangent v\n"
+            f"next b = b\nnext y = {fn}({base}, b)\nstep map\n")
+    g = compile_(text)
+    logs = [(op, args) for op, args, _l in g.tangent_step.nodes
+            if op == "log"]
+    assert len(logs) == 1
+    ref = logs[0][1][0]
+    assert ref[0] == "c" and g.const[int(ref[1:])][0] == F(base)
+    assert compile_(lang.render_canonical(g)).to_bytes() == g.to_bytes()
+
+
+def test_a_fold_of_log_of_a_constant_base_is_not_what_the_rule_does():
+    """Written by hand, log(2) of a constant is `irrational-constant`: the
+    rule's node is the only way a program holds it, which is what the test
+    above holds; this one fails if the rule were folded."""
+    with pytest.raises(lang.Refusal) as info:
+        compile_(_sys("next x = x * log(2)"))
+    assert info.value.name == "irrational-constant"
+
+
+def test_a_log_of_a_const_left_out_of_the_rule_is_red(monkeypatch):
+    """The rule's log node replaced by another operation (as a fold would
+    leave no log): red on the test above, for each base."""
+    from cft_golden.lang import tangent as lang_tangent
+    real = lang_tangent.Node
+
+    class Other(real):
+        def __init__(self, op, args, line):
+            super().__init__("abs" if op == "log" else op, args, line)
+    monkeypatch.setattr(lang_tangent, "Node", Other)
+    for fn in ("pow", "powr"):
+        for base in ("2", "1"):
+            with pytest.raises(AssertionError):
+                test_a_constant_base_has_a_tangent_holding_a_log_of_a_const(
+                    fn, base)
+
+
+# ---- the document ---------------------------------------------------------------
+
+def test_the_document_holds_the_five():
+    """docs/LANGUAGE.md's operations table has a row for each of the five
+    with its golden call, and its rules table the five's rules as the code
+    writes them (the node shapes are test_the_rules_node_shapes_are_the_
+    contract's), and the version paragraph says 1.4 and the exception."""
+    text = (REPO / "docs" / "LANGUAGE.md").read_text(encoding="utf-8")
+    for fn in FIVE:
+        assert f'`transcend.compute(fmt, "{fn}", ' in text, fn
+        assert f"| `{fn}(a" in text, fn
+    for rule in ("`(b * pow(a, b - 1)) * da + select(a == 0, 0, pow(a, b) * "
+                 "log(a)) * db`", "`(n * pown(a, n - 1)) * da`",
+                 "`(pown(rootn(a, n), 1 - n) * da) / n`",
+                 "`(n * compound(a, n - 1)) * da`"):
+        assert rule in text, rule
+    assert "**This is the language at 1.4**" in text
+    assert "**with one exception: `compound`**" in text
