@@ -191,28 +191,6 @@ rs-atan2-range-off.txt	1	env CFT_SWEEP_IMAGES=$IMAGESOFF host/routine-sweep atan
 rs-atan2-range-low.txt	1	env CFT_SWEEP_IMAGES=$IMAGESLOW host/routine-sweep atan2-f32-x3f800000-d27d159e2 0x19000000 0x19000400 all [1 s]
 rs-atan2-xneg.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-xbf800000-da86a60d8 0x19000000 0x19000040 rne [0 s]
 # rs3-*: parcel M3X2 (2026-11-24), host/tools/routine_sweep.c with the pow family (pow and powr at -x and -y, pown, rootn and compound at -n, the exact class and its line), each file the
-# tool's stderr and then its stdout (the order of the rs-* above), made on the desktop (Windows 11, mingw64 gcc 16.1, MPFR 4.2.2 and GMP 6.3.0) from the working tree of the parcel's branch (to be replaced by WSL's); the images path is written $HOME/m3x2-images in every line, and the commands below name it $IMAGES.
-# rs3-list: `list`, eighteen rows (the fifteen with digests, pown, rootn and compound `no image`: their fragments are parcel M3F2's); rs3-images-manifest (not a log, no row): the generator's
-# manifest of the same run, the digest lines of the fifteen and `skipped` lines for the three. rs3-pow-x-all: x = 2 fixed, 256 y from 1.0 under all, nothing marked (the exact line says 0);
-# rs3-pow-y-exact-all: y = 2 fixed, 256 x from 3.0 under all: lane 0x40400000 (3^2 = 9, exact) is marked under every attribute, 5 marked, 5 on an exact lane, 0 off the list, the five guesses wrong
-# (a guess is compared, not decided); rs3-pow-y-exact-rtz: the same under one attribute (the four `-` columns). rs3-refuse-*: each refusal of the grammar, exit 2, no verdict line. rs3-oracle-pown-n3:
-# `oracle` of pown at n = 3 (it needs no image, MPFR 4.1.0 and 4.2 both run pown); rs3-exact-pow-y2: `exact` classes of six lanes at y = 2. powr, rootn and compound need MPFR 4.2.0: their logs are the
-# lead's box run (rs3-box-*, hw/card_stress_fixtures/box_m3x2_fixtures.sh), and the tests that read them are SKIPPED by name until those files exist. The n-keyed names have no slice log here
-# because they have no images until parcel M3F2 has merged.
-rs3-list.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep list [1 s]
-rs3-pow-x-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-x40000000-d7043fd38 0x3f800000 0x3f800100 all [0 s]
-rs3-pow-y-exact-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-y40000000-d7043fd38 0x40400000 0x40400100 all [0 s]
-rs3-pow-y-exact-rtz.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-y40000000-d7043fd38 0x40400000 0x40400100 rtz [0 s]
-rs3-refuse-x-and-y.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-x3f800000-y40000000-d7043fd38 0 5 all [0 s]
-rs3-refuse-n-on-pow.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-n3 0 5 all [0 s]
-rs3-refuse-y-on-atan2.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-y3f800000 0 5 all [0 s]
-rs3-refuse-pown-past-int64.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pown-f32-n9223372036854775808 0 5 all [0 s]
-rs3-refuse-rootn-zero.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep rootn-f32-n0 0 5 all [0 s]
-rs3-refuse-pown-no-image.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pown-f32-n3 0 5 all [0 s]
-rs3-refuse-pow-no-suffix.txt	2	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32 0 5 all [0 s]
-rs3-oracle-pown-n3.txt	0	printf '40400000\n3f800000\nbf800000\n7f7fffff\n00000000\n' | env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep oracle pown-f32-n3 rne [0 s]
-rs3-exact-pow-y2.txt	0	printf '40400000\n40800000\n3fc00000\n40000000\n3f800000\n40490fdb\n' | env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep exact pow-f32-y40000000 [0 s]
-# rs3-*: parcel M3X2 (2026-11-24), host/tools/routine_sweep.c with the pow family (pow and powr at -x and -y, pown, rootn and compound at -n, the exact class and its line), each file the
 # tool's stderr and then its stdout (the order of the rs-* above), made in WSL cft2204 (Ubuntu 22.04.5, gcc 11.4.0, Python 3.10.12, the system's MPFR 4.1.0 and GMP 6.2.1) from a bundle clone of the branch at c290f0c6 (the manifest's commit line), by hw/card_stress_fixtures/'s generator and tool run as rs3's commands name them, none edited; the images path is written $HOME/m3x2-images in every line, and the commands below name it $IMAGES.
 # rs3-list: `list`, eighteen rows (the fifteen with digests, pown, rootn and compound `no image`: their fragments are parcel M3F2's); rs3-images-manifest (not a log, no row): the generator's
 # manifest of the same run, the digest lines of the fifteen and `skipped` lines for the three. rs3-pow-x-all: x = 2 fixed, 256 y from 1.0 under all, nothing marked (the exact line says 0);
