@@ -1,4 +1,4 @@
-oracle: MPFR 4.2.2 with GMP 6.3.0, mpfr_ieee.h's emulation
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation
 40400000 41d80000 00
 3f800000 3f800000 00
 bf800000 bf800000 00

@@ -976,7 +976,9 @@ def group_refuse(tool, work, imgs):
     refused("a missing attribute", ("exp-f32", 0, 5))
     refused("an unknown attribute", ("exp-f32", 0, 5, "rnx"))
     refused("an unknown name", ("nonesuch-f32", 0, 5, "rne"), "unknown op")
-    n_ = base_of(gen_account(open(os.path.join(imgs, "manifest.txt")).read())[0][-1][0])
+    # the last name the generator built that this tool can run (powr, rootn and compound need MPFR 4.2: on an older one the control would be refused for that, not run)
+    built_names = [base_of(k) for k, _ in gen_account(open(os.path.join(imgs, "manifest.txt")).read())[0]]
+    n_ = [b for b in built_names if has_42(tool) or b not in NEEDS_42][-1]
     suffix_ = {"atan2": "-x3f800000", "pow": "-x40400000", "powr": "-x40400000"}.get(n_, "-n2" if n_ in NKEYED else "")
     stem_ = f"{n_}-n2" if n_ in NKEYED else n_
     noimg_dir = os.path.join(work, "img-noimage")
@@ -1600,7 +1602,7 @@ def main() -> int:
                                      ("whole", lambda: group_whole(tool, names, bits)),
                                      ("fast", lambda: group_fast(tool, names, bits)),
                                      ("refuse", lambda: group_refuse(tool, work, imgs)),
-                                     ("sabotage", lambda: group_sabotage(tool, work, names)),
+                                     ("sabotage", lambda: group_sabotage(tool, work, tuple(n for n in names if n not in ("pow", "powr")))),   # pow and powr have their own legs inside the group (--bound-shift 34 is the one-word routines' device)
                                      ("plants", lambda: group_plants(tool, tree, work, imgs)),
                                      ("rule", lambda: group_rule(tool, tree, work, imgs, base)),
                                      ("unchanged", lambda: group_unchanged(ROOT, base, work)),
