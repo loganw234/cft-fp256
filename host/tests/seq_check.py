@@ -3838,7 +3838,8 @@ def pow_clause(MC):
     every --require-all run): '' where every format asked for is run.
     mathlib.POW_FORMATS decides, so that the clause is empty on its own once
     parcel M3F2 adds fp32 to it - and M3F2 then deletes this function, its one
-    call in routine_summary and the "unrun" key's two uses, and gives fp32 its
+    call in routine_summary, the "unrun" key's other two uses (routine_corpus's
+    append and main's "ran no program" line), and gives fp32 its
     lanes from the harness's *_tw section (the lane functions above call the
     double-word section's)."""
     if not MC["unrun"]:
@@ -3983,9 +3984,9 @@ def routine_remote_refusals(lib, MR, MT=None, MI=None, MP=None):
     inverse programs (parcel M4P) in MI (their own counters, so that a program
     of one part dropped from this leg is told from the others still being
     refused), the leg's own failures in MR. The pow part's programs (parcel
-    M3P) count in MP: all but its small fragments are past the leg's
-    max_insns and max_consts and write past r15, so the servers that load
-    anything of it load the small ones."""
+    M3P) count in MP: all but its small fragments (n = 0 and 1) are past the
+    leg's max_insns and max_consts, so what the servers at those capacities
+    load of it is the small ones."""
     if "mods" not in _ROUTINE or _ROUTINE["mods"] is None:
         return
     ml = routine_modules()[0]
