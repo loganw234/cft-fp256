@@ -93,10 +93,13 @@ def scan_cells():
 # the gap scan (the lead's finding on the unfixed model's scan: log-lowword's
 # capacity is 0.5275 at n = 1000 and exactly 0 from n = 2000, and -1000 against
 # -3000): the block "log-lowword" is selected to zero where |x| < SMALL =
-# 15/256 (pw32c.py's `sm`), and the main path needs |n log2(1 + x)| < 149, so
-# the block has lanes for n up to 149 / log2(1 + 15/256) = 1,815 (x > 0) and
-# 149 / |log2(1 - 15/256)| = 1,710 (x < 0): COMPUTED in mode_gapedge below.
-# The n between are scanned here, both signs, int<N> and zone<N>.
+# 15/256 (pw32c.py's `sm`). The main path is the SCREENS': the build's rounded
+# product th0 is tested against TOVF (emax + 2 = 129) and TUNF (emin - p - 2 =
+# -152), so it is -152 < t < 129 (pw32n.py :373 to :375; send-back 1's
+# correction: the first version of this comment used 149, regions.py's `_tf`,
+# which is the int sampler's cap and not the main path). The four edges of the
+# block (|x| >= SMALL, t = n log2(1 + x)) are COMPUTED in mode_gapedge below
+# from the build's own words TOVF, TUNF and SMALL.
 GAP_POS = (1100, 1200, 1300, 1500, 1700, 1800, 1900)
 GAP_NEG = (-1100, -1200, -1300, -1500, -1700, -1800, -1900, -2000, -2500)
 GAP_N = tuple(sorted(GAP_NEG + GAP_POS))
@@ -107,20 +110,35 @@ def gap_cells():
 
 
 def mode_gapedge(args):
-    """gapedge: where the log-lowword block stops having lanes, COMPUTED
-    from the build's own SMALL constant and the main path's range"""
+    """gapedge: the four edges of the log-lowword block's lanes in n,
+    COMPUTED from the build's own words TOVF, TUNF and SMALL (read from the
+    built fragment's bank), for |x| >= SMALL and -152 < t < 129"""
     import pw32n
     G, GL, plog, pexp = pw32n.plan()
     cl, _ce = pw32n._consts("compound", G, GL, plog, pexp)
     small = float(dec(fmt, cl["SMALL"]))
-    tf = RG._tf(fmt)
+    b = pw32c.build("compound", RNE, 1000)
+    tovf = float(dec(fmt, b.words["TOVF"]))
+    tunf = float(dec(fmt, b.words["TUNF"]))
     lp = math.log2(1 + small)
     ln = abs(math.log2(1 - small))
-    print(f"SMALL = {small} (= 15/256: {small == 15 / 256}); the main path "
-          f"keeps |n log2(1 + x)| < {tf}; the block (|x| >= SMALL) has lanes "
-          f"for |n| < {tf / lp:.1f} with x > 0 and |n| < {tf / ln:.1f} with "
-          f"x < 0 (COMPUTED: {tf} / log2(1 + SMALL) and {tf} / |log2(1 - "
-          f"SMALL)|)")
+    print(f"SMALL = {small} (= 15/256: {small == 15 / 256}); the screens' "
+          f"words of the build: TOVF = {tovf:g}, TUNF = {tunf:g}, so the "
+          f"main path is {tunf:g} < t < {tovf:g} (t = n log2(1 + x)); "
+          f"log2(1 + SMALL) = {lp:.6f}, |log2(1 - SMALL)| = {ln:.6f}")
+    print(f"the block (|x| >= SMALL) has lanes, COMPUTED as the screen / "
+          f"the log:")
+    print(f"  x > 0, n > 0: n < {tovf / lp:.1f}   (t up to {tovf:g})")
+    print(f"  x < 0, n > 0: n < {-tunf / ln:.1f}   (t down to {tunf:g})")
+    print(f"  x > 0, n < 0: |n| < {-tunf / lp:.1f}   (t down to {tunf:g})")
+    print(f"  x < 0, n < 0: |n| < {tovf / ln:.1f}   (t up to {tovf:g})")
+    print(f"regions.py's int sampler keeps |t| < {RG._tf(fmt)} (its `_tf`, "
+          f"t_reach - 3): on the positive side that is above the screens' "
+          f"{tovf:g}, on the negative side it is above {tunf:g}, so no "
+          f"int<N> or zone<N> lane has t in ({tunf:g}, -{RG._tf(fmt)}): "
+          f"block lanes there (x > 0 with n < 0, |n| up to the edge above; "
+          f"x < 0 with n > 0) are in no cell of the scan, a named limit of "
+          f"the scan")
 
 
 def mode_cells(args):
@@ -464,7 +482,39 @@ def mode_ladder(args):
     print(f"{time.time() - t0:.0f} s")
 
 
-EXTRA = {"ladder": mode_ladder, "costs": _wrap("costs"), "live": _wrap("live"),
+def mode_capexp(args):
+    """capexp: the experiments of the ladder's text, as an output: `early`
+    (the block built before the table's lookups) against the same variant
+    without it, and every phase label for the block, fixB: instructions,
+    cap and highest register over the 12 n and five attributes"""
+    def stats(v):
+        ins, live, top = [], 0, 0
+        for n in N_LIST:
+            for rnd in ATTRS:
+                f = pw32c.build("compound", rnd, n, variant=v).fragment()
+                ins.append(len(f.body))
+                live = max(live, f.live_max())
+                top = max(top, max_register(f) or 0)
+        return min(ins), max(ins), live, top
+    for v in ("fixB", "early+" + pw32c.ALIASES["fixB"]):
+        lo, hi, live, top = stats(v)
+        print(f"variant {v}: instructions {lo} to {hi}, cap {live}, highest "
+              f"register r{top} (12 n, five attributes)", flush=True)
+    for ph in ("lowword", "reduce", "table", "Z", "recon", "setup", "head2",
+               "final"):
+        pw32c.LW_PHASE = ph
+        try:
+            lo, hi, live, top = stats("fixB")
+            print(f"variant fixB, the block's phase label {ph!r}: "
+                  f"instructions {lo} to {hi}, cap {live}, highest register "
+                  f"r{top}", flush=True)
+        except Exception as exc:
+            print(f"variant fixB, phase label {ph!r}: REFUSED "
+                  f"{type(exc).__name__}: {str(exc)[:100]}")
+    pw32c.LW_PHASE = "lowword"
+
+
+EXTRA = {"ladder": mode_ladder, "capexp": mode_capexp, "costs": _wrap("costs"), "live": _wrap("live"),
          "pools": _wrap("pools"), "rate": _wrap("rate"),
          "plants": mode_plants}
 
