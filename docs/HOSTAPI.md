@@ -2772,7 +2772,7 @@ arguments and on the corpus's own lanes alike: the speed leg of plan answer 3
 is met for these seven at both formats. Not claimed: the default still
 waits for the overnight proof; G3B's `__noinline__` lever was measured on
 these families in scratch (faster only at fp256 on the 5060 Ti, +35 to +38 %
-at 262,144; slower at fp128 there and at both formats on the RX 7600) and is
+at 262,144; slower at fp128 there, and on the RX 7600 slower at fp128 in all seven cells and at fp256 in six of the seven, tan within) and is
 not adopted.
 
 ## The device's on-chip capacities, published (2026-09-07)
