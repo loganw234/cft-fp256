@@ -31,12 +31,51 @@ from pw32n import (fmt, N, GUARD, PHASE_MAP, PARTS, B1_FIRST, B2_FIRST,
 PLANTS = {k: v for k, v in pw32n.PLANTS.items()
           if k not in ("rootn_m0_neg",)}
 FNS = ("compound",)
-VARIANTS = {}
+VARIANTS = {
+    "sum2": "[NEW] the two plain sums of the logarithm's level 2 (log-sum's "
+            "S2 and the 1/ln 2 product's Sk2) become compensated sums: a "
+            "TwoSum chain whose errors, with the level-3 terms, are summed "
+            "by plain adds and added once",
+    "cross": "[NEW] the correction's low word gains the cross term "
+             "rh * rho_l of rho^2 = (rh + rho_l)^2 (rho^2 / 2 was rh^2 / 2)",
+    "yexact": "[NEW] rho_l = -nrho_l from exact products and a two-word "
+              "residual e of the reciprocal (needs cexact): the rounding of "
+              "yl and of rlh * yl, at 2^-24 of the correction's low word, "
+              "gone",
+    "early": "[NEW] the low word's block is built BEFORE the table's lookups "
+             "(the same DAG, the instructions in another order: the three "
+             "table words are not yet live while the block runs)",
+    "rho3": "[NEW] the third-order term rho^3 / 3 enters the correction "
+            "(dropped in pw32n; needs sum2: it is a level-3 term)",
+    "cexact": "[NEW] the correction's low word is formed exactly: the "
+              "product hrh * rh by TwoProd and its sum with rho_l by "
+              "TwoSum, the errors level-3 terms (needs sum2 and cross)",
+}
+
+
+def comp_sum(b, terms, extra=()):
+    """[NEW] a compensated sum of `terms` ([(ref, negated)], the first not
+    negated): the TwoSum chain's sum, plus the plain sum of the chain's
+    errors and of `extra` (level-3 terms, [(ref, negated)]), added ONCE. Its
+    rounding is that of the one add and of the tail (2^-24 below)."""
+    acc, es = ml._cascade(b, terms)
+    tail = [(e, False) for e in es] + list(extra)
+    if not tail:
+        return acc
+    return b.add(acc, ml._plain_sum(b, tail))
+
+
+# short names for the two combinations the report recommends between
+ALIASES = {
+    "fixA": "sum2+cross+cexact+rho3",
+    "fixB": "sum2+cross+cexact+yexact+rho3",
+}
 
 
 def variant_flags(variant):
-    """the set of change names in `variant` (None: empty), each refused by
-    name if unknown"""
+    """the set of change names in `variant` (None: empty; an alias of ALIASES
+    stands for its combination), each refused by name if unknown"""
+    variant = ALIASES.get(variant, variant)
     fl = set() if variant is None else set(variant.split("+"))
     bad = fl - set(VARIANTS)
     if bad:
@@ -54,6 +93,13 @@ def build(fn, rnd, n, G=GUARD, bound_shift=0, plant=None, B1=None, B2=None,
         raise ValueError(f"pw32c builds compound only, not {fn!r}: pown "
                          f"and rootn are pw32n.build's")
     flags = variant_flags(variant)                                 # [NEW]
+    if ("rho3" in flags or "cexact" in flags) and "sum2" not in flags:
+        raise ValueError("variants rho3 and cexact need sum2: their terms "
+                         "are level-3 terms of the compensated sum")
+    if "yexact" in flags and "cexact" not in flags:
+        raise ValueError("variant yexact needs cexact")
+    if "cexact" in flags and "cross" not in flags:
+        raise ValueError("variant cexact needs cross")
     if plant is not None and plant not in PLANTS:
         raise ValueError(f"unknown plant {plant!r}: {', '.join(PLANTS)}")
     if not -2 ** 63 <= n <= 2 ** 63 - 1:
@@ -123,11 +169,15 @@ def build(fn, rnd, n, G=GUARD, bound_shift=0, plant=None, B1=None, B2=None,
     if plant == "compound_onep_rounded":
         red.ul = ZERO
     r, kf = red.r, red.kf                                          # [pw32]
-    at(b, "log-table", "table")
-    t0_, t1_, t2_ = ml._table(b, cl_, red.tc, k_,
-                              tuple(lambda j, i=i: f"L{j}_{i}"
-                                    for i in range(3)))            # [pw32]
+    def do_table():
+        at(b, "log-table", "table")
+        return ml._table(b, cl_, red.tc, k_,
+                         tuple(lambda j, i=i: f"L{j}_{i}"
+                               for i in range(3)))                 # [pw32]
+    if "early" not in flags:
+        t0_, t1_, t2_ = do_table()                                 # [pw32n]
     corr_h = corr_l = None
+    corr_ll = []                                                   # [NEW]
     if True:                       # [pw32n] was `if fn == "compound":`
         # [NEW] M1's triple-word log1p low word (mathlib._build_log_tw,
         # "lowword" phase, copied; GL is its G): rho = r_l / (1 + r) with
@@ -145,20 +195,71 @@ def build(fn, rnd, n, G=GUARD, bound_shift=0, plant=None, B1=None, B2=None,
         for _ in range(2):
             e = b.fma(nr0, y, b.sub(ONE, y))
             y = b.fma(y, e, y)
-        e = b.fma(nr0, y, b.sub(ONE, y))
-        yl = b.mul(y, e)
-        rh = b.mul(rlh, y)
-        nre = b.fma(rlh, b.neg(y), rh)
-        w1 = b.fma(nrle, y, nre)
-        nrho_l = b.fma(b.neg(rlh), yl, w1)
+        n3 = []              # [NEW] level-3 terms of nrho_l (yexact): (ref,
+        if "yexact" not in flags:       # negated in the sum nrho_l = ...)
+            e = b.fma(nr0, y, b.sub(ONE, y))                      # [pw32n]
+            yl = b.mul(y, e)
+            rh = b.mul(rlh, y)
+            nre = b.fma(rlh, b.neg(y), rh)
+            w1 = b.fma(nrle, y, nre)
+            nrho_l = b.fma(b.neg(rlh), yl, w1)
+        else:
+            # [NEW] nrho_l = nre + nrle y - rlh yl with every product exact
+            # (TwoProd) and the residual e = 1 - (1 + r) y kept as two
+            # words, so that no rounding of the 2^-24 word's size is left
+            omy = b.sub(ONE, y)                          # exact (Sterbenz)
+            ph_ = b.mul(nr0, y)
+            pe_ = b.fma(nr0, y, b.neg(ph_))
+            e_h, se_ = two_sum(omy, ph_)
+            e_l = b.add(se_, pe_)
+            yh = b.mul(y, e_h)
+            ye = b.fma(y, e_h, b.neg(yh))
+            yel = b.mul(y, e_l)
+            rh = b.mul(rlh, y)
+            nre = b.fma(rlh, b.neg(y), rh)
+            pb = b.mul(nrle, y)
+            pbe = b.fma(nrle, y, b.neg(pb))
+            qh = b.mul(rlh, yh)
+            qe = b.fma(rlh, yh, b.neg(qh))
+            nrho_l, e3 = ml._cascade(b, [(nre, False), (pb, False),
+                                         (qh, True)])
+            n3 = ([(e, False) for e in e3] + [(pbe, False), (qe, True),
+                  (b.mul(rlh, ye), True), (b.mul(rlh, yel), True)])
         hrh = b.mul(rh, b.const("HALF", cl_["HALF"]))
         corr_h = rh
-        corr_l = b.fma(hrh, rh, nrho_l)
+        corr_ll = []                                  # [NEW] level-3 terms
+        if "cexact" in flags:
+            # [NEW] corr_l exactly: hrh * rh = ph + pe (TwoProd), ph + nrho_l
+            # = corr_l + se (TwoSum); pe and se are level 3
+            ph = b.mul(hrh, rh)
+            pe = b.fma(hrh, rh, b.neg(ph))
+            corr_l, se = two_sum(ph, nrho_l)
+            corr_ll += [(pe, True), (se, True)]   # held negated
+        else:
+            corr_l = b.fma(hrh, rh, nrho_l)               # [pw32n]
+        if "cross" in flags:
+            # rho = rh + rho_l with rho_l = -nrho_l: rho^2 / 2 gains rh *
+            # rho_l, held negated like corr_l: corr_l - rh * nrho_l
+            if "cexact" in flags:
+                ce_ = b.mul(rh, nrho_l)                   # a level-3 product
+                corr_ll.append((ce_, False))
+            else:
+                corr_l = b.fma(b.neg(rh), nrho_l, corr_l)
+        # nrho_l's level-3 terms (held negated like nrho_l itself)
+        corr_ll += [(v, not ng) for v, ng in n3]                   # [NEW]
+        if "rho3" in flags:
+            # + rho^3 / 3 (rh = rho to 2^-24), a contribution as it stands
+            cube = b.mul(b.mul(rh, rh), b.mul(rh, b.const(
+                "THIRD", ml._enc(fmt, Fraction(1, 3)))))
+            corr_ll.append((cube, False))
+        if "early" in flags:                                       # [NEW]
+            t0_, t1_, t2_ = do_table()
         sm = b.icmplt(cl.ax, b.const("SMALL", cl_["SMALL"]))
         r = b.sel(x, r, sm)
         kf = b.sel(ZERO, kf, sm)
         t0_, t1_, t2_ = (b.sel(ZERO, w, sm) for w in (t0_, t1_, t2_))
         corr_h, corr_l = b.sel(ZERO, corr_h, sm), b.sel(ZERO, corr_l, sm)
+        corr_ll = [(b.sel(ZERO, v, sm), ng) for v, ng in corr_ll]  # [NEW]
     nr = b.neg(r)                                                  # [pw32]
     y0, y1, y2 = pw32._poly3(b, cl_, *plog, r, nr, "L", "log")     # [pw32]
     at(b, "log-Z", "Z")
@@ -175,7 +276,10 @@ def build(fn, rnd, n, G=GUARD, bound_shift=0, plant=None, B1=None, B2=None,
         lv1.append((corr_h, False))
         lv2.append((corr_l, True))                  # held negated
     S1, errs = ml._cascade(b, lv1)
-    S2 = ml._plain_sum(b, lv2 + [(e, False) for e in errs])
+    if "sum2" in flags:                                            # [NEW]
+        S2 = comp_sum(b, lv2 + [(e, False) for e in errs], corr_ll)
+    else:
+        S2 = ml._plain_sum(b, lv2 + [(e, False) for e in errs])    # [pw32n]
     F0, F1 = fast_two_sum(F0s, S1)
     F1, F2 = fast_two_sum(F1, S2)
     F0, F1 = fast_two_sum(F0, F1)
@@ -191,9 +295,12 @@ def build(fn, rnd, n, G=GUARD, bound_shift=0, plant=None, B1=None, B2=None,
     Sk0, Ek_ = fast_two_sum(kf, g0)
     Sk1, errs = ml._cascade(b, [(Ek_, False), (ng0, True), (g1, False),
                                 (g2, False)])
-    Sk2 = ml._plain_sum(b, [(q2, False), (q1, False), (q0, False),
-                            (ng2, True), (ng1, True)]
-                        + [(e, False) for e in errs])
+    sk2t = [(q2, False), (q1, False), (q0, False), (ng2, True),
+            (ng1, True)] + [(e, False) for e in errs]
+    if "sum2" in flags:                                            # [NEW]
+        Sk2 = comp_sum(b, sk2t)
+    else:
+        Sk2 = ml._plain_sum(b, sk2t)                               # [pw32n]
     L0, L1 = fast_two_sum(Sk0, Sk1)
     L1, L2 = fast_two_sum(L1, Sk2)
     L0, L1 = fast_two_sum(L0, L1)

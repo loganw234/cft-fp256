@@ -388,7 +388,49 @@ def _wrap(name):
     return run
 
 
-EXTRA = {"costs": _wrap("costs"), "live": _wrap("live"),
+def mode_ladder(args):
+    """ladder LANES REGIONS VARIANTS: each variant (`;`-joined list, `none`
+    the control through pw32c.build) at each region (`,`-joined), seed 1,
+    rne: instructions, live cap and highest register over the 12 n and five
+    attributes, and per region the bound with the two logarithm terms"""
+    nl = int(args[0])
+    regs = args[1].split(",")
+    t0 = time.time()
+    lanes = {r: rg_region("compound", r, nl, 1) for r in regs}
+    for v in args[2].split(";"):
+        v = None if v == "none" else v
+        ins, live, top = [], 0, 0
+        for n in N_LIST:
+            for rnd in ATTRS:
+                f = pw32c.build("compound", rnd, n, variant=v).fragment()
+                ins.append(len(f.body))
+                live = max(live, f.live_max())
+                top = max(top, max_register(f) or 0)
+                routines.program(f)       # an AssertionError would stop here
+        print(f"VARIANT {v}: instructions {min(ins)} to {max(ins)} (12 n, "
+              f"five attributes), cap {live}, highest register r{top}, "
+              f"routines.program accepts every fragment; values beside a "
+              f"call 30 - cap = {30 - live}", flush=True)
+        for r in regs:
+            n = rg_n("compound", r)
+            b = pw32c.build("compound", RNE, n, variant=v)
+            s = NB.NBudget(b).add(lanes[r]).summary()
+            if s["lanes"] == 0:
+                print(f"  {r}: NOT MEASURED (0 measured lanes)")
+                continue
+            tot = s["bound"] + s["resid"]
+            ls = s["by"].get("log-sum", (0.0, 0.0))
+            lw = s["by"].get("log-lowword", (0.0, 0.0))
+            print(f"  {r}: {s['lanes']} measured of {len(lanes[r])}: bound "
+                  f"{s['bound']:.6f} + residual {s['resid']:.2e} = {tot:.6f} "
+                  f"Bv, margin {-math.log2(tot):.2f} bits, measured worst "
+                  f"{s['Emax']:.6f}; log-sum capacity {ls[1]:.6f} (observed "
+                  f"{ls[0]:.6f}), log-lowword capacity {lw[1]:.6f} (observed "
+                  f"{lw[0]:.6f})", flush=True)
+    print(f"{time.time() - t0:.0f} s")
+
+
+EXTRA = {"ladder": mode_ladder, "costs": _wrap("costs"), "live": _wrap("live"),
          "pools": _wrap("pools"), "rate": _wrap("rate"),
          "plants": mode_plants}
 
