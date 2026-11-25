@@ -1,0 +1,268 @@
+BOUND, model pw32c.build, variant fixA
+fp32 compound n=3 region int: 189 measured lanes of 300 (left out: 111, of them 107 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 107 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 5.828e-06 at x=0x2f0eb3b9 n=3; measured, a sample, not a bound
+  rounding instructions active 356
+  M max 0.002157 Bv; capacities 0.056058 Bv; BOUND 0.058215 Bv (2^-4.10)
+  measured worst 0.012099 Bv at x=0xbe133334 n=3
+  residual (second order, measured) 2.003e-03 Bv; bound + residual 0.060218 Bv
+    log-sum      capacity 0.014336  observed 0.009498
+    exp-recon    capacity 0.012146  observed 0.008080
+    exp-head2    capacity 0.011187  observed 0.004329
+    product      capacity 0.011011  observed 0.009053
+    log-lowword  capacity 0.005218  observed 0.003918
+    exp-Z        capacity 0.000773  observed 0.000523
+    log-head3    capacity 0.000634  observed 0.000267
+    exp-reduce   capacity 0.000295  observed 0.000158
+  15 s
+fp32 compound n=-3 region int-neg: 193 measured lanes of 300 (left out: 107, of them 107 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 107 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 3.602e-06 at x=0x2f0eb3b9 n=-3; measured, a sample, not a bound
+  rounding instructions active 357
+  M max 0.002600 Bv; capacities 0.064115 Bv; BOUND 0.066715 Bv (2^-3.91)
+  measured worst 0.006879 Bv at x=0xbe78ddf7 n=-3
+  residual (second order, measured) 2.002e-03 Bv; bound + residual 0.068717 Bv
+    exp-recon    capacity 0.021570  observed 0.010019
+    log-sum      capacity 0.014336  observed 0.009498
+    product      capacity 0.011011  observed 0.009053
+    exp-head2    capacity 0.009787  observed 0.008111
+    log-lowword  capacity 0.005218  observed 0.003918
+    exp-Z        capacity 0.000765  observed 0.000362
+    log-head3    capacity 0.000634  observed 0.000267
+    exp-reduce   capacity 0.000295  observed 0.000158
+  16 s
+fp32 compound n=17 region int17: 176 measured lanes of 300 (left out: 124, of them 123 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 123 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 2.004e-05 at x=0x2f0eb3b9 n=17; measured, a sample, not a bound
+  rounding instructions active 353
+  M max 0.002220 Bv; capacities 0.096359 Bv; BOUND 0.098578 Bv (2^-3.34)
+  measured worst 0.019415 Bv at x=0x3d64031e n=17
+  residual (second order, measured) 6.790e-03 Bv; bound + residual 0.105369 Bv
+    log-sum      capacity 0.030778  observed 0.021190
+    exp-recon    capacity 0.028019  observed 0.018869
+    log-lowword  capacity 0.016666  observed 0.009040
+    exp-head2    capacity 0.008720  observed 0.004780
+    product      capacity 0.007088  observed 0.005178
+    log-head3    capacity 0.002831  observed 0.001260
+    exp-Z        capacity 0.000826  observed 0.000654
+    log-Z        capacity 0.000461  observed 0.000410
+  16 s
+fp32 compound n=2147483647 region int31: 96 measured lanes of 300 (left out: 204, of them 204 by the tinyt gate), Y words 2, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 204 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 1.771e-06 at x=0x21bb38e4 n=2147483647; measured, a sample, not a bound
+  rounding instructions active 320
+  M max 0.000801 Bv; capacities 0.051744 Bv; BOUND 0.052545 Bv (2^-4.25)
+  measured worst 0.004439 Bv at x=0xb1e09985 n=2147483647
+  residual (second order, measured) 9.743e-06 Bv; bound + residual 0.052555 Bv
+    exp-recon    capacity 0.020534  observed 0.008927
+    log-sum      capacity 0.016389  observed 0.008002
+    product      capacity 0.006166  observed 0.005394
+    log-Z        capacity 0.003022  observed 0.001367
+    log-head3    capacity 0.002631  observed 0.001512
+    exp-head2    capacity 0.002437  observed 0.002117
+    exp-Z        capacity 0.000234  observed 0.000139
+    exp-reduce   capacity 0.000173  observed 0.000083
+  14 s
+fp32 compound n=-9223372036854775808 region int63: 119 measured lanes of 300 (left out: 181, of them 181 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 181 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 1.438e-06 at x=0x11c3205a n=-9223372036854775808; measured, a sample, not a bound
+  rounding instructions active 306
+  M max 0.002057 Bv; capacities 0.029848 Bv; BOUND 0.031906 Bv (2^-4.97)
+  measured worst 0.005566 Bv at x=0x1da79728 n=-9223372036854775808
+  residual (second order, measured) 1.788e-05 Bv; bound + residual 0.031924 Bv
+    exp-recon    capacity 0.012577  observed 0.008722
+    exp-head2    capacity 0.008942  observed 0.005465
+    log-sum      capacity 0.007190  observed 0.003686
+    exp-Z        capacity 0.000580  observed 0.000284
+    exp-reduce   capacity 0.000334  observed 0.000223
+    exp-tail     capacity 0.000139  observed 0.000105
+    exp-head3    capacity 0.000086  observed 0.000059
+    product      capacity 0.000000  observed 0.000000
+  15 s
+fp32 compound n=1000 region int1000: 171 measured lanes of 300 (left out: 129, of them 129 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 129 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 1.984e-05 at x=0x2c236bee n=1000; measured, a sample, not a bound
+  rounding instructions active 335
+  M max 0.001806 Bv; capacities 0.104250 Bv; BOUND 0.106056 Bv (2^-3.24)
+  measured worst 0.021321 Bv at x=0xb9f9e9b2 n=1000
+  residual (second order, measured) 1.351e-03 Bv; bound + residual 0.107407 Bv
+    exp-recon    capacity 0.032215  observed 0.025291
+    log-sum      capacity 0.024206  observed 0.016607
+    product      capacity 0.015545  observed 0.008998
+    log-head3    capacity 0.010488  observed 0.007141
+    exp-head2    capacity 0.010087  observed 0.005938
+    log-lowword  capacity 0.005865  observed 0.004307
+    log-Z        capacity 0.003651  observed 0.003247
+    exp-Z        capacity 0.001551  observed 0.000884
+  16 s
+fp32 compound n=16777217 region int16777217: 128 measured lanes of 300 (left out: 172, of them 171 by the tinyt gate), Y words 2, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 171 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 9.812e-05 at x=0x2590c1ab n=16777217; measured, a sample, not a bound
+  rounding instructions active 326
+  M max 0.001567 Bv; capacities 0.097992 Bv; BOUND 0.099559 Bv (2^-3.33)
+  measured worst 0.011236 Bv at x=0xb6022ef9 n=16777217
+  residual (second order, measured) 3.264e-05 Bv; bound + residual 0.099592 Bv
+    log-sum      capacity 0.027012  observed 0.021360
+    exp-recon    capacity 0.026615  observed 0.018693
+    product      capacity 0.020771  observed 0.014803
+    log-head3    capacity 0.010373  observed 0.008675
+    exp-head2    capacity 0.007545  observed 0.007014
+    log-Z        capacity 0.004284  observed 0.003368
+    exp-Z        capacity 0.000798  observed 0.000530
+    exp-reduce   capacity 0.000434  observed 0.000143
+  16 s
+fp32 compound n=1099511627776 region int1099511627776: 83 measured lanes of 300 (left out: 217, of them 217 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 217 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 2.519e-06 at x=0x1d8d5ed8 n=1099511627776; measured, a sample, not a bound
+  rounding instructions active 306
+  M max 0.001718 Bv; capacities 0.031717 Bv; BOUND 0.033435 Bv (2^-4.90)
+  measured worst 0.003652 Bv at x=0x2bde070e n=1099511627776
+  residual (second order, measured) 3.648e-06 Bv; bound + residual 0.033438 Bv
+    exp-recon    capacity 0.018626  observed 0.011087
+    log-sum      capacity 0.007272  observed 0.002096
+    exp-head2    capacity 0.004483  observed 0.003100
+    exp-Z        capacity 0.000759  observed 0.000397
+    exp-reduce   capacity 0.000357  observed 0.000126
+    exp-head3    capacity 0.000122  observed 0.000116
+    exp-tail     capacity 0.000095  observed 0.000077
+    log-Z        capacity 0.000002  observed 0.000000
+  14 s
+fp32 compound n=281474976710657 region int281474976710657: 93 measured lanes of 300 (left out: 207, of them 206 by the tinyt gate), Y words 2, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  left out by the tinyt gate: 206 lanes (|t0| < 2^-27; NOT bounded by this budget); their DIRECT error, V against the true value in Bv: largest 1.287e-06 at x=0x197aaf64 n=281474976710657; measured, a sample, not a bound
+  rounding instructions active 310
+  M max 0.001461 Bv; capacities 0.035868 Bv; BOUND 0.037328 Bv (2^-4.74)
+  measured worst 0.009286 Bv at x=0x2617b32a n=281474976710657
+  residual (second order, measured) 2.492e-05 Bv; bound + residual 0.037353 Bv
+    exp-recon    capacity 0.019185  observed 0.012250
+    log-sum      capacity 0.008423  observed 0.005766
+    product      capacity 0.004259  observed 0.002442
+    exp-head2    capacity 0.002865  observed 0.001166
+    exp-Z        capacity 0.000770  observed 0.000296
+    exp-reduce   capacity 0.000220  observed 0.000173
+    exp-tail     capacity 0.000078  observed 0.000037
+    exp-head3    capacity 0.000068  observed 0.000054
+  14 s
+fp32 compound n=3 region zone: 300 measured lanes of 300 (left out: 0, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 343
+  M max 0.001921 Bv; capacities 0.075014 Bv; BOUND 0.076935 Bv (2^-3.70)
+  measured worst 0.014991 Bv at x=0xbd7a5866 n=3
+  residual (second order, measured) 4.106e-03 Bv; bound + residual 0.081041 Bv
+    exp-recon    capacity 0.025175  observed 0.019015
+    log-sum      capacity 0.025102  observed 0.021723
+    log-lowword  capacity 0.011419  observed 0.008130
+    exp-head2    capacity 0.007582  observed 0.005667
+    product      capacity 0.003776  observed 0.003136
+    log-head3    capacity 0.000639  observed 0.000591
+    exp-Z        capacity 0.000611  observed 0.000520
+    exp-reduce   capacity 0.000283  observed 0.000280
+  18 s
+fp32 compound n=1000 region zone1000: 300 measured lanes of 300 (left out: 0, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 340
+  M max 0.000608 Bv; capacities 0.151080 Bv; BOUND 0.151688 Bv (2^-2.72)
+  measured worst 0.044073 Bv at x=0xbd7a5866 n=1000
+  residual (second order, measured) 1.784e-02 Bv; bound + residual 0.169529 Bv
+    log-sum      capacity 0.081423  observed 0.069741
+    log-lowword  capacity 0.035401  observed 0.022045
+    product      capacity 0.018165  observed 0.010622
+    log-head3    capacity 0.010440  observed 0.009845
+    log-Z        capacity 0.003105  observed 0.002875
+    exp-recon    capacity 0.001896  observed 0.001043
+    exp-head2    capacity 0.000538  observed 0.000244
+    exp-Z        capacity 0.000032  observed 0.000020
+  18 s
+fp32 compound n=-3 region zone-3: 300 measured lanes of 300 (left out: 0, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 345
+  M max 0.001385 Bv; capacities 0.087795 Bv; BOUND 0.089180 Bv (2^-3.49)
+  measured worst 0.014373 Bv at x=0xbd6d1d8e n=-3
+  residual (second order, measured) 4.098e-03 Bv; bound + residual 0.093278 Bv
+    exp-recon    capacity 0.038070  observed 0.028582
+    log-sum      capacity 0.025102  observed 0.021723
+    log-lowword  capacity 0.011419  observed 0.008130
+    exp-head2    capacity 0.007263  observed 0.006833
+    product      capacity 0.003776  observed 0.003136
+    exp-Z        capacity 0.000822  observed 0.000680
+    log-head3    capacity 0.000639  observed 0.000591
+    exp-reduce   capacity 0.000283  observed 0.000280
+  18 s
+fp32 compound n=17 region zone17: 300 measured lanes of 300 (left out: 0, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 344
+  M max 0.001440 Bv; capacities 0.122341 Bv; BOUND 0.123780 Bv (2^-3.01)
+  measured worst 0.031808 Bv at x=0xbd7a5866 n=17
+  residual (second order, measured) 7.453e-03 Bv; bound + residual 0.131234 Bv
+    log-sum      capacity 0.058406  observed 0.050371
+    exp-recon    capacity 0.022844  observed 0.012088
+    log-lowword  capacity 0.021257  observed 0.016097
+    product      capacity 0.010936  observed 0.008168
+    exp-head2    capacity 0.004450  observed 0.003202
+    log-head3    capacity 0.002847  observed 0.002641
+    log-Z        capacity 0.000788  observed 0.000737
+    exp-Z        capacity 0.000318  observed 0.000263
+  17 s
+fp32 compound n=2147483647 region cint2147483647: 285 measured lanes of 300 (left out: 15, of them 0 by the tinyt gate), Y words 2, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 316
+  M max 0.000976 Bv; capacities 0.043207 Bv; BOUND 0.044183 Bv (2^-4.50)
+  measured worst 0.010231 Bv at x=0xb329c9f8 n=2147483647
+  residual (second order, measured) 2.496e-05 Bv; bound + residual 0.044208 Bv
+    log-sum      capacity 0.019499  observed 0.013574
+    product      capacity 0.007855  observed 0.007315
+    exp-recon    capacity 0.007377  observed 0.004434
+    exp-head2    capacity 0.003467  observed 0.003100
+    log-head3    capacity 0.002636  observed 0.002467
+    log-Z        capacity 0.001802  observed 0.001703
+    exp-Z        capacity 0.000357  observed 0.000187
+    exp-reduce   capacity 0.000125  observed 0.000084
+  16 s
+fp32 compound n=-9223372036854775808 region cint-9223372036854775808: 285 measured lanes of 300 (left out: 15, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 297
+  M max 0.000976 Bv; capacities 0.022643 Bv; BOUND 0.023619 Bv (2^-5.40)
+  measured worst 0.005492 Bv at x=0xa325fb82 n=-9223372036854775808
+  residual (second order, measured) 1.068e-05 Bv; bound + residual 0.023630 Bv
+    log-sum      capacity 0.010751  observed 0.006422
+    exp-recon    capacity 0.008059  observed 0.004294
+    exp-head2    capacity 0.003249  observed 0.002844
+    exp-Z        capacity 0.000344  observed 0.000238
+    exp-reduce   capacity 0.000118  observed 0.000086
+    exp-head3    capacity 0.000062  observed 0.000038
+    exp-tail     capacity 0.000060  observed 0.000034
+    product      capacity 0.000000  observed 0.000000
+  15 s
+fp32 compound n=16777217 region cint16777217: 285 measured lanes of 300 (left out: 15, of them 0 by the tinyt gate), Y words 2, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 325
+  M max 0.000976 Bv; capacities 0.097452 Bv; BOUND 0.098428 Bv (2^-3.34)
+  measured worst 0.013715 Bv at x=0x3699f32f n=16777217
+  residual (second order, measured) 2.728e-05 Bv; bound + residual 0.098456 Bv
+    log-sum      capacity 0.040957  observed 0.037081
+    product      capacity 0.026676  observed 0.020711
+    log-head3    capacity 0.015742  observed 0.014102
+    exp-recon    capacity 0.005860  observed 0.003926
+    log-Z        capacity 0.004295  observed 0.003386
+    exp-head2    capacity 0.003346  observed 0.002475
+    exp-Z        capacity 0.000310  observed 0.000209
+    exp-reduce   capacity 0.000145  observed 0.000080
+  16 s
+fp32 compound n=4611686018427388929 region cint4611686018427388929: 285 measured lanes of 300 (left out: 15, of them 0 by the tinyt gate), Y words 2, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 304
+  M max 0.000976 Bv; capacities 0.040431 Bv; BOUND 0.041408 Bv (2^-4.59)
+  measured worst 0.007758 Bv at x=0x21895176 n=4611686018427388929
+  residual (second order, measured) 1.709e-05 Bv; bound + residual 0.041425 Bv
+    exp-recon    capacity 0.016119  observed 0.009855
+    log-sum      capacity 0.010751  observed 0.007525
+    product      capacity 0.009721  observed 0.004531
+    exp-head2    capacity 0.003249  observed 0.002844
+    exp-Z        capacity 0.000344  observed 0.000282
+    exp-reduce   capacity 0.000126  observed 0.000060
+    exp-head3    capacity 0.000062  observed 0.000038
+    exp-tail     capacity 0.000060  observed 0.000034
+  15 s
+
+SUMMARY fp32 compound, 300 lanes a region, seed 1, rne, B1 2^-66 (first), B2 2^-67 (first):
+  int                  n=3            lanes   189 of   300 (tinyt-gated 107) bound 0.058215 + residual 2.00e-03 = 0.060218 Bv (under 1); margin 4.05 bits; measured worst 0.012099; log-sum cap 0.014336 (obs 0.009498), log-lowword cap 0.005218 (obs 0.003918)
+  int-neg              n=-3           lanes   193 of   300 (tinyt-gated 107) bound 0.066715 + residual 2.00e-03 = 0.068717 Bv (under 1); margin 3.86 bits; measured worst 0.006879; log-sum cap 0.014336 (obs 0.009498), log-lowword cap 0.005218 (obs 0.003918)
+  int17                n=17           lanes   176 of   300 (tinyt-gated 123) bound 0.098578 + residual 6.79e-03 = 0.105369 Bv (under 1); margin 3.25 bits; measured worst 0.019415; log-sum cap 0.030778 (obs 0.021190), log-lowword cap 0.016666 (obs 0.009040)
+  int31                n=2^31-1       lanes    96 of   300 (tinyt-gated 204) bound 0.052545 + residual 9.74e-06 = 0.052555 Bv (under 1); margin 4.25 bits; measured worst 0.004439; log-sum cap 0.016389 (obs 0.008002), log-lowword cap 0.000000 (obs 0.000000)
+  int63                n=-2^63        lanes   119 of   300 (tinyt-gated 181) bound 0.031906 + residual 1.79e-05 = 0.031924 Bv (under 1); margin 4.97 bits; measured worst 0.005566; log-sum cap 0.007190 (obs 0.003686), log-lowword cap 0.000000 (obs 0.000000)
+  int1000              n=1000         lanes   171 of   300 (tinyt-gated 129) bound 0.106056 + residual 1.35e-03 = 0.107407 Bv (under 1); margin 3.22 bits; measured worst 0.021321; log-sum cap 0.024206 (obs 0.016607), log-lowword cap 0.005865 (obs 0.004307)
+  int16777217          n=16777217     lanes   128 of   300 (tinyt-gated 171) bound 0.099559 + residual 3.26e-05 = 0.099592 Bv (under 1); margin 3.33 bits; measured worst 0.011236; log-sum cap 0.027012 (obs 0.021360), log-lowword cap 0.000000 (obs 0.000000)
+  int1099511627776     n=1099511627776 lanes    83 of   300 (tinyt-gated 217) bound 0.033435 + residual 3.65e-06 = 0.033438 Bv (under 1); margin 4.90 bits; measured worst 0.003652; log-sum cap 0.007272 (obs 0.002096), log-lowword cap 0.000000 (obs 0.000000)
+  int281474976710657   n=2^48+1       lanes    93 of   300 (tinyt-gated 206) bound 0.037328 + residual 2.49e-05 = 0.037353 Bv (under 1); margin 4.74 bits; measured worst 0.009286; log-sum cap 0.008423 (obs 0.005766), log-lowword cap 0.000000 (obs 0.000000)
+  zone                 n=3            lanes   300 of   300 (tinyt-gated 0) bound 0.076935 + residual 4.11e-03 = 0.081041 Bv (under 1); margin 3.63 bits; measured worst 0.014991; log-sum cap 0.025102 (obs 0.021723), log-lowword cap 0.011419 (obs 0.008130)
+  zone1000             n=1000         lanes   300 of   300 (tinyt-gated 0) bound 0.151688 + residual 1.78e-02 = 0.169529 Bv (under 1); margin 2.56 bits; measured worst 0.044073; log-sum cap 0.081423 (obs 0.069741), log-lowword cap 0.035401 (obs 0.022045)
+  zone-3               n=-3           lanes   300 of   300 (tinyt-gated 0) bound 0.089180 + residual 4.10e-03 = 0.093278 Bv (under 1); margin 3.42 bits; measured worst 0.014373; log-sum cap 0.025102 (obs 0.021723), log-lowword cap 0.011419 (obs 0.008130)
+  zone17               n=17           lanes   300 of   300 (tinyt-gated 0) bound 0.123780 + residual 7.45e-03 = 0.131234 Bv (under 1); margin 2.93 bits; measured worst 0.031808; log-sum cap 0.058406 (obs 0.050371), log-lowword cap 0.021257 (obs 0.016097)
+  cint2147483647       n=2^31-1       lanes   285 of   300 (tinyt-gated 0) bound 0.044183 + residual 2.50e-05 = 0.044208 Bv (under 1); margin 4.50 bits; measured worst 0.010231; log-sum cap 0.019499 (obs 0.013574), log-lowword cap 0.000000 (obs 0.000000)
+  cint-9223372036854775808 n=-2^63        lanes   285 of   300 (tinyt-gated 0) bound 0.023619 + residual 1.07e-05 = 0.023630 Bv (under 1); margin 5.40 bits; measured worst 0.005492; log-sum cap 0.010751 (obs 0.006422), log-lowword cap 0.000000 (obs 0.000000)
+  cint16777217         n=16777217     lanes   285 of   300 (tinyt-gated 0) bound 0.098428 + residual 2.73e-05 = 0.098456 Bv (under 1); margin 3.34 bits; measured worst 0.013715; log-sum cap 0.040957 (obs 0.037081), log-lowword cap 0.000000 (obs 0.000000)
+  cint4611686018427388929 n=4611686018427388929 lanes   285 of   300 (tinyt-gated 0) bound 0.041408 + residual 1.71e-05 = 0.041425 Bv (under 1); margin 4.59 bits; measured worst 0.007758; log-sum cap 0.010751 (obs 0.007525), log-lowword cap 0.000000 (obs 0.000000)
+  worst region bound 0.169529 Bv, margin 2.56 bits, over the 17 of 17 regions measured; 271 s

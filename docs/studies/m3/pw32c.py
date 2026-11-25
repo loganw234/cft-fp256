@@ -31,6 +31,7 @@ from pw32n import (fmt, N, GUARD, PHASE_MAP, PARTS, B1_FIRST, B2_FIRST,
 PLANTS = {k: v for k, v in pw32n.PLANTS.items()
           if k not in ("rootn_m0_neg",)}
 FNS = ("compound",)
+LW_PHASE = "lowword"        # the phase the low-word block is scheduled in
 VARIANTS = {
     "sum2": "[NEW] the two plain sums of the logarithm's level 2 (log-sum's "
             "S2 and the 1/ln 2 product's Sk2) become compensated sums: a "
@@ -182,7 +183,7 @@ def build(fn, rnd, n, G=GUARD, bound_shift=0, plant=None, B1=None, B2=None,
         # [NEW] M1's triple-word log1p low word (mathlib._build_log_tw,
         # "lowword" phase, copied; GL is its G): rho = r_l / (1 + r) with
         # r_l = u_l 2^-k c, as a double word, and log1p of it, rho - rho^2/2
-        at(b, "log-lowword", "lowword")
+        at(b, "log-lowword", LW_PHASE)
         p2mk = b.ishl(b.isub(ib(fmt.bias + cl_["MAGIC"], "K_BIAS_MAGIC"),
                              red.kb), MANW)
         p2mk = b.sel(ZERO, p2mk, b.icmplt(
