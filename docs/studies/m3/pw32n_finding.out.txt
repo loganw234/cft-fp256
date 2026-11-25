@@ -1,0 +1,15 @@
+TWBudget (pw32_budget.py, M3X's tool, unchanged) on fp32 compound n=3 region int, 30 lanes, seed 1, rne: 30 lanes, M max 0.002157 Bv, capacities 7468.358331 Bv, BOUND 7468.360488 Bv
+NBudget (pw32n_budget.py) on the same lanes: 23 lanes measured, 7 left out by the tinyt gate, M max 0.002157, capacities 0.028189, BOUND 0.030345 Bv
+the active instructions with the largest capacity (index, label, op, the capacity the tool sums, the largest observed contribution):
+  instruction 427: label log-sum, op 0, sources (('v', 423), ('w', 'NIL2_0'), ('v', 426)), capacity 6454.54 Bv, observed 2.14e-26 Bv; the capacity comes from x=0x3eafef54 n=3 (largest over the lanes, 6454.54 Bv); the instruction rounds (is active) in 3 lane(s): x=0x093ada16, x=0x00000003, x=0x088e48e9
+  instruction 515: label exp-reduce, op 0, sources (('v', 505), ('w', 'NLN2_0'), ('v', 514)), capacity 1007.69 Bv, observed 9.69e-27 Bv; the capacity comes from x=0xbc7353ed n=3 (largest over the lanes, 1007.69 Bv); the instruction rounds (is active) in 2 lane(s): x=0x00000003, x=0x088e48e9
+  instruction 349: label log-head3, op 0, sources (('v', 342), ('v', 87), ('v', 348)), capacity 5.61213 Bv, observed 1.63e-70 Bv; the capacity comes from x=0xbc7353ed n=3 (largest over the lanes, 5.61213 Bv); the instruction rounds (is active) in 1 lane(s): x=0x00000003
+  instruction 319: label log-head3, op 0, sources (('v', 312), ('v', 87), ('v', 318)), capacity 0.436983 Bv, observed 1.2e-91 Bv; the capacity comes from x=0xbd0cc399 n=3 (largest over the lanes, 0.436983 Bv); the instruction rounds (is active) in 3 lane(s): x=0x093ada16, x=0x00000003, x=0x088e48e9
+  the lane x=0x21448437 (x = 6.6582e-19), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 2.453e-17 Bv; alone, TWBudget's own bound on it is 5.684e-14 Bv
+  the lane x=0x170fe698 (x = 4.6497e-25), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 2.584e-26 Bv; alone, TWBudget's own bound on it is 1.285e-27 Bv
+  the lane x=0x093ada16 (x = 2.2491e-33), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 2.799e-46 Bv; alone, TWBudget's own bound on it is 2.100e-28 Bv
+  the lane x=0x00000003 (x = 4.2039e-45), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 2.585e-26 Bv; alone, TWBudget's own bound on it is 3.161e-48 Bv
+  the lane x=0x088e48e9 (x = 8.5635e-34), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 4.058e-47 Bv; alone, TWBudget's own bound on it is 1.030e-28 Bv
+  the lane x=0x2c2f6806 (x = 2.4927e-12), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 5.273e-08 Bv; alone, TWBudget's own bound on it is 2.384e-07 Bv
+  the lane x=0x2a2e4808 (x = 1.5479e-13), n=3, rne: |t0| < 2^-27 (tinyt set); its DIRECT error (V against the true value) is 3.253e-14 Bv; alone, TWBudget's own bound on it is 5.876e-14 Bv
+12 s

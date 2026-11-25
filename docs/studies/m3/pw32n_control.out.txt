@@ -1,0 +1,37 @@
+control 1: NBudget on the model's fp64 pown, region int, 120 lanes, seed 1; reference budget.fp64-pown-int.out.txt
+fp64 pown n=3 region int: 117 measured lanes of 120 (left out: 3, of them 0 by the tinyt gate), Y words n/a, G 44, GL 47, B1 2^-100.0, B2 2^-101.0
+  rounding instructions active 145
+  M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03)
+  measured worst 0.005090 Bv at x=0xaeb06509adbf5947 n=3
+  residual (second order, measured) 1.083e-06 Bv; bound + residual 0.015354 Bv
+    product      capacity 0.009000  observed 0.004500
+    log-sum      capacity 0.005191  observed 0.004056
+    exp-recon    capacity 0.000753  observed 0.000527
+    exp-poly     capacity 0.000112  observed 0.000056
+    log-poly     capacity 0.000070  observed 0.000040
+    exp-reduce   capacity 0.000020  observed 0.000006
+    test         capacity 0.000000  observed 0.000000
+    fixed-grid   capacity 0.000000  observed 0.000000
+  5 s
+  reference: M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03) / rounding instructions active 145
+  this tool: M max 0.000207 Bv; capacities 0.015146 Bv; BOUND 0.015352 Bv (2^-6.03) / rounding instructions active 145
+CONTROL 1 REPRODUCES the bound to its printed digits
+control 2: NBudget on pw32.build's fp32 pow, region edge, 300 lanes, seed 1; reference pw32_bound-pow.out.txt (region edge)
+fp32 pow n=None region edge: 300 measured lanes of 300 (left out: 0, of them 0 by the tinyt gate), Y words n/a, G 40, GL 48, B1 2^-66.0, B2 2^-67.0
+  rounding instructions active 314
+  M max 0.000464 Bv; capacities 0.046864 Bv; BOUND 0.047328 Bv (2^-4.40)
+  measured worst 0.007206 Bv at x=0x40ed5345 y=0x422f0f75
+  residual (second order, measured) 1.656e-06 Bv; bound + residual 0.047330 Bv
+    log-sum      capacity 0.029450  observed 0.015481
+    product      capacity 0.016118  observed 0.010302
+    exp-recon    capacity 0.000720  observed 0.000522
+    exp-head2    capacity 0.000292  observed 0.000228
+    log-head3    capacity 0.000162  observed 0.000079
+    log-Z        capacity 0.000082  observed 0.000048
+    exp-Z        capacity 0.000021  observed 0.000016
+    exp-reduce   capacity 0.000010  observed 0.000006
+  29 s
+  reference: M max 0.000464 Bv; capacities 0.046864 Bv; BOUND 0.047328 Bv (2^-4.40) / rounding instructions active 314
+  this tool: M max 0.000464 Bv; capacities 0.046864 Bv; BOUND 0.047328 Bv (2^-4.40) / rounding instructions active 314
+CONTROL 2 REPRODUCES the bound to its printed digits
+34 s

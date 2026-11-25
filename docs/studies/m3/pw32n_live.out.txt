@@ -1,0 +1,236 @@
+phase map (label -> PHASE_ORDER name):
+    classify     classify
+    front        front
+    log-reduce   reduce
+    log-table    table
+    log-tail     tail
+    log-head2    head2
+    log-head3    head3
+    log-Z        Z
+    log-sum      recon
+    product      reduce
+    exp-reduce   reduce
+    exp-table    lookup
+    exp-scale    scale
+    exp-tail     tail
+    exp-head2    head2
+    exp-head3    head3
+    exp-Z        Z
+    exp-recon    recon
+    exact        final
+    test         final
+    fixed-grid   fixed-grid
+    final        final
+    beside-1     final
+    special      special
+    log-lowword  lowword
+fp32 pown n=2 rne: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=2 rtz: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 139 bank words); highest register r26
+fp32 pown n=2 rdn: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 139 bank words); highest register r26
+fp32 pown n=2 rup: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 138 bank words); highest register r26
+fp32 pown n=2 rmm: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=-2 rne: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=-2 rtz: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (862 program words, 139 bank words); highest register r26
+fp32 pown n=-2 rdn: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (862 program words, 139 bank words); highest register r26
+fp32 pown n=-2 rup: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (862 program words, 138 bank words); highest register r26
+fp32 pown n=-2 rmm: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=3 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (880 program words, 142 bank words); highest register r27
+fp32 pown n=3 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 144 bank words); highest register r27
+fp32 pown n=3 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 145 bank words); highest register r27
+fp32 pown n=3 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 143 bank words); highest register r27
+fp32 pown n=3 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (880 program words, 142 bank words); highest register r27
+fp32 pown n=-3 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (880 program words, 142 bank words); highest register r27
+fp32 pown n=-3 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (875 program words, 144 bank words); highest register r27
+fp32 pown n=-3 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (875 program words, 145 bank words); highest register r27
+fp32 pown n=-3 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (875 program words, 143 bank words); highest register r27
+fp32 pown n=-3 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (880 program words, 142 bank words); highest register r27
+fp32 pown n=17 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (880 program words, 142 bank words); highest register r27
+fp32 pown n=17 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 144 bank words); highest register r27
+fp32 pown n=17 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 145 bank words); highest register r27
+fp32 pown n=17 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 143 bank words); highest register r27
+fp32 pown n=17 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (880 program words, 142 bank words); highest register r27
+fp32 pown n=2^31-1 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (892 program words, 142 bank words); highest register r27
+fp32 pown n=2^31-1 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 144 bank words); highest register r27
+fp32 pown n=2^31-1 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 145 bank words); highest register r27
+fp32 pown n=2^31-1 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 143 bank words); highest register r27
+fp32 pown n=2^31-1 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (892 program words, 142 bank words); highest register r27
+fp32 pown n=-2^63 rne: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=-2^63 rtz: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (862 program words, 139 bank words); highest register r26
+fp32 pown n=-2^63 rdn: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (862 program words, 139 bank words); highest register r26
+fp32 pown n=-2^63 rup: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (862 program words, 138 bank words); highest register r26
+fp32 pown n=-2^63 rmm: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=1000 rne: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 139 bank words); highest register r26
+fp32 pown n=1000 rtz: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 140 bank words); highest register r26
+fp32 pown n=1000 rdn: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 140 bank words); highest register r26
+fp32 pown n=1000 rup: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 139 bank words); highest register r26
+fp32 pown n=1000 rmm: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 139 bank words); highest register r26
+fp32 pown n=16777217 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (892 program words, 141 bank words); highest register r27
+fp32 pown n=16777217 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 143 bank words); highest register r27
+fp32 pown n=16777217 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 144 bank words); highest register r27
+fp32 pown n=16777217 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 142 bank words); highest register r27
+fp32 pown n=16777217 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (892 program words, 141 bank words); highest register r27
+fp32 pown n=1099511627776 rne: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=1099511627776 rtz: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 139 bank words); highest register r26
+fp32 pown n=1099511627776 rdn: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 139 bank words); highest register r26
+fp32 pown n=1099511627776 rup: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (861 program words, 138 bank words); highest register r26
+fp32 pown n=1099511627776 rmm: live scheduled 27 (by phase 27, depth first 30, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 138 bank words); highest register r26
+fp32 pown n=2^48+1 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (892 program words, 142 bank words); highest register r27
+fp32 pown n=2^48+1 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 144 bank words); highest register r27
+fp32 pown n=2^48+1 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 145 bank words); highest register r27
+fp32 pown n=2^48+1 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (886 program words, 143 bank words); highest register r27
+fp32 pown n=2^48+1 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (892 program words, 142 bank words); highest register r27
+fp32 pown n=2^62+2^37+1 rne: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (894 program words, 143 bank words); highest register r27
+fp32 pown n=2^62+2^37+1 rtz: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (888 program words, 145 bank words); highest register r27
+fp32 pown n=2^62+2^37+1 rdn: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (888 program words, 146 bank words); highest register r27
+fp32 pown n=2^62+2^37+1 rup: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (888 program words, 144 bank words); highest register r27
+fp32 pown n=2^62+2^37+1 rmm: live scheduled 28 (by phase 28, depth first 30, design order 41); dag_digest equal to the design order's: True; routines.program accepted (894 program words, 143 bank words); highest register r27
+fp32 rootn n=2 rne: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 139 bank words); highest register r25
+fp32 rootn n=2 rtz: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (867 program words, 140 bank words); highest register r25
+fp32 rootn n=2 rdn: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (867 program words, 140 bank words); highest register r25
+fp32 rootn n=2 rup: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (867 program words, 139 bank words); highest register r25
+fp32 rootn n=2 rmm: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 139 bank words); highest register r25
+fp32 rootn n=-2 rne: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 139 bank words); highest register r25
+fp32 rootn n=-2 rtz: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 140 bank words); highest register r25
+fp32 rootn n=-2 rdn: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 140 bank words); highest register r25
+fp32 rootn n=-2 rup: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 139 bank words); highest register r25
+fp32 rootn n=-2 rmm: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 139 bank words); highest register r25
+fp32 rootn n=3 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 141 bank words); highest register r26
+fp32 rootn n=3 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 143 bank words); highest register r26
+fp32 rootn n=3 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 144 bank words); highest register r26
+fp32 rootn n=3 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 142 bank words); highest register r26
+fp32 rootn n=3 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 141 bank words); highest register r26
+fp32 rootn n=-3 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=-3 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (890 program words, 146 bank words); highest register r26
+fp32 rootn n=-3 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (890 program words, 147 bank words); highest register r26
+fp32 rootn n=-3 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (890 program words, 145 bank words); highest register r26
+fp32 rootn n=-3 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=17 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 143 bank words); highest register r26
+fp32 rootn n=17 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 145 bank words); highest register r26
+fp32 rootn n=17 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 146 bank words); highest register r26
+fp32 rootn n=17 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 144 bank words); highest register r26
+fp32 rootn n=17 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 143 bank words); highest register r26
+fp32 rootn n=2^31-1 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=2^31-1 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 146 bank words); highest register r26
+fp32 rootn n=2^31-1 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 147 bank words); highest register r26
+fp32 rootn n=2^31-1 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 145 bank words); highest register r26
+fp32 rootn n=2^31-1 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=-2^63 rne: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 140 bank words); highest register r25
+fp32 rootn n=-2^63 rtz: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 141 bank words); highest register r25
+fp32 rootn n=-2^63 rdn: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 141 bank words); highest register r25
+fp32 rootn n=-2^63 rup: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (868 program words, 140 bank words); highest register r25
+fp32 rootn n=-2^63 rmm: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 140 bank words); highest register r25
+fp32 rootn n=1000 rne: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (888 program words, 142 bank words); highest register r25
+fp32 rootn n=1000 rtz: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (881 program words, 143 bank words); highest register r25
+fp32 rootn n=1000 rdn: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (881 program words, 143 bank words); highest register r25
+fp32 rootn n=1000 rup: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (881 program words, 142 bank words); highest register r25
+fp32 rootn n=1000 rmm: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (888 program words, 142 bank words); highest register r25
+fp32 rootn n=16777217 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=16777217 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 146 bank words); highest register r26
+fp32 rootn n=16777217 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 147 bank words); highest register r26
+fp32 rootn n=16777217 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 145 bank words); highest register r26
+fp32 rootn n=16777217 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=1099511627776 rne: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 140 bank words); highest register r25
+fp32 rootn n=1099511627776 rtz: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (867 program words, 141 bank words); highest register r25
+fp32 rootn n=1099511627776 rdn: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (867 program words, 141 bank words); highest register r25
+fp32 rootn n=1099511627776 rup: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (867 program words, 140 bank words); highest register r25
+fp32 rootn n=1099511627776 rmm: live scheduled 26 (by phase 26, depth first 29, design order 39); dag_digest equal to the design order's: True; routines.program accepted (874 program words, 140 bank words); highest register r25
+fp32 rootn n=2^48+1 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=2^48+1 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 146 bank words); highest register r26
+fp32 rootn n=2^48+1 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 147 bank words); highest register r26
+fp32 rootn n=2^48+1 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 145 bank words); highest register r26
+fp32 rootn n=2^48+1 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=2^62+2^37+1 rne: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 rootn n=2^62+2^37+1 rtz: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 146 bank words); highest register r26
+fp32 rootn n=2^62+2^37+1 rdn: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 147 bank words); highest register r26
+fp32 rootn n=2^62+2^37+1 rup: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (889 program words, 145 bank words); highest register r26
+fp32 rootn n=2^62+2^37+1 rmm: live scheduled 27 (by phase 27, depth first 29, design order 40); dag_digest equal to the design order's: True; routines.program accepted (895 program words, 144 bank words); highest register r26
+fp32 compound n=2 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=2 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=2 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=2 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 139 bank words); highest register r27
+fp32 compound n=2 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=-2 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=-2 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 140 bank words); highest register r27
+fp32 compound n=-2 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 140 bank words); highest register r27
+fp32 compound n=-2 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 139 bank words); highest register r27
+fp32 compound n=-2 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=3 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=3 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 141 bank words); highest register r27
+fp32 compound n=3 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 141 bank words); highest register r27
+fp32 compound n=3 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=3 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=-3 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=-3 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 141 bank words); highest register r27
+fp32 compound n=-3 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 141 bank words); highest register r27
+fp32 compound n=-3 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 140 bank words); highest register r27
+fp32 compound n=-3 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=17 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=17 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 141 bank words); highest register r27
+fp32 compound n=17 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 141 bank words); highest register r27
+fp32 compound n=17 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=17 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=2^31-1 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (933 program words, 139 bank words); highest register r27
+fp32 compound n=2^31-1 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 141 bank words); highest register r27
+fp32 compound n=2^31-1 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 141 bank words); highest register r27
+fp32 compound n=2^31-1 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 140 bank words); highest register r27
+fp32 compound n=2^31-1 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (933 program words, 139 bank words); highest register r27
+fp32 compound n=-2^63 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=-2^63 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 140 bank words); highest register r27
+fp32 compound n=-2^63 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 140 bank words); highest register r27
+fp32 compound n=-2^63 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (914 program words, 139 bank words); highest register r27
+fp32 compound n=-2^63 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=1000 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=1000 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 141 bank words); highest register r27
+fp32 compound n=1000 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 141 bank words); highest register r27
+fp32 compound n=1000 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=1000 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 139 bank words); highest register r27
+fp32 compound n=16777217 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (933 program words, 139 bank words); highest register r27
+fp32 compound n=16777217 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 141 bank words); highest register r27
+fp32 compound n=16777217 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 141 bank words); highest register r27
+fp32 compound n=16777217 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 140 bank words); highest register r27
+fp32 compound n=16777217 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (933 program words, 139 bank words); highest register r27
+fp32 compound n=1099511627776 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=1099511627776 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=1099511627776 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 140 bank words); highest register r27
+fp32 compound n=1099511627776 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (915 program words, 139 bank words); highest register r27
+fp32 compound n=1099511627776 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (921 program words, 138 bank words); highest register r27
+fp32 compound n=2^48+1 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (933 program words, 139 bank words); highest register r27
+fp32 compound n=2^48+1 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 141 bank words); highest register r27
+fp32 compound n=2^48+1 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 141 bank words); highest register r27
+fp32 compound n=2^48+1 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (927 program words, 140 bank words); highest register r27
+fp32 compound n=2^48+1 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (933 program words, 139 bank words); highest register r27
+fp32 compound n=2^62+2^37+1 rne: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (935 program words, 140 bank words); highest register r27
+fp32 compound n=2^62+2^37+1 rtz: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (929 program words, 142 bank words); highest register r27
+fp32 compound n=2^62+2^37+1 rdn: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (929 program words, 142 bank words); highest register r27
+fp32 compound n=2^62+2^37+1 rup: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (929 program words, 141 bank words); highest register r27
+fp32 compound n=2^62+2^37+1 rmm: live scheduled 28 (by phase 28, depth first 31, design order 41); dag_digest equal to the design order's: True; routines.program accepted (935 program words, 140 bank words); highest register r27
+fp32 pown n=0 rne (build_small): live 2; routines.program accepted; highest register r1
+fp32 pown n=0 rtz (build_small): live 2; routines.program accepted; highest register r1
+fp32 pown n=0 rdn (build_small): live 2; routines.program accepted; highest register r1
+fp32 pown n=0 rup (build_small): live 2; routines.program accepted; highest register r1
+fp32 pown n=0 rmm (build_small): live 2; routines.program accepted; highest register r1
+fp32 pown n=1 rne (build_small): live 3; routines.program accepted; highest register r2
+fp32 pown n=1 rtz (build_small): live 3; routines.program accepted; highest register r2
+fp32 pown n=1 rdn (build_small): live 3; routines.program accepted; highest register r2
+fp32 pown n=1 rup (build_small): live 3; routines.program accepted; highest register r2
+fp32 pown n=1 rmm (build_small): live 3; routines.program accepted; highest register r2
+fp32 rootn n=1 rne (build_small): live 3; routines.program accepted; highest register r2
+fp32 rootn n=1 rtz (build_small): live 3; routines.program accepted; highest register r2
+fp32 rootn n=1 rdn (build_small): live 3; routines.program accepted; highest register r2
+fp32 rootn n=1 rup (build_small): live 3; routines.program accepted; highest register r2
+fp32 rootn n=1 rmm (build_small): live 3; routines.program accepted; highest register r2
+fp32 compound n=0 rne (build_small): live 3; routines.program accepted; highest register r2
+fp32 compound n=0 rtz (build_small): live 3; routines.program accepted; highest register r2
+fp32 compound n=0 rdn (build_small): live 3; routines.program accepted; highest register r2
+fp32 compound n=0 rup (build_small): live 3; routines.program accepted; highest register r2
+fp32 compound n=0 rmm (build_small): live 3; routines.program accepted; highest register r2
+fp32 compound n=1 rne (build_small): live 7; routines.program accepted; highest register r6
+fp32 compound n=1 rtz (build_small): live 7; routines.program accepted; highest register r6
+fp32 compound n=1 rdn (build_small): live 7; routines.program accepted; highest register r6
+fp32 compound n=1 rup (build_small): live 7; routines.program accepted; highest register r6
+fp32 compound n=1 rmm (build_small): live 7; routines.program accepted; highest register r6
+
+CAPS: a function's cap is its largest scheduled live count over every n of the list (the 12 n of the core, 2, -2, 3, -3, 17, 2^31-1, -2^63, 1000, 16777217, 1099511627776, 2^48+1, 2^62+2^37+1) under all five attributes
+  pown: cap 28; set by 35 of 60 (n, attribute) cells: n=3 rne; n=3 rtz; n=3 rdn; n=3 rup; n=3 rmm; n=-3 rne; n=-3 rtz; n=-3 rdn; n=-3 rup; n=-3 rmm; n=17 rne; n=17 rtz ...; the first reaching it: n=3 rne, highest register there r27; the allocator beside a call: 30 less the cap = 2 other values
+  rootn: cap 27; set by 35 of 60 (n, attribute) cells: n=3 rne; n=3 rtz; n=3 rdn; n=3 rup; n=3 rmm; n=-3 rne; n=-3 rtz; n=-3 rdn; n=-3 rup; n=-3 rmm; n=17 rne; n=17 rtz ...; the first reaching it: n=3 rne, highest register there r26; the allocator beside a call: 30 less the cap = 3 other values
+  compound: cap 28; set by 60 of 60 (n, attribute) cells: n=2 rne; n=2 rtz; n=2 rdn; n=2 rup; n=2 rmm; n=-2 rne; n=-2 rtz; n=-2 rdn; n=-2 rup; n=-2 rmm; n=3 rne; n=3 rtz ...; the first reaching it: n=2 rne, highest register there r27; the allocator beside a call: 30 less the cap = 2 other values

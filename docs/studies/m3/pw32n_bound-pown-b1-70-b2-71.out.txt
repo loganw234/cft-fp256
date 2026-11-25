@@ -1,0 +1,63 @@
+fp32 pown n=17 region int17: 92 measured lanes of 100 (left out: 8, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 312
+  M max 0.002998 Bv; capacities 0.449593 Bv; BOUND 0.452591 Bv (2^-1.14)
+  measured worst 0.069767 Bv at x=0x3e5cd06e n=17
+  residual (second order, measured) 2.569e-05 Bv; bound + residual 0.452617 Bv
+    log-sum      capacity 0.268066  observed 0.203109
+    product      capacity 0.142538  observed 0.076455
+    exp-recon    capacity 0.029262  observed 0.017144
+    exp-head2    capacity 0.006347  observed 0.003841
+    log-head3    capacity 0.001369  observed 0.000472
+    exp-Z        capacity 0.001084  observed 0.000597
+    log-Z        capacity 0.000365  observed 0.000256
+    exp-reduce   capacity 0.000326  observed 0.000202
+  6 s
+fp32 pown n=1000 region int1000: 92 measured lanes of 100 (left out: 8, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 307
+  M max 0.016354 Bv; capacities 1.938923 Bv; BOUND 1.955278 Bv (2^0.97)
+  measured worst 0.542170 Bv at x=0x3f68694f n=1000
+  residual (second order, measured) 2.771e-05 Bv; bound + residual 1.955305 Bv
+    log-sum      capacity 1.655925  observed 1.278596
+    product      capacity 0.165937  observed 0.115874
+    log-head3    capacity 0.064278  observed 0.030657
+    log-Z        capacity 0.028980  observed 0.017276
+    exp-recon    capacity 0.015028  observed 0.010738
+    exp-head2    capacity 0.006746  observed 0.005905
+    exp-Z        capacity 0.001186  observed 0.000699
+    log-head2    capacity 0.000299  observed 0.000259
+  5 s
+fp32 pown n=1000 region zone1000: 100 measured lanes of 100 (left out: 0, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 309
+  M max 0.005868 Bv; capacities 2.301537 Bv; BOUND 2.307405 Bv (2^1.21)
+  measured worst 0.571138 Bv at x=0x3f70b84a n=1000
+  residual (second order, measured) 1.158e-05 Bv; bound + residual 2.307416 Bv
+    log-sum      capacity 2.075965  observed 1.748364
+    product      capacity 0.141172  observed 0.070318
+    log-head3    capacity 0.049242  observed 0.023461
+    log-Z        capacity 0.027347  observed 0.022660
+    exp-recon    capacity 0.005001  observed 0.003190
+    exp-head2    capacity 0.001910  observed 0.001321
+    log-head2    capacity 0.000286  observed 0.000230
+    exp-Z        capacity 0.000209  observed 0.000149
+  5 s
+fp32 pown n=17 region zone17: 100 measured lanes of 100 (left out: 0, of them 0 by the tinyt gate), Y words 1, G 40, GL 48, B1 2^-70.0, B2 2^-71.0
+  rounding instructions active 308
+  M max 0.003736 Bv; capacities 0.380216 Bv; BOUND 0.383952 Bv (2^-1.38)
+  measured worst 0.084374 Bv at x=0x3f70b84a n=17
+  residual (second order, measured) 5.248e-05 Bv; bound + residual 0.384005 Bv
+    log-sum      capacity 0.301278  observed 0.261601
+    exp-recon    capacity 0.034892  observed 0.020679
+    product      capacity 0.029398  observed 0.015090
+    exp-head2    capacity 0.009101  observed 0.008212
+    log-head3    capacity 0.003177  observed 0.002119
+    log-Z        capacity 0.001016  observed 0.000842
+    exp-Z        capacity 0.000643  observed 0.000517
+    exp-reduce   capacity 0.000371  observed 0.000262
+  6 s
+
+SUMMARY fp32 pown, 100 lanes a region, seed 1, rne, B1 2^70, B2 2^71:
+  int17                n=17           lanes   92 of  100 bound 0.452591 + residual 2.57e-05 = 0.452617 Bv (under 1); margin 1.14 bits; measured worst 0.069767
+  int1000              n=1000         lanes   92 of  100 bound 1.955278 + residual 2.77e-05 = 1.955305 Bv (OVER 1); margin -0.97 bits; measured worst 0.542170
+  zone1000             n=1000         lanes  100 of  100 bound 2.307405 + residual 1.16e-05 = 2.307416 Bv (OVER 1); margin -1.21 bits; measured worst 0.571138
+  zone17               n=17           lanes  100 of  100 bound 0.383952 + residual 5.25e-05 = 0.384005 Bv (under 1); margin 1.38 bits; measured worst 0.084374
+  worst region bound 2.307416 Bv, margin -1.21 bits, over the 4 of 4 regions measured; 22 s

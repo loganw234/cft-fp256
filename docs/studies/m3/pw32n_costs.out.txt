@@ -1,0 +1,822 @@
+fp32 pown n=2 rne: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2 rtz: instructions 858, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2 rdn: instructions 858, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2 rup: instructions 858, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2 rmm: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2 rne: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2 rtz: instructions 859, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2 rdn: instructions 859, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2 rup: instructions 859, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2 rmm: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=3 rne: instructions 877, bank words 142, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=3 rtz: instructions 871, bank words 144, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=3 rdn: instructions 871, bank words 145, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=3 rup: instructions 871, bank words 143, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=3 rmm: instructions 877, bank words 142, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-3 rne: instructions 877, bank words 142, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-3 rtz: instructions 872, bank words 144, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-3 rdn: instructions 872, bank words 145, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-3 rup: instructions 872, bank words 143, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-3 rmm: instructions 877, bank words 142, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=17 rne: instructions 877, bank words 142, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=17 rtz: instructions 871, bank words 144, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=17 rdn: instructions 871, bank words 145, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=17 rup: instructions 871, bank words 143, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=17 rmm: instructions 877, bank words 142, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^31-1 rne: instructions 889, bank words 142, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^31-1 rtz: instructions 883, bank words 144, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^31-1 rdn: instructions 883, bank words 145, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^31-1 rup: instructions 883, bank words 143, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^31-1 rmm: instructions 889, bank words 142, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2^63 rne: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2^63 rtz: instructions 859, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2^63 rdn: instructions 859, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2^63 rup: instructions 859, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=-2^63 rmm: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1000 rne: instructions 865, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1000 rtz: instructions 858, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1000 rdn: instructions 858, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1000 rup: instructions 858, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1000 rmm: instructions 865, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=16777217 rne: instructions 889, bank words 141, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=16777217 rtz: instructions 883, bank words 143, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=16777217 rdn: instructions 883, bank words 144, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=16777217 rup: instructions 883, bank words 142, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=16777217 rmm: instructions 889, bank words 141, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1099511627776 rne: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1099511627776 rtz: instructions 858, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1099511627776 rdn: instructions 858, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1099511627776 rup: instructions 858, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 82, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=1099511627776 rmm: instructions 865, bank words 138, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 87, specials 17
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^48+1 rne: instructions 889, bank words 142, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^48+1 rtz: instructions 883, bank words 144, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^48+1 rdn: instructions 883, bank words 145, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^48+1 rup: instructions 883, bank words 143, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^48+1 rmm: instructions 889, bank words 142, Y words 2, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 38, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^62+2^37+1 rne: instructions 891, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 93, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^62+2^37+1 rtz: instructions 885, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^62+2^37+1 rdn: instructions 885, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^62+2^37+1 rup: instructions 885, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=2^62+2^37+1 rmm: instructions 891, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 93, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2 rne: instructions 871, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2 rtz: instructions 864, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2 rdn: instructions 864, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2 rup: instructions 864, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2 rmm: instructions 871, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2 rne: instructions 871, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2 rtz: instructions 865, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 84, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2 rdn: instructions 865, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 84, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2 rup: instructions 865, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 84, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2 rmm: instructions 871, bank words 139, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=3 rne: instructions 892, bank words 141, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=3 rtz: instructions 886, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=3 rdn: instructions 886, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=3 rup: instructions 886, bank words 142, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=3 rmm: instructions 892, bank words 141, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-3 rne: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-3 rtz: instructions 887, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 91, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-3 rdn: instructions 887, bank words 147, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 91, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-3 rup: instructions 887, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 91, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-3 rmm: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=17 rne: instructions 892, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=17 rtz: instructions 886, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=17 rdn: instructions 886, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=17 rup: instructions 886, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=17 rmm: instructions 892, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^31-1 rne: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^31-1 rtz: instructions 886, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^31-1 rdn: instructions 886, bank words 147, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^31-1 rup: instructions 886, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^31-1 rmm: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2^63 rne: instructions 871, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2^63 rtz: instructions 865, bank words 141, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 84, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2^63 rdn: instructions 865, bank words 141, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 84, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2^63 rup: instructions 865, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 84, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=-2^63 rmm: instructions 871, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1000 rne: instructions 885, bank words 142, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 88, specials 22
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1000 rtz: instructions 878, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1000 rdn: instructions 878, bank words 143, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1000 rup: instructions 878, bank words 142, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1000 rmm: instructions 885, bank words 142, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 88, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=16777217 rne: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=16777217 rtz: instructions 886, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=16777217 rdn: instructions 886, bank words 147, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=16777217 rup: instructions 886, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=16777217 rmm: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1099511627776 rne: instructions 871, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1099511627776 rtz: instructions 864, bank words 141, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1099511627776 rdn: instructions 864, bank words 141, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1099511627776 rup: instructions 864, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 313, test 83, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=1099511627776 rmm: instructions 871, bank words 140, Y words 1, TwoSum 42, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 420, product 26, exponential 315, test 88, specials 22
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^48+1 rne: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^48+1 rtz: instructions 886, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^48+1 rdn: instructions 886, bank words 147, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^48+1 rup: instructions 886, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^48+1 rmm: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^62+2^37+1 rne: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, rootn-1/n-words
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^62+2^37+1 rtz: instructions 886, bank words 146, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^62+2^37+1 rdn: instructions 886, bank words 147, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^62+2^37+1 rup: instructions 886, bank words 145, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 313, test 90, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 rootn n=2^62+2^37+1 rmm: instructions 892, bank words 144, Y words 3, TwoSum 42, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 420, product 40, exponential 315, test 94, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2 rne: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2 rtz: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2 rdn: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2 rup: instructions 912, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2 rmm: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2 rne: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2 rtz: instructions 911, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2 rdn: instructions 911, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2 rup: instructions 911, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2 rmm: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=3 rne: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=3 rtz: instructions 912, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=3 rdn: instructions 912, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=3 rup: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=3 rmm: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-3 rne: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-3 rtz: instructions 911, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-3 rdn: instructions 911, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-3 rup: instructions 911, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-3 rmm: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=17 rne: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=17 rtz: instructions 912, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=17 rdn: instructions 912, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=17 rup: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=17 rmm: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^31-1 rne: instructions 930, bank words 139, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^31-1 rtz: instructions 924, bank words 141, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^31-1 rdn: instructions 924, bank words 141, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^31-1 rup: instructions 924, bank words 140, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^31-1 rmm: instructions 930, bank words 139, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2^63 rne: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2^63 rtz: instructions 911, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2^63 rdn: instructions 911, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2^63 rup: instructions 911, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 83, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=-2^63 rmm: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x2, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1000 rne: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1000 rtz: instructions 912, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1000 rdn: instructions 912, bank words 141, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1000 rup: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1000 rmm: instructions 918, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=16777217 rne: instructions 930, bank words 139, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=16777217 rtz: instructions 924, bank words 141, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=16777217 rdn: instructions 924, bank words 141, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=16777217 rup: instructions 924, bank words 140, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=16777217 rmm: instructions 930, bank words 139, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1099511627776 rne: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1099511627776 rtz: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1099511627776 rdn: instructions 912, bank words 140, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1099511627776 rup: instructions 912, bank words 139, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=1099511627776 rmm: instructions 918, bank words 138, Y words 1, TwoSum 44, Fast2Sum 61 (built, before pruning)
+    by part: logarithm 465, product 26, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^48+1 rne: instructions 930, bank words 139, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^48+1 rtz: instructions 924, bank words 141, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^48+1 rdn: instructions 924, bank words 141, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^48+1 rup: instructions 924, bank words 140, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^48+1 rmm: instructions 930, bank words 139, Y words 2, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 38, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^62+2^37+1 rne: instructions 932, bank words 140, Y words 3, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 40, exponential 315, test 89, specials 23
+    plan: G 40, GL 48 (logarithm K3,K2,D = (7, 6, 17)), exponential K3,K2,D = (3, 4, 9), B1 2^-66, B2 2^-67
+    static proofs held: log-truncation, log-step-7-fits, log-step-13-fits, log-three-word-steps-first, exp-truncation, exp-rho, exp-magic-range, exp-scale-words-in-range, ln2-three-words, exp-r-level-3, inv-ln2-three-words, log-product-floor, n-int64, n-not-0-1, words-at-most-3, product-floor-3-words, n-words-exact
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^62+2^37+1 rtz: instructions 926, bank words 142, Y words 3, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 40, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^62+2^37+1 rdn: instructions 926, bank words 142, Y words 3, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 40, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^62+2^37+1 rup: instructions 926, bank words 141, Y words 3, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 40, exponential 313, test 84, specials 24
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 compound n=2^62+2^37+1 rmm: instructions 932, bank words 140, Y words 3, TwoSum 44, Fast2Sum 63 (built, before pruning)
+    by part: logarithm 465, product 40, exponential 315, test 89, specials 23
+    invariants (live_cap None): none failing
+    flag words: {0x0, 0x1, 0x10, 0x14, 0x18, 0x90, 0x94, 0x98}
+fp32 pown n=0 rne (build_small): instructions 6, bank words 7
+fp32 pown n=0 rtz (build_small): instructions 6, bank words 7
+fp32 pown n=0 rdn (build_small): instructions 6, bank words 7
+fp32 pown n=0 rup (build_small): instructions 6, bank words 7
+fp32 pown n=0 rmm (build_small): instructions 6, bank words 7
+fp32 pown n=1 rne (build_small): instructions 6, bank words 6
+fp32 pown n=1 rtz (build_small): instructions 6, bank words 6
+fp32 pown n=1 rdn (build_small): instructions 6, bank words 6
+fp32 pown n=1 rup (build_small): instructions 6, bank words 6
+fp32 pown n=1 rmm (build_small): instructions 6, bank words 6
+fp32 rootn n=0 rne: REFUSED by name: rootn(x, 0) is invalid for every x, a quiet NaN included: a constant the compiler refuses
+fp32 rootn n=0 rtz: REFUSED by name: rootn(x, 0) is invalid for every x, a quiet NaN included: a constant the compiler refuses
+fp32 rootn n=0 rdn: REFUSED by name: rootn(x, 0) is invalid for every x, a quiet NaN included: a constant the compiler refuses
+fp32 rootn n=0 rup: REFUSED by name: rootn(x, 0) is invalid for every x, a quiet NaN included: a constant the compiler refuses
+fp32 rootn n=0 rmm: REFUSED by name: rootn(x, 0) is invalid for every x, a quiet NaN included: a constant the compiler refuses
+fp32 rootn n=1 rne (build_small): instructions 6, bank words 6
+fp32 rootn n=1 rtz (build_small): instructions 6, bank words 6
+fp32 rootn n=1 rdn (build_small): instructions 6, bank words 6
+fp32 rootn n=1 rup (build_small): instructions 6, bank words 6
+fp32 rootn n=1 rmm (build_small): instructions 6, bank words 6
+fp32 compound n=0 rne (build_small): instructions 9, bank words 8
+fp32 compound n=0 rtz (build_small): instructions 9, bank words 8
+fp32 compound n=0 rdn (build_small): instructions 9, bank words 8
+fp32 compound n=0 rup (build_small): instructions 9, bank words 8
+fp32 compound n=0 rmm (build_small): instructions 9, bank words 8
+fp32 compound n=1 rne (build_small): instructions 25, bank words 10
+fp32 compound n=1 rtz (build_small): instructions 26, bank words 10
+fp32 compound n=1 rdn (build_small): instructions 26, bank words 10
+fp32 compound n=1 rup (build_small): instructions 26, bank words 10
+fp32 compound n=1 rmm (build_small): instructions 26, bank words 10

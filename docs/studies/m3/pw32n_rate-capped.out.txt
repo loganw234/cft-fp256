@@ -1,0 +1,7 @@
+fp32 pown n=3 region int, 2000 lanes, seed 3, G' = 6, rne: at the cap/marked/normal 869; at the cap/marked/overflow flag, answer +-inf 9; at the cap/marked/zero or subnormal 157; at the cap/unmarked/overflow flag, answer +-inf 135; p < 1/marked/normal 443; p < 1/unmarked/normal 387
+fp32 pown n=3 region int, 2000 lanes, seed 3, G' = 6, rtz: at the cap/marked/normal 182; at the cap/marked/overflow flag, finite answer 6; at the cap/marked/zero or subnormal 113; at the cap/unmarked/overflow flag, finite answer 101; p < 1/marked/normal 711; p < 1/marked/overflow flag, finite answer 3; p < 1/marked/zero or subnormal 39; p < 1/unmarked/normal 806; p < 1/unmarked/overflow flag, finite answer 34; p < 1/unmarked/zero or subnormal 5
+fp32 rootn n=3 region int, 2000 lanes, seed 3, G' = 6, rne: at the cap/marked/normal 31; p < 1/marked/normal 833; p < 1/unmarked/normal 1135
+fp32 rootn n=3 region int, 2000 lanes, seed 3, G' = 6, rtz: p < 1/marked/normal 439; p < 1/unmarked/normal 1560
+fp32 compound n=3 region int, 2000 lanes, seed 3, G' = 6, rne: at the cap/marked/normal 144; at the cap/unmarked/overflow flag, answer +-inf 24; p < 1/marked/normal 121; p < 1/unmarked/normal 972
+fp32 compound n=3 region int, 2000 lanes, seed 3, G' = 6, rtz: at the cap/marked/normal 43; at the cap/unmarked/overflow flag, finite answer 15; p < 1/marked/normal 126; p < 1/unmarked/normal 1068; p < 1/unmarked/overflow flag, finite answer 9
+75 s

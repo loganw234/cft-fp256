@@ -1,0 +1,22 @@
+# WALL-CLOCK run at 65,536 lanes (same timer), about 12:58, load not read; MPFR 4.2.2 (mingw64), gcc -O2, 2^20 random 32-bit x a (function, n), n a C long (32 bits here: the three n = -2^63 are not timed); timer pw32n_oracle_timer.c
+pown n=2 rand N=2: raw_tfn 0.320 us, oracle x1 0.946 us, oracle x5 4.669 us a lane (sink 7514986, mpfr 4.2.2)
+pown n=-2 rand N=-2: raw_tfn 0.732 us, oracle x1 1.236 us, oracle x5 6.577 us a lane (sink 15038924, mpfr 4.2.2)
+pown n=3 rand N=3: raw_tfn 0.549 us, oracle x1 1.221 us, oracle x5 6.271 us a lane (sink 22938558, mpfr 4.2.2)
+pown n=-3 rand N=-3: raw_tfn 0.824 us, oracle x1 1.572 us, oracle x5 8.362 us a lane (sink 30843256, mpfr 4.2.2)
+pown n=17 rand N=17: raw_tfn 0.763 us, oracle x1 1.495 us, oracle x5 7.767 us a lane (sink 39387218, mpfr 4.2.2)
+pown n=2147483647 rand N=2147483647: raw_tfn 6.851 us, oracle x1 7.690 us, oracle x5 31.036 us a lane (sink 48102890, mpfr 4.2.2)
+pown n=-9223372036854775808 rand N=NOFIT: not timed, a C long here is 32 bits
+rootn n=2 rand N=2: raw_tfn 0.488 us, oracle x1 1.083 us, oracle x5 5.188 us a lane (sink 51496326, mpfr 4.2.2)
+rootn n=-2 rand N=-2: raw_tfn 0.412 us, oracle x1 1.007 us, oracle x5 5.295 us a lane (sink 54890338, mpfr 4.2.2)
+rootn n=3 rand N=3: raw_tfn 0.748 us, oracle x1 1.404 us, oracle x5 7.507 us a lane (sink 61222940, mpfr 4.2.2)
+rootn n=-3 rand N=-3: raw_tfn 1.541 us, oracle x1 1.709 us, oracle x5 8.606 us a lane (sink 67555542, mpfr 4.2.2)
+rootn n=17 rand N=17: raw_tfn 1.389 us, oracle x1 1.907 us, oracle x5 9.369 us a lane (sink 73888144, mpfr 4.2.2)
+rootn n=2147483647 rand N=2147483647: raw_tfn 4.333 us, oracle x1 4.791 us, oracle x5 22.675 us a lane (sink 80220746, mpfr 4.2.2)
+rootn n=-9223372036854775808 rand N=NOFIT: not timed, a C long here is 32 bits
+compound n=2 rand N=2: raw_tfn 3.830 us, oracle x1 5.600 us, oracle x5 23.346 us a lane (sink 85298256, mpfr 4.2.2)
+compound n=-2 rand N=-2: raw_tfn 0.839 us, oracle x1 1.862 us, oracle x5 9.552 us a lane (sink 90581614, mpfr 4.2.2)
+compound n=3 rand N=3: raw_tfn 4.196 us, oracle x1 5.493 us, oracle x5 24.582 us a lane (sink 95723564, mpfr 4.2.2)
+compound n=-3 rand N=-3: raw_tfn 1.328 us, oracle x1 1.801 us, oracle x5 10.895 us a lane (sink 101133594, mpfr 4.2.2)
+compound n=17 rand N=17: raw_tfn 4.379 us, oracle x1 5.081 us, oracle x5 24.750 us a lane (sink 106382536, mpfr 4.2.2)
+compound n=2147483647 rand N=2147483647: raw_tfn 2.823 us, oracle x1 4.242 us, oracle x5 20.432 us a lane (sink 111888095, mpfr 4.2.2)
+compound n=-9223372036854775808 rand N=NOFIT: not timed, a C long here is 32 bits
