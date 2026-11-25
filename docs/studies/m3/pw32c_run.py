@@ -90,10 +90,44 @@ def scan_cells():
     return cells
 
 
+# the gap scan (the lead's finding on the unfixed model's scan: log-lowword's
+# capacity is 0.5275 at n = 1000 and exactly 0 from n = 2000, and -1000 against
+# -3000): the block "log-lowword" is selected to zero where |x| < SMALL =
+# 15/256 (pw32c.py's `sm`), and the main path needs |n log2(1 + x)| < 149, so
+# the block has lanes for n up to 149 / log2(1 + 15/256) = 1,815 (x > 0) and
+# 149 / |log2(1 - 15/256)| = 1,710 (x < 0): COMPUTED in mode_gapedge below.
+# The n between are scanned here, both signs, int<N> and zone<N>.
+GAP_POS = (1100, 1200, 1300, 1500, 1700, 1800, 1900)
+GAP_NEG = (-1100, -1200, -1300, -1500, -1700, -1800, -1900, -2000, -2500)
+GAP_N = tuple(sorted(GAP_NEG + GAP_POS))
+
+
+def gap_cells():
+    return [(n, f"{k}{n}") for n in GAP_N for k in ("int", "zone")]
+
+
+def mode_gapedge(args):
+    """gapedge: where the log-lowword block stops having lanes, COMPUTED
+    from the build's own SMALL constant and the main path's range"""
+    import pw32n
+    G, GL, plog, pexp = pw32n.plan()
+    cl, _ce = pw32n._consts("compound", G, GL, plog, pexp)
+    small = float(dec(fmt, cl["SMALL"]))
+    tf = RG._tf(fmt)
+    lp = math.log2(1 + small)
+    ln = abs(math.log2(1 - small))
+    print(f"SMALL = {small} (= 15/256: {small == 15 / 256}); the main path "
+          f"keeps |n log2(1 + x)| < {tf}; the block (|x| >= SMALL) has lanes "
+          f"for |n| < {tf / lp:.1f} with x > 0 and |n| < {tf / ln:.1f} with "
+          f"x < 0 (COMPUTED: {tf} / log2(1 + SMALL) and {tf} / |log2(1 - "
+          f"SMALL)|)")
+
+
 def mode_cells(args):
-    """cells: the scan's (n, region) cells, one `N REGION` a line, for the
-    box script"""
-    for n, name in scan_cells():
+    """cells [gap]: the scan's (n, region) cells, one `N REGION` a line, for
+    the box script (`gap`: the gap list's)"""
+    for n, name in (gap_cells() if args and args[0] == "gap"
+                    else scan_cells()):
         print(n, name)
 
 
@@ -453,7 +487,7 @@ def main():
     mode, args = argv[0], argv[1:]
     modes = {"same": mode_same, "attribute": mode_attribute,
              "cell": mode_cell, "table": mode_table, "worst": mode_worst,
-             "bound": mode_bound, "cells": mode_cells}
+             "bound": mode_bound, "cells": mode_cells, "gapedge": mode_gapedge}
     modes.update(EXTRA)
     if mode not in modes:
         raise SystemExit(f"unknown mode {mode!r}: {', '.join(sorted(modes))}")

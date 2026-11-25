@@ -10,6 +10,11 @@
 #           list lives in pw32c_run.py: SCAN_N), each at SCAN_LANES (2,000)
 #           lanes, on the UNFIXED model (--model n, the control) and on the
 #           FIX (--model c --variant $FIX), seed 1: 2 x 60 = 120 jobs
+#   scangap the gap scan: pw32c_run.py cells gap's 32 cells (16 n between the
+#           scan's, 1,100 to 1,900 and -1,100 to -2,500, int<N> and zone<N>),
+#           the same jobs as `scan` for those cells: 64 jobs, ESTIMATE 8 to 14
+#           minutes at 16 jobs (64 x 163 to 214 s / 16 = 653 to 856 s); the
+#           outputs go in the same OUTDIR names, so `worst` reads the union
 #   worst   reads OUTDIR's scan outputs of the unfixed model and takes the six
 #           n whose cell total is largest (pw32c_run.py worst prints the line
 #           `WORST n region total`, six of them, which this script echoes),
@@ -72,7 +77,7 @@ mkdir -p "$OUT"
 lim() { head -n "$LIMIT"; }
 
 jobs_scan() {
-    "$PY" -B pw32c_run.py cells | lim | while read -r n r; do
+    "$PY" -B pw32c_run.py cells $1 | lim | while read -r n r; do
         echo "--model n cell $n $r $SCAN_LANES 1 > $OUT/pw32c_cell-n-$r.out.txt"
         echo "--model c --variant $FIX cell $n $r $SCAN_LANES 1 > $OUT/pw32c_cell-c-$r.out.txt"
     done
@@ -106,6 +111,7 @@ jobs_rate() {
 {
 case "$LIST" in
     scan) jobs_scan ;;
+    scangap) jobs_scan gap ;;
     worst) jobs_worst ;;
     full) jobs_full ;;
     rate) jobs_rate ;;

@@ -1,0 +1,19 @@
+VARIANT None: instructions 911 to 932 (12 n, five attributes), cap 28, highest register r27, routines.program accepts every fragment; values beside a call 30 - cap = 2
+  int1000: 1071 measured of 2000: bound 1.263875 + residual 7.82e-02 = 1.342090 Bv, margin -0.42 bits, measured worst 0.148191; log-sum capacity 0.613201 (observed 0.156799), log-lowword capacity 0.527541 (observed 0.289070)
+  zone1000: 2000 measured of 2000: bound 0.665672 + residual 7.14e-02 = 0.737035 Bv, margin 0.44 bits, measured worst 0.091591; log-sum capacity 0.344172 (observed 0.252340), log-lowword capacity 0.265649 (observed 0.117249)
+VARIANT sum2: instructions 995 to 1016 (12 n, five attributes), cap 28, highest register r27, routines.program accepts every fragment; values beside a call 30 - cap = 2
+  int1000: 1071 measured of 2000: bound 0.851555 + residual 7.82e-02 = 0.929769 Bv, margin 0.11 bits, measured worst 0.148191; log-sum capacity 0.200881 (observed 0.068217), log-lowword capacity 0.527541 (observed 0.289070)
+  zone1000: 2000 measured of 2000: bound 0.402934 + residual 7.14e-02 = 0.474296 Bv, margin 1.08 bits, measured worst 0.091591; log-sum capacity 0.081433 (observed 0.071920), log-lowword capacity 0.265649 (observed 0.117249)
+VARIANT sum2+cross: instructions 997 to 1018 (12 n, five attributes), cap 28, highest register r27, routines.program accepts every fragment; values beside a call 30 - cap = 2
+  int1000: 1071 measured of 2000: bound 0.744563 + residual 7.82e-02 = 0.822777 Bv, margin 0.28 bits, measured worst 0.148191; log-sum capacity 0.200881 (observed 0.068217), log-lowword capacity 0.420549 (observed 0.278478)
+  zone1000: 2000 measured of 2000: bound 0.354609 + residual 7.14e-02 = 0.425972 Bv, margin 1.23 bits, measured worst 0.091591; log-sum capacity 0.081433 (observed 0.071920), log-lowword capacity 0.217437 (observed 0.110021)
+VARIANT sum2+cross+rho3: instructions 1002 to 1023 (12 n, five attributes), cap 28, highest register r27, routines.program accepts every fragment; values beside a call 30 - cap = 2
+  int1000: 1071 measured of 2000: bound 0.714139 + residual 7.82e-02 = 0.792354 Bv, margin 0.34 bits, measured worst 0.148191; log-sum capacity 0.200881 (observed 0.102276), log-lowword capacity 0.420549 (observed 0.278478)
+  zone1000: 2000 measured of 2000: bound 0.346052 + residual 7.14e-02 = 0.417414 Bv, margin 1.26 bits, measured worst 0.080628; log-sum capacity 0.081433 (observed 0.072478), log-lowword capacity 0.217437 (observed 0.110021)
+VARIANT sum2+cross+cexact+rho3: instructions 1015 to 1036 (12 n, five attributes), cap 28, highest register r27, routines.program accepts every fragment; values beside a call 30 - cap = 2
+  int1000: 1071 measured of 2000: bound 0.533139 + residual 7.82e-02 = 0.611354 Bv, margin 0.71 bits, measured worst 0.073672; log-sum capacity 0.200881 (observed 0.038245), log-lowword capacity 0.239548 (observed 0.117969)
+  zone1000: 2000 measured of 2000: bound 0.260304 + residual 7.14e-02 = 0.331667 Bv, margin 1.59 bits, measured worst 0.091591; log-sum capacity 0.081433 (observed 0.072596), log-lowword capacity 0.131689 (observed 0.037776)
+VARIANT sum2+cross+cexact+yexact+rho3: instructions 1056 to 1077 (12 n, five attributes), cap 32, highest register r31, routines.program accepts every fragment; values beside a call 30 - cap = -2
+  int1000: 1071 measured of 2000: bound 0.295439 + residual 7.82e-02 = 0.373654 Bv, margin 1.42 bits, measured worst 0.148191; log-sum capacity 0.201588 (observed 0.103450), log-lowword capacity 0.001141 (observed 0.000826)
+  zone1000: 2000 measured of 2000: bound 0.133206 + residual 7.14e-02 = 0.204569 Bv, margin 2.29 bits, measured worst 0.080628; log-sum capacity 0.082773 (observed 0.072641), log-lowword capacity 0.003251 (observed 0.001279)
+1402 s
