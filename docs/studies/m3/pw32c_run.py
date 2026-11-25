@@ -132,13 +132,56 @@ def mode_gapedge(args):
     print(f"  x < 0, n > 0: n < {-tunf / ln:.1f}   (t down to {tunf:g})")
     print(f"  x > 0, n < 0: |n| < {-tunf / lp:.1f}   (t down to {tunf:g})")
     print(f"  x < 0, n < 0: |n| < {tovf / ln:.1f}   (t up to {tovf:g})")
-    print(f"regions.py's int sampler keeps |t| < {RG._tf(fmt)} (its `_tf`, "
-          f"t_reach - 3): on the positive side that is above the screens' "
-          f"{tovf:g}, on the negative side it is above {tunf:g}, so no "
-          f"int<N> or zone<N> lane has t in ({tunf:g}, -{RG._tf(fmt)}): "
-          f"block lanes there (x > 0 with n < 0, |n| up to the edge above; "
-          f"x < 0 with n > 0) are in no cell of the scan, a named limit of "
-          f"the scan")
+    # the coverage, COUNTED: for every cell of the scan and of the gap scan
+    # (2,000 lanes, seed 1, the lists' own regions), the lanes whose
+    # t = n log2(1 + x) is in the band (TUNF, -_tf) = (-152, -149), by cell
+    # type, and of those the block's (|x| >= SMALL) by the signs of x and n
+    import mpmath
+    band_hi = -RG._tf(fmt)
+    print(f"coverage: lanes of each cell (the scan's {len(scan_cells())} and "
+          f"the gap scan's {len(gap_cells())} cells, 2,000 lanes, seed 1) "
+          f"with t in ({tunf:g}, {band_hi}); regions.py's int sampler keeps "
+          f"|t| < {RG._tf(fmt)} (its `_tf`, t_reach - 3)", flush=True)
+    tot = Counter()
+    gen = Counter()
+    sign = Counter()
+    for n, name in scan_cells() + gap_cells():
+        typ = re.match(r"[a-z]+", name).group(0)
+        lanes = rg_region("compound", name, 2000, 1)
+        gen[typ] += len(lanes)
+        k = kb = 0
+        for x, nn in lanes:
+            xv = dec(fmt, x)
+            with mpmath.workprec(80):
+                t = nn * mpmath.log(1 + mpmath.mpf(xv.numerator)
+                                    / xv.denominator, 2)
+            if tunf < t < band_hi:
+                k += 1
+                tot[typ] += 1
+                if abs(float(xv)) >= small:
+                    kb += 1
+                    sign[(typ, "x>0" if xv > 0 else "x<0",
+                          "n>0" if nn > 0 else "n<0")] += 1
+        if k:
+            print(f"  {name:12s} n={n:>6d}: {k} lanes with t in the band, "
+                  f"{kb} of them block lanes (|x| >= SMALL)", flush=True)
+    for typ in ("int", "zone", "cint"):
+        print(f"{typ}<N> cells: {gen[typ]} lanes generated, {tot[typ]} with "
+              f"t in ({tunf:g}, {band_hi}), of them block lanes by sign: "
+              + (", ".join(f"{sx} {sn} {c}" for (t2, sx, sn), c in
+                           sorted(sign.items()) if t2 == typ) or "none"))
+    # t < 0 needs x < 0 with n > 0 or x > 0 with n < 0: only those two sign
+    # cases can have block lanes in the band
+    cover = {(sx, sn) for (_t, sx, sn) in sign}
+    cases = [("x<0", "n>0"), ("x>0", "n<0")]
+    miss = [c for c in cases if c not in cover]
+    print("COVERAGE (this tool's count): of the two sign cases whose t is "
+          "negative, block lanes with t in the band are sampled in "
+          + (", ".join(f"{sx} {sn}" for sx, sn in sorted(cover)) or "neither")
+          + " (in zone cells only: no int<N> or cint<N> cell has one); "
+          "sampled in NO cell: "
+          + (", ".join(f"{sx} {sn}" for sx, sn in miss) or "none")
+          + " (a case with no lane here is not measured)")
 
 
 def mode_cells(args):
@@ -488,26 +531,41 @@ def mode_capexp(args):
     without it, and every phase label for the block, fixB: instructions,
     cap and highest register over the 12 n and five attributes"""
     def stats(v):
-        ins, live, top = [], 0, 0
+        """(min, max instructions, live cap, highest register or None,
+        the set of routines.program's refusals); the register is read only
+        where routines.program accepts the fragment"""
+        ins, live, top, refused = [], 0, 0, Counter()
         for n in N_LIST:
             for rnd in ATTRS:
                 f = pw32c.build("compound", rnd, n, variant=v).fragment()
                 ins.append(len(f.body))
                 live = max(live, f.live_max())
-                top = max(top, max_register(f) or 0)
-        return min(ins), max(ins), live, top
+                try:
+                    routines.program(f)
+                except AssertionError as exc:
+                    refused[str(exc)] += 1
+                    continue
+                top = max(top, max_register(f))
+        return min(ins), max(ins), live, top, refused
+
+    def show(lo, hi, live, top, refused):
+        if refused:
+            why = "; ".join(f"{k!r} in {c} of {len(N_LIST) * len(ATTRS)} "
+                            f"cells" for k, c in refused.items())
+            return (f"REFUSED by routines.program: {why}; instructions "
+                    f"{lo} to {hi}, live {live} (no register is allocated: "
+                    f"no highest register)")
+        return (f"instructions {lo} to {hi}, cap {live}, highest register "
+                f"r{top}")
     for v in ("fixB", "early+" + pw32c.ALIASES["fixB"]):
-        lo, hi, live, top = stats(v)
-        print(f"variant {v}: instructions {lo} to {hi}, cap {live}, highest "
-              f"register r{top} (12 n, five attributes)", flush=True)
+        print(f"variant {v}: {show(*stats(v))} (12 n, five attributes)",
+              flush=True)
     for ph in ("lowword", "reduce", "table", "Z", "recon", "setup", "head2",
                "final"):
         pw32c.LW_PHASE = ph
         try:
-            lo, hi, live, top = stats("fixB")
             print(f"variant fixB, the block's phase label {ph!r}: "
-                  f"instructions {lo} to {hi}, cap {live}, highest register "
-                  f"r{top}", flush=True)
+                  f"{show(*stats('fixB'))}", flush=True)
         except Exception as exc:
             print(f"variant fixB, phase label {ph!r}: REFUSED "
                   f"{type(exc).__name__}: {str(exc)[:100]}")
