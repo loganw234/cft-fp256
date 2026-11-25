@@ -135,7 +135,8 @@ static const int TFN_HASINT[TF_COUNT] = {
  *  - at fp32 it fails at every |n| from about 2^33 E up (E = 1 from 2^33,
  *    E = 127 from 2^40);
  *  - at fp64 it fails only for E = 1 and 2, at 2^62 and more;
- *  - it never fails for E <= -1.
+ *  - it never failed for E <= -1 in what was measured: E = -1 and -126
+ *    at every n above, and every E <= -1 of the lead's wider sample.
  *
  * Here x = +-2^E with E not a multiple of n (n < -2), so the root
  * 2^(E/n) is irrational: never representable and never a midpoint. Two

@@ -1711,7 +1711,8 @@ for x = 2^E and n = -2^k and -(2^k + 1):
 - at fp32 it fails at every |n| from about 2^33 E up (E = 1 from 2^33,
   E = 127 from 2^40);
 - at fp64 it fails only for E = 1 and 2, at |n| of 2^62 and more;
-- it never fails for E <= -1.
+- it never failed for E <= -1 in what was measured: E = -1 and -126 at
+  every n above, and every E <= -1 of the wider sample below.
 In the lead's wider sample (106,076 such cases at 24, 53, 113 and 237
 bits), 3,084 come back wrong. That sample's n jump from -2^31 to -2^62,
 so it shows nothing of the reach between.
