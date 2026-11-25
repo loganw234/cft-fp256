@@ -1691,6 +1691,32 @@ That is the second time an external arbiter has been wrong in this
 project and the second time the two independent implementations caught
 it. It is the argument for having two.
 
+**A second MPFR defect, found 2026-11-25, outside the [-12, 12] above.**
+`mpfr_rootn_si` returns an exact 1 for an irrational root at a huge
+negative n on a power of two greater than 1. rootn(2, -2^63) at 24 bits
+comes back 0x1p+0 with a zero ternary in every rounding. The root is
+just below 1, so the right answers are 0x1p+0 inexact to nearest and
+upward, and 0x1.fffffep-1 inexact toward zero and downward.
+
+The cause is in its general case (k < -2; src/root.c of 4.2.2, READ).
+It takes the |k|-th root faithfully at Ny + 10 bits and inverts it. It
+leaves its Ziv loop when the inversion was exact and x is a power of
+two, and at such a k the faithful root is exactly 1. The 4.2.1 that the
+routine sweep's own test links does the same.
+
+The routine sweep's n = -2^63 reached it. Its test caught it in the box
+gate of M3's wave 4, holding the oracle to `transcend.compute`, which
+was right. The lead's sample has 106,076 such cases, at 24, 53, 113 and
+237 bits, with n from -3 down to -2^63, and 3,084 of them come back wrong.
+At fp32 the wrong ones are about half of each of the four sampled n of
+magnitude 2^62 or more: the powers of two above 1 in magnitude. At fp64 a few fail
+at the same n. None fails at a smaller |n| or at fp128 or fp256.
+
+host/tools/mpfr_tfn.h computes those cases by a Ziv loop of its own
+(`tfn_rootn_pow2`); every other case stays with `mpfr_rootn_si`. See
+VALIDATION.md, 2026-11-25. The model needed no change: the defect was
+the arbiter's.
+
 ## Where the two implementations disagree about EFFORT
 
 They never disagree about an answer. They do disagree about how much

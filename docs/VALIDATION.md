@@ -29821,3 +29821,59 @@ No regression; three wrong answers (b), corrected in place above and here:
 - 2,000 lanes read lower than 12,000 (the unfixed zone1000 0.737 against 1.0075), so only the 12,000-lane figures above are the volume's.
 
 **Addendum (the lead, 2026-11-25), by verifier VM3XN2M:** the two windows' end times above were fixB's, and fixA's are now given beside them. The sums sentence named every folder, though one (box/m3xn2-fixscan) has no sums file; it now names the seven that have one. And the merge's base is named as a commit, not a tree. No figure changed. VM3XN2M also noted that the refusal of the labels Z, recon and final (M3XN2's first addendum, item 3) holds without `early`: with it they are accepted at cap 32 in 60 of 60 cells (VM3XN2's pass 3, quoted above).
+
+## 2026-11-25 - wave 4's box gate: the mpfr stage's five failures, an MPFR defect (mpfr_rootn_si at a huge negative n on a power of two), and the lead's fix in the oracle (the lead)
+
+**The gate** ran box_gate_m3w4.sh at wave 4's merge 496e3f9f on amd-arc-box, 07:50 to 13:54 by its summary. The lead's records are in Data/runs/2026-11-23-m3-round/. MEASURED:
+- **The 45 stages but cardstress,** in one run (`verify/run.sh --only`, run 20261125-075013-496e3f9f, 21,031 s): 36 ok, 8 SKIP, 1 FAIL (mpfr).
+  - The skips are the box's own: buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r, lang-fortran (no toolchain) and hip (no hipcc).
+  - Golden: 8,382 passed and 10 skipped, in 11,701 s.
+- **cardstress alone:** ok, with its 4 inner skips.
+- **M3X2's box fixtures** (box_m3x2_fixtures.sh): rc 0, 9 files.
+
+**The failure,** MEASURED from the stage's log. mpfr-check passed against the pinned 4.2.2. Then the routine sweep's own test (`hw/test_routine_sweep.py --only build,images,oracle,refuse,sabotage,plants,legs,marks,rule`) ran 766 checks: 5 failed, 3 skipped.
+- **The five are its oracle legs for rootn at n = -2^63,** one per attribute, each with 3 of 64 lanes differing. The lanes are x = 2 (0x40000000), 2^15 (0x47000000) and 2^91 (0x6d000000).
+- **The oracle got it wrong:** `routine-sweep oracle`, which the test builds against the box's system MPFR (4.2.1, by the test's own line), gave 0x3f800000 with no flag in all five attributes.
+- **transcend.compute got it right:** it gives 0x3f800000 inexact at rne, rup and rmm, and 0x3f7fffff inexact at rtz and rdn. The root 2^(-E/2^63) lies just below 1 for E >= 1, which is why.
+
+**The cause,** READ in MPFR 4.2.2's src/root.c (the pinned prefix's source on the box), lines 398 to 431. mpfr_rootn_si's general case, k < -2, works like this:
+- it takes the |k|-th root faithfully (MPFR_RNDF) at Ny + 10 bits;
+- it inverts that root in the asked rounding;
+- it leaves its Ziv loop when that inversion was exact and x is a power of two (line 423).
+
+At a huge |k|, the faithful root of 2^E with E >= 1 is exactly 1, so the irrational root comes back as an exact 1. For E <= -1 the root lies just below 1, which is not a power of two, and the loop goes on. That is why 0.5, 2^-126 and 2^-149 passed the same legs. 4.2.1's source was not read; its answers in the gate are the same (INFERRED: the same code).
+
+**The fix,** 7df6b032, in host/tools/mpfr_tfn.h, and only under MPFR 4.2.0 or newer:
+- **tfn_rootn_pow2_case** routes rootn when all of these hold: n < -2; x = +-2^E; E is not a multiple of n; and it is not an even root of a negative. Every other case stays with mpfr_rootn_si.
+- **tfn_rootn_pow2** computes the routed cases:
+  - mpfr_rootn_ui, then the inversion, both to nearest, at p + 72 bits;
+  - doubling the precision until `mpfr_can_round(t, w - 2, MPFR_RNDN, MPFR_RNDZ, p + (rnd == MPFR_RNDN))` holds, which is MPFR's manual's recipe for a value known not to be representable;
+  - then one `mpfr_set`.
+  - It refuses by name past 2^20 bits.
+- **Why this is sound:** the root is irrational, so it is never representable and never a midpoint.
+- **The comment narrowed:** compound's "ONE PLACE THIS CAMPAIGN DOES NOT TRUST MPFR" comment, and its claim that rootn_si is sound "at every n this campaign uses", are narrowed to mpfr-check's [-12, 12].
+
+**The lead's standalone test,** MEASURED. It is not committed and lives in the lead's records. It runs the two functions extracted verbatim from the header:
+- **The sample:** 106,076 routed evaluations at 24, 53, 113 and 237 bits in four roundings, with n from -3 down to -2^63, and E over every value in [-200, 200] plus a sparser walk to each format's ends.
+- **Against the references:** 0 differ from mpfr_rootn_ui with the inversion at 4p + 300 bits. At n = -2^63, 6,092 of them were also held to mpfr_pow(x, -2^-63), whose exponent is exact, and none differ. The same results hold on MPFR 4.1.0 (WSL cft2204) and on 4.2.2 (the box's prefix).
+- **mpfr_rootn_si beside it, on 4.2.2:** 3,084 differ.
+  - At fp32: about half of each of n = -2^62, -(2^62+1), -(2^63-1) and -2^63 (508, 1,016, 1,016 and 508 cases), namely every power of two above 1 in magnitude.
+  - At fp64: 4, 8, 16 and 8 cases at the same n.
+  - None at a smaller |n| in the sample (-3 to -2^31), nor at 113 or 237 bits.
+- **The controls,** the same on both MPFRs:
+  - MPFR's own shape (one pass at p + 10, no mpfr_can_round) is caught, with 7,824 differences;
+  - a bound ten bits too tight, from p + 2, is caught, with 1,268;
+  - a dropped sign is caught, with 39,068;
+  - a guard that takes the exact cases is caught, with 2,419 guard faults;
+  - a loop forced to start at p + 2 passes, which shows the doubling is right;
+  - a missing extra bit for nearest is NOT caught. It matters only near a midpoint, and no sampled root comes that near. It is a named limit of the test.
+
+**In the tool,** MEASURED on the box at 7df6b032, at nice 10 beside the night's preflight: `python3 -B hw/test_routine_sweep.py --only build,oracle` gave build 11 checks and oracle 391 checks, 0 failed (402 in all, 0 skipped, 28 s, against the same system MPFR 4.2.1). The gate's run of those groups at 496e3f9f had the same 391 oracle checks, 5 failed. So the five legs now pass, and nothing else in the group moved.
+
+**What it touched.**
+- **No committed digest or catalog item.** ROUTINE_N_DIGESTS is empty until parcel M3F2, so the n-keyed items do not exist yet, and no night has run the oracle's rootn. The gate's check caught the defect at the merge that brought the n-keyed oracle in, as it was built to.
+- **The documents.** They scoped rootn_si's soundness to n in [-12, 12], and that stays true. TRANSCENDENTALS.md ("The oracle's own defect"), COMPATIBILITY.md's MPFR row and the M3 study now name the second defect.
+
+**Night 1125** runs at night 1124's f7a1ce95, the plan's fallback, because the push waits. The pow and powr sweeps start one night later at the earliest.
+
+**Not yet:** the mpfr and cardstress stages at this entry's commit (the re-gate on the box), and verifier VRF. Both are added here before the push.

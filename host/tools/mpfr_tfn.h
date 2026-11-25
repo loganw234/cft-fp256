@@ -129,7 +129,10 @@ static const int TFN_HASINT[TF_COUNT] = {
  * transcend.compute's answers, which the test holds the oracle to. For
  * E <= -1 the root falls just below 1, which is not a power of two, so
  * MPFR's loop goes on and is right: 0.5, 2^-126 and 2^-149 passed the same
- * legs.
+ * legs. The test's own build links the box's system MPFR, 4.2.1; the
+ * lead's standalone test of this function shows the same defect in the
+ * pinned 4.2.2 (3,084 of 106,076 cases, fp32 and fp64, n of magnitude
+ * 2^62 and more).
  *
  * Here x = +-2^E with E not a multiple of n (n < -2), so the root
  * 2^(E/n) is irrational: never representable and never a midpoint. Two

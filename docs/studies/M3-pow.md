@@ -389,6 +389,14 @@ working precision. The model uses no MPFR: its references are transcend.py
 and mpmath at 4p + 200 bits (`m3core.true_value`, compound's 1 + x formed
 exactly as a Fraction first).
 
+A second defect was found 2026-11-25 by the box gate of wave 4, after this
+study. mpfr_rootn_si returns an exact +-1 for rootn(+-2^E, n) when E >= 1 and
+|n| is huge. At fp32 that is every such case at n = -2^63, the routine
+sweep's seventh n, and at each sampled n of magnitude 2^62 or more. host/tools/mpfr_tfn.h
+computes those cases with a Ziv loop of its own, `tfn_rootn_pow2`
+(TRANSCENDENTALS.md, "The oracle's own defect"; VALIDATION.md, 2026-11-25).
+The sweep's oracle for rootn at that n is therefore not mpfr_rootn_si alone.
+
 The routine must equal transcend.py in bits and flags on every lane it
 does not mark.
 
