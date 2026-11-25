@@ -368,6 +368,12 @@ MPFR_C5_ORACLE_JOB = ("rint128-class", "0", "1", "rne")
 # right and on the list), whose stderr names the MPFR it linked. Its digest is the table's, so a moved exp fragment fails the step twice, by name.
 ROUTINE_ORACLE_JOB = ("exp", "0x33fffffb", "0x34000004", "all")
 ROUTINE_ORACLE_MARKS = {"rne": 0, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 0}
+# parcel M3X2: the pow family's smoke job, because a step that lists the images and runs only exp would not see a broken pow path: pow with y fixed at 2 (the
+# shape whose lanes are the exact family's), 256 lanes from x = 3 = 0x40400000, whose 3^2 = 9 is exact: marked under every attribute (5 marks, all five on the
+# exact lane and none off the list), and every guess wrong (the guess carries the main path's inexact, or a value one ulp off, where 9 is exact: MEASURED
+# 2026-11-24 on the software backend at MPFR 4.2.2: device 0.24 s). (name, the fixed operand's letter, its word, lo, hi, mode, marks by attribute, exact marks)
+ROUTINE_POW_JOB = ("pow", "y", 0x40000000, "0x40400000", "0x40400100", "all")
+ROUTINE_POW_MARKS = {"rne": 1, "rtz": 1, "rdn": 1, "rup": 1, "rmm": 1}
 
 
 def mpfr_pin(root: str) -> Optional[str]:
@@ -2884,12 +2890,22 @@ class Driver:
                         bad.append(f"{name}: the generator's digest is {got.get(name, 'not given (no digest line)')}, ROUTINE_DIGESTS has {want}: "
                                    f"the fragment moved (or its images were not all built) - update hw/card_stress_lib.py ROUTINE_DIGESTS with "
                                    f"the lead's approval; the item it makes is new, its coverage from nothing")
-                extra = sorted(set(got) - set(L.ROUTINE_DIGESTS))
+                for (name, nn), want in L.ROUTINE_N_DIGESTS.items():       # parcel M3X2: pown, rootn, compound at each n a row names (empty until M3F2's merge)
+                    key = f"{name}-n{L.routine_ntoken(nn)}"
+                    if got.get(key) != want:
+                        bad.append(f"{key}: the generator's digest is {got.get(key, 'not given (no digest line)')}, ROUTINE_N_DIGESTS has {want}: "
+                                   f"the fragment moved (or its images were not all built) - update hw/card_stress_lib.py ROUTINE_N_DIGESTS with "
+                                   f"the lead's approval; the item it makes is new, its coverage from nothing")
+                tabled = set(L.ROUTINE_DIGESTS) | {f"{nm}-n{L.routine_ntoken(k)}" for nm, k in L.ROUTINE_N_DIGESTS}
+                extra = sorted(set(got) - tabled)
                 if extra:
-                    said = f"; the manifest also has digests for {', '.join(extra)}, which the table lacks (no item for them yet)"
+                    said = f"; the manifest also has digests for {', '.join(f'{k} {got[k]}' for k in extra)}, which the tables lack (no item for them yet)"
+                skipped_names = re.findall(r"^skipped (\S+) not built at fp32$", man, re.M)
+                if skipped_names:
+                    said += f"; the generator skipped {', '.join(skipped_names)} by name (not built at fp32)"
         step("routine images", not bad, ("; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else "")) if bad else
              f"gen_sweep_images.py rc 0 into {d} (a new directory, kept); the manifest's commit is this checkout's HEAD and its digest lines "
-             f"equal ROUTINE_DIGESTS for the {len(L.ROUTINE_DIGESTS)} routines{said}")
+             f"equal ROUTINE_DIGESTS for the {len(L.ROUTINE_DIGESTS)} routines and ROUTINE_N_DIGESTS' {len(L.ROUTINE_N_DIGESTS)} rows{said}")
         if bad:
             return
         env = {k2: v for k2, v in os.environ.items() if k2 not in HOST_JOB_DROPS}
@@ -2908,11 +2924,20 @@ class Driver:
                  f"the routine-sweep of host/tools/routine_sweep.c")
             return
         listed = dict(re.findall(r"^(\S+)-f32: (.*)$", out, re.M))
+        listed_n = dict(re.findall(r"^(\S+-f32-n\S+): (.*)$", out, re.M))       # parcel M3X2: a row of pown, rootn or compound at an n
         bad = []
         for name, want in L.ROUTINE_DIGESTS.items():
             if listed.get(name) != f"images rne rtz rdn rup rmm, digest {want}":
                 bad.append(f"{name}: `routine-sweep list` says {listed.get(name, 'nothing')!r}, not 'images rne rtz rdn rup rmm, digest {want}' "
                            f"(ROUTINE_DIGESTS; five images in {d})")
+        for (name, nn), want in L.ROUTINE_N_DIGESTS.items():
+            lab = f"{name}-f32-n{L.routine_ntoken(nn)}"
+            if listed_n.get(lab) != f"images rne rtz rdn rup rmm, digest {want}":
+                bad.append(f"{lab}: `routine-sweep list` says {listed_n.get(lab, 'nothing')!r}, not 'images rne rtz rdn rup rmm, digest {want}' "
+                           f"(ROUTINE_N_DIGESTS; five images in {d})")
+        for name in L.ROUTINE_NKEYED:
+            if not any(k.startswith(f"{name}-f32-n") for k in listed_n) and listed.get(name) != "no image":
+                bad.append(f"{name}: `routine-sweep list` has neither a row of an n nor `{name}-f32: no image` for it ({listed.get(name, 'nothing')!r})")
         if bad:
             step("mpfr routine-sweep", False, "; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else ""))
             return
@@ -2932,14 +2957,28 @@ class Driver:
         except L.VerdictError as e:
             step("mpfr routine-sweep", False, f"the job `routine-sweep {op} {lo} {hi} {mode}` on the software backend: {e}")
             return
+        pname, pk, pw, plo, phi, pmode = ROUTINE_POW_JOB
+        pop = L.routine_op_word(pname, L.ROUTINE_DIGESTS[pname], (pk, pw))
+        rc, pout = runr([pop, plo, phi, pmode])
+        pn = int(phi, 0) - int(plo, 0)
+        try:
+            L.parse_soak(pout, rc, pop, pmode, None, pn * 5, {"encodings": pn, "per_encoding": 5}, cpu=True)
+            pr = L.parse_routine_marks(pout, pop, pmode)
+            if pr["by_attr"] != ROUTINE_POW_MARKS or (pr["marked"], pr["off_list"], pr["exact"]) != (5, 0, 5):
+                raise L.VerdictError(f"marks {pr['by_attr']}, {pr['off_list']} off the list, {pr['exact']} on an exact lane, where the pow smoke has "
+                                     f"{ROUTINE_POW_MARKS}, 0 and 5 (five marked lanes, all of the exact family)")
+        except L.VerdictError as e:
+            step("mpfr routine-sweep", False, f"the job `routine-sweep {pop} {plo} {phi} {pmode}` on the software backend: {e}")
+            return
         seen, gmp = ora[0].group(1), ora[0].group(2)
         if seen.strip() != (self.mpfr_pin or "").strip():       # (written apart from the two tests above it: a plant's anchor is that text, once)
             step("mpfr routine-sweep", False, f"its oracle line names MPFR {seen} (with GMP {gmp}), and the pin is {self.mpfr_pin} "
                  f"({MPFR_PIN_SCRIPT}): routine-sweep linked another MPFR than the pinned one in {self.mpfr_prefix}")
             return
         step("mpfr routine-sweep", True, f"`routine-sweep list` names the {len(L.ROUTINE_DIGESTS)} routines with five images and the table's "
-             f"digests; the job {op} {lo} {hi} {mode} passed ({n * 5} cases, 3 marked lanes right and on the list), and its oracle line names "
-             f"MPFR {seen} with GMP {gmp}: the pin")
+             f"digests and, for pown, rootn and compound, a row of each n of ROUTINE_N_DIGESTS ({len(L.ROUTINE_N_DIGESTS)}) or `no image`; "
+             f"the job {op} {lo} {hi} {mode} passed ({n * 5} cases, 3 marked lanes right and on the list), the pow job {pop} {plo} {phi} {pmode} "
+             f"passed ({pn * 5} cases, 5 marked lanes, all on an exact lane), and its oracle line names MPFR {seen} with GMP {gmp}: the pin")
 
     def build_tools(self, step: Callable[[str, bool, str], None]) -> None:
         a = self.a
@@ -3534,6 +3573,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         # (Driver.refuse_wide), so that a night's list that names one is not lost to a typo's refusal
         known = {it.name for it in L.sweep_items(mpfr=True)}
         for n in a.sweep_items.split(","):
+            if n and n not in known and re.match(r"^(?:pown|rootn|compound)-f32-n", n):
+                ap.error(f"--sweep-items {n!r}: refused, it is not an item. pown, rootn and compound are items only at an n that "
+                         f"hw/card_stress_lib.py's ROUTINE_N_DIGESTS has a row for, and the table is empty until parcel M3F2 (fp32's pown, rootn and compound) "
+                         f"has merged and the lead has added its rows ({len(L.ROUTINE_N_DIGESTS)} now)")
             if n and n not in known:
                 ap.error(f"--sweep-items {n!r}: not an item ({', '.join(sorted(known)[:6])}, ...)")
     if a.soak_jobs != "auto" and not a.soak_jobs.isdigit():

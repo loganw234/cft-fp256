@@ -500,14 +500,30 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
 # and gives a MARK line in the rule the suffix " (in the rule: must mark)" or " (in the rule: band)" where an off-list one has " (off the list)". A log
 # made before the rule has neither the line nor the suffixes, and parse_routine_marks reads it as it always did: its atan2 "off the list" counts the
 # rule's lanes, which no later reading can tell apart, so the record keeps no rule counts for it (an absent key means "before the rule", never zero).
+# For the pow family (parcel M3X2: pow, powr, pown, rootn, compound, and no other op) the tool holds the EXACT FAMILY instead (routine_sweep.c, "THE EXACT
+# FAMILY"): a marked lane whose true result is exact (at most 25 significant bits) is the routine's design, counted apart from "off the list", and
+# straight after the marks line comes
+#     printf("%s %s: %llu marked on an exact lane\n", ...)
+# with the family's MARK lines ending " (exact lane)", a budget of sixteen of their own (the sixteen of any other kind are shown beside them, so that a slice
+# of thousands of exact marks does not hide an off-list one). A log of that op has the line and the suffix, a log of any other op neither: the parser refuses
+# the absence for the one and the presence for the other.
 # ---------------------------------------------------------------------------
 ROUTINE_SHOW = 16
 ROUTINE_MARKS_LINE = re.compile(r"^(\S+) (\S+): (\d+) marked \(rne (\d+|-), rtz (\d+|-), rdn (\d+|-), rup (\d+|-), rmm (\d+|-)\), "
                                 r"(\d+) off the list, (\d+) guesses wrong$", M)
 ROUTINE_MARK_LINE = re.compile(r"^  MARK (rne|rtz|rdn|rup|rmm) a=0x([0-9a-f]{8}) guess=0x([0-9a-f]{8}) (right|WRONG)"
-                               r"( \(off the list\)| \(in the rule: (must mark|band)\))?$", M)
+                               r"( \(off the list\)| \(exact lane\)| \(in the rule: (must mark|band)\))?$", M)
+ROUTINE_EXACT_LINE = re.compile(r"^(\S+) (\S+): (\d+) marked on an exact lane$", M)
 ROUTINE_RULE_LINE = re.compile(r"^(\S+) (\S+): (\d+) in the rule \(must mark (\d+), band (\d+)\), (\d+) must-mark lanes not marked$", M)
 ROUTINE_TIMING_LINE = re.compile(r"^(\S+) (\S+): device (\d+\.\d{3}) s, oracle (\d+\.\d{3}) s, (\d+) lanes a call$", M)
+
+
+ROUTINE_FAMILY = ("pow", "powr", "pown", "rootn", "compound")      # routine_sweep.c's K_POW and K_NKEY: the names that have the exact family
+
+
+def routine_has_exact(op: str) -> bool:
+    """Whether the tool holds the exact family for the op: the op words of pow, powr, pown, rootn and compound (<name>-f32-...) and no other."""
+    return op.split("-f32-", 1)[0] in ROUTINE_FAMILY and "-f32-" in op
 
 
 def routine_has_rule(op: str) -> bool:
@@ -525,9 +541,12 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
     the lanes in the rule (must mark and band) and those off the list together at most the total marked, and the MARK lines' suffixes agree with it
     (with every mark shown, exactly; else at most); a rule line for an op that has no rule, or a MARK line with the rule's suffix and no rule line, is
     refused.
-    Returns {'by_attr': {attribute: count or None}, 'marked', 'off_list', 'wrong', 'named': [{'attr', 'lane', 'guess', 'wrong', 'off_list', 'rule'}],
-    'not_named': marks with no MARK line, 'rule': None (no rule line) or {'must', 'band', 'must_unmarked'}, 'times': {'device_s', 'oracle_s',
-    'lanes_a_call'} or None}; a named lane's 'rule' is None, 'must mark' or 'band'."""
+    For an op of the pow family (routine_has_exact) the exact line `<op> <mode>: X marked on an exact lane` is REQUIRED (its absence is refused), the op and
+    mode on it are the job's, X is at most the total and X and the off-list count together at most the total, and the MARK lines are the exact ones (' (exact
+    lane)') exactly min(X, 16) and the others exactly min(total - X, 16); for any other op the line and the suffix are refused.
+    Returns {'by_attr': {attribute: count or None}, 'marked', 'off_list', 'wrong', 'named': [{'attr', 'lane', 'guess', 'wrong', 'off_list', 'rule', 'exact'}],
+    'not_named': marks with no MARK line, 'rule': None (no rule line) or {'must', 'band', 'must_unmarked'}, 'exact': None (an op without the family) or the
+    count, 'times': {'device_s', 'oracle_s', 'lanes_a_call'} or None}; a named lane's 'rule' is None, 'must mark' or 'band'."""
     m = _one(ROUTINE_MARKS_LINE, text, "routine marks line")
     if m.group(1) != op or m.group(2) != verdict_mode:
         raise VerdictError(f"routine marks: the line is for '{m.group(1)} {m.group(2)}', the job was '{op} {verdict_mode}'")
@@ -548,10 +567,33 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
     if wrong > total:
         raise VerdictError(f"routine marks: {wrong} guesses wrong of {total} marked")
     named = [{"attr": x.group(1), "lane": int(x.group(2), 16), "guess": int(x.group(3), 16), "wrong": x.group(4) == "WRONG",
-              "off_list": x.group(5) == " (off the list)", "rule": x.group(6)} for x in ROUTINE_MARK_LINE.finditer(text)]
-    if len(named) != min(total, ROUTINE_SHOW):
-        raise VerdictError(f"routine marks: {len(named)} MARK lines where {total} marked show min({total}, {ROUTINE_SHOW}) = "
-                           f"{min(total, ROUTINE_SHOW)}")
+              "off_list": x.group(5) == " (off the list)", "exact": x.group(5) == " (exact lane)", "rule": x.group(6)}
+             for x in ROUTINE_MARK_LINE.finditer(text)]
+    el = _maybe_one(ROUTINE_EXACT_LINE, text, "routine exact line")
+    exact: Optional[int] = None
+    if el is not None:
+        if not routine_has_exact(op):
+            raise VerdictError(f"routine marks: an exact line for '{op}', which has no exact family (only pow, powr, pown, rootn and compound have)")
+        if el.group(1) != op or el.group(2) != verdict_mode:
+            raise VerdictError(f"routine marks: the exact line is for '{el.group(1)} {el.group(2)}', the job was '{op} {verdict_mode}'")
+        exact = int(el.group(3))
+        if exact > total:
+            raise VerdictError(f"routine marks: {exact} marked on an exact lane of {total} marked")
+        if exact + off > total:
+            raise VerdictError(f"routine marks: {exact} on an exact lane and {off} off the list, together more than the {total} marked")
+    elif routine_has_exact(op):
+        raise VerdictError(f"routine marks: no exact line ('{op} {verdict_mode}: X marked on an exact lane') in the log of '{op}', which has the exact family")
+    elif any(n["exact"] for n in named):
+        raise VerdictError("routine marks: a MARK line of an exact lane and no exact line")
+    if exact is None:
+        if len(named) != min(total, ROUTINE_SHOW):
+            raise VerdictError(f"routine marks: {len(named)} MARK lines where {total} marked show min({total}, {ROUTINE_SHOW}) = "
+                               f"{min(total, ROUTINE_SHOW)}")
+    else:
+        n_ex = sum(1 for n in named if n["exact"])
+        if n_ex != min(exact, ROUTINE_SHOW) or len(named) - n_ex != min(total - exact, ROUTINE_SHOW):
+            raise VerdictError(f"routine marks: {n_ex} exact-lane and {len(named) - n_ex} other MARK lines where {exact} exact and {total - exact} other "
+                               f"marks show min({exact}, {ROUTINE_SHOW}) and min({total - exact}, {ROUTINE_SHOW})")
     for n in named:
         if by_attr[n["attr"]] is None:
             raise VerdictError(f"routine marks: a MARK line of {n['attr']}, which this job did not run")
@@ -578,7 +620,8 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
         for key, label in (("must mark", "must"), ("band", "band")):
             if shown[key] > rule[label] or (total <= ROUTINE_SHOW and shown[key] != rule[label]):
                 raise VerdictError(f"routine marks: {shown[key]} MARK lines in the rule's {key} where the rule line says {rule[label]}")
-    if total <= ROUTINE_SHOW:
+    all_shown = total <= ROUTINE_SHOW if exact is None else (exact <= ROUTINE_SHOW and total - exact <= ROUTINE_SHOW)
+    if all_shown:
         if sum(n["wrong"] for n in named) != wrong:
             raise VerdictError(f"routine marks: {sum(n['wrong'] for n in named)} WRONG MARK lines where the line says {wrong} guesses wrong")
         if sum(n["off_list"] for n in named) != off:
@@ -599,7 +642,7 @@ def parse_routine_marks(text: str, op: str, verdict_mode: str) -> Dict[str, Any]
             raise VerdictError(f"routine timing: the line is for '{t.group(1)} {t.group(2)}', the job was '{op} {verdict_mode}'")
         times = {"device_s": float(t.group(3)), "oracle_s": float(t.group(4)), "lanes_a_call": int(t.group(5))}
     return {"by_attr": by_attr, "marked": total, "off_list": off, "wrong": wrong, "named": named, "not_named": total - len(named), "rule": rule,
-            "times": times}
+            "exact": exact, "times": times}
 
 
 def parse_routine(text: str, rc: Optional[int], op: str, verdict_mode: str, artifact: Optional[str], expected_cases: Optional[int],
@@ -614,6 +657,8 @@ def parse_routine(text: str, rc: Optional[int], op: str, verdict_mode: str, arti
     v = parse_soak(text, rc, op, verdict_mode, artifact, expected_cases, cover, cpu=cpu, chunk=None)
     r = parse_routine_marks(text, op, verdict_mode)
     v.counts.update(marked=r["marked"], off_list=r["off_list"], guesses_wrong=r["wrong"])
+    if r["exact"] is not None:
+        v.counts.update(exact_marked=r["exact"])        # the pow family's: a mark on a lane whose result is exact, by design, counted apart from off the list
     if r["rule"] is not None:
         if r["rule"]["must_unmarked"] > v.counts.get("flag_mismatches", 0):
             raise VerdictError(f"routine marks: {r['rule']['must_unmarked']} must-mark lanes not marked, each a flag mismatch, and the verdict line "
@@ -1039,16 +1084,22 @@ OP_FORMAT.update({
 })
 
 
-# THE ROUTINE ITEMS (parcel M4X2, 2026-11-09): host/tools/routine_sweep.c (parcel M4X) sweeps one fp32 routine of python/cft_golden/mathlib.py,
-# compiled to five programs (one a rounding attribute) by host/tools/gen_sweep_images.py, over every fp32 x, against MPFR, on the card's tile
-# (each lane is a program run, cft_program_run_ex). Its op word is <name>-f32[-x<8 hex>][-d<8 hex>] (routine_sweep.c, parse_op), its one mode
-# `all`, and the item's name is the op word + "-all". THE DIGEST is in the op word, so a moved fragment is a new op and a new item, and
+# THE ROUTINE ITEMS (parcel M4X2, 2026-11-09; the pow family's added by parcel M3X2, 2026-11-24): host/tools/routine_sweep.c (parcel M4X) sweeps one
+# fp32 routine of python/cft_golden/mathlib.py, compiled to five programs (one a rounding attribute) by host/tools/gen_sweep_images.py, over every fp32 x
+# (or y), against MPFR, on the card's tile (each lane is a program run, cft_program_run_ex). Its op word is, by the routine's kind (routine_sweep.c, parse_op),
+#     <name>-f32[-d<8 hex>]                  the twelve one-operand routines: every x
+#     atan2-f32-x<8 hex>[-d<8 hex>]          atan2 with x fixed, every y
+#     pow-f32-x<8 hex>, powr-f32-x<8 hex>    pow and powr with x fixed, every y (stream a the fixed x, stream b the swept lanes)
+#     pow-f32-y<8 hex>, powr-f32-y<8 hex>    pow and powr with y fixed, every x (stream a swept, stream b the fixed y)
+#     pown|rootn|compound-f32-n<token>       the integer-operand routines, every x at a fixed n (the token decimal, m for a minus: nm3)
+# its one mode `all`, and the item's name is the op word + "-all". THE DIGEST is in the op word, so a moved fragment is a new op and a new item, and
 # coverage, which is keyed by the item's name, starts from nothing for it: the tool refuses a digest that is not its images' (exit 2).
 #
 # ROUTINE_DIGESTS is the one table of them, in the tool's order: the digest `routine-sweep list` prints and gen_sweep_images.py's `digest` lines
 # give, held to the generator by hw/test_routine_sweep.py's `images` leg and to the real tool's `list` by the fixture hw/card_stress_fixtures/
-# rs-list.txt. The thirteen rows are the generator's `digest` lines, read from a run of gen_sweep_images.py at 53ec490b (parcel M4CAT's base) and equal at 25e398c1:
-# a routine with no digest has no item, and every routine of routine_sweep.c's RTNS now has one.
+# rs-list.txt (the thirteen) and rs3-list.txt (the fifteen and the three with no image). The thirteen rows are the generator's `digest` lines, read from a run
+# of gen_sweep_images.py at 53ec490b (parcel M4CAT's base) and equal at 25e398c1; pow's and powr's are the generator's at f7a1ce95 + parcel M3X2's generator
+# (the fragments are parcel M3F1's), the lead's to approve: a routine with no digest has no item.
 # HOW A DIGEST MOVES: a changed fragment (the routine's sources in python/cft_golden/mathlib.py,
 # its constants or the compiler's output for it) changes the digest the generator writes; the table is then changed here, with the lead's
 # approval, as python/tests/routine_digests.py is changed; the item it makes is NEW (a new name), its coverage from nothing, and the old
@@ -1057,30 +1108,94 @@ ROUTINE_DIGESTS = {
     "exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63ada45", "log": "e84c29cb", "log2": "c274c957",
     "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e",
     "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8",
+    "pow": "7043fd38", "powr": "8aefb175",
 }
+# pown, rootn and compound are built at seven n each (gen_sweep_images.py's N_LIST), so their digests are keyed (name, n): ONE row is one item. THE TABLE IS
+# EMPTY at parcel M3X2's merge, because the fragments are parcel M3F2's (fp32's pown, rootn and compound): until it has merged the generator skips the
+# three by name, `routine-sweep list` says `no image` for them, and no op word of them is an item (--sweep-items names one: refused, naming this table). The
+# lead adds the 21 rows, each the generator's `digest pown-n3 <8 hex>` line (the key (name, n) of the line `digest <name>-n<token> <8 hex>`), after M3F2's merge,
+# as ROUTINE_DIGESTS' rows are added: the same rules (HOW A DIGEST MOVES above) hold for each row.
+ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}
 # atan2 is swept as every y for one fixed x, nine x (the lead's, plan.md decision 9), in the lead's order: (the x, what it is)
 ATAN2_X = (
     (0x3f800000, "1"), (0xbf800000, "-1"), (0x3f800001, "one ulp above 1"), (0x53800000, "2^40"),
     (0x7f7fffff, "the largest normal"), (0x00800000, "the smallest normal"), (0x00000003, "a subnormal"),
     (0x3fb504f3, "a full significand, 1.41421..."), (0xc0490fdb, "a full significand, negative, -3.14159..."),
 )
-ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")   # routine_sweep.c's RTNS
+# pow and powr are swept in two shapes (parcel M3X2; docs/studies/M3-pow.md question 5 (a), the study's lists in the order of the lead's measured slices,
+# docs/studies/m3/pw32_slice-oracle.out.txt), each of 2^32 lanes: every y at each of nine x, and every x at each of nine y. TYPED from the study, not derived.
+POW_X = (
+    (0x3f000000, "0.5"), (0x3f7fffff, "1 - 2^-24, the float below 1"), (0x3f800001, "1 + 2^-23, one ulp above 1"), (0x3fc00000, "1.5"),
+    (0x40000000, "2"), (0x40400000, "3"), (0x41200000, "10"), (0x00800000, "2^-126, the smallest normal"), (0x7f7fffff, "the largest normal"),
+)
+POW_Y = (
+    (0xc0000000, "-2"), (0xbf800000, "-1"), (0xbf000000, "-0.5"), (0x3f000000, "0.5"), (0x3fc00000, "1.5"),
+    (0x40000000, "2"), (0x40400000, "3"), (0x35800000, "2^-20"), (0x49800000, "2^20"),
+)
+# the seven n of pown, rootn and compound (the study's question 5: every x at each), in the generator's order: gen_sweep_images.py's N_LIST and routine_sweep.c's NLIST
+ROUTINE_NS = (2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63)
+ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2",
+                 "pow", "powr", "pown", "rootn", "compound")   # routine_sweep.c's RTNS
+ROUTINE_NKEYED = ("pown", "rootn", "compound")
 ROUTINE_ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
 ROUTINE_TOOL = "routine"
-# routine_sweep.c's op grammar (parse_op): <name>-f32[-x<8 hex>][-d<8 hex>]; a pattern, not a copy of ROUTINE_DIGESTS
-ROUTINE_OP = re.compile(r"^(%s)-f32(?:-x([0-9a-f]{8}))?(?:-d([0-9a-f]{8}))?$" % "|".join(ROUTINE_NAMES))
+# routine_sweep.c's op grammar (parse_op), a pattern, not a copy of the tables: one branch a kind of routine; each branch's groups are named for it
+# (n_*: the name; x, ax, k and w, t: the fixed word or n token; d: the digest, which any op may end with)
+_NTOK = r"(?:0|m?[1-9][0-9]*)"
+ROUTINE_OP = re.compile(
+    r"^(?:(?P<n_plain>exp|exp2|expm1|log|log2|log1p|sin|cos|tan|atan|asin|acos)-f32"
+    r"|(?P<n_atan2>atan2)-f32-x(?P<ax>[0-9a-f]{8})"
+    r"|(?P<n_pow>powr?)-f32-(?P<k>[xy])(?P<w>[0-9a-f]{8})"
+    r"|(?P<n_nkey>pown|rootn|compound)-f32-n(?P<t>" + _NTOK + r"))"
+    r"(?:-d(?P<d>[0-9a-f]{8}))?$")
 
 
-def routine_op_word(name: str, digest: str, x: Optional[int] = None) -> str:
-    return f"{name}-f32" + (f"-x{x:08x}" if x is not None else "") + f"-d{digest}"
+def routine_op_parts(op: str) -> Optional[Tuple[str, Any, Optional[str]]]:
+    """(name, fixed, digest or None) of an op word, or None when it is not one (ROUTINE_OP). `fixed` is None for the twelve, the int x of atan2's -x,
+    ('x', word) or ('y', word) for pow and powr, ('n', n) for pown, rootn and compound."""
+    m = ROUTINE_OP.match(op)
+    if m is None:
+        return None
+    if m.group("n_plain"):
+        return m.group("n_plain"), None, m.group("d")
+    if m.group("n_atan2"):
+        return "atan2", int(m.group("ax"), 16), m.group("d")
+    if m.group("n_pow"):
+        return m.group("n_pow"), (m.group("k"), int(m.group("w"), 16)), m.group("d")
+    t = m.group("t")
+    return m.group("n_nkey"), ("n", -int(t[1:]) if t.startswith("m") else int(t)), m.group("d")
 
 
-def routine_ops(digests: Optional[Dict[str, str]] = None) -> List[Tuple[str, Optional[int], str, str]]:
-    """(name, x, digest, op word) of every routine item for a table of digests (ROUTINE_DIGESTS), in the tool's order; atan2 once an x."""
-    out: List[Tuple[str, Optional[int], str, str]] = []
+def routine_ntoken(n: int) -> str:
+    """n as the op word's token: the decimal digits, an m for a minus (routine_sweep.c's ntoken)."""
+    return ("m" if n < 0 else "") + str(abs(n))
+
+
+def routine_op_word(name: str, digest: str, fixed: Any = None) -> str:
+    """The op word of a routine item. `fixed`: None, an int (atan2's x), ('x', word), ('y', word) or ('n', n) as routine_op_parts gives."""
+    if isinstance(fixed, int):
+        fixed = ("x", fixed)
+    mid = "" if fixed is None else (f"-n{routine_ntoken(fixed[1])}" if fixed[0] == "n" else f"-{fixed[0]}{fixed[1]:08x}")
+    return f"{name}-f32{mid}-d{digest}"
+
+
+def routine_ops(digests: Optional[Dict[str, str]] = None, n_digests: Optional[Dict[Tuple[str, int], str]] = None
+                ) -> List[Tuple[str, Any, str, str]]:
+    """(name, fixed, digest, op word) of every routine item for a table of digests (ROUTINE_DIGESTS) and of the n-keyed ones (ROUTINE_N_DIGESTS), in the
+    tool's order: atan2 once an x, pow and powr once an x (POW_X) and once a y (POW_Y) in that order, an n-keyed name once an n, after the rest.
+    `fixed` is as routine_op_parts gives it, except that atan2's is the int x (the first fields are the old four, which readers of the thirteen use)."""
+    out: List[Tuple[str, Any, str, str]] = []
     for name, d in (ROUTINE_DIGESTS if digests is None else digests).items():
-        for x in ([a for a, _ in ATAN2_X] if name == "atan2" else [None]):
-            out.append((name, x, d, routine_op_word(name, d, x)))
+        if name == "atan2":
+            fixes: List[Any] = [a for a, _ in ATAN2_X]
+        elif name in ("pow", "powr"):
+            fixes = [("x", a) for a, _ in POW_X] + [("y", a) for a, _ in POW_Y]
+        else:
+            fixes = [None]
+        for fx in fixes:
+            out.append((name, fx, d, routine_op_word(name, d, fx)))
+    for (name, n), d in (ROUTINE_N_DIGESTS if n_digests is None else n_digests).items():
+        out.append((name, ("n", n), d, routine_op_word(name, d, ("n", n))))
     return out
 
 
@@ -1088,16 +1203,35 @@ OP_REACH.update({op: TILE for _, _, _, op in routine_ops()})          # each lan
 OP_FORMAT.update({op: "fp32" for _, _, _, op in routine_ops()})
 
 
-def routine_claim(name: str, d: str, x: Optional[int] = None) -> str:
+def routine_claim(name: str, d: str, fixed: Any = None) -> str:
     """What a pass over a routine item's whole space claims, by space and level; never 'swept'."""
-    if x is None:
-        space = f"every fp32 x through {name} as the compiled program (its images' digest {d})"
-    else:
-        what = dict(ATAN2_X)[x]
-        space = (f"every fp32 y for x = 0x{x:08x} ({what}) through atan2 as the compiled program (its images' digest {d}), "
-                 f"not the whole space of (y, x) pairs")
-    return (f"{space}, each of the five attributes: an unmarked lane's bits and flags equal to MPFR's, a marked lane "
+    tail = (f", each of the five attributes: an unmarked lane's bits and flags equal to MPFR's, a marked lane "
             f"counted and its guess compared, not decided (L1 over the fp32 slice)")
+    if isinstance(fixed, int):
+        fixed = ("x", fixed)
+    if fixed is None:
+        space = f"every fp32 x through {name} as the compiled program (its images' digest {d})"
+    elif name == "atan2":
+        what = dict(ATAN2_X)[fixed[1]]
+        space = (f"every fp32 y for x = 0x{fixed[1]:08x} ({what}) through atan2 as the compiled program (its images' digest {d}), "
+                 f"not the whole space of (y, x) pairs")
+    elif fixed[0] == "x":
+        what = dict(POW_X)[fixed[1]]
+        space = (f"every fp32 y for x = 0x{fixed[1]:08x} ({what}) through {name} as the compiled program (its images' digest {d}), "
+                 f"not the whole space of (x, y) pairs")
+    elif fixed[0] == "y":
+        what = dict(POW_Y)[fixed[1]]
+        space = (f"every fp32 x for y = 0x{fixed[1]:08x} ({what}) through {name} as the compiled program (its images' digest {d}), "
+                 f"not the whole space of (x, y) pairs")
+    else:
+        space = (f"every fp32 x for n = {fixed[1]} through {name} as the compiled program (its images' digest {d}), "
+                 f"not the whole space of (x, n) pairs")
+    if name in ("pow", "powr", "pown", "rootn", "compound"):
+        tail += (f"; a mark on a lane whose result is exact is the routine's design and is counted apart (the exact class), "
+                 f"one a golden predicate decides in-lane is off the list")
+    return space + tail
+
+
 
 
 def format_of(op: str) -> str:
@@ -1249,12 +1383,13 @@ class Item:
         return (self.seed_index << 40) | (n << 1) | 1
 
 
-def routine_items(digests: Optional[Dict[str, str]] = None) -> List[Item]:
-    """The routine items of a table of digests (ROUTINE_DIGESTS by default): the thirteen, in the tool's order; a test passes a table of its own
-    (atan2 among them), after putting its ops into OP_REACH and OP_FORMAT as the module does for the real ones."""
+def routine_items(digests: Optional[Dict[str, str]] = None, n_digests: Optional[Dict[Tuple[str, int], str]] = None) -> List[Item]:
+    """The routine items of a table of digests (ROUTINE_DIGESTS by default) and of the n-keyed ones (ROUTINE_N_DIGESTS, empty at parcel M3X2's merge): the
+    thirteen, then pow and powr's 36, in the tool's order; a test passes a table of its own (atan2 among them), after putting its ops into OP_REACH and
+    OP_FORMAT as the module does for the real ones."""
     return [Item(f"{op}-all", ROUTINE_TOOL, "exhaustive", op, "all", verdict_mode="all", exact=True, per_encoding=len(ROUTINE_ATTRS),
                  space=EXH, level="exhaustive", whole=(len(ROUTINE_ATTRS) * EXH, 0), mpfr=True, claim=routine_claim(name, d, x))
-            for name, x, d, op in routine_ops(digests)]
+            for name, x, d, op in routine_ops(digests, n_digests)]
 
 
 def sweep_items(scaleb_modes: Iterable[str] = MODES4,
@@ -1392,6 +1527,8 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
                 items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode, verdict_mode=mode, exact=True,
                                   per_encoding=k, space=space, level="exhaustive" if f32 else "class", whole=(k * space, 0),
                                   mpfr=True, claim=f"{wide_c5_claim(op)}, under {mode}"))
+        # Parcel M3X2 (2026-11-24): the pow family's 36 items (pow and powr, eighteen each) come with the routine items, appended at the end of them, so that the
+        # 308 keep their places and the catalog is 344; the n-keyed items are not items until ROUTINE_N_DIGESTS has rows.
         # Parcel M4X2: the routine items, APPENDED after HXb's 60 so that the 287 keep their places, one an op word (routine_ops): all five
         # attributes in one job (`all`), five checks an encoding, exactly E encodings and none skipped, so exact, and the whole space is
         # (5 x 2^32, 0). The tool links the pinned MPFR, so they run only with --mpfr-prefix as the wide items do.

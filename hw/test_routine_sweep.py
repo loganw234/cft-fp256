@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""Test of routine-sweep (host/tools/routine_sweep.c, parcel M4X), its oracle header (host/tools/mpfr_tfn.h) and its image generator
+"""Parcel M3X2 (2026-11-24) added the pow family: pow and powr (-x: x fixed, y swept; -y: y fixed, x swept) and pown, rootn and compound (-n<token>), the tool's exact class
+(`routine-sweep exact`, held in `marks` against golden's _pow_dyadic, _pown_dyadic and _rootn_dyadic), the generator's n-keyed names and the eighteen of the lists below. Every leg that
+needs MPFR 4.2.0 (powr, rootn, compound) is SKIPPED BY NAME, with the MPFR the tool links, where the host's is older (WSL cft2204's 4.1.0): it is counted as a skip and never passes.
+Test of routine-sweep (host/tools/routine_sweep.c, parcel M4X), its oracle header (host/tools/mpfr_tfn.h) and its image generator
 (host/tools/gen_sweep_images.py), on the software backend. POSIX with make, a C compiler and MPFR and GMP to link (the system's:
 WSL cft2204's MPFR 4.1.0 and GMP 6.2.1, on which mpfr_tfn.h builds for the thirteen routines); python3 with mpmath and pytest, which
 python/tests/mathlib_harness.py needs. Skipped by name without any of them. The model is hw/test_c5_wide.py.
@@ -67,6 +70,7 @@ import os
 import random
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -89,6 +93,12 @@ ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
 NINE = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan")
 TWELVE = NINE + ("atan", "asin", "acos")           # the one-operand routines; atan2 (two operands) is the thirteenth
 THIRTEEN = TWELVE + ("atan2",)
+NKEYED = ("pown", "rootn", "compound")                # the integer-operand names: one set of five images a n (parcel M3X2)
+EIGHTEEN = THIRTEEN + ("pow", "powr") + NKEYED        # routine_sweep.c's RTNS, in its order
+N_LIST = (2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63)    # the seven n; gen_sweep_images.py's N_LIST and routine_sweep.c's NLIST are the two copies (held equal in `build`)
+NEEDS_42 = ("powr", "rootn", "compound")              # mpfr_powr, mpfr_rootn_si and mpfr_compound_si exist from MPFR 4.2.0: the legs on them are SKIPPED BY NAME below it
+PXS = (0x40400000, 0x3f000000)                         # the x a pow slice fixes (y swept): 3, whose y = 2 is exact, and 0.5
+PYS = (0x40000000, 0x3fc00000)                         # the y a pow slice fixes (x swept): 2, the exact family's, and 1.5
 # the nine x of M4X's brief (item 8): 1, -1, 1 + ulp, 2^40, the largest normal, the smallest normal, a subnormal, two full significands
 X9 = (0x3f800000, 0xbf800000, 0x3f800001, 0x53800000, 0x7f7fffff, 0x00800000, 0x00000003, 0x3fb504f3, 0xc0490fdb)
 MARKS_LINE = re.compile(r"^(\S+) (\S+): (\d+) marked \(rne (\S+), rtz (\S+), rdn (\S+), rup (\S+), rmm (\S+)\), (\d+) off the list, "
@@ -191,27 +201,53 @@ def gen(outdir, *args):
     return p.returncode, p.stdout + p.stderr
 
 
+def ntoken(n):
+    """The op word's n token: decimal digits, m for a minus (routine_sweep.c's ntoken, the generator's)."""
+    return ("m" if n < 0 else "") + str(abs(n))
+
+
+def base_of(key):
+    """A manifest key's routine name: pown-n3 is pown."""
+    return key.split("-n")[0]
+
+
+def label_of(key):
+    """The `list` row's label of a manifest key (pown-n3: pown-f32-n3; exp: exp-f32)."""
+    b = base_of(key)
+    return f"{b}-f32" + (key[len(b):] if key != b else "")
+
+
 def gen_account(manifest):
     """The generator's own account of what it built (send-back 1 of parcel M4X2): (BUILT, SKIPPED) - BUILT the (name, digest) of each `digest` line, in the order
     written, SKIPPED the names of its `skipped <name> not built at fp32` lines. The test follows these, so that a routine built later (parcel M4F1's atan) breaks
     no figure here; what must stay true is held by account_problems."""
-    return (re.findall(r"^digest (\w+) ([0-9a-f]{8})$", manifest, re.M), re.findall(r"^skipped (\w+) not built at fp32$", manifest, re.M))
+    return (re.findall(r"^digest (\S+) ([0-9a-f]{8})$", manifest, re.M), re.findall(r"^skipped (\w+) not built at fp32$", manifest, re.M))
 
 
 def account_problems(built, skipped):
-    """What is wrong with a generator's account: BUILT and SKIPPED must be disjoint, a name once each, and together the tool's thirteen, BUILT in the tool's order."""
-    names = [n for n, _ in built]
+    """What is wrong with a generator's account: BUILT and SKIPPED must be disjoint, a name once each (an n-keyed name once at each n of N_LIST, in order: pown-n2 ...),
+    and together the tool's eighteen, BUILT in the tool's order."""
+    keys = [n for n, _ in built]
+    names = []
+    for k in keys:
+        if base_of(k) not in names:
+            names.append(base_of(k))
     p = []
-    if len(set(names)) != len(names) or len(set(skipped)) != len(skipped):
+    if len(set(keys)) != len(keys) or len(set(skipped)) != len(skipped):
         p.append("a name twice")
     if set(names) & set(skipped):
         p.append(f"both built and skipped: {sorted(set(names) & set(skipped))}")
-    if [n for n in THIRTEEN if n not in names and n not in skipped]:
-        p.append(f"neither built nor skipped: {[n for n in THIRTEEN if n not in names and n not in skipped]}")
-    if [n for n in names + list(skipped) if n not in THIRTEEN]:
-        p.append("a name that is not one of the thirteen")
-    if names != [n for n in THIRTEEN if n in names]:
+    if [n for n in EIGHTEEN if n not in names and n not in skipped]:
+        p.append(f"neither built nor skipped: {[n for n in EIGHTEEN if n not in names and n not in skipped]}")
+    if [n for n in names + list(skipped) if n not in EIGHTEEN]:
+        p.append("a name that is not one of the eighteen")
+    if names != [n for n in EIGHTEEN if n in names]:
         p.append("built names not in the tool's order")
+    for n in names:
+        if n in NKEYED and [k for k in keys if base_of(k) == n] != [f"{n}-n{ntoken(v)}" for v in N_LIST]:
+            p.append(f"{n} is not built at each n of N_LIST in order")
+        if n not in NKEYED and [k for k in keys if base_of(k) == n] != [n]:
+            p.append(f"{n} is not built once")
     return p
 
 
@@ -307,6 +343,31 @@ def diff_oracle(got, want):
 # the groups
 # ---------------------------------------------------------------------------------------------------
 
+def mpfr_version(tool):
+    """(major, minor, patch, text) of the MPFR the tool links, from its oracle line; (0, 0, 0, '?') if it says none."""
+    rc, out, err = tool.raw("oracle", "exp-f32", "rne", stdin="")
+    m = re.search(r"^oracle: MPFR (\d+)\.(\d+)\.(\d+)\S* with GMP", err, re.M)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), f"{m.group(1)}.{m.group(2)}.{m.group(3)}") if m else (0, 0, 0, "?")
+
+
+def has_42(tool):
+    return mpfr_version(tool)[:3] >= (4, 2, 0)
+
+
+def skip_leg(group, name, tool):
+    skip(f"{group}: {name}", f"needs MPFR 4.2.0, this build has {mpfr_version(tool)[3]}")
+
+
+def expected_rows(built, skipped):
+    """The `list` rows the generator's account says: [(label, kind)], kind `digest` or `no image`, in the tool's order: one row for each built name, seven for a built
+    n-keyed name (one for each n, N_LIST's order), one `no image` row for a name that has none."""
+    rows = []
+    for n in EIGHTEEN:
+        ks = [k for k, _ in built if base_of(k) == n]
+        rows += [(label_of(k), "digest") for k in ks] if ks else [(f"{n}-f32", "no image")]
+    return rows
+
+
 def group_build(tool, log, tree, work, imgs, manifest):
     warns = [ln for ln in log.splitlines() if "warning:" in ln]
     check("build: the build of the whole library and the tool prints no warning (WSL's MPFR 4.1.0 builds mpfr_tfn.h)", not warns,
@@ -324,20 +385,36 @@ def group_build(tool, log, tree, work, imgs, manifest):
     rc, out, err = tool.raw("list")
     rows = out.splitlines()
     names = [r.split("-f32")[0] for r in rows]
-    check("build: `list` names the thirteen, in the order of the brief", rc == 0 and names == list(THIRTEEN), f"rc {rc} {names}")
     built, skipped = gen_account(manifest)
-    dig = dict(built)
-    listed = {r.split("-f32")[0]: re.search(r"digest (\S+)$", r).group(1) for r in rows if "digest" in r}
+    check("build: `list` names the eighteen, in the order of the brief (a name that has images at each n has a row for each, so its name repeats)",
+          rc == 0 and list(dict.fromkeys(names)) == list(EIGHTEEN), f"rc {rc} {names}")
+    dig = {label_of(k): v for k, v in built}
+    listed = {r.split(":")[0]: re.search(r"digest (\S+)$", r).group(1) for r in rows if "digest" in r}
     check("build: `list` gives each routine the generator built (its `digest` lines) the digest the generator's manifest gives (two implementations of the same hash "
           "over five images and banks)", listed == dig and len(built) > 0, f"{listed} {dig}")
     noimg = [r.split("-f32")[0] for r in rows if r.endswith("no image")]
-    check("build: `list` has thirteen rows, five images for exactly the generator's built names (in the tool's order) and `no image` for exactly the names it skipped",
-          len(rows) == 13 and [r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built] and noimg == skipped and not account_problems(built, skipped),
+    want_rows = expected_rows(built, skipped)
+    got_rows = [(r.split(":")[0], "no image" if r.endswith("no image") else "digest") for r in rows]
+    check("build: `list` has exactly the rows the generator's account gives (derived from it: five images and a digest for each built name, a row for each of the seven n of an n-keyed name "
+          "that is built, one `no image` row for a name that has none), in the tool's order", got_rows == want_rows and noimg == skipped and not account_problems(built, skipped),
           f"{rows} {built} {skipped}")
-    check("build: RED - the `list` check above, evaluated on lists in memory, is red when `list` says `no image` for a name the account did not skip (a doctored noimg with one built name added), and when a built name is dropped",
-          not (noimg + [built[0][0]] == skipped) and not ([r.split("-f32")[0] for r in rows if "digest" in r] == [n for n, _ in built[1:]]), "")
+    # the same comparison on doctored accounts: an n-keyed name built at its seven n has seven rows where `list` shows one `no image` row, so today's rows are not those
+    fb = [x for x in built if base_of(x[0]) != "pown"] + [(f"pown-n{ntoken(v)}", "00000000") for v in N_LIST]
+    fake_rows = expected_rows(fb, [x for x in skipped if x != "pown"])
+    check("build: RED - the `list` check above, evaluated on lists in memory, is red when `list` says `no image` for a name the account did not skip (a doctored noimg with one built name added), "
+          "when a built name is dropped, and when pown is taken as built at its seven n (seven rows for the one `pown-f32: no image`: a pattern that reads only `<name>-f32: ` rows would not see them)",
+          not (noimg + [built[0][0]] == skipped) and got_rows[1:] != want_rows and fake_rows != got_rows and len([r for r in fake_rows if r[0].startswith("pown-f32-n")]) == 7, "")
     rc, out, err = tool.raw("list", imgs=os.path.join(work, "nowhere"))
-    check("build: `list` with no images directory says `no image` thirteen times", rc == 0 and out.count("no image") == 13, out[:200])
+    check("build: `list` with no images directory says `no image` eighteen times, one row a name and none for an n", rc == 0 and out.count("no image") == 18
+          and len(out.splitlines()) == 18, out[:200])
+    csrc = open(os.path.join(tree, "host", "tools", "routine_sweep.c")).read()
+    gsrc = open(os.path.join(tree, "host", "tools", "gen_sweep_images.py")).read()
+    nl = re.search(r"NLIST\[NNLIST\] = \{ ([^}]*) \};", csrc)
+    c_ns = [(-2 ** 63 if t.strip() == "INT64_MIN" else int(t)) for t in nl.group(1).split(",")] if nl else None
+    gn = re.search(r"^N_LIST = \(([^)]*)\)", gsrc, re.M)
+    g_ns = [eval(t.strip(), {}) for t in gn.group(1).split("#")[0].split(",") if t.strip()] if gn else None
+    check("build: the tool's table of the seven n (NLIST, read from routine_sweep.c) is the generator's N_LIST (read from gen_sweep_images.py), this file's and the catalog's ROUTINE_NS: "
+          "the same seven in the same order", c_ns == g_ns == list(N_LIST) == list(L.ROUTINE_NS) and len(c_ns or []) == 7, f"{c_ns} {g_ns}")
     rc, out, err = tool.raw("exp-f32", 0, 4, "rne")
     check("build: the oracle line names the linked MPFR and GMP", re.search(r"^oracle: MPFR \S+ with GMP \S+, mpfr_ieee\.h's emulation$",
           err, re.M) is not None and L.SOAK_ORACLE_MPFR.search(err) is not None, err[:200])
@@ -360,6 +437,17 @@ def group_images(tool, tree, work, imgs, manifest):
     check("images: a DIR that exists is refused (exit 2), nothing written", rc == 2 and "exists" in o, o[-200:])
     rc, o = gen(os.path.join(work, "img-bad"), "--names", "exp,nonesuch")
     check("images: an unknown name is refused, exit 2", rc == 2, o[-200:])
+    rc, o = gen(os.path.join(work, "img-nk"), "--names", ",".join(NKEYED), "--attrs", "rne")
+    nk_man = open(os.path.join(work, "img-nk", "manifest.txt")).read() if rc == 0 else ""
+    nk_built, nk_skipped = gen_account(nk_man) if nk_man else ([], [])
+    nk_keys = [k for k, _ in nk_built]
+    check("images: `--names pown,rootn,compound` does not fail (exit 0): each name is skipped by name once (`skipped pown not built at fp32`, as the inverse names were) while parcel M3F2's "
+          "fragments are not built, and built at each of the seven n, in N_LIST's order, once they are; never both, never an error",
+          rc == 0 and all((n in nk_skipped) != any(base_of(k) == n for k in nk_keys) for n in NKEYED)
+          and all([k for k in nk_keys if base_of(k) == n] in ([], [f"{n}-n{ntoken(v)}" for v in N_LIST]) for n in NKEYED)
+          and len(nk_skipped) == len(set(nk_skipped)), f"rc {rc} {nk_skipped} {nk_keys} {o[-200:]}")
+    check("images: ... and the `skipped` check itself is red on a manifest with the name skipped twice and on one that is both built and skipped (a doctored account in memory)",
+          account_problems([], NKEYED + ("pown",))[:1] == ["a name twice"] and any("both built and skipped" in x for x in account_problems([(f"pown-n{ntoken(N_LIST[0])}", "00000000")], ["pown"])), "")
     image_line = re.compile(r"^image \S+ \S+ instructions \d+ words \d+ image_sha256 [0-9a-f]{64} bank_sha256 [0-9a-f]{64} "
                             r"marks_sha256 [0-9a-f]{64} dag_digest [0-9a-f]{64} commit \S+$", re.M)
     check("images: the generator's account is whole - the names it built (`digest` lines) and the names it skipped (`skipped ... not built at fp32`) are disjoint, once each, "
@@ -398,6 +486,15 @@ def group_images(tool, tree, work, imgs, manifest):
           and digest_judge(mdig, {k: v for k, v in L.ROUTINE_DIGESTS.items() if k != "tan"}) == ([], ["tan"] + [n for n, _ in mdig if n not in L.ROUTINE_DIGESTS]), "")
     check("images: ... and green, naming the extra, on built names with one more than the table has: a name that can never be built or tabled (nonesuch), added to the real lists",
           digest_judge(mdig + [("nonesuch", "00000000")], L.ROUTINE_DIGESTS) == ([], named_ + ["nonesuch"]), "")
+    # parcel M3X2: ROUTINE_N_DIGESTS, keyed (name, n), against the generator's `digest pown-n3 <8 hex>` lines: a row of the table needs the line with an equal digest
+    ntab = {f"{nm}-n{ntoken(v)}": d for (nm, v), d in L.ROUTINE_N_DIGESTS.items()}
+    nf, nn_ = digest_judge(mdig, ntab)
+    check(f"images: every row of ROUTINE_N_DIGESTS ({len(ntab)} today: it is empty until parcel M3F2 has merged and the lead has added the rows) is among the generator's `digest` lines (pown-n3 ...) "
+          f"with an equal digest; the n-keyed names built without a row are named, not failed ({[n for n in nn_ if base_of(n) in NKEYED] or 'none built today'})", not nf, f"{nf}")
+    check("images: ... and the same judge is red on a row for a name and n that can never be built (nonesuch-n3), on a row for pown at an n outside N_LIST, and, when the generator built an "
+          "n-keyed name, on one digit of its digest changed",
+          digest_judge(mdig, {"nonesuch-n3": "00000000"})[0] and digest_judge(mdig, {"pown-n4": "00000000"})[0]
+          and all(digest_judge(mdig, {k: d[:-1] + ("0" if d[-1] != "0" else "1")})[0] for k, d in mdig if base_of(k) in NKEYED), "")
     ok = os.path.exists(os.path.join(tree, "host", "positive-run"))
     if not ok:
         skip("images: positive-run", "did not build")
@@ -422,6 +519,42 @@ def group_images(tool, tree, work, imgs, manifest):
             check(f"images: {n} {attr}: positive-run of the image and bank deposits mathlib.evaluate's bits on {k} lanes",
                   p.returncode == 0 and dep == [b for b, _w in ev], f"rc {p.returncode} {p.stderr[-200:]}")
             check(f"images: {n} {attr}: ... and routines.run's", dep == list(outs) if p.returncode == 0 else False, "")
+    # parcel M3X2: pow and powr, the two shapes of a sweep (x fixed and y swept, y fixed and x swept) - one image serves both - and the n-keyed names at each n once built
+    for n in ("pow", "powr"):
+        for attr in ATTRS:
+            f = ml.fragment(n, FP32, rnd_of[attr])
+            k = 200 if attr == "rne" else 32
+            stem = os.path.join(imgs, f"{n}-fp32-{attr}")
+            for shape, fixed in (("x fixed, y swept", PXS[0]), ("y fixed, x swept", PYS[0])):
+                vs = rng.sample(pool, k)
+                pairs = [(fixed, v) if shape.startswith("x") else (v, fixed) for v in vs]
+                for nm, col in (("a", 0), ("b", 1)):
+                    with open(os.path.join(work, nm + ".bin"), "wb") as fh:
+                        fh.write(b"".join(pr[col].to_bytes(4, "little") for pr in pairs))
+                p = subprocess.run(NICE + [os.path.join(tree, "host", "positive-run"), stem + ".cftp", "--a", os.path.join(work, "a.bin"), "--b", os.path.join(work, "b.bin"),
+                                           "--bank", stem + ".bank", "--out", os.path.join(work, "d.bin")], capture_output=True, text=True)
+                raw = open(os.path.join(work, "d.bin"), "rb").read() if p.returncode == 0 else b""
+                dep = [int.from_bytes(raw[i:i + 4], "little") for i in range(0, len(raw), 4)]
+                check(f"images: {n} {attr} ({shape}): positive-run of the image and bank deposits mathlib.evaluate's bits on {k} lanes",
+                      p.returncode == 0 and dep == [ml.evaluate(f, pr)[0] for pr in pairs], f"rc {p.returncode} {p.stderr[-200:]}")
+    nb = [k for k, _ in built if base_of(k) in NKEYED]
+    if not nb:
+        skip("images: pown, rootn and compound positive-run", f"not built at fp32 (the generator skipped {[n for n in skipped if n in NKEYED]} by name): parcel M3F2's fragments")
+    ntok = {ntoken(v): v for v in N_LIST}
+    for key in nb:
+        nm, tok = key.split("-n")
+        for attr in ATTRS:
+            f = ml.fragment(nm, FP32, rnd_of[attr], n=ntok[tok])
+            k = 200 if attr == "rne" else 32
+            xs = rng.sample(pool, k)
+            with open(os.path.join(work, "a.bin"), "wb") as fh:
+                fh.write(b"".join(x.to_bytes(4, "little") for x in xs))
+            stem = os.path.join(imgs, f"{key}-fp32-{attr}")
+            p = subprocess.run(NICE + [os.path.join(tree, "host", "positive-run"), stem + ".cftp", "--a", os.path.join(work, "a.bin"),
+                                       "--bank", stem + ".bank", "--out", os.path.join(work, "d.bin")], capture_output=True, text=True)
+            raw = open(os.path.join(work, "d.bin"), "rb").read() if p.returncode == 0 else b""
+            dep = [int.from_bytes(raw[i:i + 4], "little") for i in range(0, len(raw), 4)]
+            check(f"images: {key} {attr}: positive-run deposits mathlib.evaluate's bits on {k} lanes", p.returncode == 0 and dep == [ml.evaluate(f, x)[0] for x in xs], f"rc {p.returncode}")
 
 
 def group_oracle(tool):
@@ -455,6 +588,59 @@ def group_oracle(tool):
     got, _ = tool_oracle(tool, "log-f32", "rne", [0xbf800000, 0x7fa00001, 0xff800001, 0x7fc12345])
     check("oracle: log of -1, of two sNaNs and of a quiet NaN with a payload are all 0x7fc00000",
           got is not None and all(v[0] == 0x7fc00000 for v in got.values()), f"{got}")
+    group_oracle_pow(tool)
+
+
+def pow_lanes():
+    """The swept lanes of the pow family's oracle legs: 48 of the pools and the special classes, and the specials and ends by hand (zeros, infinities, quiet and signalling NaNs, +-1, the
+    smallest subnormal and normal, the largest normal)."""
+    base = oracle_lanes("pow")
+    rng = random.Random(5)
+    hand = [0, 0x80000000, 0x7f800000, 0xff800000, 0x7fc00000, 0x7fa00000, 0x3f800000, 0xbf800000, 1, 0x00800000, 0x7f7fffff, 0xff7fffff, 0x40000000, 0xc0000000, 0x3f000000, 0x40400000]
+    return sorted(set(rng.sample(base, 48)) | set(hand))
+
+
+def group_oracle_pow(tool):
+    """`routine-sweep oracle` for pow, powr, pown, rootn and compound against transcend.compute: pow and powr at the nine x (y swept) and the nine y (x swept) of the study's lists, pown, rootn
+    and compound at the seven n; the legs of powr, rootn and compound need MPFR 4.2.0 and are SKIPPED BY NAME, one each, where the tool links an older MPFR (never passed)."""
+    FP32, ml, routines, sf, T, har = mods()
+    rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
+    lanes = pow_lanes()
+    v42 = has_42(tool)
+    skipped_legs = 0
+    for fn in ("pow", "powr"):
+        if fn in NEEDS_42 and not v42:
+            skip_leg("oracle", f"{fn}: its nine x and nine y legs (every lane through mpfr_{fn})", tool)
+            skipped_legs += 1
+            continue
+        for kind, table in (("x", L.POW_X), ("y", L.POW_Y)):
+            for w, _what in table:
+                for attr in ATTRS:
+                    got, why = tool_oracle(tool, f"{fn}-f32-{kind}{w:08x}", attr, lanes)
+                    want = {v: (T.compute(FP32, fn, w, v, rnd_of[attr]) if kind == "x" else T.compute(FP32, fn, v, w, rnd_of[attr])) for v in lanes}
+                    bad = diff_oracle(got, want) if got is not None else [(-2, why, "")]
+                    check(f"oracle: {fn} {kind}={w:#010x} {attr}: {len(lanes)} swept lanes, bits and flags equal transcend.compute's", not bad,
+                          f"{len(bad)} differ: {[(hex(x), g, w2) for x, g, w2 in bad[:3]]}")
+    for fn in NKEYED:
+        if fn in NEEDS_42 and not v42:
+            skip_leg("oracle", f"{fn}: its seven n (every lane through mpfr_{'rootn_si' if fn == 'rootn' else 'compound_si'})", tool)
+            skipped_legs += 1
+            continue
+        for n in N_LIST:
+            prc, _po, perr = tool.raw("oracle", f"{fn}-f32-n{ntoken(n)}", "rne", stdin="")
+            if prc == 2 and "does not fit this host's long" in perr:
+                skip("oracle", f"{fn} n={n}: an n beyond this host's long (a Windows build: 32 bits), refused by the tool by name; the sweeps run on Linux")
+                skipped_legs += 1
+                continue
+            for attr in ATTRS:
+                got, why = tool_oracle(tool, f"{fn}-f32-n{ntoken(n)}", attr, lanes)
+                if fn == "rootn" and n == 0:
+                    continue
+                want = {v: T.compute(FP32, fn, v, 0, rnd_of[attr], n=n) for v in lanes}
+                bad = diff_oracle(got, want) if got is not None else [(-2, why, "")]
+                check(f"oracle: {fn} n={n} {attr}: {len(lanes)} lanes, bits and flags equal transcend.compute's", not bad,
+                      f"{len(bad)} differ: {[(hex(x), g, w2) for x, g, w2 in bad[:3]]}")
+    print(f"  oracle: {skipped_legs} of the five pow-family names' legs not run, each SKIPPED by name above (MPFR {mpfr_version(tool)[3]})")
 
 
 def slice_lanes(lo, n):
@@ -468,6 +654,8 @@ ATAN2_XS_RUN = (X9[0], X9[3], X9[8])     # the x that agree and whole run atan2 
 def ops_of(name):
     """[(op word, wrap)] of a name: <name>-f32 and the lane as it is, or for atan2 one op word a fixed x (ATAN2_XS_RUN) and the lane y paired with that x
     for mathlib.evaluate, which takes atan2's (y, x)."""
+    if name in ("pow", "powr"):          # x fixed at 3 and y swept (lanes are y: evaluate takes (x, y)), and y fixed at 2 and x swept
+        return [(f"{name}-f32-x{PXS[0]:08x}", lambda y, x=PXS[0]: (x, y)), (f"{name}-f32-y{PYS[0]:08x}", lambda x, y=PYS[0]: (x, y))]
     if name != "atan2":
         return [(f"{name}-f32", lambda y: y)]
     return [(f"atan2-f32-x{x:08x}", lambda y, x=x: (y, x)) for x in ATAN2_XS_RUN]
@@ -477,10 +665,13 @@ def group_agree(tool, names):
     FP32, ml, routines, sf, T, har = mods()
     rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
     for n in names:
+      if n in NEEDS_42 and not has_42(tool):
+          skip_leg("agree", n, tool)
+          continue
       for op, wrap in ops_of(n):
         for attr in ATTRS:
             f = ml.fragment(n, FP32, rnd_of[attr])
-            for lo in AGREE_SLICES:
+            for lo in AGREE_SLICES + ((0x40400000,) if n in ("pow", "powr") else ()):
                 lanes = slice_lanes(lo, 256)
                 got, why = tool_oracle(tool, op, attr, lanes)
                 bad, py_marked = [], 0
@@ -538,6 +729,183 @@ def group_marks(tool, work):
               f"its wrong guesses ({mk and mk[3]}) Python's ({guess_wrong}), no unmarked lane wrong, every mark off the list",
               mk is not None and mk[1][1] == marked and mk[3] == guess_wrong and vm is not None and vm[1:] == (0, 0) and mk[2] == marked
               and marked > 0, f"{mk} {vm} python {marked} {guess_wrong}")
+    group_marks_pow(tool, work)
+
+
+def golden_class(T, fn, xa, xb=0, n=0, p=24):
+    """The exact family's class of a lane from GOLDEN's own predicates (python/cft_golden/transcend.py), written here from their text and not from the tool: `exact` (the true result has
+    at most p + 1 significant bits, and golden does not decide it in-lane), `inlane` (golden decides it in-lane: a power-of-two x at an integer exponent, y = 1, n = 0 and 1) or `none`.
+    pow and powr: _pow_dyadic; pown: _pown_dyadic; rootn: _rootn_dyadic; compound has no golden predicate (the exact value (1 + x)^n is taken in exact rational arithmetic here)."""
+    from fractions import Fraction
+    FP32, = (mods()[0],)
+    ux = T.unpack(FP32, xa)
+    fin = lambda u: u.kind not in (T.ZERO, T.INF, T.NAN)      # noqa: E731
+    if not fin(ux):
+        return "none"
+    if fn in ("pow", "powr"):
+        uy = T.unpack(FP32, xb)
+        if not fin(uy):
+            return "none"
+        if fn == "powr" and ux.sign:
+            return "none"
+        y_int, _ = T._integrality(uy)
+        if ux.sign and not y_int:
+            return "none"
+        M, E = T._dyadic(ux)
+        Y, F = T._dyadic(uy)
+        if not uy.sign and Y == 1 and F == 0:
+            return "inlane"
+        if M == 1 and E == 0:
+            return "inlane"                                   # |x| = 1
+        r = T._pow_dyadic(FP32, ux, uy)
+        if r is None:
+            return "none"
+        return "inlane" if r[0] == 1 else "exact"
+    if fn == "pown":
+        if n in (0, 1):
+            return "inlane"
+        r = T._pown_dyadic(FP32, ux.m, ux.e, n)
+        if r is None:
+            return "none"
+        return "inlane" if r[0] == 1 else "exact"
+    if fn == "rootn":
+        if n == 1:
+            return "inlane"
+        if ux.sign and n % 2 == 0:
+            return "none"
+        r = T._rootn_dyadic(FP32, ux, n)
+        if r is None:
+            return "none"
+        return "inlane" if T._dyadic(ux)[0] == 1 else "exact"
+    if fn == "compound":
+        if n in (0, 1):
+            return "inlane"
+        v = Fraction(-1 if ux.sign else 1) * ux.m * (Fraction(2) ** ux.e) + 1
+        if v <= 0:
+            return "none"
+        v = v ** n
+        if v.denominator & (v.denominator - 1):
+            return "none"
+        num = v.numerator
+        while num and not num & 1:
+            num >>= 1
+        return "exact" if num.bit_length() <= p + 1 else "none"
+    raise ValueError(fn)
+
+
+def exact_lanes():
+    """The lanes of the exact-class legs: every power of two, products of a power of two and a small odd number, the neighbours (one ulp each side) of both, random pool lanes and the specials; both signs."""
+    FP32, ml, routines, sf, T, har = mods()
+    out = {0, 0x80000000, 0x7f800000, 0xff800000, 0x7fc00000, 0x3f800000, 0xbf800000, 0x3f800001, 0x3f7fffff, 0x7f7fffff, 0x00800000, 1}
+    for e in range(0, 255, 5):
+        for mant in (0, 0x400000, 0x200000, 0x500000, 0x600000, 0x7ffffe, 0x000001, 0x100000):
+            v = (e << 23) | mant
+            out |= {v, v + 1, v - 1} if v > 0 else {v}
+    out |= {0x40400000, 0x40a00000, 0x40e00000, 0x41100000, 0x3fc00000, 0x41200000, 0x40490fdb}       # 3, 5, 7, 9, 1.5, 10, pi
+    out |= set(random.Random(9).sample(list(har.pools(FP32)), 40))
+    return sorted({v for v in out if 0 <= v < 0x7fffffff} | {v | 0x80000000 for v in out if 0 <= v < 0x7fffffff})
+
+
+def tool_exact(tool, op, lanes):
+    rc, out, err = tool.raw("exact", op, stdin="".join(f"{x:08x}\n" for x in lanes))
+    rows = [ln.split() for ln in out.splitlines()]
+    if rc != 0 or len(rows) != len(lanes):
+        return None
+    return {int(a, 16): c for a, c in rows}
+
+
+def group_marks_pow(tool, work):
+    """The pow family's marks: the exact class of the tool against golden's three predicates on the lanes of the structured lists, a slice at y = 2 whose marks are all of the exact class, an
+    unmarked power of two (decided in-lane), the exact line, and a doctored predicate red - in the tool's source (a rebuilt tool) and in the reading of golden's (the comparison itself)."""
+    FP32, ml, routines, sf, T, har = mods()
+    lanes = exact_lanes()
+    v42 = has_42(tool)
+    kind_map = {"exact": "exact", "inlane": "inlane", "none": "none"}
+    ys = (0x40000000, 0x3f800000, 0x3fc00000, 0x3f000000, 0xbf800000, 0xc0000000, 0x40400000, 0x3e800000, 0x3eaaaaab, 0x40a00000, 0x41000000, 0x3f400000)
+    allbad = []
+    cnt = {"exact": 0, "inlane": 0, "none": 0}
+    for fn in ("pow", "powr"):
+        if fn in NEEDS_42 and not v42:
+            skip_leg("marks", f"{fn}: the exact class against golden's _pow_dyadic", tool)
+            continue
+        for y in ys:
+            got = tool_exact(tool, f"{fn}-f32-y{y:08x}", lanes)
+            for x in lanes:
+                g = golden_class(T, fn, x, y)
+                if got is None or got[x] != kind_map[g]:
+                    # a lane where golden answers `none` because the result is NaN (x < 0 with a non-integer y) while the tool says `inlane` (x a power of two at an integer exponent) is
+                    # both "not the family": only the family (exact) is held there
+                    if got is not None and g == "none" and got[x] == "inlane" and T.unpack(FP32, x).sign:
+                        continue
+                    allbad.append((fn, hex(x), hex(y), got and got[x], g))
+                else:
+                    cnt[g] += 1
+        check(f"marks: {fn}: the tool's exact class (`routine-sweep exact`) is golden's (_pow_dyadic, _integrality, y = 1 and |x| = 1) on {len(lanes)} lanes at each of {len(ys)} y", not allbad, f"{allbad[:4]} ({len(allbad)})")
+    check(f"marks: ... and the three classes all occur in those lanes (exact {cnt['exact']}, inlane {cnt['inlane']}, none {cnt['none']}): the comparison is not vacuous",
+          all(v > 0 for v in cnt.values()) if v42 else cnt["exact"] > 0 and cnt["inlane"] > 0, str(cnt))
+    ns = (2, -2, 3, -3, 17, 0, 1, 5, 2 ** 31 - 1)
+    nbad = []
+    for fn in NKEYED:
+        if fn in NEEDS_42 and not v42:
+            skip_leg("marks", f"{fn}: the exact class against golden's {'_rootn_dyadic' if fn == 'rootn' else 'exact (1 + x)^n'}", tool)
+            continue
+        for n in ns:
+            if fn == "rootn" and n == 0:
+                continue
+            got = tool_exact(tool, f"{fn}-f32-n{ntoken(n)}", lanes)
+            for x in lanes:
+                g = golden_class(T, fn, x, 0, n) if abs(n) <= 17 or fn != "compound" else None
+                if g is None:
+                    continue
+                if got is None or got[x] != kind_map[g]:
+                    if got is not None and g == "none" and got[x] == "inlane" and fn == "rootn":
+                        continue                              # a negative x with an even n: NaN, which the tool calls inlane for a power of two and golden none: neither is the family
+                    nbad.append((fn, n, hex(x), got and got[x], g))
+        check(f"marks: {fn}: the tool's exact class is golden's on {len(lanes)} lanes at each of {len(ns)} n", not nbad, f"{nbad[:4]} ({len(nbad)})")
+    # a doctored golden predicate is red: _pow_dyadic returning None for everything leaves the tool's `exact` lanes unmatched
+    got = tool_exact(tool, f"pow-f32-y{ys[0]:08x}", lanes)
+    saved = T._pow_dyadic
+    try:
+        T._pow_dyadic = lambda fmt, ux, uy: None
+        red = any(got[x] != golden_class(T, "pow", x, ys[0]) and not (got[x] == "inlane" and golden_class(T, "pow", x, ys[0]) == "none") for x in lanes)
+    finally:
+        T._pow_dyadic = saved
+    check("marks: RED - golden's predicate doctored in memory (_pow_dyadic answers None for every lane) makes the class comparison fail on y = 2", red, "")
+    # the slice at y = 2: every mark is the exact family's, counted apart; an unmarked power of two is decided; the exact line
+    op = f"pow-f32-y{PYS[0]:08x}"
+    lo = 0x40400000
+    rc, text, m = tool.run(op, lo, lo + 0x2000, "all")
+    ok, why = judge_run(rc, text, op, "all", lo, lo + 0x2000, 5)
+    mk = marks_of(text)
+    ex = re.search(rf"^{re.escape(op)} all: (\d+) marked on an exact lane$", text, re.M)
+    named = re.findall(r"^  MARK (\w+) a=0x([0-9a-f]{8}) .*\(exact lane\)$", text, re.M)
+    marked_lanes = sorted({int(a, 16) for _m, a in named})
+    cls = tool_exact(tool, op, marked_lanes) or {}
+    check("marks: pow y = 2 over 2^13 lanes from x = 3: the verdict passes; its marks (10: the lanes 0x40400000 and 0x40401000 under five attributes) are all counted on an exact lane and none off the list; "
+          "the exact line follows the marks line; every MARK line is ' (exact lane)' and its lane is class `exact` in `exact`",
+          ok and mk is not None and mk[0] == 10 and mk[2] == 0 and ex is not None and int(ex.group(1)) == 10 and len(named) == 10 and set(cls.values()) == {"exact"}
+          and text.index("marked (rne") < text.index("marked on an exact lane"), f"{why} {mk} {ex and ex.group(0)} {len(named)} {cls}")
+    check("marks: ... and L.parse_routine_marks reads it, the exact count 10 and each named lane exact",
+          (lambda r: r["exact"] == 10 and r["off_list"] == 0 and all(n["exact"] for n in r["named"]))(L.parse_routine_marks(text, op, "all")), "")
+    lo2 = 0x3ffffc00
+    rc, text2, m2 = tool.run(op, lo2, lo2 + 0x800, "all")
+    ok2, why2 = judge_run(rc, text2, op, "all", lo2, lo2 + 0x800, 5)
+    mk2 = marks_of(text2)
+    check("marks: pow y = 2 over 2^11 lanes around x = 2 (a power of two at an integer exponent, decided in-lane): the verdict passes, nothing marked, the exact line says 0 (an unmarked exact lane is judged "
+          "as any: bits and flags equal MPFR's)", ok2 and mk2 is not None and mk2[0] == 0 and "0 marked on an exact lane" in text2, f"{why2} {mk2}")
+    # the other ops print no exact line and no rule line; pow prints no rule line
+    rc, t_exp, _m = tool.run("exp-f32", 0x33fffffb, 0x34000004, "all")
+    check("marks: exp prints no exact line and no rule line, pow prints an exact line and no rule line (the rule is atan2's alone, the exact line the pow family's)",
+          "marked on an exact lane" not in t_exp and "in the rule" not in t_exp and "marked on an exact lane" in text and "in the rule" not in text, "")
+    # a doctored tool: the in-lane rule for a power-of-two x at an integer exponent removed -> x = 2^k at y = 2 is `exact`, which golden's predicate does not say
+    exe = plant_tool(os.path.join(work, "tree"), work, "inlane_off", [("tools/routine_sweep.c", "            inlane = mpfr_integer_p(p) != 0;\n", "            inlane = 0;\n")])
+    if exe:
+        got2 = tool_exact(Sweep(exe, tool.imgs), op, [0x40800000, 0x40000000, 0x40400000])
+        check("marks: RED - a tool whose in-lane rule for a power of two x is removed calls x = 4 and x = 2 at y = 2 `exact` where golden's predicate (M == 1) says inlane",
+              got2 is not None and got2[0x40800000] == "exact" and got2[0x40000000] == "exact" and got2[0x40400000] == "exact", f"{got2}")
+        rc, text3, m3 = Sweep(exe, tool.imgs).run(op, 0x3ffffc00, 0x3ffffc00 + 0x800, "all")
+        check("marks: ... and a tool without it, over the slice around x = 2 (where nothing is marked), is the same green: the plant is red in the class only, where golden is compared",
+              rc == 0, f"rc {rc}")
 
 
 def slices_of(bits):
@@ -546,13 +914,33 @@ def slices_of(bits):
 
 
 def group_whole(tool, names, bits):
-    n = 1 << bits
     for name in names:
+      if name in NEEDS_42 and not has_42(tool):
+          skip_leg("whole", name, tool)
+          continue
+      pw = name in ("pow", "powr")
+      b = min(bits, 13) if pw else bits               # the pow family is ~1000 instructions a lane: its slices are 2^13 lanes (the others' 2^16)
+      n = 1 << b
       for op, _wrap in ops_of(name):
-        for what, lo in slices_of(bits).items():
+        sl = dict(slices_of(b))
+        if pw:
+            sl["marking, x = 3 and its neighbours"] = 0x40400000       # at y = 2 the lanes 0x40400000 + k 4096 are exact squares of at most 12 bits: they mark
+        for what, lo in sl.items():
             rc, text, m = tool.run(op, lo, lo + n, "all")
             ok, why = judge_run(rc, text, op, "all", lo, lo + n, 5)
-            check(f"whole: {op} all over 2^{bits} lanes {what} [{lo:#x}, +{n:#x}): judged by L.parse_soak", ok, why)
+            check(f"whole: {op} all over 2^{b} lanes {what} [{lo:#x}, +{n:#x}): judged by L.parse_soak", ok, why)
+            if pw and what.startswith("marking") and op.startswith(f"{name}-f32-y"):
+                mk = marks_of(text)
+                ex = re.search(rf"^{re.escape(op)} all: (\d+) marked on an exact lane$", text, re.M)
+                check(f"whole: {op}: the marking slice has marks (10: lanes 0x40400000 and 0x40401000 under five attributes), every one counted as on an exact lane ({ex and ex.group(1)}) and none off the list",
+                      mk is not None and mk[0] == 10 and mk[2] == 0 and ex is not None and int(ex.group(1)) == mk[0], f"{mk} {ex and ex.group(0)}")
+    lo = slices_of(bits)["around 1"]
+    n = 1 << bits
+    for attr in (ATTRS if "exp" in names else ()):      # once, with exp
+        rc, text, m = tool.run("exp-f32", lo, lo + n, attr)
+        ok, why = judge_run(rc, text, "exp-f32", attr, lo, lo + n, 1)
+        check(f"whole: exp {attr} alone over 2^{bits} lanes around 1", ok, why)
+
     lo = slices_of(bits)["around 1"]
     for attr in (ATTRS if "exp" in names else ()):      # once, with exp
         rc, text, m = tool.run("exp-f32", lo, lo + n, attr)
@@ -563,11 +951,15 @@ def group_whole(tool, names, bits):
 def group_fast(tool, names, bits):
     n = 1 << min(bits, 13)
     for name in names:
-        for what, lo in slices_of(bits).items():
-            rc, text, m = tool.run(f"{name}-f32", lo, lo + n, "all", env={"CFT_SWEEP_ORACLE_CHECK": "1"})
-            ok, why = judge_run(rc, text, f"{name}-f32", "all", lo, lo + n, 5)
-            check(f"fast: {name} {what} [{lo:#x}, +{n:#x}) with the oracle beside every lane: no difference (no ORACLE line)",
-                  ok and "ORACLE" not in text, why)
+        if name in NEEDS_42 and not has_42(tool):
+            skip_leg("fast", name, tool)
+            continue
+        for op, _wrap in ops_of(name):
+            for what, lo in slices_of(bits).items():
+                rc, text, m = tool.run(op, lo, lo + n, "all", env={"CFT_SWEEP_ORACLE_CHECK": "1"})
+                ok, why = judge_run(rc, text, op, "all", lo, lo + n, 5)
+                check(f"fast: {op} {what} [{lo:#x}, +{n:#x}) with the oracle beside every lane: no difference (no ORACLE line)",
+                      ok and "ORACLE" not in text, why)
 
 
 def group_refuse(tool, work, imgs):
@@ -584,14 +976,18 @@ def group_refuse(tool, work, imgs):
     refused("a missing attribute", ("exp-f32", 0, 5))
     refused("an unknown attribute", ("exp-f32", 0, 5, "rnx"))
     refused("an unknown name", ("nonesuch-f32", 0, 5, "rne"), "unknown op")
-    n_ = gen_account(open(os.path.join(imgs, "manifest.txt")).read())[0][-1][0]
+    # the last name the generator built that this tool can run (powr, rootn and compound need MPFR 4.2: on an older one the control would be refused for that, not run)
+    built_names = [base_of(k) for k, _ in gen_account(open(os.path.join(imgs, "manifest.txt")).read())[0]]
+    n_ = [b for b in built_names if has_42(tool) or b not in NEEDS_42][-1]
+    suffix_ = {"atan2": "-x3f800000", "pow": "-x40400000", "powr": "-x40400000"}.get(n_, "-n2" if n_ in NKEYED else "")
+    stem_ = f"{n_}-n2" if n_ in NKEYED else n_
     noimg_dir = os.path.join(work, "img-noimage")
     shutil.copytree(imgs, noimg_dir)
     for attr in ("rne", "rtz", "rdn", "rup", "rmm"):
-        os.remove(os.path.join(noimg_dir, f"{n_}-fp32-{attr}.cftp"))
+        os.remove(os.path.join(noimg_dir, f"{stem_}-fp32-{attr}.cftp"))
     refused(f"a name with no image ({n_}, the last the generator built, its five .cftp files removed from a copy of its output)",
-            (f"{n_}-f32" + ("-x3f800000" if n_ == "atan2" else ""), 0, 5, "rne"), f"{n_}-fp32-rne.cftp", imgs=noimg_dir)
-    op_ = f"{n_}-f32" + ("-x3f800000" if n_ == "atan2" else "")
+            (f"{n_}-f32" + suffix_, 0, 5, "rne"), f"{stem_}-fp32-rne.cftp", imgs=noimg_dir)
+    op_ = f"{n_}-f32" + suffix_
     rc, text, m = tool.run(op_, 0, 4, "rne")
     ok, why = judge_run(rc, text, op_, "rne", 0, 4, 1)
     check(f"refuse: CONTROL - the same op ({n_}) over the generator's own output, its images present, is run to a verdict and not refused", ok, why)
@@ -600,6 +996,37 @@ def group_refuse(tool, work, imgs):
     refused("an x with 7 digits", ("atan2-f32-x3f80000", 0, 5, "rne"), "eight hex")
     refused("an x that is not hex", ("atan2-f32-xzzzzzzzz", 0, 5, "rne"))
     refused("an x on a unary name", ("exp-f32-x3f800000", 0, 5, "rne"), "only atan2")
+    # parcel M3X2: each refusal of the pow family's grammar, by its name, nothing run (exit 2 without a verdict)
+    refused("pow with both -x and -y", ("pow-f32-x3f800000-y40000000", 0, 5, "rne"), "exactly one")
+    refused("pow with neither", ("pow-f32", 0, 5, "rne"), "exactly one of")
+    refused("powr with neither (a digest only)", ("powr-f32-d00000000", 0, 5, "rne"), "exactly one of")
+    refused("pow with -y given before -x", ("pow-f32-y40000000-x3f800000", 0, 5, "rne"), "fixes one operand")
+    refused("pow with -x after -d", ("pow-f32-d00000000-x3f800000", 0, 5, "rne"), "before -d")
+    refused("-y on atan2", ("atan2-f32-y3f800000", 0, 5, "rne"), "only pow and powr take -y")
+    refused("-y on a unary name", ("exp-f32-y3f800000", 0, 5, "rne"), "only pow and powr take -y")
+    refused("-n on pow", ("pow-f32-n3", 0, 5, "rne"), "only pown, rootn and compound take -n")
+    refused("-n on a unary name", ("exp-f32-n3", 0, 5, "rne"), "only pown, rootn and compound take -n")
+    refused("-x on pown", ("pown-f32-x3f800000", 0, 5, "rne"), "only atan2")
+    refused("-y on rootn", ("rootn-f32-y3f800000", 0, 5, "rne"), "only pow and powr take -y")
+    refused("pown without its n", ("pown-f32", 0, 5, "rne"), "take their n")
+    refused("an n that is not an integer", ("pown-f32-n3.5", 0, 5, "rne"), "decimal integer")
+    refused("an empty n token", ("pown-f32-n", 0, 5, "rne"), "decimal integer")
+    refused("an n of m alone", ("compound-f32-nm", 0, 5, "rne"), "decimal integer")
+    refused("an n with a minus sign instead of m", ("pown-f32-n-3", 0, 5, "rne"))
+    refused("an n with a leading zero", ("pown-f32-n03", 0, 5, "rne"), "canonical")
+    refused("an n of m0", ("pown-f32-nm0", 0, 5, "rne"), "canonical")
+    refused("an n past int64 (2^63)", ("pown-f32-n9223372036854775808", 0, 5, "rne"), "does not fit int64")
+    refused("an n past int64 (-2^63 - 1)", ("pown-f32-nm9223372036854775809", 0, 5, "rne"), "does not fit int64")
+    refused("an n of 20 digits", ("compound-f32-n99999999999999999999", 0, 5, "rne"), "does not fit int64")
+    if struct.calcsize("l") == 4:
+        refused("an n that fits int64 and not this host's long (3000000000)", ("pown-f32-n3000000000", 0, 5, "rne"), "does not fit this host's long")
+    else:
+        skip("refuse: an n that fits int64 and not the host's long", f"this host's long is {8 * struct.calcsize('l')} bits: every int64 fits (the sweeps run on Linux); a Windows build refuses it by name")
+    refused("rootn's n = 0", ("rootn-f32-n0", 0, 5, "rne"), "n = 0")
+    refused("an n-keyed name at an n with no images (pown n = 4, which N_LIST does not hold)", ("pown-f32-n4", 0, 5, "rne"), "cannot read")
+    refused("`exact` on an op without the exact family", ("exact", "exp-f32"), "only pow, powr")
+    check("refuse: CONTROL - pow at x fixed and at y fixed run to a verdict and are not refused (the same words the refusals above change)",
+          all(judge_run(*tool.run(o, 0x3f800000, 0x3f800004, "rne")[:2], o, "rne", 0x3f800000, 0x3f800004, 1)[0] for o in ("pow-f32-x40400000", "pow-f32-y40000000")), "")
     refused("a digest that is not the images'", ("exp-f32-d00000000", 0, 5, "rne"), "digest")
     rc, out, err = tool.raw("list")
     d = re.search(r"^exp-f32: .*digest (\S+)$", out, re.M).group(1)
@@ -664,6 +1091,20 @@ def group_sabotage(tool, work, names):
     rc, text, m = tool.run("exp-f32", 0x3f800000, 0x3f800010, "rne", env={"CFT_SOAK_SABOTAGE": "3"})
     check("sabotage: =3 over a slice with no marked lane says so on stderr and passes (it sabotages nothing)",
           rc == 0 and "nothing is sabotaged" in text, f"rc {rc} {text[-200:]}")
+    # parcel M3X2: pow at y = 2 over 64 lanes from x = 3 (whose lane 0x40400000 is marked under every attribute)
+    for op in ("pow-f32-y40000000", "pow-f32-x40400000"):
+        lo = 0x40400000
+        for s, want in (("1", "MISMATCH"), ("2", "FLAGS")):
+            rc, text, m = tool.run(op, lo, lo + 64, "all", env={"CFT_SOAK_SABOTAGE": s})
+            check(f"sabotage: {op} =1/2 {s} over 64 lanes exits 1 and prints {want} lines", rc == 1 and f"  {want} " in text, f"rc {rc} {text[-200:]}")
+        rc, text, m = tool.run(op, lo, lo + 64, "all")
+        ok, why = judge_run(rc, text, op, "all", lo, lo + 64, 5)
+        check(f"sabotage: {op} the same slice passes without", ok, why)
+    op, lo = "pow-f32-y40000000", 0x40400000
+    rc, text, m = tool.run(op, lo, lo + 64, "all", env={"CFT_SOAK_SABOTAGE": "3"})
+    mk = marks_of(text)
+    check("sabotage: pow =3 over the slice with x = 3 marked exits 1 on the call's STATUS check (STATUS[6] set and no lane's byte has bit 7) and counts no mark",
+          rc == 1 and "STATUS[6] set and no lane" in text and mk is not None and mk[0] == 0, f"rc {rc} {text[-300:]}")
 
 
 def run_plant_slice(exe, imgs, op, lo, hi, mode, env=None):
@@ -742,6 +1183,14 @@ def group_plants(tool, tree, work, imgs):
         check("plants: the tool stopping one lane early (a call's last lane unjudged) exits 0 with no mismatch and a short count, "
               "and L.parse_soak's cover rule refuses the verdict", rc == 0 and m1 is not None and int(m1.group(3)) < 5 * 256
               and refused_by_cover, f"rc {rc} {m1 and m1.group(0)}")
+    # parcel M3X2: a plant of pow's own (mark_silenced: the mark never set in the flag word), where the control marks x = 3 at y = 2 by design
+    d = plant_imgs("pow_mark_silenced", "--names", "pow", "--plant", "mark_silenced", "--attrs", "rne")
+    rc, text, m, c = run_plant_slice(tool.path, d, "pow-f32-y40000000", 0x40400000, 0x40400100, "rne")
+    check("plants: pow mark_silenced under rne over 256 lanes from x = 3 (y = 2: 3^2 = 9 is exact, and the plant's V is not) is red in value or flag mismatches",
+          rc == 1 and c and (c[1] > 0 or c[2] > 0), f"rc {rc} {c}")
+    rc, text, m, c = run_plant_slice(tool.path, imgs, "pow-f32-y40000000", 0x40400000, 0x40400100, "rne")
+    check("plants: ... CONTROL, the plain pow over the same slice, is green and counts its mark on an exact lane",
+          judge_run(rc, text, "pow-f32-y40000000", "rne", 0x40400000, 0x40400100, 1)[0] and "1 marked on an exact lane" in text, f"{c}")
     # (g) the fast path rounding rup as rtz
     exe = plant_tool(tree, work, "fast_rup", [("tools/routine_sweep.c", "        case 3: away = !sign; break;                    /* rup */\n",
                                                "        case 3: away = 0; break;                        /* rup */\n")])
@@ -752,6 +1201,11 @@ def group_plants(tool, tree, work, imgs):
     rc, text, m, c = run_plant_slice(tool.path, imgs, "exp-f32", 0x3f000000, 0x3f000400, "all", env={"CFT_SWEEP_ORACLE_CHECK": "1"})
     check("plants: ... CONTROL, the real fast path under the same check, is green",
           judge_run(rc, text, "exp-f32", "all", 0x3f000000, 0x3f000400, 5)[0], f"{c}")
+    if exe:
+        rc, text, m, c = run_plant_slice(exe, imgs, "pow-f32-y3fc00000", 0x3f800000, 0x3f800400, "all", env={"CFT_SWEEP_ORACLE_CHECK": "1"})
+        check("plants: ... and the same plant over pow at y = 1.5 (x swept: the two-operand fast path) is red too", rc == 1 and c and c[1] > 0 and "MISMATCH ORACLE rup" in text, f"rc {rc} {c}")
+    rc, text, m, c = run_plant_slice(tool.path, imgs, "pow-f32-y3fc00000", 0x3f800000, 0x3f800400, "all", env={"CFT_SWEEP_ORACLE_CHECK": "1"})
+    check("plants: ... CONTROL, the real fast path over pow at y = 1.5 under the same check, is green", judge_run(rc, text, "pow-f32-y3fc00000", "all", 0x3f800000, 0x3f800400, 5)[0], f"{c}")
 
 
 RULE_X = X9 + (0x40400000, 0x3fffffff, 0x1f800000, 0x00000f00)     # the nine x, 3, a full significand just under 2, 2^-62, a subnormal
@@ -1018,6 +1472,36 @@ def group_legs(tool, imgs, work):
         check(f"legs: judge_run fails on its own, doctored {leg}", not ok, "")
     mk = marks_of(text)
     check("legs: marks_of reads the marks line and a doctored line has no parse", mk is not None and marks_of(text.replace("guesses", "gesses")) is None, f"{mk}")
+    # the exact line, read by the driver's parser (hw/card_stress_lib.py): green on a real pow log, each damage refused by name, and refused for an op that has no exact family
+    pop = "pow-f32-y40000000"
+    rcp, ptext, _mp = tool.run(pop, 0x40400000, 0x40400010, "all")
+    pr = None
+    try:
+        pr = L.parse_routine_marks(ptext, pop, "all")
+    except L.VerdictError as e:
+        pr = str(e)
+    check("legs: parse_routine_marks reads a real pow log, the exact line 5 and its five MARK lines exact", isinstance(pr, dict) and pr["exact"] == 5 and sum(n["exact"] for n in pr["named"]) == 5, f"{pr}")
+    damaged = {
+        "the exact line gone": re.sub(r"^.*marked on an exact lane\n", "", ptext, flags=re.M),
+        "the exact count above the total": ptext.replace("5 marked on an exact lane", "6 marked on an exact lane"),
+        "the exact count with off the list over it": ptext.replace("0 off the list", "1 off the list").replace("5 marked on an exact lane", "5 marked on an exact lane"),
+        "another op's exact line": ptext.replace("pow-f32-y40000000 all: 5 marked on", "pow-f32-y40000001 all: 5 marked on"),
+        "a MARK line that is not exact": ptext.replace(" (exact lane)", "", 1),
+        "a second exact line": ptext + "pow-f32-y40000000 all: 5 marked on an exact lane\n",
+    }
+    for what, t in damaged.items():
+        try:
+            L.parse_routine_marks(t, pop, "all")
+            red = False
+        except L.VerdictError:
+            red = True
+        check(f"legs: parse_routine_marks refuses a pow log with {what}", red, "")
+    try:
+        L.parse_routine_marks(tool.run("exp-f32", 0x33fffffb, 0x34000004, "all")[1] + "exp-f32 all: 0 marked on an exact lane\n", "exp-f32", "all")
+        red = False
+    except L.VerdictError:
+        red = True
+    check("legs: ... and refuses an exact line in the log of an op that has none (exp)", red, "")
     a = {1: (0x3f800000, 0x10), 2: (0x40000000, 0x10)}
     check("legs: diff_oracle is empty on equal maps", not diff_oracle(a, dict(a)), "")
     check("legs: diff_oracle sees a bits difference", bool(diff_oracle(a, {1: (0x3f800001, 0x10), 2: a[2]})), "")
@@ -1044,6 +1528,23 @@ def group_legs(tool, imgs, work):
     check("legs: the marks comparison is red when Python counts the plain fragment (0) against the tool's G' = 6 images' marks over "
           f"the same 256 lanes ({mk2 and mk2[1][1]}); its other leg, the wrong-guess count, is the plain fragment's 0 against the tool's "
           f"({mk and mk[3]})", rc2 == 0 and mk2 is not None and py_plain == 0 and mk2[1][1] > 0, f"{mk2} {py_plain}")
+    # the lead's box script (hw/card_stress_fixtures/box_m3x2_fixtures.sh): its exit status fails on a doctored job, and is 0 on the real tool where the tool's MPFR is 4.2.0 or newer
+    script = os.path.join(HERE, "card_stress_fixtures", "box_m3x2_fixtures.sh")
+    bad_tool = os.path.join(work, "not-the-tool.sh")
+    with open(bad_tool, "w", newline="\n") as fh:
+        fh.write("#!/bin/sh\nexit 0\n")
+    os.chmod(bad_tool, 0o755)
+    p1 = subprocess.run(["bash", script, ROOT, bad_tool, os.path.join(work, "box-bad")], capture_output=True, text=True, timeout=600, env=dict(os.environ, PYTHON=sys.executable))
+    check("legs: box_m3x2_fixtures.sh with a tool that is not routine-sweep (it exits 0 and prints nothing) exits 1 and names each log that lacks its line", p1.returncode == 1 and "the log lacks" in p1.stderr, f"rc {p1.returncode} {p1.stderr[-200:]}")
+    if has_42(tool):
+        p3 = subprocess.run(["bash", script, ROOT, tool.path, os.path.join(work, "box-good")], capture_output=True, text=True, timeout=600, env=dict(os.environ, PYTHON=sys.executable))
+        rows = [ln.split("\t") for ln in p3.stdout.splitlines()]
+        check("legs: ... and with the real tool (MPFR 4.2 or newer) exits 0, eight logs and their INDEX rows (name, exit status, command, seconds), the powr slice's exact line 5",
+              p3.returncode == 0 and len(rows) == 8 and all(len(r) == 3 for r in rows) and "5 marked on an exact lane" in open(os.path.join(work, "box-good", "rs3-box-powr-y-exact-all.txt")).read(), f"rc {p3.returncode} {p3.stderr[-200:]}")
+    else:
+        skip("legs: box_m3x2_fixtures.sh with the real tool exits 0", f"needs MPFR 4.2.0, this build has {mpfr_version(tool)[3]}: powr is refused at run time here, and the script exits 1 for it by design (the lead runs it on the box)")
+        p2 = subprocess.run(["bash", script, ROOT, tool.path, os.path.join(work, "box-bad2")], capture_output=True, text=True, timeout=600, env=dict(os.environ, PYTHON=sys.executable))
+        check("legs: ... and with the real tool on an MPFR below 4.2 it exits 1 (powr refused, exit 3, and its log lacks the exact line): a doctored environment is red", p2.returncode == 1, f"rc {p2.returncode}")
     got, _ = tool_oracle(tool, "exp-f32", "rne", [0x3f800000, 0x7fa00001])
     check("legs: tool_oracle's reading of the tool is the transcend value for exp(1) and exp(sNaN)",
           got == {0x3f800000: (0x402df854, 0x10), 0x7fa00001: (0x7fc00000, 0x01)}, f"{got}")
@@ -1058,7 +1559,7 @@ def main() -> int:
         return args[args.index(name) + 1] if name in args else default
 
     only = set(opt("--only").split(",")) if opt("--only") else None
-    names = tuple(opt("--names", ",".join(NINE)).split(","))
+    names = tuple(opt("--names", ",".join(NINE + ("pow", "powr"))).split(","))      # the nine, and (parcel M3X2) pow and powr, whose powr legs need MPFR 4.2 and are skipped by name below it
     bits = int(opt("--slice-bits", "16"))
     rate_lanes = int(opt("--rate-lanes", str(1 << 18)))
     base = opt("--baseline-tree")
@@ -1101,7 +1602,7 @@ def main() -> int:
                                      ("whole", lambda: group_whole(tool, names, bits)),
                                      ("fast", lambda: group_fast(tool, names, bits)),
                                      ("refuse", lambda: group_refuse(tool, work, imgs)),
-                                     ("sabotage", lambda: group_sabotage(tool, work, names)),
+                                     ("sabotage", lambda: group_sabotage(tool, work, tuple(n for n in names if n not in ("pow", "powr")))),   # pow and powr have their own legs inside the group (--bound-shift 34 is the one-word routines' device)
                                      ("plants", lambda: group_plants(tool, tree, work, imgs)),
                                      ("rule", lambda: group_rule(tool, tree, work, imgs, base)),
                                      ("unchanged", lambda: group_unchanged(ROOT, base, work)),

@@ -10,18 +10,25 @@
  *
  *   routine-sweep <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>
  *   routine-sweep oracle <op> <rne|rtz|rdn|rup|rmm>      hex lanes on stdin, "lane result flags" a line each out; no device, no image
- *   routine-sweep list                                   the thirteen, each with its images found or `no image`
+ *   routine-sweep list                                   the eighteen, each with its images found or `no image` (pown, rootn and compound: a row for each n found)
  *   routine-sweep rule atan2-f32-x<8 hex digits>         hex y lanes on stdin, "lane none|must|band" a line each out: atan2's rule's class of each (below)
+ *   routine-sweep exact <pow, powr, pown, rootn or compound op>   hex swept lanes on stdin, "lane none|exact|inlane" a line each out: the exact family's class (below)
  *
  * op is <name>-f32 for exp, exp2, expm1, log, log2, log1p, sin, cos, tan, atan, asin and acos, and atan2-f32-x<8 hex digits> for
- * atan2 with x fixed and y swept (r0 the lanes' y, r1 the fixed x). Any op may end -d<8 hex digits>, the first 32 bits of the
+ * atan2 with x fixed and y swept (r0 the lanes' y, r1 the fixed x). The pow family (parcel M3X2): pow-f32-x<8 hex digits> and powr-f32-x<8 hex digits>
+ * fix x and sweep y (stream a holds the fixed x, stream b the swept lanes), pow-f32-y<8 hex digits> and powr-f32-y<8 hex digits> fix y and sweep x
+ * (stream a the swept lanes, stream b the fixed y); exactly one of -x and -y, which for atan2 keeps its meaning (atan2's fixed second operand) and no
+ * other op takes. pown-f32-n<token>, rootn-f32-n<token> and compound-f32-n<token> sweep x for a fixed integer n, the token decimal with an m for a
+ * minus (n3, nm3, n17, n2147483647, nm9223372036854775808); an n beyond int64 or this host's long (32 bits on Windows) is exit 2, naming it, and rootn's
+ * n = 0 is refused. In every verdict line `a=` is the SWEPT lane, whichever stream it is in. Any op may end -d<8 hex digits>, the first 32 bits of the
  * sha256 of the five attributes' image and bank bytes, rne to rmm (image then bank, each attribute): a digest that is not the
  * images' is exit 2, which is how a slice is tied to the fragment it ran. [lo, hi) is 0 <= lo < hi <= 2^32, decimal or 0x; a
  * slice is any part of the space and a run keeps no state.
  *
  * THE IMAGES are the compiled shape of the routine's fragment (python/tests/mathlib_harness.r24_program), written by
  * host/tools/gen_sweep_images.py as <name>-fp32-<attr>.cftp (the program), .bank (its constants) and .marks (the lanes that must
- * mark, one hex word a line). They are read from CFT_SWEEP_IMAGES, else from sweep-images/ beside the binary. A missing or
+ * mark, one hex word a line; empty for pow, powr, pown, rootn and compound, whose marks are the exact family's, below). The stem of pown, rootn and
+ * compound is <name>-n<token>, one set a n; `list` looks for the seven n of NLIST. They are read from CFT_SWEEP_IMAGES, else from sweep-images/ beside the binary. A missing or
  * unreadable file, a load the device refuses, or a bank that is not the program's n_consts words is exit 2, naming the file and
  * cft_last_error(). Atan, asin, acos and atan2 have an image only once parcels M4F1 and M4F2 are merged.
  *
@@ -43,6 +50,14 @@
  * is, and fails the slice. After the marks line comes
  *     <op> <mode>: R in the rule (must mark P, band B), Q must-mark lanes not marked
  * and a MARK line in the rule ends " (in the rule: must mark)" or " (in the rule: band)". No other op prints these.
+ * THE EXACT FAMILY, for pow, powr, pown, rootn and compound ops and no other op: the routine marks by design a lane whose true result is exact (at most
+ * p + 1 = 25 significant bits: a point or a midpoint of the grid), except where it decides in-lane (a power of two x at an integer exponent, y = 1, n = 0
+ * and 1: docs/studies/M3-pow.md 2.7, question 4 (a)). exact_class below says which; a marked lane of the family is counted in
+ * the line that follows the marks line
+ *     <op> <mode>: X marked on an exact lane
+ * and not as "off the list", and its MARK line ends " (exact lane)" (these have a budget of sixteen of their own, so that a slice of thousands of them does
+ * not hide an off-list mark); a mark on a lane that is not the family, or that golden decides in-lane, is "off the list", as for any op. An unmarked exact
+ * lane is judged as any unmarked lane: nothing "must mark".
  * Each call is held as mathlib_harness.check_r24 holds one: the OR of the bytes' [4:0] is flags_out; STATUS[6] is set exactly
  * when a byte's bit 7 is; no byte has [6:5]; every count is 1; STATUS has no other bit. A failure is a flag mismatch, named by
  * the call's range.
@@ -105,12 +120,24 @@
 static const fdesc F32 = { "fp32", CFT_FP32, 8, 23, 24, 127, -126, 4 };
 #define QNAN32 0x7fc00000u
 
-typedef struct { const char *name; int fn; } rtn;
-static const rtn RTNS[13] = {
-    { "exp", TF_EXP }, { "exp2", TF_EXP2 }, { "expm1", TF_EXPM1 }, { "log", TF_LOG }, { "log2", TF_LOG2 },
-    { "log1p", TF_LOG1P }, { "sin", TF_SIN }, { "cos", TF_COS }, { "tan", TF_TAN }, { "atan", TF_ATAN },
-    { "asin", TF_ASIN }, { "acos", TF_ACOS }, { "atan2", TF_ATAN2 },
+/* kind: how an op word fixes the operands. K_UNARY: x swept, nothing fixed. K_ATAN2: the first operand y swept and the second x fixed (-x).
+ * K_POW: pow and powr, either y swept for a fixed x (-x) or x swept for a fixed y (-y). K_NKEY: pown, rootn, compound, x swept for a fixed
+ * integer n (-n<token>), whose images are one set a n. */
+enum { K_UNARY, K_ATAN2, K_POW, K_NKEY };
+typedef struct { const char *name; int fn; int kind; } rtn;
+#define NRTN 18
+static const rtn RTNS[NRTN] = {
+    { "exp", TF_EXP, K_UNARY }, { "exp2", TF_EXP2, K_UNARY }, { "expm1", TF_EXPM1, K_UNARY }, { "log", TF_LOG, K_UNARY },
+    { "log2", TF_LOG2, K_UNARY }, { "log1p", TF_LOG1P, K_UNARY }, { "sin", TF_SIN, K_UNARY }, { "cos", TF_COS, K_UNARY },
+    { "tan", TF_TAN, K_UNARY }, { "atan", TF_ATAN, K_UNARY }, { "asin", TF_ASIN, K_UNARY }, { "acos", TF_ACOS, K_UNARY },
+    { "atan2", TF_ATAN2, K_ATAN2 },
+    { "pow", TF_POW, K_POW }, { "powr", TF_POWR, K_POW },
+    { "pown", TF_POWN, K_NKEY }, { "rootn", TF_ROOTN, K_NKEY }, { "compound", TF_COMPOUND, K_NKEY },
 };
+/* The n the images of pown, rootn and compound are built for, in the generator's order: gen_sweep_images.py's N_LIST is the other copy
+ * (hw/test_routine_sweep.py holds the two equal). `list` looks for these and no others. */
+#define NNLIST 7
+static const int64_t NLIST[NNLIST] = { 2, -2, 3, -3, 17, 2147483647, INT64_MIN };
 static const struct { const char *name; mpfr_rnd_t mr; int rmm; } ATT[5] = {
     { "rne", MPFR_RNDN, 0 }, { "rtz", MPFR_RNDZ, 0 }, { "rdn", MPFR_RNDD, 0 }, { "rup", MPFR_RNDU, 0 },
     { "rmm", MPFR_RNDN, 1 },
@@ -119,7 +146,8 @@ static const struct { const char *name; mpfr_rnd_t mr; int rmm; } ATT[5] = {
 static cft_device *dev;
 static uint64_t cases, vmis, fmis, nmarked[5], off_list, wrong_guess;
 static uint64_t in_must, in_band, must_unmarked;   /* atan2: marks in the rule's must-mark range and band; must-mark lanes left unmarked */
-static int shown_m, shown_f, shown_k;
+static uint64_t exact_marked;             /* the pow family: marks on a lane of the exact family (exact_class 1), counted apart from "off the list" */
+static int shown_m, shown_f, shown_k, shown_e;
 static int sabotage;                       /* 0, or CFT_SOAK_SABOTAGE's 1, 2 or 3 */
 static uint64_t sab3_cleared;              /* sabotage 3: the marks it cleared */
 static double t_device, t_oracle_s;
@@ -191,16 +219,77 @@ static int parse_hex8(const char *s, uint32_t *out)
     return 1;
 }
 
-typedef struct { int ri; int has_x; uint32_t x; int has_d; uint32_t d; } opspec;
+typedef struct {
+    int ri;
+    int has_x; uint32_t x;                 /* -x: atan2's fixed second operand, or pow's and powr's fixed x (y swept) */
+    int has_y; uint32_t y;                 /* -y: pow's and powr's fixed y (x swept) */
+    int has_n; long n; char ntok[24];      /* -n: the n of pown, rootn and compound; ntok its canonical token (n3 is "3", n-3 is "m3") */
+    int has_d; uint32_t d;
+} opspec;
 
-/* <name>-f32[-x<8 hex>][-d<8 hex>]; x belongs to atan2 and atan2 requires it. 0 and a message on failure. */
+/* n as the op word's token: the decimal digits, an `m` for a minus. */
+static void ntoken(int64_t n, char *out, size_t cap)
+{
+    uint64_t u = n < 0 ? (uint64_t)0 - (uint64_t)n : (uint64_t)n;
+    snprintf(out, cap, "%s%llu", n < 0 ? "m" : "", (unsigned long long)u);
+}
+
+/* The n token (after the `n`): `m`? then decimal digits, no leading zero, no `m0`; it must fit int64 and then this host's long. */
+static int parse_ntoken(const char *t, size_t len, long *out, const char **why)
+{
+    uint64_t v = 0;
+    size_t i = 0;
+    int neg = 0;
+    if (len && t[0] == 'm') {
+        neg = 1;
+        i = 1;
+    }
+    if (i >= len) {
+        *why = "-n takes a decimal integer, m for a minus (n3, nm3, n17, n2147483647, nm9223372036854775808)";
+        return 0;
+    }
+    if (t[i] == '0' && (len - i > 1 || neg)) {
+        *why = "the n token is canonical: no leading zero, and no m0 (n0 is zero)";
+        return 0;
+    }
+    for (; i < len; i++) {
+        unsigned d;
+        if (t[i] < '0' || t[i] > '9') {
+            *why = "-n takes a decimal integer, m for a minus (n3, nm3, n17, n2147483647, nm9223372036854775808)";
+            return 0;
+        }
+        d = (unsigned)(t[i] - '0');
+        if (v > (UINT64_MAX - d) / 10) {
+            *why = "n does not fit int64";
+            return 0;
+        }
+        v = v * 10 + d;
+    }
+    if (neg ? v > ((uint64_t)1 << 63) : v > (((uint64_t)1 << 63) - 1)) {
+        *why = "n does not fit int64";
+        return 0;
+    }
+    {
+        int64_t n64 = neg ? (int64_t)((uint64_t)0 - v) : (int64_t)v;
+        if ((int64_t)(long)n64 != n64) {
+            *why = "n does not fit this host's long (MPFR's integer operand: 32 bits on Windows; the sweeps run on Linux, where it is 64)";
+            return 0;
+        }
+        *out = (long)n64;
+    }
+    return 1;
+}
+
+/* <name>-f32 then, by the name's kind, -x<8 hex> (atan2; pow and powr with y swept), -y<8 hex> (pow and powr, x swept) or -n<token> (pown, rootn,
+ * compound), then -d<8 hex> for any. 0 and a message on failure. */
 static int parse_op(const char *s, opspec *o, const char **why)
 {
     size_t k, nl;
     const char *rest = NULL;
+    int kind, fixed = 0;
     memset(o, 0, sizeof *o);
     o->ri = -1;
-    for (k = 0; k < 13; k++) {
+    for (k = 0; k < NRTN; k++) {
         nl = strlen(RTNS[k].name);
         if (!strncmp(s, RTNS[k].name, nl) && !strncmp(s + nl, "-f32", 4) &&
             (s[nl + 4] == 0 || s[nl + 4] == '-')) {
@@ -210,51 +299,96 @@ static int parse_op(const char *s, opspec *o, const char **why)
         }
     }
     if (o->ri < 0) {
-        *why = "unknown op (the thirteen are exp exp2 expm1 log log2 log1p sin cos tan atan asin acos atan2, each as <name>-f32)";
+        *why = "unknown op (the eighteen are exp exp2 expm1 log log2 log1p sin cos tan atan asin acos atan2 pow powr pown rootn compound, "
+               "each as <name>-f32 and the suffix its kind takes)";
         return 0;
     }
-    /* walk the suffixes by hand: -x<8> then -d<8> */
-    rest = s + strlen(RTNS[o->ri].name) + 4;
+    kind = RTNS[o->ri].kind;
+    /* walk the suffixes by hand: one of -x -y -n, then -d */
     while (*rest) {
         char buf[9];
         uint32_t v;
-        if (rest[0] != '-' || (rest[1] != 'x' && rest[1] != 'd')) {
-            *why = "bad suffix (after <name>-f32 only -x<8 hex digits> and -d<8 hex digits> may follow)";
+        int c = rest[0] == '-' ? rest[1] : 0;
+        if (c != 'x' && c != 'y' && c != 'n' && c != 'd') {
+            *why = "bad suffix (after <name>-f32 only -x<8 hex digits>, -y<8 hex digits>, -n<integer> and -d<8 hex digits> may follow)";
             return 0;
         }
+        if (c == 'n') {
+            size_t len = 0;
+            const char *t = rest + 2;
+            while (t[len] && t[len] != '-')
+                len++;
+            if (o->has_d || fixed) {
+                *why = fixed ? "an op word fixes one operand: -x, -y or -n is given once, before -d" : "-n is given before -d";
+                return 0;
+            }
+            if (kind != K_NKEY) {
+                *why = "only pown, rootn and compound take -n";
+                return 0;
+            }
+            if (!parse_ntoken(t, len, &o->n, why))
+                return 0;
+            memcpy(o->ntok, t, len);
+            o->ntok[len] = 0;
+            o->has_n = 1;
+            fixed = 1;
+            rest = t + len;
+            continue;
+        }
         if (strlen(rest) < 10) {
-            *why = "a -x or -d word is exactly eight hex digits";
+            *why = "a -x, -y or -d word is exactly eight hex digits";
             return 0;
         }
         memcpy(buf, rest + 2, 8);
         buf[8] = 0;
         if (!parse_hex8(buf, &v)) {
-            *why = "a -x or -d word is exactly eight hex digits";
+            *why = "a -x, -y or -d word is exactly eight hex digits";
             return 0;
         }
-        if (rest[1] == 'x') {
-            if (o->has_x || o->has_d) {
-                *why = "-x is given once, before -d";
-                return 0;
-            }
-            o->has_x = 1;
-            o->x = v;
-        } else {
+        if (c == 'd') {
             if (o->has_d) {
                 *why = "-d is given once";
                 return 0;
             }
             o->has_d = 1;
             o->d = v;
+        } else {
+            if (o->has_d || fixed) {
+                *why = fixed ? "an op word fixes one operand: exactly one of -x and -y for pow and powr, -x for atan2, -n for pown, rootn and "
+                               "compound, given once and before -d"
+                             : "-x and -y are given before -d";
+                return 0;
+            }
+            if (c == 'x' ? (kind != K_ATAN2 && kind != K_POW) : kind != K_POW) {
+                *why = c == 'x' ? "only atan2 (the fixed second operand of atan2(y, x)) and pow and powr (x fixed, y swept) take -x"
+                                : "only pow and powr take -y (y fixed, x swept)";
+                return 0;
+            }
+            if (c == 'x') {
+                o->has_x = 1;
+                o->x = v;
+            } else {
+                o->has_y = 1;
+                o->y = v;
+            }
+            fixed = 1;
         }
         rest += 10;
     }
-    if (RTNS[o->ri].fn == TF_ATAN2 && !o->has_x) {
+    if (kind == K_ATAN2 && !o->has_x) {
         *why = "atan2 takes its fixed x as atan2-f32-x<8 hex digits>";
         return 0;
     }
-    if (RTNS[o->ri].fn != TF_ATAN2 && o->has_x) {
-        *why = "only atan2 takes -x";
+    if (kind == K_POW && !o->has_x && !o->has_y) {
+        *why = "pow and powr take exactly one of -x<8 hex digits> (x fixed, y swept) and -y<8 hex digits> (y fixed, x swept)";
+        return 0;
+    }
+    if (kind == K_NKEY && !o->has_n) {
+        *why = "pown, rootn and compound take their n as <name>-f32-n<integer> (nm3 for -3)";
+        return 0;
+    }
+    if (RTNS[o->ri].fn == TF_ROOTN && o->n == 0) {
+        *why = "rootn's n = 0 is invalid for every x (a constant the compiler refuses), and there is no sweep of it";
         return 0;
     }
     return 1;
@@ -294,9 +428,18 @@ static void set_imgdir(const char *argv0)
     }
 }
 
-static void path_of(char *buf, size_t n, int ri, int m, const char *ext)
+/* the images' stem: <name>, or <name>-n<token> for pown, rootn and compound (one set of five a n) */
+static void stem_of(char *buf, size_t n, int ri, const char *ntok)
 {
-    snprintf(buf, n, "%s/%s-fp32-%s.%s", imgdir, RTNS[ri].name, ATT[m].name, ext);
+    if (RTNS[ri].kind == K_NKEY)
+        snprintf(buf, n, "%s-n%s", RTNS[ri].name, ntok);
+    else
+        snprintf(buf, n, "%s", RTNS[ri].name);
+}
+
+static void path_of(char *buf, size_t n, const char *stem, int m, const char *ext)
+{
+    snprintf(buf, n, "%s/%s-fp32-%s.%s", imgdir, stem, ATT[m].name, ext);
 }
 
 /* 0 and *why filled on failure; the buffer is malloc'd (one spare byte). */
@@ -364,7 +507,7 @@ static int cmp_u32(const void *a, const void *b)
 }
 
 /* Read the three files of (routine, attribute). 0 and a message on a missing or bad file. */
-static int load_files(int ri, int m, image *im, char *msg, size_t msgn)
+static int load_files(const char *stem, int m, image *im, char *msg, size_t msgn)
 {
     char mpath[1100];
     uint8_t *mk = NULL, *cat;
@@ -373,9 +516,9 @@ static int load_files(int ri, int m, image *im, char *msg, size_t msgn)
     int digits = 0;
     uint8_t d32[32];
     memset(im, 0, sizeof *im);
-    path_of(im->ipath, sizeof im->ipath, ri, m, "cftp");
-    path_of(im->bpath, sizeof im->bpath, ri, m, "bank");
-    path_of(mpath, sizeof mpath, ri, m, "marks");
+    path_of(im->ipath, sizeof im->ipath, stem, m, "cftp");
+    path_of(im->bpath, sizeof im->bpath, stem, m, "bank");
+    path_of(mpath, sizeof mpath, stem, m, "marks");
     if (!read_file(im->ipath, &im->img, &im->imgn)) {
         snprintf(msg, msgn, "cannot read %s", im->ipath);
         return 0;
@@ -480,12 +623,12 @@ static uint32_t mpfr_to_bits(const mpfr_t v)
 }
 
 /* ieee_tfn_oracle for one lane under attribute m: the answer's bits and the contract's flags. */
-static void slow_lane(int fn, int m, uint32_t a, uint32_t bx, uint32_t *bits, uint32_t *flags)
+static void slow_lane(int fn, int m, uint32_t a, uint32_t bx, long nn, uint32_t *bits, uint32_t *flags)
 {
     uint8_t ba[4], bb[4];
     put32(ba, a);
     put32(bb, bx);                         /* a unary call passes a real word: tfn_class_flags reads bb */
-    ieee_tfn_oracle(&F32, fn, ATT[m].mr, ATT[m].rmm, ba, bb, 0, o_out, flags);
+    ieee_tfn_oracle(&F32, fn, ATT[m].mr, ATT[m].rmm, ba, bb, nn, o_out, flags);
     *bits = mpfr_to_bits(o_out);
 }
 
@@ -493,7 +636,7 @@ static mpfr_t j_w;                         /* judge()'s, precision 24 */
 static mpfr_t f_a, f_b, f_y;               /* the fast path's: precisions 24, 24, 25 */
 
 /* The fast path (see the header). 1 and the five attributes' bits and flags if the lane is on it, else 0. */
-static int fast_lane(int fn, uint32_t a, uint32_t bx, uint32_t ob[5], uint32_t of[5])
+static int fast_lane(int fn, uint32_t a, uint32_t bx, long nn, uint32_t ob[5], uint32_t of[5])
 {
     uint8_t ba[4], bb[4];
     cls ca, cb;
@@ -507,7 +650,7 @@ static int fast_lane(int fn, uint32_t a, uint32_t bx, uint32_t ob[5], uint32_t o
     classify(&F32, ba, &ca);
     if (ca.is_nan || ca.is_inf || ca.is_zero)
         return 0;
-    if (fn == TF_ATAN2) {
+    if (TFN_NARGS[fn] == 2) {              /* atan2, pow, powr: both operands; the n of pown, rootn and compound is not a lane */
         classify(&F32, bb, &cb);
         if (cb.is_nan || cb.is_inf || cb.is_zero)
             return 0;
@@ -517,7 +660,7 @@ static int fast_lane(int fn, uint32_t a, uint32_t bx, uint32_t ob[5], uint32_t o
     mpfr_set_emin(mpfr_get_emin_min());
     mpfr_set_emax(mpfr_get_emax_max());
     mpfr_clear_flags();
-    t = raw_tfn(f_y, fn, f_a, f_b, 0, MPFR_RNDZ);
+    t = raw_tfn(f_y, fn, f_a, f_b, nn, MPFR_RNDZ);
     ok = mpfr_number_p(f_y) && !mpfr_zero_p(f_y) && t != 0 && !mpfr_overflow_p() && !mpfr_underflow_p();
     if (ok) {
         mpfr_exp_t e = mpfr_get_exp(f_y);             /* |y| in [2^(e-1), 2^e) */
@@ -563,6 +706,83 @@ static int fast_lane(int fn, uint32_t a, uint32_t bx, uint32_t ob[5], uint32_t o
     return 1;
 }
 
+/* ---- the exact family (pow, powr, pown, rootn, compound) -------------------------------------------------------------------------------- */
+
+/* A marked lane's value can be exact, and then the routine marks it by design (docs/studies/M3-pow.md 2.7, question 4 (a)): its core's V is within
+ * Bv of the exact value, so a rounding boundary is marked. The family is every lane whose true result f(x, y) or f(x, n) is a number of at most p + 1 = 25
+ * significant bits: a point of the 24-bit grid or a midpoint of it, which is exactly the value golden's _pow_dyadic, _pown_dyadic and _rootn_dyadic
+ * return an (m, e) for with m under p + 2 bits (python/cft_golden/transcend.py). Here that is MPFR's ternary 0 at precision 25 with the widest
+ * exponents, the fast path's own construction, and the operands finite and not zero.
+ * Golden decides some of those in-lane, and the routine does too, so a MARK on one is a fault, not the family: x a power of two at an exponent t = y E
+ * that is an integer (2^n, 0.5^n, 4^0.5, and |x| = 1), y = 1, and for the n-keyed names n = 0 and n = 1 and, for pown, a power of two x, for rootn a
+ * power of two x with |n| dividing E. compound has no golden predicate (transcend.py has no _compound_dyadic): its family is the 25-bit rule alone.
+ * exact_class: 0 not the family (a mark is "off the list"), 1 the family (a mark is counted as exact), 2 decided in-lane (a mark is a fault, "off the list"). */
+static int pow2_regular(const mpfr_t v)
+{
+    return mpfr_regular_p(v) && mpfr_min_prec(v) == 1;
+}
+
+static int exact_class(int fn, uint32_t a, uint32_t bx, long nn)
+{
+    uint8_t ba[4], bb[4];
+    cls ca, cb;
+    mpfr_exp_t save_emin = mpfr_get_emin(), save_emax = mpfr_get_emax();
+    int t, inlane = 0, exact;
+    put32(ba, a);
+    put32(bb, bx);
+    classify(&F32, ba, &ca);
+    if (ca.is_nan || ca.is_inf || ca.is_zero)
+        return 0;
+    if (TFN_NARGS[fn] == 2) {
+        classify(&F32, bb, &cb);
+        if (cb.is_nan || cb.is_inf || cb.is_zero)
+            return 0;
+    }
+    enc_to_mpfr(&F32, ba, f_a);
+    enc_to_mpfr(&F32, bb, f_b);
+    switch (fn) {
+    case TF_POW:
+    case TF_POWR:
+        if (mpfr_cmp_ui(f_b, 1) == 0)
+            inlane = 1;
+        else if (pow2_regular(f_a)) {
+            mpfr_t p;
+            mpfr_init2(p, 64);
+            mpfr_mul_si(p, f_b, (long)mpfr_get_exp(f_a) - 1, MPFR_RNDN);   /* 24 bits times at most 8: exact */
+            inlane = mpfr_integer_p(p) != 0;
+            mpfr_clear(p);
+        }
+        break;
+    case TF_POWN:
+        inlane = nn == 0 || nn == 1 || pow2_regular(f_a);
+        break;
+    case TF_ROOTN:
+        if (nn == 1)
+            inlane = 1;
+        else if (pow2_regular(f_a) && nn != 0) {
+            unsigned long k = nn < 0 ? 0ul - (unsigned long)nn : (unsigned long)nn;
+            long e = (long)mpfr_get_exp(f_a) - 1;
+            inlane = ((unsigned long)(e < 0 ? -e : e)) % k == 0;
+        }
+        break;
+    case TF_COMPOUND:
+        inlane = nn == 0 || nn == 1;
+        break;
+    default:
+        return 0;
+    }
+    mpfr_set_emin(mpfr_get_emin_min());
+    mpfr_set_emax(mpfr_get_emax_max());
+    mpfr_clear_flags();
+    t = raw_tfn(f_y, fn, f_a, f_b, nn, MPFR_RNDZ);
+    exact = t == 0 && mpfr_regular_p(f_y) && !mpfr_overflow_p() && !mpfr_underflow_p();
+    mpfr_set_emin(save_emin);
+    mpfr_set_emax(save_emax);
+    if (inlane)
+        return 2;
+    return exact ? 1 : 0;
+}
+
 /* ---- reporting ----------------------------------------------------- */
 
 static void rep_mismatch(const char *what, const char *mode, uint32_t a, uint32_t lib, uint32_t want, const char *who)
@@ -584,7 +804,12 @@ static void rep_flags(const char *mode, uint32_t a, uint32_t lib, uint32_t want,
 typedef struct {
     int ri, fn, mode;                      /* mode: 0..4 one attribute, 5 all */
     int first, last;                       /* attributes run: first..last */
-    uint32_t x;
+    uint32_t x;                            /* atan2's fixed x (the rule's) */
+    uint32_t fix;                          /* the fixed operand's word, whichever the op fixes (0 for a unary op) */
+    int shape;                             /* 0 one operand (and n for the n-keyed), 1 swept lane is operand a, fixed is b, 2 fixed is a, swept is b */
+    long nn;                               /* the n of pown, rootn, compound (else 0) */
+    int fam;                               /* pow, powr, pown, rootn, compound: the exact family is counted */
+    char stem[64];                         /* the images' stem */
     image im[5];
     uint32_t chk;                          /* CFT_SWEEP_ORACLE_CHECK */
     size_t lanes;
@@ -701,7 +926,7 @@ static int run_call(job *J, int m, const uint32_t *A, const uint32_t *B, size_t 
     memset(&ra, 0, sizeof ra);
     ra.struct_size = sizeof ra;
     ra.a = A;
-    ra.b = RTNS[J->ri].fn == TF_ATAN2 ? (const void *)B : NULL;
+    ra.b = TFN_NARGS[J->fn] == 2 ? (const void *)B : NULL;
     ra.n = nl;
     ra.bank = J->im[m].bank;
     ra.bank_bytes = J->im[m].bankn;
@@ -716,7 +941,7 @@ static int run_call(job *J, int m, const uint32_t *A, const uint32_t *B, size_t 
     if (st != CFT_OK) {
         const char *detail = cft_last_error();
         printf("  library call failed\n");
-        fprintf(stderr, "cft_program_run_ex(%s %s, lanes 0x%08lx..) failed: %s%s%s\n", RTNS[J->ri].name, ATT[m].name,
+        fprintf(stderr, "cft_program_run_ex(%s %s, lanes 0x%08lx..) failed: %s%s%s\n", J->stem, ATT[m].name,
                 (unsigned long)lo, cft_strerror(st), (detail && *detail) ? " - " : "", (detail && *detail) ? detail : "");
         return 0;
     }
@@ -764,6 +989,18 @@ static int run_call(job *J, int m, const uint32_t *A, const uint32_t *B, size_t 
     return 1;
 }
 
+/* The operands (a, b) of the swept lane v: the job's shape says which stream holds it. */
+static void operands(const job *J, uint32_t v, uint32_t *oa, uint32_t *ob)
+{
+    if (J->shape == 2) {
+        *oa = J->fix;
+        *ob = v;
+    } else {
+        *oa = v;
+        *ob = J->fix;
+    }
+}
+
 /* Judge one lane of attribute m: lib bits (unmarked or guess) and byte against the oracle's bits and flags. */
 static void judge(job *J, int m, uint32_t a, uint32_t lib, uint8_t byte, uint32_t ob, uint32_t of)
 {
@@ -782,19 +1019,30 @@ static void judge(job *J, int m, uint32_t a, uint32_t lib, uint8_t byte, uint32_
         int wrong = bad || (byte & CFT_FLAGS_ALL) != of;
         int listed = on_list(&J->im[m], a);
         int rc = rule_class(J, a);
+        int ec = 0;
         nmarked[m]++;
         if (rc == 1)
             in_must++;
         else if (rc == 2)
             in_band++;
-        else if (!listed)
-            off_list++;
+        else if (!listed) {
+            if (J->fam) {
+                uint32_t qa, qb;
+                operands(J, a, &qa, &qb);
+                ec = exact_class(J->fn, qa, qb, J->nn) == 1;
+            }
+            if (ec)
+                exact_marked++;
+            else
+                off_list++;
+        }
         if (wrong)
             wrong_guess++;
-        if (shown_k++ < SHOW)
+        /* the family's marks have a budget of their own, so that the sixteen shown are not all the exact ones that a slice at y = 2 is full of */
+        if (ec ? shown_e++ < SHOW : shown_k++ < SHOW)
             printf("  MARK %s a=0x%08lx guess=0x%08lx %s%s\n", mode, (unsigned long)a, (unsigned long)lib,
                    wrong ? "WRONG" : "right",
-                   rc == 1 ? " (in the rule: must mark)" : rc == 2 ? " (in the rule: band)" : listed ? "" : " (off the list)");
+                   rc == 1 ? " (in the rule: must mark)" : rc == 2 ? " (in the rule: band)" : ec ? " (exact lane)" : listed ? "" : " (off the list)");
         return;
     }
     if (bad) {
@@ -836,13 +1084,18 @@ static int run_slice(job *J, uint64_t lo, uint64_t hi)
             return 2;
         }
     }
-    for (i = 0; i < L; i++)
-        B[i] = J->x;
+    for (i = 0; i < L; i++) {              /* the fixed operand's stream, whichever it is */
+        if (J->shape == 2)
+            A[i] = J->fix;
+        else
+            B[i] = J->fix;
+    }
     for (at = lo; at < hi; at += nl) {
         double t0;
+        uint32_t *S = J->shape == 2 ? B : A;   /* the swept lanes' stream */
         nl = (size_t)(hi - at < L ? hi - at : L);
         for (i = 0; i < nl; i++)
-            A[i] = (uint32_t)(at + i);
+            S[i] = (uint32_t)(at + i);
         for (m = J->first; m <= J->last; m++)
             if (!run_call(J, m, A, B, nl, dep[m], lfl[m], cnt, at)) {
                 rc = 1;
@@ -850,14 +1103,15 @@ static int run_slice(job *J, uint64_t lo, uint64_t hi)
             }
         t0 = now_s();
         for (i = 0; i < nl; i++) {   /* the lanes of one call */
-            uint32_t a = A[i], ob[5], of[5];
+            uint32_t a = S[i], oa, obw, ob[5], of[5];   /* a: the swept lane, which every verdict line names */
+            operands(J, a, &oa, &obw);
             if (J->mode < 5) {
-                slow_lane(fn, J->mode, a, J->x, &ob[J->mode], &of[J->mode]);
-            } else if (fast_lane(fn, a, J->x, ob, of)) {
+                slow_lane(fn, J->mode, oa, obw, J->nn, &ob[J->mode], &of[J->mode]);
+            } else if (fast_lane(fn, oa, obw, J->nn, ob, of)) {
                 if (J->chk && a % J->chk == 0) {
                     for (m = 0; m < 5; m++) {
                         uint32_t sb, sf;
-                        slow_lane(fn, m, a, J->x, &sb, &sf);
+                        slow_lane(fn, m, oa, obw, J->nn, &sb, &sf);
                         if (sb != ob[m] || sf != of[m]) {
                             vmis++;
                             rep_mismatch("ORACLE", ATT[m].name, a, ob[m], sb, "fast");
@@ -866,7 +1120,7 @@ static int run_slice(job *J, uint64_t lo, uint64_t hi)
                 }
             } else {
                 for (m = 0; m < 5; m++)
-                    slow_lane(fn, m, a, J->x, &ob[m], &of[m]);
+                    slow_lane(fn, m, oa, obw, J->nn, &ob[m], &of[m]);
             }
             for (m = J->first; m <= J->last; m++)
                 judge(J, m, a, dep[m][i], lfl[m][i], ob[m], of[m]);
@@ -892,14 +1146,18 @@ static void usage(const char *p)
             "usage: %s <op> <lo> <hi> <rne|rtz|rdn|rup|rmm|all>\n"
             "       %s oracle <op> <rne|rtz|rdn|rup|rmm>        hex lanes on stdin\n"
             "       %s rule atan2-f32-x<8 hex digits>           hex y lanes on stdin, \"lane none|must|band\" a line each out\n"
+            "       %s exact <op>                               (pow, powr, pown, rootn, compound) hex swept lanes on stdin, \"lane none|exact|inlane\"\n"
             "       %s list\n"
-            "  op: <name>-f32 for exp exp2 expm1 log log2 log1p sin cos tan atan asin acos, or atan2-f32-x<8 hex digits>;\n"
-            "      either may end -d<8 hex digits>, the images' digest (routine-sweep list prints them)\n"
+            "  op: <name>-f32 for exp exp2 expm1 log log2 log1p sin cos tan atan asin acos; atan2-f32-x<8 hex digits>;\n"
+            "      pow-f32-x<8 hex digits> and powr-f32-x<..> (x fixed, y swept; stream a the fixed x, stream b the swept lanes);\n"
+            "      pow-f32-y<8 hex digits> and powr-f32-y<..> (y fixed, x swept; stream a swept, stream b the fixed y);\n"
+            "      pown-f32-n<n>, rootn-f32-n<n>, compound-f32-n<n> (x swept, an integer n; m for a minus: nm3; n must fit int64 and this host's long);\n"
+            "      any may end -d<8 hex digits>, the images' digest (routine-sweep list prints them). `a=` in every verdict line is the swept lane.\n"
             "  [lo, hi): 0 <= lo < hi <= 2^32, decimal or 0x\n"
             "  CFT_SWEEP_IMAGES (the images' directory, else sweep-images/ beside the binary), CFT_SOAK_ARTIFACT, CFT_XRT_TILES,\n"
             "  CFT_SWEEP_LANES, CFT_SWEEP_ORACLE_CHECK, CFT_SOAK_SABOTAGE (=1 flips the low bit of, =2 a flag bit of, the first\n"
             "  UNMARKED lane of each call, not the first lane: a marked first lane would only make a wrong guess, which fails\n"
-            "  nothing; =3 clears every mark)\n", p, p, p, p);
+            "  nothing; =3 clears every mark)\n", p, p, p, p, p);
 }
 
 static void oracle_init(void)
@@ -917,29 +1175,87 @@ static void oracle_line(void)
     fprintf(stderr, "oracle: MPFR %s with GMP %s, mpfr_ieee.h's emulation\n", mpfr_get_version(), gmp_version);
 }
 
+/* The shape of a parsed op in a job: which stream holds the swept lane, the fixed word, the n, and the images' stem. */
+static void job_shape(job *J, const opspec *o)
+{
+    J->ri = o->ri;
+    J->fn = RTNS[o->ri].fn;
+    J->x = o->x;
+    J->nn = o->has_n ? o->n : 0;
+    J->fam = RTNS[o->ri].kind == K_POW || RTNS[o->ri].kind == K_NKEY;
+    switch (RTNS[o->ri].kind) {
+    case K_ATAN2:                          /* y swept in stream a, the fixed x in stream b */
+        J->shape = 1;
+        J->fix = o->x;
+        break;
+    case K_POW:
+        if (o->has_y) {                    /* x swept in stream a, the fixed y in stream b */
+            J->shape = 1;
+            J->fix = o->y;
+        } else {                           /* the fixed x in stream a, y swept in stream b */
+            J->shape = 2;
+            J->fix = o->x;
+        }
+        break;
+    default:                               /* one swept operand; the n-keyed ops' n is J->nn */
+        J->shape = 0;
+        J->fix = 0;
+        break;
+    }
+    stem_of(J->stem, sizeof J->stem, o->ri, o->ntok);
+}
+
+/* One row for the images of a (name, stem) the directory holds: `<label>: images rne rtz rdn rup rmm, digest <8 hex>`, or `<label>: N of 5 images found (why)`;
+ * `have` is how many of the five were found (0 prints nothing here: the caller decides what a name with none is). */
+static int list_one(int ri, const char *stem, const char *label, int *have_out)
+{
+    image im[5];
+    char msg[1300];
+    int have = 0, ok = 1, m;
+    for (m = 0; m < 5; m++) {
+        memset(&im[m], 0, sizeof im[m]);
+        if (load_files(stem, m, &im[m], msg, sizeof msg))
+            have++;
+        else
+            ok = 0;
+    }
+    (void)ri;
+    if (ok)
+        printf("%s: images rne rtz rdn rup rmm, digest %08lx\n", label, (unsigned long)digest_of(im));
+    else if (have)
+        printf("%s: %d of 5 images found (%s)\n", label, have, msg);
+    for (m = 0; m < 5; m++)
+        free_image(&im[m]);
+    *have_out = have;
+    return ok;
+}
+
+/* `list`: a row a name in the tool's order. For pown, rootn and compound the images are a set for each n, so the rows are one for each n of NLIST
+ * (the seven the generator builds) that has any file, `<name>-f32-n<token>: ...`, and, when none has, the one row `<name>-f32: no image`. */
 static int cmd_list(const char *argv0)
 {
-    int ri, m;
+    int ri;
     set_imgdir(argv0);
-    for (ri = 0; ri < 13; ri++) {
-        image im[5];
-        char msg[1300];
-        int have = 0, ok = 1;
-        for (m = 0; m < 5; m++) {
-            memset(&im[m], 0, sizeof im[m]);
-            if (load_files(ri, m, &im[m], msg, sizeof msg))
-                have++;
-            else
-                ok = 0;
+    for (ri = 0; ri < NRTN; ri++) {
+        char label[96], stem[96];
+        int have = 0, any = 0, k;
+        if (RTNS[ri].kind != K_NKEY) {
+            snprintf(label, sizeof label, "%s-f32", RTNS[ri].name);
+            list_one(ri, RTNS[ri].name, label, &have);
+            if (!have)
+                printf("%s: no image\n", label);
+            continue;
         }
-        if (ok)
-            printf("%s-f32: images rne rtz rdn rup rmm, digest %08lx\n", RTNS[ri].name, (unsigned long)digest_of(im));
-        else if (have == 0)
+        for (k = 0; k < NNLIST; k++) {
+            char tok[24];
+            ntoken(NLIST[k], tok, sizeof tok);
+            stem_of(stem, sizeof stem, ri, tok);
+            snprintf(label, sizeof label, "%s-f32-n%s", RTNS[ri].name, tok);
+            list_one(ri, stem, label, &have);
+            any += have > 0;
+        }
+        if (!any)
             printf("%s-f32: no image\n", RTNS[ri].name);
-        else
-            printf("%s-f32: %d of 5 images found (%s)\n", RTNS[ri].name, have, msg);
-        for (m = 0; m < 5; m++)
-            free_image(&im[m]);
     }
     return 0;
 }
@@ -988,7 +1304,14 @@ static int cmd_oracle(int argc, char **argv)
                 return 2;
             }
         }
-        slow_lane(RTNS[o.ri].fn, m, (uint32_t)v, o.x, &bits, &fl);
+        {
+            job J0;
+            uint32_t oa, ob;
+            memset(&J0, 0, sizeof J0);
+            job_shape(&J0, &o);
+            operands(&J0, (uint32_t)v, &oa, &ob);
+            slow_lane(RTNS[o.ri].fn, m, oa, ob, J0.nn, &bits, &fl);
+        }
         printf("%08lx %08lx %02lx\n", (unsigned long)v, (unsigned long)bits, (unsigned long)fl);
     }
     return 0;
@@ -1048,6 +1371,62 @@ static int cmd_rule(int argc, char **argv)
     return 0;
 }
 
+/* routine-sweep exact <pow, powr, pown, rootn or compound op>: hex swept lanes on stdin, "lane none|exact|inlane" a line each out: the exact family's class of
+ * each (exact_class above: 0 none, 1 exact, 2 inlane), with no device and no image. The class the sweep's judge uses, for tests to hold to golden's own
+ * predicates (python/cft_golden/transcend.py: _pow_dyadic, _pown_dyadic, _rootn_dyadic). */
+static int cmd_exact(int argc, char **argv)
+{
+    opspec o;
+    job J;
+    const char *why = "";
+    char line[256];
+    if (argc != 3) {
+        usage(argv[0]);
+        return 2;
+    }
+    if (!parse_op(argv[2], &o, &why)) {
+        fprintf(stderr, "routine-sweep: %s: %s\n", argv[2], why);
+        return 2;
+    }
+    memset(&J, 0, sizeof J);
+    job_shape(&J, &o);
+    if (!J.fam) {
+        fprintf(stderr, "routine-sweep: exact: only pow, powr, pown, rootn and compound have an exact family, not %s\n", RTNS[o.ri].name);
+        return 2;
+    }
+    oracle_init();
+    oracle_line();
+    while (fgets(line, sizeof line, stdin)) {
+        char *s = line;
+        size_t n;
+        uint64_t v;
+        uint32_t oa, ob;
+        int c;
+        while (*s == ' ' || *s == '\t')
+            s++;
+        n = strlen(s);
+        while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
+            s[--n] = 0;
+        if (!n)
+            continue;
+        {
+            char tmp[300];
+            const char *h = s;
+            if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+                h = s + 2;
+            snprintf(tmp, sizeof tmp, "0x%s", h);
+            if (!*h || !parse_u64(tmp, &v) || v > 0xffffffffull) {
+                fprintf(stderr, "routine-sweep: exact: not a 32-bit hex lane: %s\n", s);
+                return 2;
+            }
+        }
+        operands(&J, (uint32_t)v, &oa, &ob);
+        c = exact_class(J.fn, oa, ob, J.nn);
+        printf("%08lx %s\n", (unsigned long)v, c == 1 ? "exact" : c == 2 ? "inlane" : "none");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     opspec o;
@@ -1065,6 +1444,8 @@ int main(int argc, char **argv)
         return cmd_oracle(argc, argv);
     if (argc >= 2 && !strcmp(argv[1], "rule"))
         return cmd_rule(argc, argv);
+    if (argc >= 2 && !strcmp(argv[1], "exact"))
+        return cmd_exact(argc, argv);
     if (argc != 5) {
         usage(argv[0]);
         return 2;
@@ -1092,10 +1473,8 @@ int main(int argc, char **argv)
         return 2;
     }
     memset(&J, 0, sizeof J);
-    J.ri = o.ri;
-    J.fn = RTNS[o.ri].fn;
+    job_shape(&J, &o);
     J.mode = mode;
-    J.x = o.x;
     J.first = mode < 5 ? mode : 0;
     J.last = mode < 5 ? mode : 4;
     J.lanes = LANES;
@@ -1127,7 +1506,7 @@ int main(int argc, char **argv)
         char msg[1300];
         for (m = 0; m < 5; m++)
             if (need_all || m == mode)
-                if (!load_files(o.ri, m, &J.im[m], msg, sizeof msg)) {
+                if (!load_files(J.stem, m, &J.im[m], msg, sizeof msg)) {
                     fprintf(stderr, "routine-sweep: %s\n", msg);
                     return 2;
                 }
@@ -1181,7 +1560,7 @@ int main(int argc, char **argv)
             cft_close(dev);
             return 2;
         }
-        fprintf(stderr, "image %s %s: sha256 %s, %lu instructions, %lu words\n", RTNS[o.ri].name, ATT[m].name, im->sha,
+        fprintf(stderr, "image %s %s: sha256 %s, %lu instructions, %lu words\n", J.stem, ATT[m].name, im->sha,
                 (unsigned long)im->ninsn, (unsigned long)im->nwords);
     }
 
@@ -1209,6 +1588,8 @@ int main(int argc, char **argv)
                argv[4], (unsigned long long)tot, col[0], col[1], col[2], col[3], col[4], (unsigned long long)off_list,
                (unsigned long long)wrong_guess);
     }
+    if (J.fam)
+        printf("%s %s: %llu marked on an exact lane\n", opword, argv[4], (unsigned long long)exact_marked);
     if (J.fn == TF_ATAN2)
         printf("%s %s: %llu in the rule (must mark %llu, band %llu), %llu must-mark lanes not marked\n", opword, argv[4],
                (unsigned long long)(in_must + in_band), (unsigned long long)in_must, (unsigned long long)in_band,

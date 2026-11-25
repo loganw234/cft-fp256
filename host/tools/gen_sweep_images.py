@@ -13,15 +13,24 @@ For each routine name and each rounding attribute at fp32 it writes, into the ne
     <name>-fp32-<attr>.bank    the program's constant bank: n_consts fp32 words, little-endian, densely packed
     <name>-fp32-<attr>.marks   the lanes (encodings) that MUST mark, one 8-digit hex word a line, in ascending order; maybe none
 
+The names are the eighteen of routine_sweep.c, in its order: the thirteen of parcel M4X, then pow, powr (built at fp32 since parcel M3F1), pown,
+rootn and compound (parcel M3F2's: a name whose fragment is refused as "is not built" is skipped, once, by name, and is not an error). pown, rootn
+and compound take an integer operand n that is a constant of the fragment, so each is built at every n of N_LIST, in that order, and its files and
+its manifest lines carry the n in the name: pown-n3 (stem pown-n3-fp32-rne.cftp), pown-nm3 for -3. The tool's own table of the seven n is its NLIST
+(host/tools/routine_sweep.c), and hw/test_routine_sweep.py holds the two equal. pow and powr, whose second operand is an input, have one set each, for
+either shape of a sweep (x fixed or y fixed).
+
 and manifest.txt: a header, then one `image` line for each file set (name, attribute, instructions, words, the sha256 of each of
-the three files, the fragment's dag_digest, the commit) and, for a name whose five attributes were all written, a `digest` line:
+the three files, the fragment's dag_digest, the commit) and, for a name (or a name and n, pown-n3) whose five attributes were all written, a `digest` line:
 the first 32 bits of the sha256 of the five attributes' image and bank bytes, rne to rmm, image then bank, which is the `-d` word
 routine-sweep's op names take. A name that is not built at fp32 is
 skipped and named, in the manifest and on stdout. A DIR that exists is refused (exit 2), nothing written.
 
 The marks come from one table (MARKS): at fp32 exp marks five lanes under rtz, rdn and rup and none under rne and rmm (host/tests/
 seq_check.py's routine_ln1p_marks derives them, and so does marks_exp() below: the floats nearest ln(1 + t) for t = 2^-23, 2^-22,
-2^-21, -2^-22 and -2^-21). Every other file is empty until a sweep finds a lane the model says must mark. --plant NAME and
+2^-21, -2^-22 and -2^-21). Every other file is empty until a sweep finds a lane the model says must mark: the pow, powr, pown, rootn and compound
+files are empty by design, no lane that MUST mark being known there, their marks being the exact family's (routine_sweep.c, "THE EXACT FAMILY": a mark on
+a lane whose result is exact is counted apart from "off the list", and an exact lane is never "must mark"). --plant NAME and
 --bound-shift S build the fragment through mathlib.build (a plant of mathlib.PLANTS, TRIG_PLANTS ...; S is the in-lane bound's
 widening, 34 for the G' = 6 of mathlib_harness.py's rate law); the marks table is the plain fragment's in either case, which is why
 a `mark_silenced` image is red against it.
@@ -42,6 +51,9 @@ sys.path.insert(0, os.path.join(ROOT, "python"))
 sys.path.insert(0, os.path.join(ROOT, "python", "tests"))
 
 NAMES13 = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2")
+NKEYED = ("pown", "rootn", "compound")                    # the names with an integer operand n: one set of five a n
+NAMES18 = NAMES13 + ("pow", "powr") + NKEYED               # routine_sweep.c's RTNS, in its order
+N_LIST = (2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63)        # the seven n of parcel M3X2 (question 5); routine_sweep.c's NLIST is the other copy
 ATTRS = ("rne", "rtz", "rdn", "rup", "rmm")
 
 
@@ -55,6 +67,18 @@ def marks_exp(ml, fmt):
             v = mpmath.log(1 + mpmath.mpf(t.numerator) / t.denominator)
             out.append(ml._enc(fmt, ml._frac(v)))
     return sorted(out)
+
+
+def ntoken(n: int) -> str:
+    """n as the op word's and the stem's token: the decimal digits, an `m` for a minus."""
+    return ("m" if n < 0 else "") + str(abs(n))
+
+
+def keys_of(name: str):
+    """[(key, n)] a name builds: the name once (n None), or, for pown, rootn and compound, <name>-n<token> at each n of N_LIST, in order."""
+    if name in NKEYED:
+        return [(f"{name}-n{ntoken(n)}", n) for n in N_LIST]
+    return [(name, None)]
 
 
 def sha(b: bytes) -> str:
@@ -73,7 +97,9 @@ def commit() -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", required=True, help="the directory to make (it must not exist)")
-    ap.add_argument("--names", default=",".join(NAMES13), help="comma list of routine names (default: the thirteen)")
+    ap.add_argument("--names", default=",".join(NAMES18),
+                    help="comma list of routine names (default: the eighteen; pown, rootn and compound are built at each of the seven n, or skipped by name "
+                         "while parcel M3F2's fragments are not built)")
     ap.add_argument("--attrs", default=",".join(ATTRS), help="comma list of rne,rtz,rdn,rup,rmm (default: all five)")
     ap.add_argument("--plant", default=None, help="build every selected routine with this plant (mathlib.build's)")
     ap.add_argument("--bound-shift", type=int, default=0, help="widen the in-lane bound by 2^S (mathlib.build's bound_shift)")
@@ -81,8 +107,8 @@ def main(argv=None) -> int:
     names = [n for n in a.names.split(",") if n]
     attrs = [x for x in a.attrs.split(",") if x]
     for n in names:
-        if n not in NAMES13:
-            print(f"gen_sweep_images: unknown routine {n!r}; the thirteen are {', '.join(NAMES13)}", file=sys.stderr)
+        if n not in NAMES18:
+            print(f"gen_sweep_images: unknown routine {n!r}; the eighteen are {', '.join(NAMES18)}", file=sys.stderr)
             return 2
     for x in attrs:
         if x not in ATTRS:
@@ -106,35 +132,45 @@ def main(argv=None) -> int:
     for x in attrs:
         assert x in rnd_of, (x, rnd_of)
     marks = {("exp", "rtz"): marks_exp(ml, FP32), ("exp", "rdn"): marks_exp(ml, FP32), ("exp", "rup"): marks_exp(ml, FP32)}
-    built = set(ml.NAMES) | set(ml.TRIG_NAMES) | set(ml._INV_TW_BUILDERS)
+    built = set(ml.NAMES) | set(ml.TRIG_NAMES) | set(ml._INV_TW_BUILDERS) | set(ml._POW_TW_BUILDERS)
     com = commit()
     files, lines, skipped, wrote = {}, [], [], {}
-    for n in names:
-        if n not in built:
-            skipped.append(n)
+    for name in names:
+        if name not in built and name not in NKEYED:
+            skipped.append(name)
             continue
-        per = {}
-        for x in attrs:
-            rnd = rnd_of[x]
-            try:
-                if a.plant is None and a.bound_shift == 0:
-                    f = ml.fragment(n, FP32, rnd)
-                else:
-                    f = ml.build(n, FP32, rnd, bound_shift=a.bound_shift, plant=a.plant).fragment()
-            except ValueError as exc:
-                print(f"gen_sweep_images: {n} {x}: {exc}", file=sys.stderr)
-                return 2
-            prog, bank = har.r24_program(f)
-            image = prog.to_bytes()
-            bankb = b"".join(struct.pack("<I", w) for w in bank)
-            assert len(bankb) == 4 * prog.n_consts == 4 * len(bank), (n, x)
-            mk = "".join(f"{m:08x}\n" for m in marks.get((n, x), [])).encode()
-            stem = f"{n}-fp32-{x}"
-            files[stem + ".cftp"], files[stem + ".bank"], files[stem + ".marks"] = image, bankb, mk
-            per[x] = (image, bankb)
-            lines.append(f"image {n} {x} instructions {len(prog.insns)} words {len(bank)} image_sha256 {sha(image)} "
-                         f"bank_sha256 {sha(bankb)} marks_sha256 {sha(mk)} dag_digest {ml.dag_digest(f)} commit {com}")
-        wrote[n] = per
+        refused = False
+        for n, nval in keys_of(name):
+            per = {}
+            for x in attrs:
+                rnd = rnd_of[x]
+                try:
+                    if a.plant is None and a.bound_shift == 0:
+                        f = ml.fragment(name, FP32, rnd, n=nval)
+                    else:
+                        f = ml.build(name, FP32, rnd, bound_shift=a.bound_shift, plant=a.plant, n=nval).fragment()
+                except ValueError as exc:
+                    # an n-keyed name whose fragment is "not built" (parcel M3F2's, until it merges) is skipped by name, once: its first build says so
+                    if name in NKEYED and "is not built" in str(exc) and nval == N_LIST[0] and x == attrs[0]:
+                        refused = True
+                        break
+                    print(f"gen_sweep_images: {n} {x}: {exc}", file=sys.stderr)
+                    return 2
+                prog, bank = har.r24_program(f)
+                image = prog.to_bytes()
+                bankb = b"".join(struct.pack("<I", w) for w in bank)
+                assert len(bankb) == 4 * prog.n_consts == 4 * len(bank), (n, x)
+                mk = "".join(f"{m:08x}\n" for m in marks.get((n, x), [])).encode()
+                stem = f"{n}-fp32-{x}"
+                files[stem + ".cftp"], files[stem + ".bank"], files[stem + ".marks"] = image, bankb, mk
+                per[x] = (image, bankb)
+                lines.append(f"image {n} {x} instructions {len(prog.insns)} words {len(bank)} image_sha256 {sha(image)} "
+                             f"bank_sha256 {sha(bankb)} marks_sha256 {sha(mk)} dag_digest {ml.dag_digest(f)} commit {com}")
+            if refused:
+                break
+            wrote[n] = per
+        if refused:
+            skipped.append(name)
     head = ["# routine-sweep images, written by host/tools/gen_sweep_images.py (parcel M4X)",
             f"commit {com}", f"plant {a.plant or 'none'}", f"bound_shift {a.bound_shift}",
             f"names {','.join(names)}", f"attrs {','.join(attrs)}"]

@@ -68,7 +68,7 @@ def test_the_table_is_the_old_eight_the_new_seven_the_wide_thirty_then_the_wide_
 
 
 def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
-    # parcel M4X2: the routine op words (21: twelve routines one each, atan2 at nine x; each with its digest in the word) are tile ops by a rule of their own, read from routine_sweep.c's op grammar;
+    # parcel M4X2: the routine op words (21: twelve routines one each, atan2 at nine x; each with its digest in the word; 57 since parcel M3X2: pow and powr at eighteen each) are tile ops by a rule of their own, read from routine_sweep.c's op grammar;
     # the table is the other fifty-one, exactly
     driver = {op for op, reach in csl.OP_REACH.items() if reach == "tile" and not FE.ROUTINE_OP_RE.match(op)}
     table = set(FE.STRESS_TILE_OPS)
@@ -94,7 +94,7 @@ def test_a_run_that_served_every_item_of_the_catalog_passes_the_reach_check(
 def test_the_routine_rule_and_the_drivers_op_reach_say_the_same_of_every_routine_op_word(csl):
     """Parcel M4X2: the rule (a pattern of the op grammar) matches exactly the routine ops OP_REACH calls tile, both ways, and no op of the table of fifty-one."""
     routine = {it.op for it in csl.sweep_items(mpfr=True) if it.tool == "routine"}
-    assert len(routine) == 21        # twelve routines one op word each, atan2 at nine x
+    assert len(routine) == 57        # twelve routines one op word each, atan2 at nine x, pow and powr at eighteen each (parcel M3X2)
     assert {op for op, reach in csl.OP_REACH.items() if reach == "tile" and FE.ROUTINE_OP_RE.match(op)} == routine
     assert all(FE.is_tile_op(op) for op in routine) and not any(FE.ROUTINE_OP_RE.match(op) for op in FE.STRESS_TILE_OPS)
     assert not any(FE.ROUTINE_OP_RE.match(op) for op in csl.OP_REACH if op not in routine)
@@ -104,6 +104,22 @@ def test_the_routine_rule_and_the_drivers_op_reach_say_the_same_of_every_routine
     served = routine | {"sqrt32", "rem32"}
     assert FE.tile_ops_served(served) == ["sqrt32"] + sorted(routine)
     FE._check_reach(served, csl.OP_REACH)                                # must not raise
+
+
+def test_the_routine_rule_holds_the_pow_familys_grammar_both_ways(csl):
+    """Parcel M3X2: pow and powr take exactly one of -x and -y, pown, rootn and compound take -n<token>, atan2 keeps -x, and the controls: an op word with
+    both -x and -y, an n token for pow, -y for atan2 or for exp, -x or -y for pown, no suffix for pow or pown, a leading zero in n, and m0 are NOT routine
+    ops (the pattern is the tool's grammar, which refuses each: hw/test_routine_sweep.py's `refuse` runs the tool on them)."""
+    good = ["pow-f32-x3f000000", "pow-f32-y3f000000-d7043fd38", "powr-f32-x40000000-d8aefb175", "powr-f32-y49800000", "pown-f32-n3", "pown-f32-nm3-d00000000",
+            "rootn-f32-n2147483647", "compound-f32-nm9223372036854775808", "pown-f32-n0", "atan2-f32-x3f800000-d00000000"]
+    bad = ["pow-f32-x3f000000-y3f000000", "pow-f32-y3f000000-x3f000000", "pow-f32-n3", "powr-f32-n3", "atan2-f32-y3f800000", "exp-f32-y3f800000", "exp-f32-n3",
+           "pown-f32-x3f800000", "pown-f32-y3f800000", "pow-f32", "pow-f32-d7043fd38", "pown-f32", "pown-f32-n03", "pown-f32-nm0", "pown-f32-n", "pown-f32-nm",
+           "pown-f32-n3-n3", "pow-f32-x3f00000", "pow-f32-x3f0000000", "pow-f32-X3f000000", "atan2-f32", "pown-f32-n3.5", "pown-f32-n-3", "pow-f32-x3f000000-all"]
+    assert all(FE.ROUTINE_OP_RE.match(w) for w in good), [w for w in good if not FE.ROUTINE_OP_RE.match(w)]
+    assert not any(FE.ROUTINE_OP_RE.match(w) for w in bad), [w for w in bad if FE.ROUTINE_OP_RE.match(w)]
+    # the rule and the catalog's pattern (hw/card_stress_lib.py's ROUTINE_OP) are two statements that agree on every word above and on every item's
+    assert all(bool(csl.ROUTINE_OP.match(w)) == bool(FE.ROUTINE_OP_RE.match(w)) for w in good + bad)
+    assert all(csl.ROUTINE_OP.match(it.op) for it in csl.sweep_items(mpfr=True) if it.tool == "routine")
 
 
 def test_a_routine_op_called_host_is_refused_by_name(csl):

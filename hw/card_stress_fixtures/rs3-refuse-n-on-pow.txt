@@ -1,0 +1,1 @@
+routine-sweep: pow-f32-n3: only pown, rootn and compound take -n
