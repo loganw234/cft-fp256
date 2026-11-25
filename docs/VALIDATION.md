@@ -29880,6 +29880,15 @@ At a huge |k|, the faithful root of 2^E with E >= 1 is exactly 1, so the irratio
 
 **Night 1125** runs at night 1124's f7a1ce95, the plan's fallback, because the push waits. The pow and powr sweeps start one night later at the earliest.
 
-**Not yet:** the mpfr and cardstress stages at this entry's commit (the re-gate on the box), and verifier VRF. Both are added here before the push.
+**The re-gate and the verifier,** added before the push:
+- **The re-gate,** MEASURED: box_regate_rootn.sh at 8736b254 on amd-arc-box, 14:43:48 to 15:18:08. The clone's chain was asserted (five commits from 61863305, no merge), as were the six files moved.
+  - docs, innerskips, generated and mpfr, in one run: PASS, 1,241 s.
+  - mpfr's 3 inner skips are the gate's own three, line for line. The routine sweep's test gave 766 checks, 0 failed, 3 skipped, with its oracle group at 391 checks, 0 failed; the gate's had 5 failed.
+  - cardstress alone: PASS, 808 s, with its 4 inner skips.
+- **Verifier VRF** (Sonnet), MEASURED by it:
+  - pass 1 at d808fd01: no (a). Its one (b), the reach, was fixed in d808fd01. One wider sentence ("never fails for E <= -1") was narrowed in 8736b254.
+  - pass 2 at 8736b254: no (a), no (b).
+  - Its own test used an exp2 reference at 1000 bits, p = 2 to 300 and five roundings including RNDA: 222,000 routed cases, 0 bad.
+- **This paragraph** is the one change after the re-gate. It is docs only, and docs and generated are run again before the push.
 
 **Addendum, before the push** (the lead, on verifier VRF's interim (b)). As first committed, four places read the sample's gap between -2^31 and -2^62 as the defect's reach: this entry's "None at a smaller |n|", the header comment's "n of magnitude 2^62 and more", TRANSCENDENTALS.md's "None fails at a smaller |n|" and the study's note's "each sampled n of magnitude 2^62 or more". VRF found it by running mpfr_rootn_ui with MPFR_RNDF at 34 bits under WSL's 4.1.0: it returns exactly 1 from n = -2^33 at E = 1. The reach item above was measured after that, and the four places now give it. The fix is unaffected: its guard takes every n below -2.
