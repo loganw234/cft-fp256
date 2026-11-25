@@ -1,0 +1,6 @@
+# pw32c_box.sh scan at 30 lanes, 1 cell, with the doctored job: SCAN_LANES=30 LIMIT=1 sh pw32c_box.sh python OUT scan 2 bad (2026-11-25, desktop; the script's own output and exit status)
+list scan: 3 jobs, 2 at a time, FIX=none, 2026-11-25 08:07:07
+Traceback (most recent call last):
+ValueError: no region named 'nosuchregion'
+done 2026-11-25 08:07:11 list scan xargs status 123 (AT LEAST ONE JOB FAILED: read OUTDIR and the run log)
+script exit status: 123

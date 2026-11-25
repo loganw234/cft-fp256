@@ -1,0 +1,20 @@
+SMALL = 0.05859375 (= 15/256: True); the screens' words of the build: TOVF = 129, TUNF = -152, so the main path is -152 < t < 129 (t = n log2(1 + x)); log2(1 + SMALL) = 0.082149, |log2(1 - SMALL)| = 0.087111
+the block (|x| >= SMALL) has lanes, COMPUTED as the screen / the log:
+  x > 0, n > 0: n < 1570.3   (t up to 129)
+  x < 0, n > 0: n < 1744.9   (t down to -152)
+  x > 0, n < 0: |n| < 1850.3   (t down to -152)
+  x < 0, n < 0: |n| < 1480.9   (t up to 129)
+coverage: lanes of each cell (the scan's 60 and the gap scan's 32 cells, 2,000 lanes, seed 1) with t in (-152, -149); regions.py's int sampler keeps |t| < 149 (its `_tf`, t_reach - 3)
+  zone2000     n=  2000: 192 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone3000     n=  3000: 44 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone5000     n=  5000: 18 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone10000    n= 10000: 7 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone30000    n= 30000: 3 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone100000   n=100000: 1 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone1700     n=  1700: 12 lanes with t in the band, 12 of them block lanes (|x| >= SMALL)
+  zone1800     n=  1800: 618 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+  zone1900     n=  1900: 281 lanes with t in the band, 0 of them block lanes (|x| >= SMALL)
+int<N> cells: 84000 lanes generated, 0 with t in (-152, -149), of them block lanes by sign: none
+zone<N> cells: 84000 lanes generated, 1176 with t in (-152, -149), of them block lanes by sign: x<0 n>0 12
+cint<N> cells: 16000 lanes generated, 0 with t in (-152, -149), of them block lanes by sign: none
+COVERAGE (this tool's count): of the two sign cases whose t is negative, block lanes with t in the band are sampled in x<0 n>0 (in zone cells only: no int<N> or cint<N> cell has one); sampled in NO cell: x>0 n<0 (a case with no lane here is not measured)

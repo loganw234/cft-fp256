@@ -1,0 +1,10 @@
+variant fixB: instructions 1056 to 1077, cap 32, highest register r31 (12 n, five attributes)
+variant early+sum2+cross+cexact+yexact+rho3: instructions 1056 to 1077, cap 32, highest register r31 (12 n, five attributes)
+variant fixB, the block's phase label 'lowword': instructions 1056 to 1077, cap 32, highest register r31
+variant fixB, the block's phase label 'reduce': instructions 1056 to 1077, cap 32, highest register r31
+variant fixB, the block's phase label 'table': instructions 1056 to 1077, cap 32, highest register r31
+variant fixB, the block's phase label 'Z': REFUSED by routines.program: 'no register for the harness' in 60 of 60 cells; instructions 1056 to 1077, live 41 (no register is allocated: no highest register)
+variant fixB, the block's phase label 'recon': REFUSED by routines.program: 'no register for the harness' in 60 of 60 cells; instructions 1056 to 1077, live 41 (no register is allocated: no highest register)
+variant fixB, the block's phase label 'setup': instructions 1056 to 1077, cap 32, highest register r31
+variant fixB, the block's phase label 'head2': instructions 1056 to 1077, cap 32, highest register r31
+variant fixB, the block's phase label 'final': REFUSED by routines.program: 'no register for the harness' in 60 of 60 cells; instructions 1056 to 1077, live 41 (no register is allocated: no highest register)
