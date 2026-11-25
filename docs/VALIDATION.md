@@ -29474,5 +29474,57 @@ VM3XN found no regression and reproduced the caps, the instruction counts, B1 an
 
 **Addendum to M3X2's entry (send-back 1, 2026-11-24; the wording above is corrected in place where it carried a figure, this lists each item):**
 - **(b)1, the slice time.** First wording, in docs/CARDDAY.md's "The pow family's items": "A slice of 2^32 lanes is 9.0 to 9.4 hours on one tile at the means of M3X's lists ... The device sets the pace." Wrong: at 4.57 us a lane the device takes 4.57 us x 2^32 = 5.45 h, and 9.0 to 9.4 h follows only from the oracle's 7.7 us a lane (9.19 h), so the slice is oracle-bound at the oracle's slow end. CARDDAY now states the device 5.45 h and the oracle 1.43 h at 1.2 us and 9.19 h at 7.7 us, each with its source, takes the larger, drops "the device sets the pace", and derives "about 82 hours" for the 36 slices as 36 x 9.2 h / 4 = 82.8 h (81 to 85 h at 9.0 to 9.4). It also says that the tool runs a call's device and oracle one after the other (so a slice may take their sum, 6.9 to 14.6 h: an ESTIMATE the card's measured rate decides). The 39 h and 121 h stay INFERRED.
-- **(b)2, the rule group's count.** First wording (this entry and the report): `rule` 20 checks, 0 skipped. That is `python3 -B hw/test_routine_sweep.py --only rule,unchanged --baseline-tree DIR` (WSL, 30 s, with `unchanged` skipped by name); the default `python3 -B hw/test_routine_sweep.py --only rule` gives **14 checks, 0 failed, and one named skip** (the baseline leg: "needs --baseline-tree DIR"), MEASURED in WSL at c290f0c6 (26 s). The in-place sentence above now names the invocation.
+- **(b)2, the rule group's count.** First wording (this entry and the report): `rule` 20 checks, 0 skipped. That is `python3 -B hw/test_routine_sweep.py --only rule --baseline-tree DIR` (WSL, 30 s; verifier VM3X2 measured the same form at the tip, 2026-11-24 16:42: 20 checks, 0 failed, 0 skipped. The lead corrected this sentence at the wave 4 merge: it first named `--only rule,unchanged`, whose `unchanged` legs skip by name in WSL's MPFR 4.1.0); the default `python3 -B hw/test_routine_sweep.py --only rule` gives **14 checks, 0 failed, and one named skip** (the baseline leg: "needs --baseline-tree DIR"), MEASURED in WSL at c290f0c6 (26 s). The in-place sentence above now names the invocation.
 - **(L1), hw/card_stress_fixtures/INDEX.txt.** First state: each of the 13 rs3-* rows twice, the desktop block (made on the desktop's mingw64) and the WSL block, from running the append script twice; the files are WSL's, committed at 61ff1126. The desktop block is removed, so each file has one row, the one that describes it as committed; the older rows are unchanged.
+
+## 2026-11-24 - wave 4's merge (parcels M3L, M3C, M3XN and M3X2), the lead's: the merges, one sentence corrected, M3XN's box run, and Logan's split of fp32's three (the lead)
+
+**The merges** (branch merge-m3w4 from f7a1ce95), each a merge commit:
+- 52d46b27: M3C at 8be282de, carrying M3L's verified 35a91678 (the tree is m3c's);
+- 5b409d8e: M3XN at 1d0a1015;
+- c00b9c11: M3X2 at c7473f55.
+
+The resolutions:
+- VALIDATION by `val_merge4.py f7a1ce95 HEAD <branch>` at each step (base 29,276 lines; +79 for the pair, then +105 and +18), each `--check` exit 0;
+- the study's dated notes kept in order (M3L, M3C, M3XN);
+- README's counts set by this commit until `check_docs_index.py` passed;
+- VERIFICATION merged by git with no conflict.
+
+**Verified:**
+- M3L by verifier VM3L (two passes);
+- M3C by VM3C (two passes);
+- M3XN by VM3XN (two passes);
+- M3X2 by VM3X2 (two passes), with one sentence owed by the lead.
+
+Each parcel's own entry precedes this one, with its addendum where it was sent back.
+
+**One sentence corrected by the lead** (M3X2's addendum, item (b)2):
+- **The first wording** named the 20-check rule run as `--only rule,unchanged --baseline-tree DIR` "with `unchanged` skipped by name" and "0 skipped".
+- **Verifier VM3X2 measured** `--only rule --baseline-tree DIR` at the tip (20 checks, 0 failed, 0 skipped; WSL, 2026-11-24 16:42). The sentence now names that form, as M3X2's entry's own body already did.
+
+**M3XN's box run** (the lead's, on amd-arc-box, 2026-11-24 13:50:02 to 14:49:27): `pw32n_box.sh` at 1d0a1015, 16 jobs at once, rc 0 in 3,561 s, 46 outputs, every job exit 0. The 43 regions at 12,000 lanes each (rne, seed 1, B1 2^-66, B2 2^-67), MEASURED:
+- **pown:** every measured region under 1 Bv, the worst int1000 at 0.296 (margin 1.76 bits). int31, int63, int2^40 and int2^48+1 are NOT MEASURED (0 lanes; screened).
+- **rootn:** every measured region under 1 Bv, the worst int-neg at 0.159. int63, int2^40 and int2^48+1 are NOT MEASURED.
+- **compound: two regions OVER 1 Bv, both at n = 1000.**
+  - **int1000:** 1.377296 Bv, margin -0.46 bits, over 6,578 measured lanes. The other 5,414 lanes were left out by the tinyt gate; their direct errors are at most 9.3e-05 Bv.
+  - **zone1000:** 1.007524 Bv, margin -0.01 bits, over all 12,000 lanes.
+  - The measured worst direct errors in these two regions are 0.148 and 0.092 Bv. **The first-order budget does not bound them; no lane was observed wrong.**
+  - The largest term in int1000 is log-lowword, capacity 0.5275 Bv (observed 0.371): the logarithm of the low word of 1 + x, which n multiplies.
+  - compound's 15 other regions are under 0.47 Bv.
+
+So condition (e) of M3XN's decision fails for compound at n = 1000 at the box's volume. M3XN's entry states (e) at 300 lanes on the desktop, where zone1000 read 0.331; its words are true of that sample. This is the cancelling zone that M3's study met at fp64 ("found only by volume"). **The card's planned compound slices** (n = +-2, +-3, 17, 2^31 - 1, -2^63) do not include n = 1000.
+
+The outputs, the box script's log and summary, and their sums are in the lead's records (Data/runs/2026-11-23-m3-round/box/m3xn-pw32n/, `sha256sum -c` all OK).
+
+**Logan's answer** (2026-11-24, to the figures above): "Split it". So:
+- parcel M3F2 builds pown and rootn at fp32 as the triple word, on M3XN's figures;
+- compound stays refused at fp32 by name;
+- a short model follow-up (M3XN2) fixes or re-bounds compound's low word, checked at volume on the box;
+- the 14 pown and rootn slices run after M3F2, and compound's 7 later.
+
+**Known limits recorded at this merge** (the verifiers' readings, not defects of the merged code):
+- **(1)** The inherited `held_by_lang_run` (python/tests/test_cftc_invtrig.py:742) asserts at most one unit in the last place on a marked lane, more than the language's rule (LANGUAGE.md's "A marked lane"; lang_check R3). Its two-step callers test_cftc_trig.py:647 and test_cftc_invtrig.py:800 are green on their seeded lanes. M3C's test_cftc_pow.py has its own comparison under the rule.
+- **(2)** Without mpmath, cftc refuses a rewritten pown(x, 2) at fp64, because the check runs on the graph before the rewrite. fp32 compiles it.
+- **(3)** hw/test_routine_sweep.py's `pool` group's resume checks are timing-flaky in both trees: in WSL the base failed 2 and the tip 0; on the desktop the base failed 4 and the tip 10 (VM3X2).
+- **(4)** routine-sweep's exact class is tested on few lanes: 7 exact lanes in VM3X2's 2,967.
+- **(5)** M3L kept no ledger file; its working notes are in its scratch.
