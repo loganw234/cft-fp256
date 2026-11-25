@@ -140,6 +140,8 @@ Nothing in the tree imports the model.
 
 **A note of 2026-11-25, at parcel M3XN2** (compound at fp32 in the model, `docs/studies/m3/pw32c.py`; the study's text stays as written). 2.8's compound at fp32, the triple word of M3XN, was OVER 1 Bv at n = 1000 (1.377296 at the box's 12,000 lanes) in its two logarithm terms, log-sum and log-lowword; the follow-up attributes both to instructions (five plain-sum adds of level 2 for log-sum, six instructions of rho's low word for log-lowword, capacities 0.613 and 0.528 at int1000), scans n (the unfixed model is over 1 Bv at six int cells, n = 200, 300, 500, 1000, -300 and -1000, at the box; log-lowword's block has lanes only for |n| below 1570 (x > 0, n > 0), 1745 (x < 0, n > 0), 1850 (x > 0, n < 0) and 1481 (x < 0, n < 0), the screens' -152 < t < 129 over |x| >= 15/256), and builds two fixes in the model: fixA (compensated level-2 sums, the cross term, an exact correction, rho^3/3: 1,015 to 1,036 instructions, cap 28) and fixB (fixA with rho_l's exact products: 1,056 to 1,077 instructions, cap 32, no value beside a call), int1000 0.611 and 0.374 Bv at the desktop's 2,000 lanes. The box's volume figures of the fixes and Logan's choice among four options are in docs/VALIDATION.md, the entry for parcel M3XN2.
 
+**A note of 2026-11-25, at the lead's fix of wave 4's box gate** (a second defect in the oracle; the study's text stays as written). 1.3's "The oracle's known defect" names mpfr_compound_si's. A second was found by the box gate of wave 4: mpfr_rootn_si returns an exact +-1 for rootn(+-2^E, n) when E >= 1 and |n| is huge. At fp32 that is every such case at n = -2^63, the routine sweep's seventh n, and at each sampled n of magnitude 2^62 or more. host/tools/mpfr_tfn.h computes those cases with a Ziv loop of its own, `tfn_rootn_pow2` (TRANSCENDENTALS.md, "The oracle's own defect"; VALIDATION.md, 2026-11-25), so the sweep's oracle for rootn at that n is not mpfr_rootn_si alone. The model, which uses no MPFR, is unchanged.
+
 ## Contents
 
 0. In brief
@@ -388,14 +390,6 @@ off by one ulp for a negative n when 1 + x is not representable at the
 working precision. The model uses no MPFR: its references are transcend.py
 and mpmath at 4p + 200 bits (`m3core.true_value`, compound's 1 + x formed
 exactly as a Fraction first).
-
-A second defect was found 2026-11-25 by the box gate of wave 4, after this
-study. mpfr_rootn_si returns an exact +-1 for rootn(+-2^E, n) when E >= 1 and
-|n| is huge. At fp32 that is every such case at n = -2^63, the routine
-sweep's seventh n, and at each sampled n of magnitude 2^62 or more. host/tools/mpfr_tfn.h
-computes those cases with a Ziv loop of its own, `tfn_rootn_pow2`
-(TRANSCENDENTALS.md, "The oracle's own defect"; VALIDATION.md, 2026-11-25).
-The sweep's oracle for rootn at that n is therefore not mpfr_rootn_si alone.
 
 The routine must equal transcend.py in bits and flags on every lane it
 does not mark.
