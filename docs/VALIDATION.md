@@ -29474,7 +29474,7 @@ VM3XN found no regression and reproduced the caps, the instruction counts, B1 an
 
 **Addendum to M3X2's entry (send-back 1, 2026-11-24; the wording above is corrected in place where it carried a figure, this lists each item):**
 - **(b)1, the slice time.** First wording, in docs/CARDDAY.md's "The pow family's items": "A slice of 2^32 lanes is 9.0 to 9.4 hours on one tile at the means of M3X's lists ... The device sets the pace." Wrong: at 4.57 us a lane the device takes 4.57 us x 2^32 = 5.45 h, and 9.0 to 9.4 h follows only from the oracle's 7.7 us a lane (9.19 h), so the slice is oracle-bound at the oracle's slow end. CARDDAY now states the device 5.45 h and the oracle 1.43 h at 1.2 us and 9.19 h at 7.7 us, each with its source, takes the larger, drops "the device sets the pace", and derives "about 82 hours" for the 36 slices as 36 x 9.2 h / 4 = 82.8 h (81 to 85 h at 9.0 to 9.4). It also says that the tool runs a call's device and oracle one after the other (so a slice may take their sum, 6.9 to 14.6 h: an ESTIMATE the card's measured rate decides). The 39 h and 121 h stay INFERRED.
-- **(b)2, the rule group's count.** First wording (this entry and the report): `rule` 20 checks, 0 skipped. That is `python3 -B hw/test_routine_sweep.py --only rule --baseline-tree DIR` (WSL, 30 s; verifier VM3X2 measured the same form at the tip, 2026-11-24 16:42: 20 checks, 0 failed, 0 skipped. The lead corrected this sentence at the wave 4 merge: it first named `--only rule,unchanged`, whose `unchanged` legs skip by name in WSL's MPFR 4.1.0); the default `python3 -B hw/test_routine_sweep.py --only rule` gives **14 checks, 0 failed, and one named skip** (the baseline leg: "needs --baseline-tree DIR"), MEASURED in WSL at c290f0c6 (26 s). The in-place sentence above now names the invocation.
+- **(b)2, the rule group's count.** First wording (this entry and the report): `rule` 20 checks, 0 skipped. That is `python3 -B hw/test_routine_sweep.py --only rule --baseline-tree DIR` (WSL, 30 s; the form verifier VM3X2 measured at the tip, 20 checks, 0 failed, 0 skipped); the default `python3 -B hw/test_routine_sweep.py --only rule` gives **14 checks, 0 failed, and one named skip** (the baseline leg: "needs --baseline-tree DIR"), MEASURED in WSL at c290f0c6 (26 s). The in-place sentence above now names the invocation.
 - **(L1), hw/card_stress_fixtures/INDEX.txt.** First state: each of the 13 rs3-* rows twice, the desktop block (made on the desktop's mingw64) and the WSL block, from running the append script twice; the files are WSL's, committed at 61ff1126. The desktop block is removed, so each file has one row, the one that describes it as committed; the older rows are unchanged.
 
 ## 2026-11-24 - wave 4's merge (parcels M3L, M3C, M3XN and M3X2), the lead's: the merges, one sentence corrected, M3XN's box run, and Logan's split of fp32's three (the lead)
@@ -29509,14 +29509,14 @@ Each parcel's own entry precedes this one, with its addendum where it was sent b
   - **int1000:** 1.377296 Bv, margin -0.46 bits, over 6,578 measured lanes. The other 5,414 lanes were left out by the tinyt gate; their direct errors are at most 9.3e-05 Bv.
   - **zone1000:** 1.007524 Bv, margin -0.01 bits, over all 12,000 lanes.
   - The measured worst direct errors in these two regions are 0.148 and 0.092 Bv. **The first-order budget does not bound them; no lane was observed wrong.**
-  - The largest term in int1000 is log-lowword, capacity 0.5275 Bv (observed 0.371): the logarithm of the low word of 1 + x, which n multiplies.
+  - The two largest terms are the logarithm's, which n multiplies. In int1000: log-sum, capacity 0.6309 Bv (observed 0.235), and log-lowword, the low word of 1 + x, capacity 0.5275 (observed 0.371, the largest observed). In zone1000: 0.528 and 0.351 by capacity.
   - compound's 15 other regions are under 0.47 Bv.
 
 So condition (e) of M3XN's decision fails for compound at n = 1000 at the box's volume. M3XN's entry states (e) at 300 lanes on the desktop, where zone1000 read 0.331; its words are true of that sample. This is the cancelling zone that M3's study met at fp64 ("found only by volume"). **The card's planned compound slices** (n = +-2, +-3, 17, 2^31 - 1, -2^63) do not include n = 1000.
 
 The outputs, the box script's log and summary, and their sums are in the lead's records (Data/runs/2026-11-23-m3-round/box/m3xn-pw32n/, `sha256sum -c` all OK).
 
-**Logan's answer** (2026-11-24, to the figures above): "Split it". So:
+**Logan's answer** (2026-11-24, to the figures above): "Split it (Recommended)". So:
 - parcel M3F2 builds pown and rootn at fp32 as the triple word, on M3XN's figures;
 - compound stays refused at fp32 by name;
 - a short model follow-up (M3XN2) fixes or re-bounds compound's low word, checked at volume on the box;
