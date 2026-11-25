@@ -29859,7 +29859,11 @@ At a huge |k|, the faithful root of 2^E with E >= 1 is exactly 1, so the irratio
 - **mpfr_rootn_si beside it, on 4.2.2:** 3,084 differ.
   - At fp32: about half of each of n = -2^62, -(2^62+1), -(2^63-1) and -2^63 (508, 1,016, 1,016 and 508 cases), namely every power of two above 1 in magnitude.
   - At fp64: 4, 8, 16 and 8 cases at the same n.
-  - None at a smaller |n| in the sample (-3 to -2^31), nor at 113 or 237 bits.
+  - None at a smaller |n| in the sample (-3 to -2^31), nor at 113 or 237 bits. The sample's n jump from -2^31 to -2^62, so this says nothing of the range between; the next item measures it.
+- **mpfr_rootn_si's reach,** MEASURED separately (the lead's t_reach.c, on 4.2.2 and on the box's system 4.2.1, which agree line for line): x = 2^E; n = -2^k and -(2^k + 1) for k = 2 to 62, and -2^63; four roundings, against the same reference.
+  - At fp32 it fails at every |n| from 2^33 at E = 1, from 2^34 at E = 2, 2^35 at E = 4, 2^37 at E = 15, 2^39 at E = 91 and 2^40 at E = 127, and at every larger |n| tried: about 2^33 E.
+  - At fp64 it fails only for E = 1, from 2^62, and E = 2, at 2^63.
+  - It never fails for E = -1 or E = -126.
 - **The controls,** the same on both MPFRs:
   - MPFR's own shape (one pass at p + 10, no mpfr_can_round) is caught, with 7,824 differences;
   - a bound ten bits too tight, from p + 2, is caught, with 1,268;
@@ -29877,3 +29881,5 @@ At a huge |k|, the faithful root of 2^E with E >= 1 is exactly 1, so the irratio
 **Night 1125** runs at night 1124's f7a1ce95, the plan's fallback, because the push waits. The pow and powr sweeps start one night later at the earliest.
 
 **Not yet:** the mpfr and cardstress stages at this entry's commit (the re-gate on the box), and verifier VRF. Both are added here before the push.
+
+**Addendum, before the push** (the lead, on verifier VRF's interim (b)). As first committed, four places read the sample's gap between -2^31 and -2^62 as the defect's reach: this entry's "None at a smaller |n|", the header comment's "n of magnitude 2^62 and more", TRANSCENDENTALS.md's "None fails at a smaller |n|" and the study's note's "each sampled n of magnitude 2^62 or more". VRF found it by running mpfr_rootn_ui with MPFR_RNDF at 34 bits under WSL's 4.1.0: it returns exactly 1 from n = -2^33 at E = 1. The reach item above was measured after that, and the four places now give it. The fix is unaffected: its guard takes every n below -2.

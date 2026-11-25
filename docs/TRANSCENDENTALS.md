@@ -1706,11 +1706,15 @@ routine sweep's own test links does the same.
 
 The routine sweep's n = -2^63 reached it. Its test caught it in the box
 gate of M3's wave 4, holding the oracle to `transcend.compute`, which
-was right. The lead's sample has 106,076 such cases, at 24, 53, 113 and
-237 bits, with n from -3 down to -2^63, and 3,084 of them come back wrong.
-At fp32 the wrong ones are about half of each of the four sampled n of
-magnitude 2^62 or more: the powers of two above 1 in magnitude. At fp64 a few fail
-at the same n. None fails at a smaller |n| or at fp128 or fp256.
+was right. Its reach, as the lead measured it on 4.2.2 and 4.2.1 alike,
+for x = 2^E and n = -2^k and -(2^k + 1):
+- at fp32 it fails at every |n| from about 2^33 E up (E = 1 from 2^33,
+  E = 127 from 2^40);
+- at fp64 it fails only for E = 1 and 2, at |n| of 2^62 and more;
+- it never fails for E <= -1.
+In the lead's wider sample (106,076 such cases at 24, 53, 113 and 237
+bits), 3,084 come back wrong. That sample's n jump from -2^31 to -2^62,
+so it shows nothing of the reach between.
 
 host/tools/mpfr_tfn.h computes those cases by a Ziv loop of its own
 (`tfn_rootn_pow2`); every other case stays with `mpfr_rootn_si`. See
