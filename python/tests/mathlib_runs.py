@@ -1374,23 +1374,28 @@ def _pow_n_bound(a, P, fn, fmt, rnds, n_pts):
 
 def _pow_formats(arg, default, fns=None):
     """The formats asked for: fp64, fp128 and fp256 (the double word's), and
-    fp32, the triple word (parcel M3F1: pow and powr only; never a default).
-    fp32 with any function but pow or powr is refused by name, as parcel
-    M3F2's (pown, rootn and compound are not built at fp32)."""
+    fp32, the triple word (pow and powr, parcel M3F1; pown and rootn, parcel
+    M3F2; never a default). fp32 with compound is refused by name (compound is
+    not built at fp32), and `--fn`'s default is the five names, so
+    `--formats fp32` with no `--fn` is refused too: it says to pass
+    `--fn pow,powr,pown,rootn`."""
     P = _pow_harness()
     names = arg.split(",") if arg else default
     for n in names:
         if n == "fp32":
-            lacking = [f for f in (fns or P.FUNCS) if f not in P.TW_FUNS]
+            built = tuple(P.TW_FUNS) + tuple(P.TW_N_FUNS)
+            lacking = [f for f in (fns or P.FUNCS) if f not in built]
             if lacking:
                 raise SystemExit(f"--formats 'fp32': {', '.join(lacking)} "
                                  f"{'is' if len(lacking) == 1 else 'are'} "
-                                 f"not built at fp32: parcel M3F2's (pow and "
-                                 f"powr are the triple word)")
+                                 f"not built at fp32 (pass --fn "
+                                 f"{','.join(built)}; pow and powr are the "
+                                 f"triple word, parcel M3F1's, pown and "
+                                 f"rootn parcel M3F2's)")
             continue
         if n not in P.BY_NAME:
             raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256 (or "
-                             f"fp32, for pow and powr)")
+                             f"fp32, for pow, powr, pown and rootn)")
     return [P.FP32 if n == "fp32" else P.BY_NAME[n] for n in names]
 
 

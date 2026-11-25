@@ -44,7 +44,8 @@ against the contract and against divfull.
   join ROUTINES after atan2, in the language's order; pow and powr take
   atan2's two inputs, the three ONE and an integer n that keys their
   fragment (N_KEYED, tied to the language's two-operand nodes); their cap
-  rows are pinned (the three with no fp32 key until parcel M3F2) and
+  rows are pinned (compound has no fp32 key: pown and rootn gained theirs at
+  parcel M3F2) and
   mathlib.POW_LIVE_CAP is a view of them; and their 205 fragments are what
   they were at f7a1ce95, digest for digest (routine_digests_pow.py).
 """
@@ -592,21 +593,24 @@ N_SET = (2, 3, -2, -2 ** 63)     # the n whose fragments reach the caps
 def test_the_five_have_their_cap_rows_pinned():
     """Logan's answer 8 of 2026-11-19: pow 30 at fp64, fp128 and fp256 and 32
     at fp32 (parcel M3F1's), powr 23, 22 and 22 and 29 at fp32, pown 21, rootn
-    19 and compound 22 at fp64, fp128 and fp256, each row's values pinned; the
-    five are under the six's contract; and the three (pown, rootn, compound)
-    have NO fp32 key until parcel M3F2 - a format left out of a row is no
-    cap there, silently, so the absence is itself pinned."""
+    19 and compound 22 at fp64, fp128 and fp256, pown 28 and rootn 27 at fp32
+    (parcel M3F2's, the triple word), each row's values pinned; the five are
+    under the six's contract; and compound has NO fp32 key (it is not built
+    there) - a format left out of a row is no cap there, silently, so the
+    absence is itself pinned."""
     assert R.LIVE_CAP["pow"] == {"fp32": 32, "fp64": 30, "fp128": 30,
                                  "fp256": 30}
     assert R.LIVE_CAP["powr"] == {"fp32": 29, "fp64": 23, "fp128": 22,
                                   "fp256": 22}
-    assert R.LIVE_CAP["pown"] == {"fp64": 21, "fp128": 21, "fp256": 21}
-    assert R.LIVE_CAP["rootn"] == {"fp64": 19, "fp128": 19, "fp256": 19}
+    assert R.LIVE_CAP["pown"] == {"fp32": 28, "fp64": 21, "fp128": 21,
+                                  "fp256": 21}
+    assert R.LIVE_CAP["rootn"] == {"fp32": 27, "fp64": 19, "fp128": 19,
+                                   "fp256": 19}
     assert R.LIVE_CAP["compound"] == {"fp64": 22, "fp128": 22, "fp256": 22}
     six = R.Contract(R.MARKED_FLAG_WORDS, (RNE, RTZ, RDN, RUP), True)
     for op in FIVE:
         assert R.CONTRACT[op] == six
-    for op in N_KEYED:
+    for op in ("compound",):
         assert "fp32" not in R.LIVE_CAP[op]
 
 
@@ -631,13 +635,16 @@ def test_mathlibs_pow_live_cap_is_a_view_of_the_five_rows():
     assert ml.POW_LIVE_CAP["powr"]["fp32"] == 29
 
 
-def test_the_threes_rows_name_the_three_formats_they_are_built_at():
-    """pown, rootn and compound are built at fp64, fp128 and fp256 alone
-    (mathlib.fragment refuses them at fp32 by name, parcel M3F2's), so their
-    rows name those three formats and no cap exists at fp32: when parcel M3F2
-    builds them this test and the rows change together."""
+def test_the_threes_rows_name_the_formats_they_are_built_at():
+    """pown and rootn are built at all four formats (fp32's the triple word,
+    parcel M3F2's) and compound at fp64, fp128 and fp256 alone
+    (mathlib.fragment refuses it at fp32 by name), so compound's row names
+    those three formats and no cap exists for it at fp32: when compound is
+    built at fp32 this test and the row change together."""
+    for op in ("pown", "rootn"):
+        assert set(R.LIVE_CAP[op]) == {"fp32", "fp64", "fp128", "fp256"}
+    assert set(R.LIVE_CAP["compound"]) == {"fp64", "fp128", "fp256"}
     for op in N_KEYED:
-        assert set(R.LIVE_CAP[op]) == {"fp64", "fp128", "fp256"}
         assert all(isinstance(v, int) and v > 0
                    for v in R.LIVE_CAP[op].values())
 
@@ -650,11 +657,12 @@ def test_the_fives_caps_are_the_measured_maximum_with_no_slack(op, fmt):
     of its fragments there keeps over the five attributes (pown, rootn and
     compound at n = 2, 3, -2 and -2^63 as well; MEASURED at the base, f7a1ce95:
     30, 23, 21, 19 and 22 at fp64, 30, 22, 21, 19 and 22 at fp128 and fp256,
-    and 32 and 29 at fp32 for pow and powr), and that fragment fails a cap
+    and 32 and 29 at fp32 for pow and powr; pown 28 and rootn 27 at fp32,
+    parcel M3F2's), and that fragment fails a cap
     one under by name - so a cap row lowered by one, or a fragment growing
     past it, is red here and in routines.fragment()."""
-    if op in N_KEYED and fmt.name == "fp32":
-        pytest.skip(f"{op} has no fp32 fragment: parcel M3F2's")
+    if op == "compound" and fmt.name == "fp32":
+        pytest.skip("compound has no fp32 fragment: it is not built there")
     cap = R.LIVE_CAP[op][fmt.name]
     ns = N_SET if op in N_KEYED else (None,)
     frags = [R.fragment(op, fmt, rnd, n) for rnd in RND_MODES for n in ns]
@@ -700,7 +708,8 @@ def test_the_three_are_keyed_by_n(op):
     cache's key does), two n are two fragments and one n one, a bool or a
     float is refused by name before any key is made (True, 1.0 and 1 are
     one dict key: M3G2's finding), n outside int64 is refused, fp32 is
-    refused by name (parcel M3F2's), and the golden function takes
+    refused by name for compound (not built there; pown and rootn are the
+    triple word, parcel M3F2's), and the golden function takes
     (fmt, a, rnd, n) with n a Python int."""
     from cft_golden import mathlib as ml
     from cft_golden import transcend
@@ -722,8 +731,11 @@ def test_the_three_are_keyed_by_n(op):
     for edge in (-2 ** 63, 2 ** 63 - 1):
         assert R.fragment(op, FP128, RNE, edge) is ml.fragment(
             op, FP128, RNE, n=edge)
-    with pytest.raises(ValueError, match="parcel M3F2's"):
-        R.fragment(op, FP32, RNE, 3)
+    if op == "compound":
+        with pytest.raises(ValueError, match="compound at fp32 is not built"):
+            R.fragment(op, FP32, RNE, 3)
+    else:
+        assert R.fragment(op, FP32, RNE, 3) is ml.fragment(op, FP32, RNE, n=3)
     x = sf.one_bits(FP64) + 12345
     assert R.GOLDEN[op](FP64, x, RDN, 3) == transcend.compute(
         FP64, op, x, 0, RDN, 3)

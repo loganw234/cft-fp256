@@ -11266,6 +11266,326 @@ def _build_pow_tw_n_family(name, fmt, rnd, guard, shift, plant, n):
     return b
 
 
+# ---- the constants of fp32's pown and rootn, checked (parcel M3F2) ------------
+#
+# check_pow_tw_n_constants asks the BUILT fragment's words, by role, of the same
+# independent enclosures as check_pow_tw_constants (the section above: the
+# logarithm's and the exponential's tables, polynomials, reduction words, the
+# screens, the neighbours of 1 and the responses), and of the new roles of the
+# integer operand, derived in their own form from n alone:
+#
+#   N0..N2 (pown)    n in words, each the nearest to what the ones before
+#                    leave of the exact integer n; the words' sum is n EXACTLY
+#                    and none is zero (so the count is the right one)
+#   R0..R2 (rootn)   1/n in words, each the nearest to what the ones before
+#                    leave of 1/n; the sum within 2^-(3p-2) of 1/n, a power of
+#                    two n a single exact word
+#   YB2              the bound's |Y k| coefficient: |n| (pown) or 1/|n|
+#                    (rootn) times B2 = 2^-(3p-5), rounded UPWARD
+#   SIGN             held where n is odd (the result's sign), and only then
+# It does not run check_pow_tw_scale's lanes (they take a pair lane):
+# _check_pow_tw_n_scale runs lanes x = 2^m through the build instead.
+
+_POW_TW_N_CHECK_NS = (3, -2, 17, 1000, 2 ** 24 + 1, 2 ** 40, 2 ** 48 + 1,
+                      2 ** 62 + 2 ** 37 + 1)
+
+
+def _check_pow_tw_n_scale(b: Build, findings):
+    """The scale offsets and the fixed grid's words where they act, on lanes
+    x = 2^m through the n-keyed build: pown (t = n m) at the m whose t has
+    |8 t| below 2^(p-2), rootn (t = m / n) at the m that n divides, each run
+    through the unpruned body, nf = 8 t, Ek, S1 and S2 against the exact k = t.
+    -> lanes run (few where m is not representable: a large n of rootn)."""
+    fmt, p, mw = b.fmt, b.fmt.prec, b.fmt.man_w
+    ew, _mw = _TRIG_FIELDS[fmt.name]
+    emin, emax = 2 - 2 ** (ew - 1), 2 ** (ew - 1) - 1
+    bias, OFF = emax, b.meta["OFF"]
+    fn, n = b.meta["fn"], b.meta["n"]
+    tag = f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]} n = {n}"
+    ran = 0
+    for m in range(emin - p + 1, emax + 1):
+        t = Fraction(n * m) if fn == "pown" else Fraction(m, n)
+        if t.denominator != 1 or abs(8 * t) >= 2 ** (p - 2)                 or not emin - p - 2 <= t <= emax + 1:
+            continue
+        k = int(t)
+        x = _enc_exact(fmt, Fraction(2) ** m)
+        _res, _fl, pr = b.run((x,), ("nf", "t0", "t1", "t2", "Ek", "S1", "S2",
+                                     "rp"))
+        if _dec(fmt, pr["nf"]) != 8 * k or _dec(fmt, pr["rp"]) != 0 \
+                or _dec(fmt, pr["t0"]) != t or _dec(fmt, pr["t1"]) != 0 \
+                or _dec(fmt, pr["t2"]) != 0:
+            findings.append(f"{tag}: x = 2^{m}: t is {_dec(fmt, pr['t0'])} + "
+                            f"{_dec(fmt, pr['t1'])} + {_dec(fmt, pr['t2'])}, "
+                            f"nf {_dec(fmt, pr['nf'])}, want t = {t}")
+            continue
+        ran += 1
+        if pr["Ek"] != k + bias + OFF:
+            findings.append(f"{tag}: x = 2^{m} (k = {k}): Ek = {pr['Ek']}, "
+                            f"want {k + bias + OFF}")
+        for nm, kk in (("S1", k // 2), ("S2", k - k // 2)):
+            u = sf.unpack(fmt, pr[nm])
+            if (u.kind != sf.NORM or u.sign or u.m != 1 << mw
+                    or u.e + mw != kk):
+                findings.append(f"{tag}: x = 2^{m} (k = {k}): {nm} = "
+                                f"{pr[nm]:#x} is not 2^{kk}")
+    return ran
+
+
+def _check_pow_tw_n_build(b: Build, findings, scale=True):
+    """Every derived constant of one built fp32 pown or rootn fragment against
+    its independent derivation, by role (the section's comment; the constants
+    shared with pow's and powr's are _check_pow_tw_build's, derived again).
+    -> (constants checked, lanes run)."""
+    fmt, p, W = b.fmt, b.fmt.prec, b.fmt.width
+    fn, G, n = b.meta["fn"], b.meta["G"], b.meta["n"]
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    emax, emin = 2 ** (ew - 1) - 1, 2 - 2 ** (ew - 1)
+    bias = emax
+    tag, verify, point, seen, count = _verifier(b, findings)
+    tag = f"{tag} n = {n}"
+
+    def bits_are(role, want):
+        seen.add(role)
+        if role not in b.roles:
+            findings.append(f"{tag}: the fragment has no constant {role}")
+            return
+        count[0] += 1
+        got = b.words[b.roles[role][1]]
+        if got != want:
+            findings.append(f"{tag} {role}: {got:#x} is not {want:#x}")
+
+    def words_of(prefix_roles, lo, hi):
+        for role in prefix_roles:
+            w = verify(role, "rn", lo, hi)
+            lo, hi = lo - w, hi - w
+        return lo, hi
+    m = b.meta
+    GL, KL, KE, B1, B2, proofs = _check_pow_tw_plan(fmt, G)
+    if m["GL"] != GL or m["GE"] != G:
+        findings.append(f"{tag}: (GL, GE) = {(m['GL'], m['GE'])} is not the "
+                        f"re-derived {(GL, G)}")
+    if (m["KL"], m["KE"]) != (KL, KE):
+        findings.append(f"{tag}: the plan {(m['KL'], m['KE'])} is not the "
+                        f"re-derived {(KL, KE)}")
+    if (m["B1"], m["B2"]) != (B1, B2):
+        findings.append(f"{tag}: (B1, B2) = {(m['B1'], m['B2'])} is not the "
+                        f"re-derived {(B1, B2)}")
+    # the five proofs of the integer operand follow pow's twelve
+    held = list(m["proofs"])
+    extra = ["n-int64", "n-not-0-1", "words-at-most-3",
+             "product-floor-3-words"]
+    extra.append("rootn-1/n-words" if fn == "rootn" else "n-words-exact")
+    if m["plant"] in ("n_word_ulp", "n_low_dropped", "n_word3_dropped"):
+        extra = extra[:4]               # the plant leaves the last one out
+    if held != proofs + extra:
+        findings.append(f"{tag}: the static proofs that held are {held}, "
+                        f"not {proofs + extra}")
+    shift = m["shift"]
+    # ---- the integer operand's words, in their own form ----
+    roles = [f"{'R' if fn == 'rootn' else 'N'}{i}" for i in range(3)]
+    held_roles = [r for r in roles if r in b.roles]
+    if held_roles != roles[:len(held_roles)] or not held_roles:
+        findings.append(f"{tag}: the word roles held are {held_roles}")
+    if fn == "pown":
+        # an exact integer may sit on a tie of the grid (2^24 + 1 between 2^24
+        # and 2^24 + 2): the word is then the one with the even significand,
+        # which _why_not's strict "rn" refuses, so the rule is written here
+        left = Fraction(n)
+        for role in held_roles:
+            seen.add(role)
+            count[0] += 1
+            bits = b.words[b.roles[role][1]]
+            w = _dec(fmt, bits)
+            up = _dec(fmt, sf.next_up(fmt, bits)[0])
+            dn = _dec(fmt, sf.next_down(fmt, bits)[0])
+            tie = left in ((w + up) / 2, (w + dn) / 2)
+            if not ((w + dn) / 2 <= left <= (w + up) / 2) or (tie
+                                                            and bits & 1):
+                findings.append(f"{tag} {role}: {bits:#x} = {_show(w)} is not"
+                                f" the nearest (even on a tie) to {left}")
+            left -= w
+        if left != 0:
+            findings.append(f"{tag}: n less its {len(held_roles)} words is "
+                            f"{left}, not 0")
+    else:
+        inv = Fraction(1, n)
+        left, _hi = words_of(held_roles, inv, inv)
+        if abs(left) > abs(inv) / 2 ** (3 * p - 2):
+            findings.append(f"{tag}: 1/n less its {len(held_roles)} words is "
+                            f"{float(left):.3e}, over 2^-(3p-2) of itself")
+    for r in held_roles:
+        if b.words[b.roles[r][1]] & ((1 << (W - 1)) - 1) == 0:
+            findings.append(f"{tag} {r}: a zero word is held")
+    odd = n % 2 != 0
+    ay = Fraction(1, abs(n)) if fn == "rootn" else Fraction(abs(n))
+    verify("YB2", "ru", ay * B2 * 2 ** shift, ay * B2 * 2 ** shift)
+    # ---- the logarithm's words (GL) ----
+    magic_bits = ((bias + p - 1) << mw) | (1 << (mw - 1))
+    magic = Fraction(3, 2) * 2 ** (p - 1)
+    point("MAGIC", magic)
+    point("SIXTEEN", 16)
+    point("SIXTEENTH", Fraction(1, 16))
+    point("NMAGIC16", -magic / 16)
+    point("HALF", Fraction(1, 2))
+    point("NEGONE", -1)
+    point("MINN", Fraction(2) ** emin)
+    point("P2P", Fraction(2) ** p)
+    for j in range(N):
+        lo, hi = _check_log16(16 if j == 0 else 8 + j)
+        words_of([f"L{j}_{i}" for i in range(3)], lo, hi)
+    K3, K2, D = KL
+    for i in range(K3 + K2, D + 1):
+        c = Fraction((-1) ** i, i + 1)
+        verify(f"LY{i}", "rn", c, c)
+    for i in range(K3, K3 + K2):
+        c = Fraction((-1) ** i, i + 1)
+        words_of([f"LA{i}_{k}" for k in range(2)], c, c)
+    for i in range(K3):
+        c = Fraction((-1) ** i, i + 1)
+        words_of([f"LB{i}_{k}" for k in range(3)], c, c)
+    lo, hi = _check_inv_ln2()
+    w0 = verify("IL2_0", "rn", lo, hi)
+    w1 = verify("IL2_1", "rn", lo - w0, hi - w0)
+    verify("IL2_2", "rn", lo - w0 - w1, hi - w0 - w1)
+    point("NIL2_0", w0, negated=True)
+    point("NIL2_1", w1, negated=True)
+    # ---- the exponential's (G) ----
+    point("EIGHT", 8)
+    point("NINV8", Fraction(-1, 8))
+    l2lo, l2hi = _check_ln2()
+    w0 = verify("LN2_0", "rn", l2lo, l2hi)
+    w1 = verify("LN2_1", "rn", l2lo - w0, l2hi - w0)
+    verify("LN2_2", "rn", l2lo - w0 - w1, l2hi - w0 - w1)
+    point("NLN2_0", w0, negated=True)
+    point("NLN2_1", w1, negated=True)
+    for j in range(N):
+        lo, hi = _check_two_to_eighth(j)
+        words_of([f"T{j}_{i}" for i in range(3)], lo, hi)
+    K3, K2, D = KE
+    for i in range(K3 + K2, D + 1):
+        verify(f"EY{i}", "rn", Fraction(1, math.factorial(i + 1)),
+               Fraction(1, math.factorial(i + 1)))
+    for i in range(K3, K3 + K2):
+        c = Fraction(1, math.factorial(i + 1))
+        words_of([f"EA{i}_{k}" for k in range(2)], c, c)
+    for i in range(K3):
+        c = Fraction(1, math.factorial(i + 1))
+        words_of([f"EB{i}_{k}" for k in range(3)], c, c)
+    point("C0", Fraction(1, 16))
+    # ---- the bound, the screens, the gate, the neighbours, the responses ----
+    point("BREL", Fraction(2) ** (-(p + G) + shift))
+    verify("B1", "rn", B1 * 2 ** shift, B1 * 2 ** shift)
+    point("TOVF", emax + 2)
+    point("TUNF", emin - p - 2)
+    point("TINYT", Fraction(1, 2 ** (p + 3)))
+    for sign in ((0, 1) if odd else (0,)):
+        for away in (0, 1):
+            point(f"NB{sign}{away}", _check_pow_neighbour(b.rnd, sign, away,
+                                                          p))
+    for sign, tail in ((0, "_P"), (1, "_N")):
+        ovf, unf = _check_pow_responses(fmt, b.rnd, sign)
+        if sign == 0 or odd:
+            bits_are("OVFB" + tail, ovf)
+            bits_are("UNFB" + tail, unf)
+    # ---- the words every routine has, from the IEEE fields ----
+    full = (1 << W) - 1
+    point("ZERO", 0)
+    point("ONE", 1)
+    bits_are("INT1", 1)
+    bits_are("ABSM", full ^ (1 << (W - 1)))
+    bits_are("INF", ((1 << ew) - 1) << mw)
+    bits_are("QNAN", (((1 << ew) - 1) << mw) | (1 << (mw - 1)))
+    bits_are("QBIT", 1 << (mw - 1))
+    bits_are("SIGN_SHIFT", W - 1)
+    bits_are("MANTISSA_WIDTH", mw)
+    bits_are("MANTISSA_MASK", (1 << mw) - 1)
+    # SIGN is held where n is odd (the sign word) or where rootn_m0_neg takes
+    # x's sign at an even n, and not otherwise
+    if odd or m["plant"] == "rootn_m0_neg":
+        bits_are("SIGN", 1 << (W - 1))
+    elif "SIGN" in b.roles:
+        seen.add("SIGN")
+        findings.append(f"{tag}: SIGN is held at an even n")
+    for role, v in _POW_FLAG_WORDS.items():
+        if role in b.roles or role == "FL_DIVZERO":
+            bits_are(role, v)
+    for v in _POW_SMALL_INTS:
+        if f"I{v}" in b.roles:
+            bits_are(f"I{v}", v)
+    bits_are("K_OFFSET", magic_bits - bias)
+    bits_are("K_OFFSET_SUB", magic_bits - bias - p)
+    bits_are("C_WRAP", magic_bits + 9)
+    OFF = p + 8
+    if (bias + OFF) % 2:
+        OFF += 1
+    if m.get("OFF") != OFF:
+        findings.append(f"{tag}: OFF = {m.get('OFF')} is not the re-derived "
+                        f"{OFF}")
+    bits_are("KOFFSET", magic_bits - 8 * (bias + OFF))
+    bits_are("KBIAS1", bias - (bias + OFF) // 2)
+    bits_are("K_EMIN_P1", emin + bias + OFF + 1)
+    bits_are("K_EMIN", emin + bias + OFF)
+    kd = emin + 2 * bias + OFF
+    bits_are("K_KD", kd)
+    if b.rnd in (RNE, RMM):
+        bits_are("K_KD_P", kd - p)
+    elif "K_KD_P" in b.roles:
+        seen.add("K_KD_P")
+        findings.append(f"{tag}: K_KD_P is held, the half grid is the nearest "
+                        f"attributes'")
+    bits_are("K_SUBMIN", emin - p + 1 + bias + OFF)
+    unchecked = sorted(set(b.roles) - seen)
+    if unchecked:
+        findings.append(f"{tag}: derived but not checked: {unchecked}")
+    used = {s[1] for i in b.live_indices() for s in b.body[i][2]
+            if s[0] == "w"}
+    nameless = sorted(k for k in used - {ref[1] for ref in b.roles.values()})
+    if nameless:
+        findings.append(f"{tag}: words the fragment holds with no role: "
+                        f"{[(k, hex(b.words[k])) for k in nameless]}")
+    lanes = _check_pow_tw_n_scale(b, findings) if scale else 0
+    return count[0], lanes
+
+
+def check_pow_tw_n_constants(builder=None, attrs=sf.RND_MODES, names=None,
+                             ns=None):
+    """(lines, findings): re-derive every derived constant of fp32's pown and
+    rootn (_POW_TW_N_BUILDERS) at each of `attrs` and, for each name, at each n
+    of `ns` (default _POW_TW_N_CHECK_NS: odd and even, one to three words,
+    rootn's three-word 1/n and a power of two's one word; pown only at 2^62 +
+    2^37 + 1), by role (the section's comment). `builder(name, fmt, rnd, n)`
+    is build with n=, or a faulted one for a test. `lines` say what was
+    checked, one a function; `findings` are the differences, named by fragment
+    and word, empty when none."""
+    builder = builder or (lambda name, fmt, rnd, n: build(name, fmt, rnd, n=n))
+    names = tuple(_POW_TW_N_BUILDERS) if names is None else tuple(names)
+    ns = _POW_TW_N_CHECK_NS if ns is None else tuple(ns)
+    lines, findings = [], []
+    for name in names:
+        n_const = n_lanes = n_frag = 0
+        used = [k for k in ns
+                if not (name == "rootn" and k == 2 ** 62 + 2 ** 37 + 1)]
+        for n in used:
+            for rnd in attrs:
+                b = builder(name, FP32, rnd, n)
+                c, ln = _check_pow_tw_n_build(b, findings, rnd == attrs[0])
+                n_const += c
+                n_lanes += ln
+                n_frag += 1
+        m = b.meta
+        lines.append(
+            f"{name} fp32 (triple word, integer operand): G = {m['G']}, GL = "
+            f"{m['GL']}, plan (K3, K2, D) = {m['KL']} (logarithm) and "
+            f"{m['KE']} (exponential): {n_const} derived constants in "
+            f"{n_frag} fragments (n = {', '.join(str(k) for k in used)}, "
+            f"under {len(attrs)} attributes), the words of n (pown: their "
+            f"sum exactly n, none zero) or of 1/n (rootn: within 2^-(3p-2)), "
+            f"YB2 rounded upward, SIGN only at an odd n, the plan and the "
+            f"names of the seventeen static proofs re-derived; {n_lanes} "
+            f"lanes x = 2^m of the scale words")
+    return lines, findings
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the
@@ -12892,6 +13212,19 @@ def main(argv=None):
                       f"{len(_POW_TW_BUILDERS)} routines, 1 format, "
                       f"{len(findings)} differences")
             failed = failed or bool(findings)
+            # parcel M3F2: pown and rootn at fp32, the integer operand: its
+            # own lines and count line after pow-tw's, which are unchanged
+            lines, findings = check_pow_tw_n_constants()
+            if "pow-tw" in only:
+                for ln in lines:
+                    print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            if "pow-tw" in only:
+                print(f"mathlib --check (pow, triple word, integer operand): "
+                      f"{len(_POW_TW_N_BUILDERS)} routines, 1 format, "
+                      f"{len(findings)} differences")
+            failed = failed or bool(findings)
         return 1 if failed else 0
     if names:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
@@ -12953,6 +13286,18 @@ def main(argv=None):
                 print(f"{name:8s} {'fp32':6s} {sf.RND_NAMES[rnd]:4s} "
                       f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
                       f"{POW_LIVE_CAP[name]['fp32']}")
+        # parcel M3F2: pown and rootn at fp32, with the n each is built at
+        print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
+              f"{'words':>6s} {'live':>5s}  cap  {'n':>20s}")
+        for name in _POW_TW_N_BUILDERS:
+            for n in _POW_TW_N_CHECK_NS:
+                if name == "rootn" and n == 2 ** 62 + 2 ** 37 + 1:
+                    continue
+                for rnd in sf.RND_MODES:
+                    f = fragment(name, FP32, rnd, n)
+                    print(f"{name:8s} {'fp32':6s} {sf.RND_NAMES[rnd]:4s} "
+                          f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
+                          f"{POW_LIVE_CAP[name]['fp32']:3d}  {n:20d}")
     if "trig" in only:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
               f"{'words':>6s} {'live':>5s}  cap")
