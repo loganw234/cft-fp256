@@ -106,6 +106,96 @@ static const int TFN_HASINT[TF_COUNT] = {
     0, 0, 0, 0, 0, 0, 1, 0, 1, 1
 };
 
+#if MPFR_VERSION >= MPFR_VERSION_NUM(4, 2, 0)
+/* rootn at an n below -2 on a power of two, by a Ziv loop of this file's
+ * own: the second place this file does not trust MPFR (the lead,
+ * 2026-11-25).
+ *
+ * MPFR 4.2.2's mpfr_rootn_si, in its general case for k < -2 (src/root.c
+ * as shipped, lines 398 to 431, READ on the box), takes the |k|-th root
+ * FAITHFULLY (MPFR_RNDF) at Ny + 10 bits, inverts it in the asked
+ * rounding, and leaves its Ziv loop as soon as the inversion was exact and
+ * x is a power of two (`inexact == 0 && mpfr_powerof2_raw (x)`, line 423),
+ * which it takes for the exact case. At a huge |k| the faithful root of
+ * 2^E can itself be 1, because 2^(E/|k|) lies within an ulp of 1 at that
+ * precision. Then 1/1 is exact, the loop ends, and an IRRATIONAL root
+ * comes back as exactly 1 with a zero ternary, in every rounding.
+ *
+ * Found by the routine-sweep test's oracle legs in the box gate of M3's
+ * wave 4 (2026-11-25): rootn at n = -2^63 on x = 2, 2^15 and 2^91 at fp32
+ * came back 0x1p+0 exact in all five attributes. The true value
+ * 2^(-E/2^63) is just below 1, so it is 0x1p+0 inexact to nearest, upward
+ * and rmm, and 0x1.fffffep-1 inexact toward zero and downward: these are
+ * transcend.compute's answers, which the test holds the oracle to. For
+ * E <= -1 the root falls just below 1, which is not a power of two, so
+ * MPFR's loop goes on and is right: 0.5, 2^-126 and 2^-149 passed the same
+ * legs.
+ *
+ * Here x = +-2^E with E not a multiple of n (n < -2), so the root
+ * 2^(E/n) is irrational: never representable and never a midpoint. Two
+ * roundings bound the error by 2 ulp of the working precision w:
+ * mpfr_rootn_ui to nearest (1/2 ulp), then the inversion to nearest (1/2
+ * ulp more, beside the image of the first error). So
+ * mpfr_can_round(t, w - 2, MPFR_RNDN, MPFR_RNDZ, p + (rnd == MPFR_RNDN))
+ * decides both the rounding and the ternary. MPFR's manual gives that
+ * directed-rounding form at mpfr_can_round, for a value known not to be
+ * representable. The loop doubles w until it can round. For n = -2^63 at
+ * fp32 the first w, p + 72, is enough, since the root's run of ones below
+ * 1 is about 63 bits long. A representable root would never round this
+ * way, so past 2^20 bits the loop refuses by name (exit 3) rather than
+ * run on; the guard keeps every such case out.
+ *
+ * The following stay with mpfr_rootn_si, as before: a multiple of n (the
+ * exact cases), a value that is not a power of two, |x| = 1, an even root
+ * of a negative, and n >= -2 (mpfr_ui_div and mpfr_rec_sqrt there, with
+ * no loop). */
+static int tfn_rootn_pow2_case(const mpfr_t a, long nn)
+{
+    mpfr_exp_t e;
+    if (nn >= -2 || !mpfr_regular_p(a))
+        return 0;
+    if (mpfr_sgn(a) < 0 && nn % 2 == 0)
+        return 0;                               /* NaN: MPFR's own row */
+    e = mpfr_get_exp(a) - 1;                    /* 2^e <= |a| < 2^(e+1) */
+    if (mpfr_cmp_si_2exp(a, mpfr_sgn(a), e) != 0)
+        return 0;                               /* not a power of two */
+    return e % nn != 0;                         /* 0 at |a| = 1, e = 0 */
+}
+
+static int tfn_rootn_pow2(mpfr_t r, const mpfr_t a, long nn, mpfr_rnd_t rnd)
+{
+    unsigned long k = (unsigned long)(-(nn + 1)) + 1UL;  /* |nn|, LONG_MIN too */
+    mpfr_prec_t p = mpfr_get_prec(r), w = p + 72;
+    mpfr_t x, t;
+    int s;
+    mpfr_init2(x, mpfr_get_prec(a));
+    mpfr_abs(x, a, MPFR_RNDN);                  /* exact */
+    mpfr_init2(t, w);
+    for (;;) {
+        mpfr_rootn_ui(t, x, k, MPFR_RNDN);
+        mpfr_ui_div(t, 1, t, MPFR_RNDN);
+        if (mpfr_can_round(t, w - 2, MPFR_RNDN, MPFR_RNDZ,
+                           p + (rnd == MPFR_RNDN)))
+            break;
+        w *= 2;
+        if (w > ((mpfr_prec_t)1 << 20)) {
+            /* only a representable root (an exact case, which the guard
+             * keeps out) could get here: refuse by name, never loop on */
+            fprintf(stderr, "mpfr_tfn.h: rootn at n = %ld passed 2^20 bits in "
+                    "its own Ziv loop; refusing\n", nn);
+            exit(3);
+        }
+        mpfr_set_prec(t, w);
+    }
+    if (mpfr_sgn(a) < 0)
+        mpfr_neg(t, t, MPFR_RNDN);              /* an odd root: exact */
+    s = mpfr_set(r, t, rnd);
+    mpfr_clear(t);
+    mpfr_clear(x);
+    return s;
+}
+#endif
+
 static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
                    long nn, mpfr_rnd_t rnd)
 {
@@ -162,7 +252,9 @@ static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
     case TF_POWN:     return mpfr_pow_si(r, a, nn, rnd);
     case TF_POWR:     return mpfr_powr(r, a, b, rnd);
     case TF_COMPOUND:
-        /* THE ONE PLACE THIS CAMPAIGN DOES NOT TRUST MPFR.
+        /* THE FIRST PLACE THIS FILE DOES NOT TRUST MPFR (the second,
+         * found 2026-11-25, is rootn at an n below -2 on a power of
+         * two: tfn_rootn_pow2() above).
          *
          * mpfr_compound_si is off by one unit in the last place for a
          * NEGATIVE n whenever 1 + x is not representable at the working
@@ -176,9 +268,12 @@ static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
          *   same reference gives 0x4.000008p-4.
          *
          * n = -2 and n = -4 do it too; a NON-NEGATIVE n does not, and
-         * mpfr_pow_si and mpfr_rootn_si are sound at every n this
-         * campaign uses (all three checked by the same 400-bit
-         * reference). So n >= 0 goes through MPFR's own compound, which
+         * mpfr_pow_si and mpfr_rootn_si are sound at every n of
+         * mpfr-check's campaign, [-12, 12] (all three checked by the
+         * same 400-bit reference). mpfr_rootn_si is not sound at a huge
+         * negative n on a power of two, which the routine sweep's
+         * n = -2^63 reaches; see tfn_rootn_pow2() above.
+         * So n >= 0 goes through MPFR's own compound, which
          * is the comparison worth having, and n < 0 is built from the
          * EXACTLY formed 1 + x and mpfr_pow_si - still MPFR arithmetic,
          * still one rounding, and not the entry point with the defect.
@@ -203,7 +298,12 @@ static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
             mpfr_clear(s);
             return t;
         }
-    default:          return mpfr_rootn_si(r, a, nn, rnd);
+    default:
+#if MPFR_VERSION >= MPFR_VERSION_NUM(4, 2, 0)
+        if (tfn_rootn_pow2_case(a, nn))
+            return tfn_rootn_pow2(r, a, nn, rnd);
+#endif
+        return mpfr_rootn_si(r, a, nn, rnd);
     }
 }
 
