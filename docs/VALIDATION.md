@@ -29780,7 +29780,7 @@ No regression; three wrong answers (b), corrected in place above and here:
 
 ## 2026-11-25 - parcel M3XN2's merge, the lead's: the merge, one sentence narrowed, the box runs of pw32c at volume, and Logan's choice for compound at fp32 (the lead)
 
-**The merge** (branch merge-m3xn2 on merge-g3c, which is wave 4's tree 496e3f9f with night 28's page data and GPU parcel G3C's merge): b1edbe4c, M3XN2 at dae2e3db.
+**The merge** (branch merge-m3xn2 on merge-g3c, which is wave 4's merge 496e3f9f with night 28's page data and GPU parcel G3C's merge): b1edbe4c, M3XN2 at dae2e3db.
 - VALIDATION by `val_merge4.py 5081cd5b HEAD dae2e3db`: base 29,530 lines; keep +174; branch's block +75; result 29,779; `--check` exit 0.
 - README's counts set by the lead: the base's figure plus each side's change.
 - The study's dated note merged by git.
@@ -29800,12 +29800,12 @@ No regression; three wrong answers (b), corrected in place above and here:
   - the unfixed model is over 1 Bv in 7 int cells, the largest int-1200 at 1.263856;
   - 4 zone cells are NOT MEASURED;
   - the unfixed cells are equal in the two variants' runs, 32 of 32.
-- **The fixes' lists** (`scan`, `worst` and `full` at 741770a6, each variant, 08:40 to 10:57). Beside them, **each fix's own six worst cells** of the scan and the gap at 12,000 lanes (the lead's job lists, in `pw32c_box.sh`'s own form, at 6689dd7c, 09:43 to 10:42). `worst` picks its six by the unfixed model, and a fix's worst cells need not be among them.
+- **The fixes' lists** (`scan`, `worst` and `full` at 741770a6, each variant: fixB 08:40 to 10:57, fixA 08:40 to 10:54). Beside them, **each fix's own six worst cells** of the scan and the gap at 12,000 lanes (the lead's job lists, in `pw32c_box.sh`'s own form, at 6689dd7c: fixB 09:43 to 10:42, fixA 09:43 to 10:40). `worst` picks its six by the unfixed model, and a fix's worst cells need not be among them.
   - **The unfixed control at 12,000 lanes:** int1000 1.377296 and zone1000 1.007524 Bv, equal to the digit to M3XN's box run of 2026-11-24.
   - **The unfixed model's six worst cells at 12,000 lanes:** 1.194960 to 1.381418 Bv, the largest int-1000.
   - **fixB, over every cell run at 12,000 lanes for it** (the 17 regions of `full`, the unfixed model's six, its own six): **at most 0.404175 Bv (int-1300, margin 1.31 bits)**. zone1000 reads 0.222989 and int1000 0.393525.
   - **fixA, over the same:** **at most 0.644537 Bv (int-1500, margin 0.63 bits)**. zone1000 reads 0.392961 and int1000 0.627744.
-- The outputs, logs, tables and sums are in the lead's records (Data/runs/2026-11-23-m3-round/box/m3xn2-*); `sha256sum -c` was all OK in each folder after the copy.
+- The outputs, logs, tables and sums are in the lead's records (Data/runs/2026-11-23-m3-round/box/m3xn2-*); `sha256sum -c` was all OK in each of the seven folders with a sums file, after the copy. box/m3xn2-fixscan has none: its two tables are byte for byte the scan tables in box/m3xn2-fixA and box/m3xn2-fixB.
 
 **fixB's registers:** cap 32 at r31, so -2 values beside a call (30 less the cap, M4C's first-spill rule; the allocator spills and does not refuse). That is the cost pow already has at fp32 (LANGUAGE.md's paragraph on the pow family's caps).
 
@@ -29819,3 +29819,5 @@ No regression; three wrong answers (b), corrected in place above and here:
 - the cells are samples of n and of lanes, so their worst is a lower bound of the true worst;
 - no re-bound was built;
 - 2,000 lanes read lower than 12,000 (the unfixed zone1000 0.737 against 1.0075), so only the 12,000-lane figures above are the volume's.
+
+**Addendum (the lead, 2026-11-25), by verifier VM3XN2M:** the two windows' end times above were fixB's, and fixA's are now given beside them. The sums sentence named every folder, though one (box/m3xn2-fixscan) has no sums file; it now names the seven that have one. And the merge's base is named as a commit, not a tree. No figure changed. VM3XN2M also noted that the refusal of the labels Z, recon and final (M3XN2's first addendum, item 3) holds without `early`: with it they are accepted at cap 32 in 60 of 60 cells (VM3XN2's pass 3, quoted above).
