@@ -1369,6 +1369,10 @@ def _pow_n_bound(a, P, fn, fmt, rnds, n_pts):
     measured, regions NOT MEASURED)."""
     measured = unmeasured = 0
     tw = fmt.name == "fp32"              # parcel M3F2: the triple word's
+    if tw and a.guard is not None and a.guard != ml.GUARD["fp32"]:
+        raise SystemExit(f"--guard {a.guard}: the triple word is built at "
+                         f"G = {ml.GUARD['fp32']} alone (its bound's B1 and "
+                         f"B2 are measured there)")
     for rnd in rnds:
         for k, name in enumerate(P.REGION_NAMES_TW_N if tw else
                                  P.region_names_n(fn, fmt)):
@@ -1376,6 +1380,15 @@ def _pow_n_bound(a, P, fn, fmt, rnds, n_pts):
             if a.ns and rn is not None and rn not in _ns_of(a, P, fn, fmt):
                 continue
             lanes = P.region_n_cached(fmt, fn, name, n_pts, a.seed + k)
+            if not lanes and tw:
+                # parcel M3F2: a region with no lane at all (pown's int63,
+                # int1099511627776 and int281474976710657 at fp32) measured
+                # nothing: named, and outside the pass count
+                unmeasured += 1
+                say(f"pow-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} {name} "
+                    f"seed {a.seed + k}: NOT MEASURED (0 lanes: none of the "
+                    f"region's lanes is on the main path)")
+                continue
             if not lanes:
                 continue
             if tw:
@@ -2488,10 +2501,12 @@ def main(argv=None):
     p = sub.add_parser("pow-pools")
     p.add_argument("--fn", help="a comma list (by default the five built: "
                                 "pow, powr, pown, rootn, compound; fp32 "
-                                "takes --fn pow,powr)")
+                                "takes --fn pow,powr,pown,rootn: compound "
+                                "is not built there)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); "
-                                     "fp32, the triple word (parcel M3F1), "
-                                     "for pow and powr, never by default")
+                                     "fp32, the triple word (parcels M3F1 "
+                                     "and M3F2), for pow, powr, pown and "
+                                     "rootn, never by default")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--seq", action="store_true")
     p.add_argument("--step", type=int, default=0,
@@ -2514,10 +2529,12 @@ def main(argv=None):
     p = sub.add_parser("pow-bound")
     p.add_argument("--fn", help="a comma list (by default the five built: "
                                 "pow, powr, pown, rootn, compound; fp32 "
-                                "takes --fn pow,powr)")
+                                "takes --fn pow,powr,pown,rootn: compound "
+                                "is not built there)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default); "
-                                     "fp32, the triple word (parcel M3F1), "
-                                     "for pow and powr, never by default")
+                                     "fp32, the triple word (parcels M3F1 "
+                                     "and M3F2), for pow, powr, pown and "
+                                     "rootn, never by default")
     p.add_argument("--attrs", help="rne (by default)")
     p.add_argument("--n", type=int, default=0,
                    help="points a region (default 3,000 at fp64, 1,000 at "

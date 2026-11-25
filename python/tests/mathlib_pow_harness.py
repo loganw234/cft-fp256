@@ -4722,15 +4722,19 @@ def check_constants_cli_tw_n():
 
 def red_checks_tw_n(plant, fn="pown", n=3, rnds=(RNE,), region_count=6,
                     bound_count=6, pool_step=3, shift=0):
-    """{check: [findings]} for CHECKS_TW_N, EVERY key present (a check that
-    is green has an empty list; one in `not_run` is absent from the run and
-    on `plant` (None: the control) at fp32 on `fn` at
-    n: pools at pool_step, regions (the regions whose n is this n; the
-    check's own lanes), specials under `rnds` and structured under rne, seq
-    under rne, bound over the regions of that n, shape under all five (where
-    the plant reaches all five) and constants under rne. A plant the build
-    cannot reach is refused by name. GREEN means green at this scope."""
+    """(red, not_run): red is {check: [findings]} for the checks of
+    CHECKS_TW_N that RAN on `plant` (None: the control) at fp32 on `fn` at n
+    (a check that is green has an empty list), not_run the names of those
+    that did not, so that red, green and not run are disjoint and cover every
+    check (a green check must have run). pools run where the pool has lanes
+    of n (not at 2^31 - 1 and up), regions and bound where a region of
+    REGION_NAMES_TW_N is at this n (not at n = 2 and -2: they have none),
+    shape where the plant reaches all five attributes; specials, structured,
+    seq and constants always. A plant the build cannot reach is refused by
+    name. GREEN means green at this scope, which is smaller than the tests'
+    own on the control."""
     red = {name: [] for name in CHECKS_TW_N}
+    not_run = []
     reach = []
     for rnd in RND_MODES:
         try:
@@ -4745,22 +4749,36 @@ def red_checks_tw_n(plant, fn="pown", n=3, rnds=(RNE,), region_count=6,
                          f"n = {n}, under any attribute")
     rnds = tuple(r for r in rnds if r in reach) or (reach[0],)
     names = [r for r in REGION_NAMES_TW_N if region_n_of(r) == n]
-    for rnd in rnds:
-        red["pools"] += check_pools_tw_n(fn, rnd, n, plant, pool_step)[0]
-        for name in names:
-            red["regions"] += check_regions_tw_n(fn, rnd, name, region_count,
-                                                 plant)[0]
+    if tw_n_pool_lanes(fn, n):
+        for rnd in rnds:
+            red["pools"] += check_pools_tw_n(fn, rnd, n, plant, pool_step)[0]
+    else:
+        not_run.append("pools")
+    if names:
+        for rnd in rnds:
+            for name in names:
+                red["regions"] += check_regions_tw_n(fn, rnd, name,
+                                                     region_count, plant)[0]
+    else:
+        not_run.append("regions")
     red["specials"] += check_specials_tw_n(fn, n, rnds, plant)[0]
     red["structured"] += check_structured_tw_n(fn, rnds[0], n, plant)[0]
     red["seq"] += check_seq_tw_n(fn, rnds[0], n, plant)[0]
     b = tw_n_build_of(fn, RNE, n, plant, shift)
-    for name in names:
-        lanes = region_n_cached(FP32, fn, name, bound_count, 11)
-        red["bound"] += check_bound_tw_n(b, lanes, name)[0]
+    if names:
+        for name in names:
+            lanes = region_n_cached(FP32, fn, name, bound_count, 11)
+            red["bound"] += check_bound_tw_n(b, lanes, name)[0]
+    else:
+        not_run.append("bound")
     if len(reach) == len(RND_MODES):
         red["shape"] += check_shape_tw_n(fn, n, plant=plant)
+    else:
+        not_run.append("shape")
     red["constants"] += check_constants_tw_n(
         builder=lambda name, f_, r_, n_: tw_n_build_of(name, r_, n_, plant,
                                                        shift),
         attrs=(RNE,), names=(fn,), ns=(n,))[0]
-    return red
+    for c in not_run:
+        del red[c]
+    return red, not_run

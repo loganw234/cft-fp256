@@ -155,7 +155,9 @@ assert R.INPUTS["pown"] == R.INPUTS["rootn"] == R.INPUTS["compound"] == ("a",)
 assert R.N_KEYED == ("pown", "rootn", "compound")
 assert R.LIVE_CAP["pow"] == {"fp32": 32, "fp64": 30, "fp128": 30,
                              "fp256": 30}
-assert R.LIVE_CAP["pown"] == {"fp64": 21, "fp128": 21, "fp256": 21}
+assert R.LIVE_CAP["pown"] == {"fp32": 28, "fp64": 21, "fp128": 21,
+                              "fp256": 21}
+assert "fp32" not in R.LIVE_CAP["compound"]
 R.fragment("div", FORMATS["fp64"], sf.RND_RNE)
 assert "mpmath" not in sys.modules
 for op in R.BUILT:
@@ -807,11 +809,11 @@ def test_compound_at_fp32_is_refused_by_name_and_a_rewritten_n_is_not():
     # two instances, sorted: the routines' order, then n signed
     obj = _obj("system t\nformat fp32\nround rne\nstate x, y\n"
                "next x = x * 3\nnext y = y * -2\nstep map\n")
-    obj["step"]["nodes"][0][0] = "rootn"
-    obj["step"]["nodes"][1][0] = "pown"
+    obj["step"]["nodes"][0][0] = "compound"
+    obj["step"]["nodes"][1][0] = "compound"
     b = _bytes(obj)
     assert cftc.unbuilt_at_fp32(_stand_in(b, "fp32")) == \
-        [("pown", -2), ("rootn", 3)]
+        [("compound", -2), ("compound", 3)]
 
 
 _NO_MPMATH_FP32 = r"""
@@ -1470,7 +1472,8 @@ def rows_for(op, fmt, rnd):
 MARKED = {("pow", "fp32"): 3, ("pow", "fp64"): 3, ("pow", "fp128"): 3,
           ("pow", "fp256"): 3, ("powr", "fp32"): 2, ("powr", "fp64"): 2,
           ("powr", "fp128"): 2, ("powr", "fp256"): 2, ("pown", "fp64"): 3,
-          ("pown", "fp128"): 3, ("pown", "fp256"): 3, ("rootn", "fp64"): 2,
+          ("pown", "fp128"): 3, ("pown", "fp256"): 3, ("pown", "fp32"): 3,
+          ("rootn", "fp32"): 2, ("rootn", "fp64"): 2,
           ("rootn", "fp128"): 2, ("rootn", "fp256"): 2, ("compound", "fp64"): 4,
           ("compound", "fp128"): 6, ("compound", "fp256"): 6}
 
@@ -1745,19 +1748,14 @@ def test_the_rewrites_apply_in_a_tangent_section_and_equal_lang_run(
     (the manifest's lowering.rewritten counts them; the graph's own counts,
     graph_tangent_by_op, are before it). The image on seq.py equals lang.run
     - states, tangents and flags - lane by lane under all five attributes,
-    at every format where the source compiles: pown(x, 3) and rootn(x, 2)
-    are routines in the step (pown(3), rootn(2)) and so refused at fp32 by
-    name, while rootn(x, -1) is a division in the step and a pown(root, 2),
-    a multiplication, in the tangent, and compiles at fp32 with pown(x, 2),
-    pow(x, 3), pow(x, 2) and pow(x, 0)."""
+    at every format where the source compiles, fp32 included since parcel
+    M3F2 (pown(x, 3) and rootn(x, 2) are routines of the step there, the
+    triple word; rootn(x, -1) is a division in the step and a pown(root, 2),
+    a multiplication, in the tangent, with pown(x, 2), pow(x, 3), pow(x, 2)
+    and pow(x, 0))."""
     fmt = FORMATS[fmt_name]
     t3 = lambda rnd: (f"system t\nformat {fmt_name}\nround {rnd}\nstate x\n"
                       f"tangent w\nnext x = {expr}\nstep map\n")
-    if fmt_name == "fp32" and expr in ("pown(x, 3)", "rootn(x, 2)"):
-        with pytest.raises(lang.Refusal) as e:
-            cftc.compile_text(t3("rne"), 1, source="t.cftl")
-        assert e.value.name == "routine-unavailable"
-        return
     want = TANGENT_SOURCES[expr]
     for rnd in sf.RND_MODES:
         c = cftc.compile_text(t3(RND_NAMES[rnd]), 1, source="t.cftl")
