@@ -111,8 +111,8 @@ pown, rootn and compound take an integer constant n, the second operand of
 their node, which keys the fragment (an instance a distinct n: `pown(3)`)
 and is in no bank slot; the exponents 2, 1 and -1 of pow, pown and rootn
 are written as one multiplication or division before the lowering; and
-pown, rootn and compound at fp32, which the math library has not built
-(parcel M3F2's), are `routine-unavailable` unless a rewrite takes them. For
+compound at fp32, which the math library has not built (pown and rootn are,
+parcel M3F2's), is `routine-unavailable` unless a rewrite takes it. For
 each source of the sets measured below, 9 writes the same images, banks and
 text files as 8, and its manifests say version 9; nothing else in them moved
 (a manifest's routines block carries the five's own sentence, and
@@ -208,11 +208,12 @@ nodes and in a tangent section's, bit for bit and flag for flag the
 node's golden function (python/tests/test_cftc_pow.py), and the manifest's
 graph_by_op stays the graph's, with `lowering.rewritten` saying what was
 written. powr, rootn(x, 2), compound(x, 1) and pow(x, 1/2) are not
-rewritten. pown, rootn and compound have no fp32 until parcel M3F2: at fp32
-a node of them that no rewrite takes is `routine-unavailable`, first of
-all (NOT_BUILT_FP32; refuse_unavailable); pow and powr are built at fp32
-(the triple word, parcel M3F1's; pow keeps 32 values live, past the
-allocator's 29). sin's and cos's fragments hold two MIN and two MAX (their
+rewritten. compound has no fp32 (its first-order budget is over 1 Bv at
+n = 1000 in the model): at fp32 a node of it that no rewrite takes is
+`routine-unavailable`, first of all (NOT_BUILT_FP32; refuse_unavailable); pow,
+powr, pown and rootn are built at fp32 (the triple word, parcels M3F1's and
+M3F2's; pow keeps 32 values live, past the allocator's 29, powr 29, pown 28
+and rootn 27). sin's and cos's fragments hold two MIN and two MAX (their
 clamp), asin's and acos's one of each and atan's and atan2's one MIN,
 against bank words (MEASURED at the four formats under rne), which no
 other routine does: the emitter writes them, the assembler takes them and
@@ -614,15 +615,15 @@ MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan",
         "atan", "asin", "acos", "atan2", "pow", "powr", "pown", "rootn",
         "compound")
 
-# The three of MATH the math library has not built at fp32 (parcel M3F2's,
-# wave 5: they have no measured fp32 design; pow and powr are built there, the
-# triple word, parcel M3F1's), which the compiler refuses by name at fp32 and
-# no other format. ONE table, which parcel M3F2 deletes, and a test that fails
-# by name when mathlib builds one of them at fp32 while this still says it does
-# not. A node of these the rewrites take (ir.REWRITE: pown(x, 2), pown(x, 1),
-# pown(x, -1), rootn(x, 1), rootn(x, -1)) is a mul or a div by then and is not
-# refused.
-NOT_BUILT_FP32 = ("pown", "rootn", "compound")
+# The one of MATH the math library has not built at fp32 (compound: its
+# first-order budget is over 1 Bv at n = 1000 in the model; pow and powr are
+# built there, the triple word, parcel M3F1's, and pown and rootn, parcel
+# M3F2's), which the compiler refuses by name at fp32 and no other format. ONE
+# table, and a test that fails by name when mathlib builds one of them at fp32
+# while this still says it does not. A node the rewrites take (ir.REWRITE:
+# pown(x, 2), pown(x, 1), pown(x, -1), rootn(x, 1), rootn(x, -1)) is a mul or a
+# div by then and is not refused; compound has no rewrite.
+NOT_BUILT_FP32 = ("compound",)
 
 
 def math_nodes(graph):
@@ -668,10 +669,9 @@ def refuse_unavailable(graph, source=None):
         them = "it" if len(unbuilt) == 1 else "them"
         refuse("routine-unavailable",
                f"this system computes {names} at run time at fp32, where "
-               f"the math library has not built {them}: pown, rootn and "
-               f"compound at fp32 are parcel M3F2's (pow and powr are "
-               f"built there, the triple word, parcel M3F1's), and are "
-               f"refused by name until it merges. "
+               f"the math library has not built {them}: compound is not "
+               f"built at fp32 (pow, powr, pown and rootn are, the triple "
+               f"word), and is refused by name. "
                f"At the other formats the same source compiles; at fp32 an "
                f"exponent the compiler rewrites (pown(x, 2), pown(x, 1), "
                f"pown(x, -1), rootn(x, 1) and rootn(x, -1)) compiles as the "

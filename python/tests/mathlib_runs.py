@@ -1297,6 +1297,10 @@ def _ns_of(a, P, fn, fmt):
     n list at the format, mathlib.POW_CHECK_NS's), rootn's 0 left out and
     refused by name where asked for."""
     if not a.ns:
+        # fp32 (parcel M3F2): the harness's own list, which has no 2^62 + 2^37
+        # + 1 for rootn and takes 0 and 1 for pown (TW_N_NS)
+        if fmt.name == "fp32":
+            return list(P.TW_N_NS[fn])
         return list(P.check_ns(fn, fmt))
     if a.ns == "pool":
         # parcel M3G3: the pool's own n (31 distinct), for the pools' box run
@@ -1314,26 +1318,43 @@ def _pow_n_pools(a, P, fn, fmt, rnds, step):
     (every `step`-th) through the fragment of that n under every attribute
     (the model's marks pinned where step is the golden stage's), then the
     placed regions at each region's own n (--lanes a region)."""
+    tw = fmt.name == "fp32"              # parcel M3F2: the triple word's
     for n in _ns_of(a, P, fn, fmt):
         for rnd in rnds:
-            out, t = P.check_pools_n(fn, fmt, rnd, n, step=step)
+            if tw:
+                out, t = P.check_pools_tw_n(fn, rnd, n, step=step)
+                f = P.tw_n_fragment_of(fn, rnd, n)
+            else:
+                out, t = P.check_pools_n(fn, fmt, rnd, n, step=step)
+                f = P.fragment_n(fn, fmt, rnd, n)
             note(out)
-            f = P.fragment_n(fn, fmt, rnd, n)
-            say(f"pow-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]} n = {n}: "
-                f"{t.n} lanes, {len(t.marked)} marked, {len(t.wrong)} wrong "
-                f"unmarked; {len(f)} instructions, {f.live_max()} live")
+            line = (f"pow-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]} n = {n}: "
+                    f"{t.n} lanes, {len(t.marked)} marked, {len(t.wrong)} "
+                    f"wrong unmarked; {len(f)} instructions, "
+                    f"{f.live_max()} live")
+            if a.seq and tw:
+                out, lanes = P.check_seq_tw_n(fn, rnd, n)
+                note(out)
+                line += (f"; seq.py and the compiled shape over {len(lanes)} "
+                         f"lanes: {len(out)} findings")
+            say(line)
     cnt = a.lanes if a.lanes is not None else (
-        12 if a.quick else P.REGION_LANES[(fn, fmt.name)])
+        12 if a.quick else (P.REGION_LANES_TW_N[fn] if tw else
+                            P.REGION_LANES[(fn, fmt.name)]))
     if not cnt:
         return
-    for name in P.region_names_n(fn, fmt):
+    for name in (P.REGION_NAMES_TW_N if tw else P.region_names_n(fn, fmt)):
         rn = P.region_n_of(name)
         if a.ns and rn is not None and rn not in _ns_of(a, P, fn, fmt):
             continue
         for rnd in rnds:
             t0 = time.perf_counter()
-            out, (lanes, marked, main) = P.check_regions_n(
-                fn, fmt, rnd, name, cnt)
+            if tw:
+                out, (lanes, marked, main) = P.check_regions_tw_n(
+                    fn, rnd, name, cnt, seed=a.seed)
+            else:
+                out, (lanes, marked, main) = P.check_regions_n(
+                    fn, fmt, rnd, name, cnt)
             note(out)
             say(f"pow-regions {fn} {fmt.name} {sf.RND_NAMES[rnd]} {name}: "
                 f"{lanes} lanes, {marked} marked, {main} reach the main "
@@ -1347,16 +1368,22 @@ def _pow_n_bound(a, P, fn, fmt, rnds, n_pts):
     each region's own n (--ns keeps the regions whose n is listed). -> (regions
     measured, regions NOT MEASURED)."""
     measured = unmeasured = 0
+    tw = fmt.name == "fp32"              # parcel M3F2: the triple word's
     for rnd in rnds:
-        for k, name in enumerate(P.region_names_n(fn, fmt)):
+        for k, name in enumerate(P.REGION_NAMES_TW_N if tw else
+                                 P.region_names_n(fn, fmt)):
             rn = P.region_n_of(name)
             if a.ns and rn is not None and rn not in _ns_of(a, P, fn, fmt):
                 continue
             lanes = P.region_n_cached(fmt, fn, name, n_pts, a.seed + k)
             if not lanes:
                 continue
-            out, (worst, main, total) = P.check_bound_n(
-                fn, fmt, rnd, name, lanes=lanes)
+            if tw:
+                out, (worst, main, total) = P.check_bound_tw_n_region(
+                    fn, rnd, name, lanes)
+            else:
+                out, (worst, main, total) = P.check_bound_n(
+                    fn, fmt, rnd, name, lanes=lanes)
             note(out)
             if not main:
                 unmeasured += 1
@@ -1578,6 +1605,13 @@ def cmd_pow_bound(a):
         # a region the function has no lane of at all (powr's negint and
         # negedge: pow's only) measured nothing: named, outside the pass count
         for fn in fns:
+            if fn in P.INT_FUNCS:
+                # pown and rootn (parcel M3F2): n = 2 and -2 have no region at
+                # all (the model's regions.py has none): printed, and not in
+                # the count of regions, which are named per region
+                say(f"pow-bound {fn} fp32: n = 2 and n = -2 have no region "
+                    f"(the pools alone cover them): NOT MEASURED, in no count")
+                continue
             for region in ("negint", "negedge"):
                 if region not in P.REGION_NAMES[fn]:
                     unmeasured += len(rnds)
@@ -1693,7 +1727,11 @@ def cmd_pow_budget(a):
     for fmt in fmts:
         if fmt.name == "fp32":
             raise SystemExit("--formats fp32: the triple word has no "
-                             "budget (parcel M3F2's)")
+                             "first-order budget in this build; its evidence "
+                             "is the model's budgets (docs/studies/m3/: M3X "
+                             "and M3XN), the box's 12,000-lane samples and "
+                             "the card's sweeps (pow-bound is the direct "
+                             "error)")
         for fn in fns:
             for region, count, seed, plant in _pow_budget_cells(
                     a, P, PB, fmt, fn):
@@ -1796,7 +1834,8 @@ def cmd_pow_rate(a):
     for fmt in fmts:
         if fmt.name == "fp32":
             raise SystemExit("--formats fp32: the triple word has no rate "
-                             "check here (parcel M3F2's)")
+                             "check in this build (the model's rate cells, "
+                             "docs/studies/m3/, are its evidence)")
         count = a.n if a.n else (150 if a.quick else _RATE_SIZES[fmt.name])
         for fn in fns:
             for region in regions[fn]:
@@ -1876,7 +1915,8 @@ def cmd_pow_family(a):
     for fmt in fmts:
         if fmt.name == "fp32":
             raise SystemExit("--formats fp32: the triple word has no "
-                             "structured families here (parcel M3F2's)")
+                             "structured families in this build (pow-pools "
+                             "--seq runs the harness's structured rows)")
         for fn in fns:
             ns = PF.FAMILY_NS if fn in P.INT_FUNCS else ()
             for rnd in rnds:

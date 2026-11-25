@@ -132,9 +132,11 @@ def test_n_is_required_and_refused_where_it_is_not_taken():
             with pytest.raises(ValueError, match=f"{name} takes no integer "
                                f"operand"):
                 call(name, FP64, RNE, n=3)
-    for name in INT_FUNCS:
+    for name in ("compound",):
         with pytest.raises(ValueError, match="triple word, parcel M3F1's"):
             ml.build(name, FP32, RNE, n=3)
+    for name in ("pown", "rootn"):
+        assert ml.build(name, FP32, RNE, n=3).meta["family"] == "triple word"
     # the names the library knows, listed in the refusal: the built ones after
     # pow and powr
     with pytest.raises(ValueError) as e:

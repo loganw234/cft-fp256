@@ -13198,6 +13198,20 @@ def main(argv=None):
                       f"{len(findings)} differences")
             failed = failed or bool(findings)
         if pow_tw:
+            # parcel M3F2: pown and rootn at fp32, the integer operand: its
+            # own lines and count line BEFORE pow-tw's, so that pow-tw's last line
+            # (a test pins it) and its lines stay as they were
+            lines, findings = check_pow_tw_n_constants()
+            if "pow-tw" in only:
+                for ln in lines:
+                    print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            if "pow-tw" in only:
+                print(f"mathlib --check (pow, triple word, integer operand): "
+                      f"{len(_POW_TW_N_BUILDERS)} routines, 1 format, "
+                      f"{len(findings)} differences")
+            failed = failed or bool(findings)
             # parcel M3F1: fp32's triple word. As inv-tw above, the default
             # run prints only its differences: every other line of it is the
             # base's, byte for byte
@@ -13210,19 +13224,6 @@ def main(argv=None):
             if "pow-tw" in only:
                 print(f"mathlib --check (pow, triple word): "
                       f"{len(_POW_TW_BUILDERS)} routines, 1 format, "
-                      f"{len(findings)} differences")
-            failed = failed or bool(findings)
-            # parcel M3F2: pown and rootn at fp32, the integer operand: its
-            # own lines and count line after pow-tw's, which are unchanged
-            lines, findings = check_pow_tw_n_constants()
-            if "pow-tw" in only:
-                for ln in lines:
-                    print(ln)
-            for fd in findings:
-                print("DIFFERENCE:", fd)
-            if "pow-tw" in only:
-                print(f"mathlib --check (pow, triple word, integer operand): "
-                      f"{len(_POW_TW_N_BUILDERS)} routines, 1 format, "
                       f"{len(findings)} differences")
             failed = failed or bool(findings)
         return 1 if failed else 0

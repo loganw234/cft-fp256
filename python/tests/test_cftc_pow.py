@@ -87,9 +87,17 @@ INT64 = (-2 ** 63, 2 ** 63 - 1)
 
 
 def formats_of(op):
-    """The formats the compiler builds `op` at: the three have no fp32 until
-    parcel M3F2."""
-    return THREE_FMT if op in N_KEYED else FMT_NAMES
+    """The formats the compiler builds `op` at: compound has no fp32 (its
+    first-order budget is over 1 Bv at n = 1000 in the model); pown and rootn
+    are built there, the triple word, parcel M3F2's."""
+    return THREE_FMT if op == "compound" else FMT_NAMES
+
+
+# the (op, format) pairs of the tests that ran the five, or the three, at the
+# double word's three formats: pown and rootn gain fp32 (parcel M3F2)
+FIVE_AT = [(op, f) for op in FIVE
+           for f in THREE_FMT + (("fp32",) if op in ("pown", "rootn") else ())]
+N_KEYED_AT = [(op, f) for op in N_KEYED for f in formats_of(op)]
 
 
 # ---- the tables --------------------------------------------------------------
@@ -123,7 +131,7 @@ def test_the_tables_name_the_five_as_routines_routines_py_does():
     assert not set(manifest.POWER) & set(manifest.RADIAN + manifest.INVERSE)
     assert list(callloop.ORDER) == list(R.ROUTINES)
     assert [callloop.ORDER[op] for op in FIVE] == [15, 16, 17, 18, 19]
-    assert cftc.NOT_BUILT_FP32 == ("pown", "rootn", "compound")
+    assert cftc.NOT_BUILT_FP32 == ("compound",)
 
 
 _NO_MPMATH_TABLES = r"""
@@ -371,8 +379,7 @@ ROUTINE_N = {"pown": (3, 5, -3, 0, 1 - 2, 2 ** 63 - 1, -2 ** 63),
 # ---- n travels below the language ------------------------------------------------
 
 @needs_mpmath
-@pytest.mark.parametrize("fmt_name", THREE_FMT)
-@pytest.mark.parametrize("op", FIVE)
+@pytest.mark.parametrize("op,fmt_name", FIVE_AT)
 def test_each_of_the_five_runs_below_the_language_as_its_golden_function(
         op, fmt_name):
     """At the format under all five attributes: the graph's bytes through
@@ -442,8 +449,7 @@ def _instance_of(op, n):
 
 
 @needs_mpmath
-@pytest.mark.parametrize("fmt_name", THREE_FMT)
-@pytest.mark.parametrize("op", N_KEYED)
+@pytest.mark.parametrize("op,fmt_name", N_KEYED_AT)
 def test_n_travels_to_the_fragment_and_equals_the_golden_function(op, fmt_name):
     """For n = -2^63, 2^63 - 1, 3, 5, -3, 0 and 1 (rootn: not 0, which the
     language refuses): the graph whose second operand is the const entry
@@ -760,27 +766,33 @@ def _stand_in(b, fmt_name):
         section=lambda name: sec if name == "step" else None)
 
 
-def test_the_three_at_fp32_are_refused_by_name_and_a_rewritten_n_is_not():
-    """pown, rootn and compound have no fp32 until parcel M3F2:
-    refuse_unavailable refuses `routine-unavailable` (no line) naming each
-    instance (pown(3), rootn(-2), compound(1000)) and "parcel M3F2's", FIRST
+def test_compound_at_fp32_is_refused_by_name_and_a_rewritten_n_is_not():
+    """compound has no fp32 (pown and rootn are built there, parcel M3F2's):
+    refuse_unavailable refuses `routine-unavailable` (no line) naming the
+    instance (compound(1000)) and "compound is not built at fp32", FIRST
     - the sentence is the same with mpmath taken away - and a node the
     rewrites take (pown(x, 2), 1 and -1, rootn(x, 1) and -1) is a mul or a
     div by then and is not refused; at any other format nothing is
     refused. pow and powr are never refused at fp32."""
-    refused = {("pown", 3): "pown(3)", ("rootn", -2): "rootn(-2)",
-               ("compound", 1000): "compound(1000)",
-               ("pown", 0): "pown(0)", ("compound", 1): "compound(1)",
-               ("rootn", 2): "rootn(2)", ("pown", -2 ** 63): "pown(-9223372036854775808)"}
+    refused = {("compound", 1000): "compound(1000)",
+               ("compound", 1): "compound(1)", ("compound", 3): "compound(3)",
+               ("compound", -2 ** 63): "compound(-9223372036854775808)"}
     for (op, n), name in refused.items():
         b = n_graph(op, n, "fp32")
         with pytest.raises(lang.Refusal) as e:
             cftc.refuse_unavailable(_stand_in(b, "fp32"), "src.cftl")
         assert (e.value.name, e.value.line) == ("routine-unavailable", None)
         assert name in e.value.sentence
-        assert "parcel M3F2's" in e.value.sentence
+        assert "compound is not built at fp32" in e.value.sentence
+        assert "parcel M3F2's" not in e.value.sentence
         if have_mpmath():
             cftc.refuse_unavailable(_stand_in(b, "fp64"), "src.cftl")
+    # pown and rootn are built at fp32: refused nothing, whatever n
+    for op, n in (("pown", 3), ("rootn", -2), ("pown", 0), ("rootn", 2),
+                  ("pown", -2 ** 63), ("rootn", 2 ** 63 - 1)):
+        b = n_graph(op, n, "fp32")
+        assert cftc.unbuilt_at_fp32(_stand_in(b, "fp32")) == []
+        cftc.refuse_unavailable(_stand_in(b, "fp32"), "src.cftl")
     for op, n in (("pown", 2), ("pown", 1), ("pown", -1), ("rootn", 1),
                   ("rootn", -1)):
         b = n_graph(op, n, "fp32")
@@ -822,25 +834,26 @@ except lang.Refusal as e:
 
 
 def test_the_fp32_refusal_comes_before_the_mpmath_test():
-    """On a host without mpmath a pown(x, 3) at fp32 is refused by the fp32
-    sentence (parcel M3F2's), not the mpmath one: the refusal needs no
-    import, and says what will change when M3F2 builds the routine."""
-    b = n_graph("pown", 3, "fp32")
+    """On a host without mpmath a compound(x, 3) at fp32 is refused by the
+    fp32 sentence, not the mpmath one: the refusal needs no import."""
+    b = n_graph("compound", 3, "fp32")
     r = subprocess.run([sys.executable, "-B", "-c", _NO_MPMATH_FP32,
                         str(ROOT)], input=b, capture_output=True)
     assert r.returncode == 0, r.stderr
     name, line, sentence = json.loads(r.stdout)
     assert (name, line) == ("routine-unavailable", None)
-    assert "parcel M3F2's" in sentence and "mpmath" not in sentence
+    assert "compound is not built at fp32" in sentence \
+        and "mpmath" not in sentence
 
 
 @needs_mpmath
 def test_not_built_fp32_is_exactly_what_mathlib_refuses_at_fp32():
     """cftc.NOT_BUILT_FP32 lists the routines of N_KEYED that mathlib does
-    not build at fp32: this test fails by name when mathlib builds one of
-    them (parcel M3F2) and the table still lists it - and when the table
-    stops listing one mathlib still refuses - so that M3F2 cannot leave it.
-    pow and powr are built there and are not in it."""
+    not build at fp32 (compound): this test fails by name when mathlib builds
+    one of them and the table still lists it - and when the table stops
+    listing one mathlib still refuses - so that the parcel that builds
+    compound cannot leave it. pow, powr, pown and rootn are built there and
+    are not in it."""
     fp32 = FORMATS["fp32"]
     built = {}
     for op in N_KEYED:
@@ -848,7 +861,7 @@ def test_not_built_fp32_is_exactly_what_mathlib_refuses_at_fp32():
             ml.fragment(op, fp32, sf.RND_RNE, n=3)
             built[op] = True
         except ValueError as e:
-            assert "parcel M3F2's" in str(e)
+            assert f"{op} at fp32 is not built:" in str(e)
             built[op] = False
     stale = [op for op in cftc.NOT_BUILT_FP32 if built[op]]
     assert not stale, (f"mathlib builds {stale} at fp32 and "
@@ -1364,15 +1377,24 @@ def test_the_room_table_of_the_five_pow_is_past_it_at_every_format_and_powr_at_f
     (one fixed) at fp32 under every attribute, and 31 or 30 at fp64, fp128
     and fp256 under the two attributes that keep 30 live (rne and rmm); powr
     needs 30 at fp32 with nothing fixed and 29, the room exactly, with an
-    input fixed. pown, rootn and compound are within it at every n, their
-    most 23 registers."""
+    input fixed. pown, rootn and compound are within it at every n: at the
+    double word's three formats their most is 23 registers, and pown and
+    rootn at fp32 (parcel M3F2's, the triple word) need 28 or 29 and 27 or 28
+    (MEASURED here by cftc's own allocator, over the five attributes and the
+    three n; 29 is the room exactly, so a pown call at fp32 fits with no
+    value beside it to spare)."""
     assert ROOM == 29
     got = {op: _plans(op) for op in FIVE}
     assert len(got["pow"]) == len(got["powr"]) == 4 * 5 * 3
-    assert all(len(got[op]) == 3 * 5 * len(N_PLANS) for op in N_KEYED)
+    assert all(len(got[op]) == len(formats_of(op)) * 5 * len(N_PLANS)
+               for op in N_KEYED)
     past = {op: [r for r in rows if r[4] > ROOM] for op, rows in got.items()}
     assert past["pown"] == past["rootn"] == past["compound"] == []
-    assert max(r[4] for op in N_KEYED for r in got[op]) == 23
+    assert max(r[4] for op in N_KEYED for r in got[op]
+               if r[0] != "fp32") == 23
+    assert {r[4] for r in got["pown"] if r[0] == "fp32"} == {28, 29}
+    assert {r[4] for r in got["rootn"] if r[0] == "fp32"} == {27, 28}
+    assert not [r for r in got["compound"] if r[0] == "fp32"]
     assert len(past["pow"]) == 33 and len(past["powr"]) == 5
     assert {(r[0], r[2], r[4]) for r in past["powr"]} == {("fp32", (), 30)}
     assert {(r[0], r[2], r[4]) for r in past["pow"]
@@ -1468,8 +1490,8 @@ def test_each_of_the_five_compiles_and_runs_as_lang_run_at_every_attribute(
     on sw, sw:4096 and revision 8's three targets, and refused
     `target-feature` on revision 7's four (the sentence naming the
     routine)."""
-    if op in N_KEYED and fmt_name == "fp32":
-        pytest.skip("pown, rootn and compound have no fp32 until M3F2")
+    if op == "compound" and fmt_name == "fp32":
+        pytest.skip("compound has no fp32: it is not built there")
     fmt = FORMATS[fmt_name]
     name = R.instance(op, 3 if op in N_KEYED else None)
     marks = {}
@@ -1500,8 +1522,7 @@ def test_each_of_the_five_compiles_and_runs_as_lang_run_at_every_attribute(
 
 
 @needs_mpmath
-@pytest.mark.parametrize("fmt_name", THREE_FMT)
-@pytest.mark.parametrize("op", N_KEYED)
+@pytest.mark.parametrize("op,fmt_name", N_KEYED_AT)
 def test_the_three_at_the_edges_of_int64_compile_and_run_as_lang_run(
         op, fmt_name):
     """n = -2^63, 2^63 - 1, 0 and 1 (not rootn's 0) through the source: the
@@ -1748,11 +1769,11 @@ def test_the_rewrites_apply_in_a_tangent_section_and_equal_lang_run(
 
 
 @needs_mpmath
-@pytest.mark.parametrize("op", N_KEYED)
-def test_the_three_at_fp32_are_routine_unavailable_on_every_target(op):
-    """pown(x, 3), rootn(x, 3) and compound(x, 3) at fp32 are refused
-    `routine-unavailable` (line None, the sentence naming the instance and
-    parcel M3F2's) on sw and on revision 8's and revision 7's targets alike
+@pytest.mark.parametrize("op", ("compound",))
+def test_compound_at_fp32_is_routine_unavailable_on_every_target(op):
+    """compound(x, 3) at fp32 is refused `routine-unavailable` (line None, the
+    sentence naming the instance and "compound is not built at fp32") on sw
+    and on revision 8's and revision 7's targets alike
     - BEFORE `target-feature`, which revision 7's targets would otherwise
     say - and a rewritten n at fp32 (pown(x, 2)) is not refused by name on
     sw, and is refused nothing on revision 7's, being a multiplication."""
@@ -1762,7 +1783,7 @@ def test_the_three_at_fp32_are_routine_unavailable_on_every_target(op):
             cftc.compile_text(t, 1, target=target, source="t.cftl")
         assert (e.value.name, e.value.line) == ("routine-unavailable", None)
         assert f"{op}(3)" in e.value.sentence
-        assert "parcel M3F2's" in e.value.sentence
+        assert "compound is not built at fp32" in e.value.sentence
     ok = cftc.compile_text(source("pown", "fp32", n=2), 1,
                            target="u50-rev7", source="t.cftl")
     assert ok.manifest["lowering"]["rewritten"]

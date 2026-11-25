@@ -570,9 +570,13 @@ eighteen, named as `python/cft_golden/transcend.py` names the functions.
     values live at fp64 (30 less the cap; pown at n = -2^63, 10 at fp128
     and fp256 for n = 3 whose fragment keeps 20), -2 for pow at fp32
     (spilling 3 slots at k = 0) and +1 for powr, measured at every k from
-    0 to 20. pown, rootn and compound have no fp32 until parcel M3F2: at
-    fp32 a node of them that no rewrite takes is `routine-unavailable`,
-    first of all, before the mpmath test; pow and powr are built at fp32.
+    0 to 20. compound has no fp32 (its first-order budget is over 1 Bv at
+    n = 1000 in the model): at fp32 a node of it that no rewrite takes is
+    `routine-unavailable`, first of all, before the mpmath test; pow, powr,
+    pown and rootn are built at fp32, the triple word, pown keeping 28 values
+    live and rootn 27 (2 and 3 other values beside a call, 30 less the cap),
+    in 877 and 892 instructions at n = 3 under rne (python/cft_golden/mathlib.py:
+    `fragment("pown", FP32, RNE, 3)` and `("rootn", ...)`).
     The fragments are 434, 489, 540 and 925 instructions (pow), 413, 468,
     519 and 903 (powr) at fp64, fp128, fp256 and fp32, and 386, 442 and
     493 (pown at n = 3), 387, 443 and 494 (rootn), 410, 469 and 520
@@ -3230,7 +3234,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos, atan2, pow, powr, pown, rootn or compound on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4; M2's for sin, cos and tan; M4's for atan, asin, acos and atan2; M3's for the five) - or a routine the math library has not built at the program's format (pown, rootn and compound at fp32, parcel M3F2's, unless a rewrite takes them) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
+| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p, log2, sin, cos, tan, atan, asin, acos, atan2, pow, powr, pown, rootn or compound on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4; M2's for sin, cos and tan; M4's for atan, asin, acos and atan2; M3's for the five) - or a routine the math library has not built at the program's format (compound at fp32, unless a rewrite takes it; pown and rootn are built there, parcel M3F2's) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
 
 ## The gate
 

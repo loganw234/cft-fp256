@@ -28,12 +28,11 @@ so a writer meets one form of refusal from the parser to the image:
                      compound) on a host without mpmath, through which
                      the golden generator (cft_golden/mathlib.py) derives
                      the routine's constants (M1's build, item 4, M2's,
-                     M4's and M3's), or a run-time node of pown, rootn or
-                     compound at fp32, which the math library has not
-                     built (parcel M3F2's) and which no rewrite takes
-                     (python/cftc/__init__.py's NOT_BUILT_FP32):
-                     the one name that depends on the HOST (or, for those
-                     three, the format, until M3F2) - with mpmath the same
+                     M4's and M3's), or a run-time node of compound at
+                     fp32, which the math library has not built and which
+                     no rewrite takes (python/cftc/__init__.py's
+                     NOT_BUILT_FP32): the one name that depends on the
+                     HOST (or, for compound, the format) - with mpmath the same
                      source and target compile, or are refused by
                      another name such as target-feature. Raised after the
                      refusals of the arguments alone (segment-steps,

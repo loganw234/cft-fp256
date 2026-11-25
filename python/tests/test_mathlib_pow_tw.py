@@ -81,12 +81,15 @@ def test_fp32_pow_and_powr_are_built_and_the_rest_refused_by_name():
             assert b.meta["family"] == "triple word"
             f = ml.fragment(fn, FP32, rnd)
             assert (f.op, f.fmt, f.rnd) == (fn, FP32, rnd)
-    for name in ("pown", "rootn", "compound"):
+    for name in ("compound",):
         for call in (ml.build, ml.fragment):
-            for kw in ({}, {"n": 3}):
+            for kw in ({}, {"n": 3}, {"n": 1000}):
                 with pytest.raises(ValueError, match=f"{name} at fp32 is not "
-                                   f"built: parcel M3F2's"):
+                                   f"built:"):
                     call(name, FP32, RNE, **kw)
+    for name in ("pown", "rootn"):
+        assert ml.build(name, FP32, RNE, n=3).meta["family"] == "triple word"
+        assert ml.fragment(name, FP32, RNE, n=3).op == name
     for fn in FNS:
         with pytest.raises(ValueError, match=f"{fn} takes no integer operand"):
             ml.build(fn, FP32, RNE, n=3)
@@ -729,7 +732,8 @@ def test_the_pow_commands_run_at_fp32_and_say_what_is_not_measured(
     assert "RESULT: ok" in shown
     R.FINDINGS.clear()
     R.OUT = None
-    with pytest.raises(SystemExit, match="parcel M3F2's"):
-        R._pow_formats("fp32", [], ["pow", "pown"])
+    assert R._pow_formats("fp32", [], ["pow", "pown"]) == [P.FP32]
+    with pytest.raises(SystemExit, match="compound.*not built at fp32"):
+        R._pow_formats("fp32", [], ["pow", "compound"])
     with pytest.raises(SystemExit, match="fp64, fp128 or fp256"):
         R._pow_formats("fp16", [], ["pow"])
