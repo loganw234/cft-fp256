@@ -21,7 +21,7 @@ Only revision-7 instructions are written - the ALU opcodes the
 language's built-ins name, `ior` for a copy, and STL, LDL, REPEAT,
 ENDREP and HALT - so a tile can run every image, unless the step holds a
 routine: it divides or takes a root (C4), or computes one of the math
-library's thirteen (M1's build, item 4, M2's and M4's; `exp(x): mathlib's exp
+library's eighteen (M1's build, item 4, M2's, M4's and M3's; `exp(x): mathlib's exp
 routine, run quiet`, its instructions under up to five attributes,
 `add.rdn` and `add.rup` among them). Then each routine inlined is written
 
@@ -113,7 +113,7 @@ class Namer:
         operation and its place among the step's loops."""
         nd = self.x.nodes[j]
         if self.kind(j) == "loop":
-            return f"{nd.op} loop {nd.block + 1}"
+            return f"{nd.instance} loop {nd.block + 1}"
         low_nd = self.low.nodes[nd.routine]
         return low_nd.label or self.low_names.expr(nd.routine)
 
@@ -138,7 +138,10 @@ class Namer:
 
     def expr(self, j):
         nd = self.x.nodes[j]
-        return f"{nd.op}({', '.join(self.ref(a) for a in nd.args)})"
+        args = [self.ref(a) for a in nd.args]
+        if nd.n is not None:
+            args.append(str(nd.n))      # pown, rootn, compound: x, then n
+        return f"{nd.op}({', '.join(args)})"
 
 
 def _line(code, comment):
@@ -156,18 +159,20 @@ def _src(s):
 
 # whose instructions a routine is: divfull's and sqrtfull's (C4), and the
 # math library's generator's (mathlib.py; M1's build, item 4, M2's, which
-# adds sin, cos and tan, and M4's, atan, asin, acos and atan2). A routine
-# left out is a KeyError in a call loop's
-# comment: python/tests/test_cftc_trig.py pins the keys to routines.ROUTINES.
+# adds sin, cos and tan, M4's, atan, asin, acos and atan2, and M3's, pow,
+# powr, pown, rootn and compound). A routine left out is a KeyError in a call
+# loop's comment: python/tests/test_cftc_trig.py pins the keys to
+# routines.ROUTINES.
 ROUTINE_SOURCE = {"div": "divfull's", "sqrt": "sqrtfull's",
                   **{op: f"mathlib's {op}" for op in
                      ("exp", "expm1", "exp2", "log", "log1p", "log2",
-                      "sin", "cos", "tan", "atan", "asin", "acos", "atan2")}}
+                      "sin", "cos", "tan", "atan", "asin", "acos", "atan2",
+                      "pow", "powr", "pown", "rootn", "compound")}}
 
 
-def routine_fragment(low, op):
-    from .check import held_fragment
-    return held_fragment(op, low.graph.fmt, low.graph.rnd)
+def routine_fragment(low, op, n=None):
+    from .check import fragment_args, held_fragment
+    return held_fragment(*fragment_args(op, low.graph.fmt, low.graph.rnd, n))
 
 
 def _loop_text(low, namer, ins, pad):
@@ -221,7 +226,7 @@ def _ins_text(low, namer, ins, indent, out_of, block=None):
                                                          for s in ins.srcs)
         if namer.kind(ins.node) == "loop":
             nd = namer.x.nodes[ins.node]
-            f_len = len(routine_fragment(low, nd.op))
+            f_len = len(routine_fragment(low, nd.op, nd.n))
             return _line(code, f"{namer.routine(ins.node)} "
                                f"[{ins.key[1] + 1}/{f_len}]")
         if namer.kind(ins.node) == "quiet":
@@ -299,11 +304,12 @@ def cfta(low, prog, steps, meta):
     loops = getattr(x, "loops", None)
     if blocks or loops:
         calls = {}
-        for _j, op, _f, _r in blocks:
-            calls[op] = calls.get(op, 0) + 1
+        for j, _op, _f, _r in blocks:
+            name = low.nodes[j].instance
+            calls[name] = calls.get(name, 0) + 1
         for li in loops or ():
             nd = x.nodes[li]
-            calls[nd.op] = calls.get(nd.op, 0) + len(nd.calls)
+            calls[nd.instance] = calls.get(nd.instance, 0) + len(nd.calls)
         made = ", ".join(f"{op} {k}" for op, k in calls.items())
         raises = counts["raises"]
         lines.append(f"; routines {made} a step: {prog.routine_alu()} of the "
@@ -315,7 +321,8 @@ def cfta(low, prog, steps, meta):
         lines.append(f"; call loops {len(loops)}, the step past "
                      f"{callloop.CALL_LOOP_ABOVE:,} instructions inlined: "
                      + "; ".join(
-                         f"{x.nodes[li].op} x {len(x.nodes[li].calls)} at "
+                         f"{x.nodes[li].instance} x "
+                         f"{len(x.nodes[li].calls)} at "
                          f"depth {x.nodes[li].depth}, records from slot "
                          f"{x.nodes[li].base}" for li in loops)
                      + f"; {counts['indexed']} ldx and stx, "

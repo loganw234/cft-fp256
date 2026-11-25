@@ -18,12 +18,14 @@
                     log1p(a) and log₂(a), its sin, cos and tan (M2's
                     build) as sin(a), cos(a) and tan(a), its atan, asin,
                     acos and atan2 (M4's build) as arctan(a), arcsin(a),
-                    arccos(a) and atan2(a, b), each constant as
+                    arccos(a) and atan2(a, b), its pow, powr, pown,
+                    rootn and compound (M3's build) as the generic call
+                    pow(a, b) and so on, each constant as
                     its exact value, the step as the template's own scheme.
                     Evaluated exactly at random rational points it gives
                     what the step graph gives evaluated exactly
                     (python/tests/lang_mathform.py) - each square root
-                    and each of the thirteen a fixed function of its exact
+                    and each of the eighteen a fixed function of its exact
                     argument on both sides (graph.exact_root,
                     graph.exact_transcendental).
 
@@ -540,12 +542,17 @@ def m_sqrt(a):
 # notation already, sin(x), cos(x) and tan(x), in radians. atan, asin and
 # acos (M4's build) are conventional notation too, ISO 80000-2's arctan(x),
 # arcsin(x) and arccos(x), in radians; atan2(y, x) has none, and is written
-# by the name numerical libraries give it, y first as they do.
+# by the name numerical libraries give it, y first as they do. pow, powr,
+# pown, rootn and compound (M3's build) have none either, and are the
+# generic call, x first: no notation tells pow, powr and pown apart.
 _MATH_CALL = {"exp": "exp({})", "expm1": "expm1({})", "exp2": "2^({})",
               "log": "ln({})", "log1p": "log1p({})", "log2": "log₂({})",
               "sin": "sin({})", "cos": "cos({})", "tan": "tan({})",
               "atan": "arctan({})", "asin": "arcsin({})",
-              "acos": "arccos({})", "atan2": "atan2({}, {})"}
+              "acos": "arccos({})", "atan2": "atan2({}, {})",
+              "pow": "pow({}, {})", "powr": "powr({}, {})",
+              "pown": "pown({}, {})", "rootn": "rootn({}, {})",
+              "compound": "compound({}, {})"}
 
 
 def m_math(op, *a):

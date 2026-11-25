@@ -26,9 +26,10 @@ attribute, for the four that round). The segment must:
   whose others are the same.
 
 A step that divides or takes a root (C4), or computes one of the math
-library's thirteen (M1's build, item 4, M2's and M4's), holds each routine
-to its FRAGMENT, which the check takes from the golden model itself
-(cft_golden/routines.py, which hands out the thirteen's from mathlib.py) - not
+library's eighteen (M1's build, item 4, M2's, M4's and M3's), holds each
+routine instance to its FRAGMENT - for pown, rootn and compound, of its n - which
+the check takes from the golden model itself
+(cft_golden/routines.py, which hands out the eighteen's from mathlib.py) - not
 from the compiler's inlining - and holds first to its routine's
 statement of what a fragment may be (routines.invariants: its flag
 word's values, its attributes, its live values, every instruction
@@ -50,7 +51,7 @@ instruction share its symbol, as the image computes it once. Then:
   cannot reach FLAGS and a language node's flags cannot be lost;
 * each routine node's flag word is RAISEd exactly once, outside every
   region, and nothing else is raised - so a mark, which only a flag word
-  of the thirteen's can carry (routines.CONTRACT), reaches the lane exactly
+  of the eighteen's can carry (routines.CONTRACT), reaches the lane exactly
   where its routine's word sets it;
 * regions are balanced within the step, and none stands outside it.
 
@@ -112,10 +113,18 @@ def _fail(why):
 _HELD = {}
 
 
-def held_fragment(op, fmt, rnd):
+def fragment_args(op, fmt, rnd, n=None):
+    """held_fragment's arguments for an instance: `n` only for a routine
+    keyed by one, so that a call for any other reads (op, fmt, rnd) as it
+    always has."""
+    return (op, fmt, rnd) if n is None else (op, fmt, rnd, n)
+
+
+def held_fragment(op, fmt, rnd, n=None):
     """The golden model's fragment of routine `op` at `fmt` under the
-    program's attribute `rnd` (routines.fragment), held to what a fragment
-    of it may be - routines.invariants, its routine's own statement - and
+    program's attribute `rnd` (routines.fragment; for pown, rootn and
+    compound, of the integer operand `n`, which a Fragment does not hold, so
+    the key here does), held to what a fragment of it may be - routines.invariants, its routine's own statement - and
     to having been made for that routine, format and attribute. Every
     fragment the compiler reads comes through here (the lowering's words,
     the inlining, the call loop, the text, the manifest) and so does every
@@ -123,22 +132,28 @@ def held_fragment(op, fmt, rnd):
     so before it is used (the module docstring). A failure is the internal
     check's, an InternalError: the golden model's own assertion at a
     fragment's making is turned into one too."""
+    name = R.instance(op, n)
+    if n is not None and (isinstance(n, bool) or not isinstance(n, int)):
+        _fail(f"{op}'s integer operand is {n!r}, not an int")
     try:
-        f = R.fragment(op, fmt, rnd)
+        f = R.fragment(*fragment_args(op, fmt, rnd, n))
     except AssertionError as e:
-        _fail(f"the golden model's fragment of {op} at {fmt.name} under "
+        _fail(f"the golden model's fragment of {name} at {fmt.name} under "
               f"rounding attribute {rnd} breaks its routine's invariants "
               f"(cft_golden/routines.py): {e}")
-    key = (op, fmt.name, rnd)
+    except ValueError as e:
+        _fail(f"the golden model has no fragment of {name} at {fmt.name} "
+              f"under rounding attribute {rnd}: {e}")
+    key = (op, fmt.name, rnd, n)
     if _HELD.get(key) is f:
         return f
-    if (f.op, f.fmt.name, f.rnd) != key:
-        _fail(f"the golden model's fragment of {op} at {fmt.name} under "
+    if (f.op, f.fmt.name, f.rnd) != key[:3]:
+        _fail(f"the golden model's fragment of {name} at {fmt.name} under "
               f"rounding attribute {rnd} is {f.op}'s at {f.fmt.name} under "
               f"{f.rnd}")
     bad = R.invariants(f)
     if bad:
-        _fail(f"{op}'s fragment at {fmt.name} under rounding attribute "
+        _fail(f"{name}'s fragment at {fmt.name} under rounding attribute "
               f"{rnd} breaks its routine's invariants "
               f"(cft_golden/routines.py): {'; '.join(bad[:3])}")
     _HELD[key] = f
@@ -195,7 +210,11 @@ def verify(low, prog, image_bytes, steps, half_values=None):
             expected.append(sym)
             lang_syms.append(sym)
             continue
-        f = held_fragment(nd.op, g.fmt, g.rnd)
+        f = held_fragment(*fragment_args(nd.op, g.fmt, g.rnd, nd.n))
+        if len(args) != len(f.inputs):
+            _fail(f"{nd.instance} node {j} has {len(args)} operands and its "
+                  f"fragment {len(f.inputs)} inputs (an integer operand is "
+                  f"a key, never an operand)")
         inputs = dict(zip(f.inputs, args))
         vals = {}
         for i, (opc, r, srcs) in enumerate(f.body):
@@ -208,7 +227,7 @@ def verify(low, prog, image_bytes, steps, half_values=None):
                 else:
                     k = word_slot.get(f.words[s[1]])
                     if k is None:
-                        _fail(f"{nd.op} node {j}'s word {s[1]} is in no bank "
+                        _fail(f"{nd.instance} node {j}'s word {s[1]} is in no bank "
                               f"slot")
                     ss.append(sym_bank[k])
             ss = tuple(ss)
@@ -489,8 +508,11 @@ def _verify_bank(low, half_values, loop_words=frozenset()):
     # read, from the golden model (cft_golden/routines.py), and those a
     # call loop's index arithmetic read - each once
     want = set(loop_words)
-    for op in sorted({nd.op for nd in low.nodes if nd.op in ROUTINES}):
-        want |= set(held_fragment(op, fmt, g.rnd).words.values())
+    for op, n in sorted({(nd.op, nd.n) for nd in low.nodes
+                         if nd.op in ROUTINES},
+                        key=lambda k: (k[0], k[1] is not None, k[1] or 0)):
+        want |= set(held_fragment(*fragment_args(op, fmt, g.rnd, n))
+                    .words.values())
     have = [s.bits for s in low.slots if s.kind == "word"]
     if len(set(have)) != len(have) or set(have) != want:
         _fail(f"the bank's {len(have)} word slots are not the "

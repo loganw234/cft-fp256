@@ -69,6 +69,7 @@ THREE = ("sin", "cos", "tan")
 NINE = SIX + THREE
 FOUR = ("atan", "asin", "acos", "atan2")    # test_cftc_invtrig.py's
 FMT_NAMES = ("fp32", "fp64", "fp128", "fp256")
+FIVE = ("pow", "powr", "pown", "rootn", "compound")
 RND_NAMES = sf.RND_NAMES
 needs_mpmath = pytest.mark.skipif(not have_mpmath(), reason=NO_MPMATH)
 
@@ -84,15 +85,16 @@ def test_the_tables_name_the_three_as_routines_routines_py_does():
     arity one directly after log2, then the four (M4's), and neg, the place
     the language gives them (test_routines.py pins the whole of it to
     lang.OPS)."""
-    assert cftc.MATH == R.BUILT == NINE + FOUR
+    assert cftc.MATH == R.BUILT == NINE + FOUR + FIVE
     assert set(emit.ROUTINE_SOURCE) == set(R.ROUTINES) == \
-        {"div", "sqrt", *NINE, *FOUR}
+        {"div", "sqrt", *NINE, *FOUR, *FIVE}
     assert [emit.ROUTINE_SOURCE[op] for op in THREE] == \
         ["mathlib's sin", "mathlib's cos", "mathlib's tan"]
     assert ir.ROUTINES == frozenset(R.ROUTINES)
     names = list(ir.ARITY)
     at = names.index("log2")
-    assert names[at + 1:at + 9] == ["sin", "cos", "tan", *FOUR, "neg"]
+    assert names[at + 1:at + 14] == ["sin", "cos", "tan", *FOUR, *FIVE,
+                                     "neg"]
     assert [ir.ARITY[op] for op in THREE] == [1, 1, 1]
     assert manifest.RADIAN == THREE
     assert set(manifest.RADIAN) <= set(cftc.MATH)
@@ -114,7 +116,7 @@ try:
     sys.exit(1)
 except ImportError:
     pass
-assert cftc.MATH == R.BUILT and list(R.ROUTINES)[-7:-4] == [
+assert cftc.MATH == R.BUILT and list(R.ROUTINES)[-12:-9] == [
     "sin", "cos", "tan"]
 assert R.LIVE_CAP["sin"] == {"fp32": 23, "fp64": 26, "fp128": 17,
                              "fp256": 16}
@@ -124,7 +126,8 @@ R.fragment("div", FORMATS["fp64"], sf.RND_RNE)
 assert "mpmath" not in sys.modules
 for op in R.BUILT:
     try:
-        R.fragment(op, FORMATS["fp64"], sf.RND_RNE)
+        R.fragment(op, FORMATS["fp64"], sf.RND_RNE,
+                   3 if op in R.N_KEYED else None)
     except ImportError:
         continue
     print("NO IMPORTERROR FOR", op)
@@ -635,8 +638,8 @@ def test_each_of_the_three_compiles_and_runs_as_lang_run_at_every_attribute(
     for rnd in sf.RND_MODES:
         text = _one(fn, fmt_name, RND_NAMES[rnd])
         c = cftc.compile_text(text, 2, source="t.cftl")
-        assert c.version == cftc.VERSION == 8
-        assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+        assert c.version == cftc.VERSION == 9
+        assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
         assert c.manifest["routines"]["calls"] == {fn: 1}
         assert "FLAG_CONTROL" in c.features
         assert c.accepted_by == ["sw", *REV8]
@@ -1073,7 +1076,7 @@ def test_the_committed_references_are_what_the_compiler_writes(name):
     for fname, data in files.items():
         assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
             fname
-    assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
     assert c.accepted_by == ["sw", *REV8]
     base, fmt = name.rsplit("-", 1)
     assert set(_calls(c)) == M2_CALLS[base.replace("-tangent", "")], \

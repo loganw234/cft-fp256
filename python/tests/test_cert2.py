@@ -1720,7 +1720,8 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     F = Fraction
     assert cert2.TRANSCEND_OPS == {"exp", "expm1", "exp2", "log", "log1p",
                                    "log2", "sin", "cos", "tan", "atan",
-                                   "asin", "acos", "atan2"}
+                                   "asin", "acos", "atan2", "pow", "powr",
+                                   "pown", "rootn", "compound"}
     assert cert2.TRANSCEND_OPS == set(lang.graph.TRANSCEND)
     text = ("system s\nformat fp64\nstate x, y\ntangent v\nnext x = x\n"
             "next y = y + exp(x)\nstep map\n")

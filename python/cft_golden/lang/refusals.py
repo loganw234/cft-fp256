@@ -64,9 +64,11 @@ CATALOGUE = {
     "bank-capacity": "more than 512 params and constants - and, the "
                      "compiler's count, with the words of the routines it "
                      "inlines for a division, a root (C4) or one of the "
-                     "math library's thirteen (M1's six, M2's sin, cos and "
-                     "tan, M4's atan, asin, acos and atan2): the bank holds "
-                     "512 on every device",
+                     "math library's eighteen (M1's six, M2's sin, cos and "
+                     "tan, M4's atan, asin, acos and atan2, M3's pow, powr, "
+                     "pown, rootn and compound; one instance a distinct n "
+                     "of the last three): the bank holds 512 on every "
+                     "device",
     # -- equations, indices, the step ---------------------------------
     "missing-equation": "a state component with no equation",
     "duplicate-equation": "a state component with two equations",
@@ -107,20 +109,28 @@ CATALOGUE = {
     # them as inlined routines, and that name went too. exp, expm1, exp2,
     # log, log1p and log2 are operations since M1's build, item 3,
     # 2026-10-15, sin, cos and tan since M2's build, 2026-11-02, and
-    # atan, asin, acos and atan2 since M4's build: `transcendental`
-    # refuses the rest of the reserved list)
+    # atan, asin, acos and atan2 since M4's build, and pow, powr, pown,
+    # rootn and compound since M3's: `transcendental` refuses the rest of
+    # the reserved list)
     "transcendental": "a transcendental function the language does not "
-                      "have (pow, sinh and the rest of the reserved "
+                      "have (sinh and the rest of the reserved "
                       "list), at run time",
     "irrational-constant": "a square root of a constant that is no "
                            "rational's square (2, or a negative one); exp, "
                            "expm1, exp2, log, log1p, log2, sin, cos, tan, "
-                           "atan, asin, acos or atan2 of constants whose "
+                           "atan, asin, acos, atan2, pow, powr, pown, "
+                           "rootn or compound of constants whose "
                            "value is irrational or not real (exp(1), "
                            "log(2), log(-1), sin(1), atan(1), asin(2), "
-                           "atan2(1, 1)); or any other transcendental of a "
-                           "constant, which the language does not have "
-                           "yet",
+                           "atan2(1, 1), pow(2, 1/2), pow(-8, 1/2), "
+                           "rootn(2, 2), rootn(x, 0)); or any other "
+                           "transcendental of a constant, which the "
+                           "language does not have yet",
+    "integer-operand": "the second operand of pown, rootn or compound that "
+                       "is not an integer constant within int64 (a state, "
+                       "a param, a lane param, a let of one, h or a "
+                       "multiple of h, 5/2, 2^63): the three take an "
+                       "integer, which a lane does not hold",
     "power": "^ or **",
     "not-equal": "!=",
     "chained-comparison": "a comparison of a comparison, unparenthesised",
@@ -132,8 +142,9 @@ CATALOGUE = {
     "constant-infinity": "inf or infinity written as a constant",
     "constant-nan": "nan or snan written as a constant",
     "constant-division-by-zero": "a constant divided by a constant "
-                                 "zero, or a logarithm of a constant at "
-                                 "its pole: log(0), log2(0), log1p(-1)",
+                                 "zero, or a logarithm or a power of a "
+                                 "constant at its pole: log(0), log2(0), "
+                                 "log1p(-1), pow(0, -1), pown(0, -1)",
     "constant-overflow": "a constant whose one rounding overflows",
     "constant-rounds-to-zero": "a nonzero constant whose one rounding "
                                "is zero",
@@ -193,15 +204,19 @@ COMPILER_REFUSALS = {
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
     # M1's build, item 4 (cftc's output version 6), M2's for sin, cos
-    # and tan (version 7) and M4's for atan, asin, acos and atan2 (version
-    # 8): the one that depends on the host
+    # and tan (version 7), M4's for atan, asin, acos and atan2 (version 8)
+    # and M3's for pow, powr, pown, rootn and compound (version 9, whose
+    # fp32 case is the three's, parcel M3F2's): the one that depends on the
+    # host
     "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p, log2, "
-                           "sin, cos, tan, atan, asin, acos or atan2 on a "
-                           "host without mpmath, "
-                           "through which the routine's fragment is built: "
-                           "it depends on the host, and with mpmath the "
-                           "same source and target compile or are refused "
-                           "by another name",
+                           "sin, cos, tan, atan, asin, acos, atan2, pow, "
+                           "powr, pown, rootn or compound on a host without "
+                           "mpmath, through which the routine's fragment is "
+                           "built: it depends on the host, and with mpmath "
+                           "the same source and target compile or are "
+                           "refused by another name - or a routine the math "
+                           "library has not built at the program's format "
+                           "(pown, rootn and compound at fp32)",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

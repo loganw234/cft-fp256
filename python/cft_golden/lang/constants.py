@@ -109,7 +109,7 @@ def ln2_bits(fmt, rnd):
     (transcend.log of 2)", no new name). It IS transcend.log of 2 - the
     gate holds the two equal at every format and attribute - and is
     computed here by integers alone, so that checking a source never needs
-    mpmath (only lang.run of a graph holding one of the thirteen does):
+    mpmath (only lang.run of a graph holding one of the eighteen does):
     ln 2 = sum over k >= 1 of 1/(k 2^k), each of the first K terms
     truncated to a multiple of 2^-N, so that 2^N ln 2 lies in
     [S, S + K + 1] (each term loses less than 1, the tail past K = N less
@@ -473,3 +473,171 @@ def describe(fmt, rnd, value, bits, flags):
     text = ", ".join(words)
     rel = relative_error(fmt, bits, value)
     return f"{text}, relative error {sig(rel)}"
+
+
+# ---- pow, powr, pown, rootn and compound of constants (M3's build) --------
+#
+# A power of an exact rational is exact where it is a rational and only
+# there; power_fold is the one function the checker's folds (check.py) and
+# the exact evaluation of a graph (graph.py, exact_transcendental) both
+# take, so that a constant fold and a node run at the same point cannot
+# differ. Its operands are exact Fractions, n of pown, rootn and compound an
+# integer.
+
+# The most bits a held power's numerator or denominator may need, beyond
+# which the power is refused rather than computed: |m| * the larger bit
+# length of the base's numerator and denominator, for a base other than 1
+# and -1. A constant within 2^+-LIMIT_LOG2 needs about LIMIT_LOG2 bits at
+# most where its base is an integer, so four times that bounds every power
+# such a base can give; a base within 2^-k of 1 raised to a large m is
+# the case it also refuses, though its value is small (bounded, not
+# computed).
+POWER_BITS = 1 << 22
+
+POWER_OPS = ("pow", "powr", "pown", "rootn", "compound")
+
+# the three whose second operand is the integer n
+INT_POWER_OPS = ("pown", "rootn", "compound")
+
+
+def iroot_exact(n, k):
+    """The integer whose k-th power is the positive integer n, or None: an
+    exact root, by Newton's method on integers (never a float). k >= 1."""
+    if n == 1 or k == 1:
+        return n
+    bits = n.bit_length()
+    if k >= bits:
+        return None         # n >= 2 and n < 2^k: its root lies in (1, 2)
+    x = 1 << (bits // k + 1)
+    while True:
+        y = ((k - 1) * x + n // x ** (k - 1)) // k
+        if y >= x:
+            break
+        x = y
+    return x if x ** k == n else None
+
+
+def rational_root(value, k):
+    """The exact k-th root of the positive rational `value` where its
+    numerator and denominator are both perfect k-th powers (a Fraction is
+    in lowest terms, so that is where the root is rational), else None."""
+    value = exact(value)
+    rn = iroot_exact(value.numerator, k)
+    if rn is None:
+        return None
+    rd = iroot_exact(value.denominator, k)
+    if rd is None:
+        return None
+    return Fraction(rn, rd)
+
+
+def _int_power(b, m, shown):
+    """b^m for a nonzero rational b and an integer m, as power_fold's
+    answer: ("value", it), or ("range", sentence) past 2^+-LIMIT_LOG2 or
+    needing more than POWER_BITS bits."""
+    if b == 1 or m == 0:
+        return "value", Fraction(1)
+    if b == -1:
+        return "value", Fraction(-1 if m % 2 else 1)
+    size = max(abs(b.numerator).bit_length(), b.denominator.bit_length())
+    if abs(m) * size > POWER_BITS:
+        return "range", (f"{shown} needs more than {POWER_BITS} bits to hold "
+                         f"exactly, or lies beyond 2^+-{LIMIT_LOG2}, outside "
+                         f"every format by far")
+    v = b ** m
+    if not in_range(v):
+        return "range", (f"{shown} lies beyond 2^+-{LIMIT_LOG2}, outside "
+                         f"every format by far")
+    return "value", v
+
+
+def power_fold(op, c, d):
+    """pow(c, d), powr(c, d), pown(c, d), rootn(c, d) or compound(c, d) of
+    exact rationals (d an integer for the last three) as (kind, what):
+
+      ("value", F)         the exact rational value;
+      ("unreal", text)     no real number: a negative base and a non-integer
+                           power, powr below 0 and powr(0, 0), rootn of
+                           order 0 and of a negative with an even order,
+                           compound below -1;
+      ("pole", text)       a division by zero: 0 to a negative power,
+                           compound(-1, n < 0), rootn(0, n < 0);
+      ("range", text)      the value is past 2^+-LIMIT_LOG2 (or needs more
+                           than POWER_BITS bits);
+      ("irrational", text) a value no rational carries (pow(2, 1/2),
+                           rootn(2, 2))
+
+    pow(0, 0) is 1, pown(c, 0) is 1 for every c, and compound(c, 0) is 1 at
+    c >= -1, as transcend.py's functions have them (IEEE 754-2019 9.2)."""
+    c, d = exact(c), exact(d)
+    shown = f"{op}({brief(c)}, {brief(d)})"
+    if op in ("pow", "powr"):
+        if op == "powr" and c < 0:
+            return "unreal", (f"{shown} is not a real number: powr of a "
+                              f"negative base is invalid")
+        if c == 0:
+            if d > 0:
+                return "value", Fraction(0)
+            if d == 0:
+                if op == "powr":
+                    return "unreal", (f"{shown} is not a real number: "
+                                      f"powr(0, 0) is invalid")
+                return "value", Fraction(1)
+            return "pole", f"{shown} is a pole: 0 to a negative power"
+        if d == 0 or c == 1:
+            return "value", Fraction(1)
+        if d.denominator == 1:
+            return _int_power(c, d.numerator, shown)
+        if c < 0:
+            return "unreal", (f"{shown} is not a real number: a negative "
+                              f"base to a power that is not an integer has "
+                              f"no value")
+        root = rational_root(c, d.denominator)
+        if root is None:
+            return "irrational", (f"{shown} is irrational: the base is no "
+                                  f"rational's s-th power for s = {d.denominator} (a "
+                                  f"rational c^(r/s), r/s in lowest terms, "
+                                  f"makes c a rational's s-th power)")
+        return _int_power(root, d.numerator, shown)
+    assert d.denominator == 1, (op, d)
+    n = d.numerator
+    shown = f"{op}({brief(c)}, {n})"
+    if op == "pown":
+        if c == 0:
+            if n < 0:
+                return "pole", f"{shown} is a pole: 0 to a negative power"
+            return "value", Fraction(1 if n == 0 else 0)
+        return _int_power(c, n, shown)
+    if op == "compound":
+        b = 1 + c
+        if b < 0:
+            return "unreal", (f"{shown} is not a real number: compound of "
+                              f"a constant below -1 is invalid")
+        if b == 0:
+            if n < 0:
+                return "pole", f"{shown} is a pole: (1 + c)^n at c = -1"
+            return "value", Fraction(1 if n == 0 else 0)
+        return _int_power(b, n, shown)
+    assert op == "rootn", op
+    if n == 0:
+        return "unreal", (f"{shown} is not a real number: rootn of order 0 "
+                          f"has no value")
+    if c == 0:
+        if n < 0:
+            return "pole", f"{shown} is a pole: the root of 0 of a negative order"
+        return "value", Fraction(0)
+    if c < 0 and n % 2 == 0:
+        return "unreal", (f"{shown} is not a real number: an even root of a "
+                          f"negative base has no value")
+    root = rational_root(abs(c), abs(n))
+    if root is None:
+        return "irrational", (f"{shown} is irrational: the base is no "
+                              f"rational's k-th power for k = {abs(n)}")
+    if c < 0:
+        root = -root
+    if n < 0:
+        root = 1 / root
+    if not in_range(root):
+        return "range", (f"{shown} lies beyond 2^+-{LIMIT_LOG2}, outside "
+                         f"every format by far")
+    return "value", root

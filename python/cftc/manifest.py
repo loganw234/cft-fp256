@@ -31,6 +31,10 @@ RADIAN = ("sin", "cos", "tan")
 # and the inverse routines (M4's build), likewise: a manifest of a step
 # without atan, asin, acos and atan2 says what it said before M4's build.
 INVERSE = ("atan", "asin", "acos", "atan2")
+# and the power routines (M3's build): pow, powr, and the three keyed by an
+# integer n, whose entries in `calls` and `per_call` are one an instance
+# (`pown(3)`), likewise only where the step holds one of them.
+POWER = ("pow", "powr", "pown", "rootn", "compound")
 
 # What each template's step advances the independent variable by, over
 # RN(h): k times the h-scaled constant of factor f. rk4's update is
@@ -202,7 +206,7 @@ def build(c):
         },
         "lowering": {
             "graph_step_nodes": len(g.nodes),
-            "graph_by_op": g.op_counts(),
+            "graph_by_op": g.graph_counts(),
             "shared": low.shared,
             "folded": len(low.folds),
             "folds": [{"neg": f"n{f['neg_origin']}",
@@ -236,19 +240,35 @@ def build(c):
         m["lowering"]["graph_by_op"] = g.primal_counts
         m["lowering"]["graph_tangent_step_nodes"] = g.tangent_step_nodes
         m["lowering"]["graph_tangent_by_op"] = g.tangent_counts
+    if g.rewritten:
+        # the rewrites of the exponents 2, 1 and -1 (ir.REWRITE), only where
+        # the graph has one, so that a manifest without one is what it was:
+        # each rewritten routine instance, how many graph nodes it was, and
+        # the operation written in its place. graph_by_op above is the
+        # graph's, before them.
+        rewritten = {}
+        for _k, op, n, written in g.rewritten:
+            e = rewritten.setdefault(f"{op}({n})", {"nodes": 0,
+                                                    "as": written})
+            e["nodes"] += 1
+        m["lowering"]["rewritten"] = rewritten
     x = getattr(prog, "x", None)
     blocks = getattr(x, "blocks", None)
     loops = getattr(x, "loops", None)
     if blocks or loops:
         # the routines' own entries (C4), only where the step has them, so
-        # a manifest without them is what it was
-        from .check import held_fragment
-        calls = {}
-        for _j, op, _f, _r in blocks:
-            calls[op] = calls.get(op, 0) + 1
+        # a manifest without them is what it was. An instance is the op, or
+        # for pown, rootn and compound `op(n)`: one entry a distinct n.
+        from .check import fragment_args, held_fragment
+        calls, inst = {}, {}
+        for j, _op, _f, _r in blocks:
+            nd = low.nodes[j]
+            calls[nd.instance] = calls.get(nd.instance, 0) + 1
+            inst[nd.instance] = (nd.op, nd.n)
         for li in loops or ():
             nd = x.nodes[li]
-            calls[nd.op] = calls.get(nd.op, 0) + len(nd.calls)
+            calls[nd.instance] = calls.get(nd.instance, 0) + len(nd.calls)
+            inst[nd.instance] = (nd.op, nd.n)
         # where the fragments come from, and what their raises do: C4's two
         # sentences exactly where the step holds only division and root, so
         # that such a manifest is what it was; the math library's six
@@ -258,9 +278,11 @@ def build(c):
         # without them is what it was; atan, asin, acos and atan2 (M4's
         # build) likewise add a sentence of their own
         math = [op for op in calls if op not in ("div", "sqrt")]
-        six = [op for op in math if op not in RADIAN + INVERSE]
-        radian = [op for op in math if op in RADIAN]
-        inverse = [op for op in math if op in INVERSE]
+        six = [op for op in math
+               if inst[op][0] not in RADIAN + INVERSE + POWER]
+        radian = [op for op in math if inst[op][0] in RADIAN]
+        inverse = [op for op in math if inst[op][0] in INVERSE]
+        power = [op for op in math if inst[op][0] in POWER]
         source, flags = [], ("each runs in a quiet region and raises exactly "
                              "its operation's flags: revision 8's flag "
                              "control, QUIET, ENDQUIET and RAISE "
@@ -291,10 +313,17 @@ def build(c):
                       "in-lane test cannot decide the last bit, and mark "
                       "the lane as the six do (R23's byte [7], STATUS[6]; "
                       "docs/LANGUAGE.md, \"A marked lane\")")
+        if power:
+            flags += ("; the math library's pow, powr, pown, rootn and "
+                      "compound likewise set the raised word's bit 7 where "
+                      "their in-lane test cannot decide the last bit, and "
+                      "mark the lane as the six do (R23's byte [7], "
+                      "STATUS[6]; docs/LANGUAGE.md, \"A marked lane\")")
         m["routines"] = {
             "calls": calls,
-            "per_call": {op: len(held_fragment(op, fmt, g.rnd))
-                         for op in calls},
+            "per_call": {name: len(held_fragment(*fragment_args(
+                inst[name][0], fmt, g.rnd, inst[name][1])))
+                         for name in calls},
             "words": sum(1 for s in low.slots if s.kind == "word"),
             "instructions_quiet": prog.routine_alu(),
             "raises": counts["raises"],
@@ -308,6 +337,8 @@ def build(c):
             m["routines"]["call_loops"] = {
                 "above": _call_loop_above(),
                 "loops": [{"op": x.nodes[li].op,
+                           **({"n": x.nodes[li].n}
+                              if x.nodes[li].n is not None else {}),
                            "depth": x.nodes[li].depth,
                            "calls": len(x.nodes[li].calls),
                            "records": [x.nodes[li].base,

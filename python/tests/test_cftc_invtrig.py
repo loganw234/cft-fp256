@@ -76,6 +76,7 @@ from test_cftc_trig import (_decoded, _exp_text, _image_with,  # noqa: E402
 
 THREE_ONE = ("atan", "asin", "acos")
 FOUR = THREE_ONE + ("atan2",)
+FIVE = ("pow", "powr", "pown", "rootn", "compound")
 NINE = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan")
 FMT_NAMES = ("fp32", "fp64", "fp128", "fp256")
 RND_NAMES = sf.RND_NAMES
@@ -93,16 +94,17 @@ def test_the_tables_name_the_four_as_routines_routines_py_does():
     after tan and before neg, the place the language gives them
     (test_routines.py pins the whole of it to lang.OPS); the manifest's
     INVERSE is the four; and the call loop's order is the routines'."""
-    assert cftc.MATH == R.BUILT == NINE + FOUR
+    assert cftc.MATH == R.BUILT == NINE + FOUR + FIVE
     assert set(emit.ROUTINE_SOURCE) == set(R.ROUTINES) == \
-        {"div", "sqrt", *NINE, *FOUR}
+        {"div", "sqrt", *NINE, *FOUR, *FIVE}
     assert [emit.ROUTINE_SOURCE[op] for op in FOUR] == \
         ["mathlib's atan", "mathlib's asin", "mathlib's acos",
          "mathlib's atan2"]
     assert ir.ROUTINES == frozenset(R.ROUTINES)
     names = list(ir.ARITY)
     at = names.index("tan")
-    assert names[at + 1:at + 6] == ["atan", "asin", "acos", "atan2", "neg"]
+    assert names[at + 1:at + 11] == ["atan", "asin", "acos", "atan2",
+                                     *FIVE, "neg"]
     assert [ir.ARITY[op] for op in FOUR] == [1, 1, 1, 2]
     assert {op: R.ROUTINES[op] for op in FOUR} == \
         {op: ir.ARITY[op] for op in FOUR}
@@ -127,7 +129,7 @@ try:
     sys.exit(1)
 except ImportError:
     pass
-assert cftc.MATH == R.BUILT and list(R.ROUTINES)[-4:] == [
+assert cftc.MATH == R.BUILT and list(R.ROUTINES)[-9:-5] == [
     "atan", "asin", "acos", "atan2"]
 assert R.INPUTS["atan2"] == ("a", "b") and R.INPUTS["atan"] == ("a",)
 assert R.LIVE_CAP["atan2"] == {"fp32": 31, "fp64": 19, "fp128": 19,
@@ -139,7 +141,8 @@ R.fragment("div", FORMATS["fp64"], sf.RND_RNE)
 assert "mpmath" not in sys.modules
 for op in R.BUILT:
     try:
-        R.fragment(op, FORMATS["fp64"], sf.RND_RNE)
+        R.fragment(op, FORMATS["fp64"], sf.RND_RNE,
+                   3 if op in R.N_KEYED else None)
     except ImportError:
         continue
     print("NO IMPORTERROR FOR", op)
@@ -363,7 +366,7 @@ def test_atan2_takes_its_inputs_in_mathlibs_order_and_the_node_binds_them():
     args)))."""
     assert R.INPUTS["atan2"] == ("a", "b")
     assert all(R.INPUTS[op] == ("a",) for op in R.ROUTINES
-               if op not in ("div", "atan2"))
+               if op not in ("div", "atan2", "pow", "powr"))
     assert R.ROUTINES["atan2"] == len(R.INPUTS["atan2"]) == 2
     f = R.fragment("atan2", FORMATS["fp64"], sf.RND_RNE)
     assert f.inputs == ("a", "b") == ml.fragment(
@@ -789,8 +792,8 @@ def test_each_of_the_four_compiles_and_runs_as_lang_run_at_every_attribute(
     for rnd in sf.RND_MODES:
         text = _one(fn, fmt_name, RND_NAMES[rnd])
         c = cftc.compile_text(text, 2, source="t.cftl")
-        assert c.version == cftc.VERSION == 8
-        assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+        assert c.version == cftc.VERSION == 9
+        assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
         assert c.manifest["routines"]["calls"] == {fn: 1}
         assert "FLAG_CONTROL" in c.features
         assert c.accepted_by == ["sw", *REV8]
@@ -1135,7 +1138,7 @@ def test_the_committed_references_are_what_the_compiler_writes(name):
     for fname, data in files.items():
         assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
             fname
-    assert c.manifest["compiler"] == {"name": "cftc", "version": 8}
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 9}
     assert c.accepted_by == ["sw", *REV8]
     assert set(c.manifest["routines"]["calls"]) == {*FOUR, "div", "sqrt"}
     assert "the math library's atan, asin, acos and atan2" in \
@@ -1269,7 +1272,7 @@ def test_each_of_the_four_rules_written_otherwise_moves_the_followers_bytes(
     comp = SYSTEMS / "compiled-tangent"
     names = sorted(p.name[:-len(".graph.json")] for p in comp.glob(
         "*.graph.json"))
-    assert set(PF_NAMES) <= set(names) and len(names) == 18
+    assert set(PF_NAMES) <= set(names) and len(names) == 20
     committed = {n: (comp / f"{n}.graph.json").read_bytes() for n in names}
 
     class P(_RulePlant):

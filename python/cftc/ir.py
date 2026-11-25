@@ -25,10 +25,22 @@ tangent component as one more component of the state - homed or pinned,
 loaded and stored like any - and its sharing merges what the copies
 compute alike: the primal values a tangent writes again, and the
 primal-only nodes of the rules (copysign(1, a), r == a) across vectors.
+
+The five of M3's build (pow, powr, pown, rootn and compound) are nodes of two
+operands in the graph, as in the language (lang.OPS). For pown, rootn and
+compound the second operand is the integer n, a const entry of the table, read
+by Graph.integer from its EXACT value and never from its encoding (which at
+fp32 and fp64 does not carry it); the lowering drops it from the node and keeps
+it as the node's key (lower.py). Before the lowering sees the graph, the
+rewrites of the exponents 2, 1 and -1 (REWRITE, below) are applied to it, in
+the step's nodes and in the tangent section's: the node is replaced in its
+place by the one operation that computes the same bits and flags.
 """
 
 import hashlib
 import json
+from fractions import Fraction
+
 from cft_golden import FORMATS
 from cft_golden import softfloat as sf
 from cft_golden.lang import constants as K
@@ -41,19 +53,37 @@ from .refusals import InternalError
 ARITY = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
          "exp": 1, "expm1": 1, "exp2": 1, "log": 1, "log1p": 1, "log2": 1,
          "sin": 1, "cos": 1, "tan": 1, "atan": 1, "asin": 1, "acos": 1,
-         "atan2": 2,
+         "atan2": 2, "pow": 2, "powr": 2, "pown": 2, "rootn": 2,
+         "compound": 2,
          "neg": 1, "abs": 1, "copysign": 2, "min": 2, "max": 2, "minnum": 2,
          "maxnum": 2, "cmplt": 2, "cmple": 2, "cmpeq": 2, "select": 3}
 # The four the image computes as one instruction under the program's one
 # attribute. A division and a square root round once under it too, and so
-# do the math library's thirteen (the six, sin, cos and tan, and atan, asin,
-# acos and atan2), but no instruction is any of them: each is a ROUTINE,
-# inlined (inline.py; C4, and M1's, M2's and M4's builds).
+# do the math library's eighteen (the six, sin, cos and tan, atan, asin, acos
+# and atan2, and pow, powr, pown, rootn and compound), but no instruction is
+# any of them: each is a ROUTINE, inlined (inline.py; C4, and M1's, M2's, M4's
+# and M3's builds).
 ROUNDED = frozenset({"fma", "add", "sub", "mul"})
-# the fifteen (cft_golden/routines.py's ROUTINES, whose order is theirs)
+# the twenty (cft_golden/routines.py's ROUTINES, whose order is theirs)
 ROUTINES = frozenset({"div", "sqrt", "exp", "expm1", "exp2", "log", "log1p",
                       "log2", "sin", "cos", "tan", "atan", "asin", "acos",
-                      "atan2"})
+                      "atan2", "pow", "powr", "pown", "rootn", "compound"})
+# the three whose second operand is the integer n (routines.N_KEYED)
+N_KEYED = ("pown", "rootn", "compound")
+# The rewrites: (op, the exponent's exact value) -> the operation written in
+# its place, over the node's first operand "x" and the constant 1 (ONE). Each
+# is one correctly rounded operation of the same exact value as the node's, so
+# its bits and flags are the node's under every attribute (the study,
+# docs/studies/M3-pow.md section 6; python/tests/test_cftc_pow.py holds each
+# on seq.py against lang.run at every format where the node compiles). Not
+# here, by design: powr (powr(x < 0, 2) is invalid where x * x is a number),
+# rootn(x, 2), compound(x, 1) and pow(x, 1/2), and n = 0.
+ONE = "ONE"
+REWRITE = {("pow", 2): ("mul", "x", "x"), ("pown", 2): ("mul", "x", "x"),
+           ("pow", 1): ("mul", "x", ONE), ("pown", 1): ("mul", "x", ONE),
+           ("rootn", 1): ("mul", "x", ONE),
+           ("pow", -1): ("div", ONE, "x"), ("pown", -1): ("div", ONE, "x"),
+           ("rootn", -1): ("div", ONE, "x")}
 RND_BY_NAME = {name: code for code, name in sf.RND_NAMES.items()}
 
 
@@ -144,6 +174,11 @@ class Graph:
         self.tangent_counts = {}
         if self.T:
             self._tangent(obj["tangent_step"])
+        # the graph's operations as written, counted before the rewrites
+        # (the manifest's graph_by_op is the graph's)
+        self.written_counts = self.op_counts()
+        self.rewritten = []
+        self._rewrite()
         self.field_counts = None
         if obj.get("field") is not None:
             counts = {}
@@ -198,6 +233,58 @@ class Graph:
                                     f"state components")
             self.outs += outs
 
+    def integer(self, ref, what="a node"):
+        """The integer n a const operand stands for, from its EXACT value
+        (the module docstring): an int in [-2^63, 2^63 - 1], else an
+        InternalError - the language refuses anything else, so a graph that
+        has one is not the language's."""
+        if ref[0] != "c":
+            raise InternalError(f"{what}: its integer operand is "
+                                f"{ref_text(ref)}, not a constant")
+        exact, factor = self.const[ref[1]][:2]
+        if factor is not None or exact.denominator != 1 or \
+                not -2 ** 63 <= exact.numerator <= 2 ** 63 - 1:
+            raise InternalError(f"{what}: its integer operand c{ref[1]} is "
+                                f"not an int64 constant")
+        return int(exact.numerator)
+
+    def _one(self):
+        """The const entry holding 1 (exact, not h-scaled): the graph's own
+        where it has one, else one appended to the table, which is a bank
+        constant like any (lower.py's `used` counts it)."""
+        for i, (exact, factor, _b, _f) in enumerate(self.const):
+            if factor is None and exact == 1:
+                return ("c", i)
+        bits, flags = K.round_once(self.fmt, self.rnd, Fraction(1))
+        self.const.append((Fraction(1), None, bits, flags))
+        return ("c", len(self.const) - 1)
+
+    def _rewrite(self):
+        """REWRITE, applied in place to the step's nodes and the tangent
+        section's, before anything lowers them: node k stays node k, with its
+        label, and every reference to it is still right. `rewritten` records
+        (node, op, exponent, the operation written in its place)."""
+        for k, (op, refs, label) in enumerate(self.nodes):
+            if op not in ("pow", "pown", "rootn"):
+                continue
+            if op == "pow":
+                # pow's exponent is any const, or a run-time value
+                ref = refs[1]
+                n = None
+                if ref[0] == "c":
+                    exact, factor = self.const[ref[1]][:2]
+                    if factor is None and exact.denominator == 1:
+                        n = int(exact.numerator)
+            else:
+                n = self.integer(refs[1], f"step node {k} ({op})")
+            form = REWRITE.get((op, n))
+            if form is None:
+                continue
+            new_refs = tuple(self._one() if name == ONE else refs[0]
+                             for name in form[1:])
+            self.nodes[k] = (form[0], new_refs, label)
+            self.rewritten.append((k, op, n, form[0]))
+
     def _check_ref(self, ref, before):
         kind, i = ref
         limit = {"s": self.n_state, "l": len(self.lane),
@@ -217,6 +304,11 @@ class Graph:
         for op, _a, _l in self.nodes:
             counts[op] = counts.get(op, 0) + 1
         return {op: counts[op] for op in ARITY if op in counts}
+
+    def graph_counts(self):
+        """The graph's operations by name, as it writes them: before the
+        rewrites (the manifest's graph_by_op)."""
+        return dict(self.written_counts)
 
     def ref_name(self, ref):
         """A readable name for a leaf: x, x[3], sigma, lane param mass."""

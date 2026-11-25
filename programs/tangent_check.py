@@ -60,7 +60,10 @@ lang_check.py, whose helpers this reuses), with tangents:
      and atan2 since M4's build (the phase follower at round rdn, whose
      lanes keep the oscillator in the half plane c > 0, so that atan2's
      primal never meets its jump, and q and v inside [-2, 2], asin's and
-     acos's domain); the golden reader and audit and
+     acos's domain), and the one holding pow and pown since M3's build (the
+     atmosphere at round rdn, whose lanes keep the base 1 + alt / 8 in
+     [1, 3/2] and v and m off the exact cases the pow family marks by
+     design); the golden reader and audit and
      cft-audit accept each. A segment that marks a lane (STATUS[6]) fails
      here by name: version 1 holds the machine's guess, STATUS[6] on the
      segment; cft-segrun's version-2 writer, which this leg does not use,
@@ -84,7 +87,8 @@ lang_check.py, whose helpers this reuses), with tangents:
      bytes - every committed graph holding a product of two tangent-
      carrying operands, and only those (Lotka-Volterra's, the diodes', the
      pendulum's and the phase follower's multiply a state value only by a
-     param, as its atan2 and the unary three are of one); three in a
+     param, as its atan2 and the unary three are of one; the atmosphere's
+     holds one, v * abs(v)); three in a
      copy of the compiler, each stopped by its internal check and, with
      that off, red on seq.py
   K  coverage: every operation the rules write, every activity pattern
@@ -154,6 +158,28 @@ lang_check.py, whose helpers this reuses), with tangents:
      (red at the attributes where its two forms differ), atan's golden
      function swapped for asin's, atan2's operands swapped in the
      interpreter (red on the golden check)
+     pow, powr, pown, rootn and compound (M3's build, math_pow) are held
+     by the same checks: written shapes and generated systems with tangent
+     vectors, n held to the set 2, 1, 0, -1, -2, 3, -3, 5 (the rules read n
+     and n - 1: pown(x, 2)'s holds pown(a, 1), n = 1's holds pown(a, 0), n =
+     0 has no tangent) and, in the rounding and golden checks, also 2^31 -
+     1, 2^63 - 1 and 2 - 2^63, with -2^63 (and rootn's 1 - 2^63) the
+     refusal `integer-operand`, tested apart, the primal compiling without
+     its tangent; the tangent exactly against this stage's own dual
+     numbers, and leg M's own central difference at eps = 2^-64 within
+     2^-100 (the rules hold powers and roots, whose central difference
+     loses bits at 2^-256), each with a floor of ten decided points per
+     function - a point where a value is no real number or at a pole
+     decides nothing and is not counted; the primal unchanged; each rule's
+     rounding bit for bit on y = f(a) at every format and attribute (pow
+     and powr in three cases: both tangents, b the constant 5/2, a a lane
+     param) and the node's own result the golden function's, bit for bit,
+     with n the exact integer; the specials (pow at a = 0, whose db term is
+     +0 and whose da term is 0, da, an infinity or, at b = 0, the invalid
+     NaN); and plants - each rule made wrong, each rounded otherwise, pow's
+     select form replaced by the product, pow's golden function swapped
+     for powr's, pow's operands swapped in the interpreter, n read from the
+     encoding and n off by one. Skipped by name without mpmath
   N  the math library's six compiled, with tangent vectors (M1's build,
      item 5): generated systems that call them beside division, the root
      and the other operations, all with one tangent vector or two, under
@@ -267,9 +293,15 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
          # phase follower, atan2 of two state components and each of the
          # unary three of one, at round rdn, where acos's and atan2's rules
          # rounded otherwise are other bytes (and other values)
-         "phasefollower-rk4-tangent": 10}
+         "phasefollower-rk4-tangent": 10,
+         # pow, powr, pown, rootn and compound and their rules (M3's build):
+         # a body falling through a power-law atmosphere, pow with a
+         # non-integer constant exponent of a state-dependent base and
+         # pown with n = 3, at round rdn (the pown rule's pown(v, 2) is
+         # written by the compiler as v * v)
+         "atmosphere-rk4-tangent": 10}
 # The references holding the math library's routines, the six, sin, cos and
-# tan, and atan, asin, acos and atan2: compiled only where mpmath imports,
+# tan, atan, asin, acos and atan2, and pow and pown: compiled only where mpmath imports,
 # since the routines' generator derives their constants through it (a leg
 # that compiles them skips them by name elsewhere), and run on lanes whose
 # boxes keep the logarithms in their domains, the angles away from tan's
@@ -277,7 +309,8 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
 # none, and the leg fails by name a segment that marks one
 MATH_TREFS = ("lotkavolterra-rk4-tangent", "diode-rk4-tangent",
               "culture-rk4-tangent", "pendulum-rk4-tangent",
-              "attitude-rk4-tangent", "phasefollower-rk4-tangent")
+              "attitude-rk4-tangent", "phasefollower-rk4-tangent",
+              "atmosphere-rk4-tangent")
 MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
             "diode-rk4": [(0, 4), (0, 4)],
             "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)],
@@ -291,7 +324,12 @@ MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
             # segment that marks one)
             "phasefollower-rk4": [(Fraction(1, 2), 1),
                                   (-Fraction(1, 2), Fraction(1, 2)),
-                                  (-1, 1), (-1, 1), (-1, 1)]}
+                                  (-1, 1), (-1, 1), (-1, 1)],
+            # the atmosphere: alt in [0, 4] keeps the base 1 + alt / 8 in
+            # [1, 3/2], v in [-1, 1] and m in [1, 2]; no lane is an exact
+            # power, a zero or an infinity, the cases the pow family marks
+            # by design (leg G fails a segment that marks one)
+            "atmosphere-rk4": [(0, 4), (-1, 1), (1, 2)]}
 # Lorenz-63's largest Lyapunov exponent at sigma 10, rho 28, beta 8/3, as
 # the round's brief gives it (the figure commonly quoted, to four places)
 LITERATURE = Fraction(9056, 10000)
@@ -3188,6 +3226,635 @@ def math_four(count, rng):
     print(f"  (atan, asin, acos and atan2: {time.perf_counter() - t0:.1f} s)")
 
 
+# ---- M, the five of M3's build: pow, powr, pown, rootn and compound --------
+
+FIVE = ("pow", "powr", "pown", "rootn", "compound")     # M3's build
+INT5 = ("pown", "rootn", "compound")
+# the integer n of the generated systems and of the rounding check's second
+# set: the one the rules read as n and n - 1 (pown(x, 2)'s rule holds
+# pown(a, 1), n = 1's holds pown(a, 0), n = 0 has no tangent, and -2^63 is
+# refused `integer-operand` by the derivation, tested apart: n - 1 leaves
+# int64)
+N5 = (2, 1, 0, -1, -2, 3, -3, 5)
+N5_ROUND = N5 + (2 ** 31 - 1, 2 ** 63 - 1, 2 - 2 ** 63)
+N5_GOLDEN = N5_ROUND + (-2 ** 63,)
+FLOOR5 = 10                     # decided points per function, each check
+
+M5_SHAPES = {       # pow, powr, pown, rootn and compound under each integrator
+    "the five, a map": (
+        "system five\nformat fp64\nstate x, y, z\ntangent v\n"
+        "next x = pow(1 + y * y, z / 4) - powr(1 + z * z, x / 8)\n"
+        "next y = pown(x * y, 3) / (1 + z * z) + rootn(1 + x * x, 3)\n"
+        "next z = compound(z / (1 + abs(z)), 2) * pown(y, -2) + x\n"
+        "step map\n"),
+    "a constant base, a map": (
+        "system cbase\nformat fp64\nstate x, y\ntangent v\n"
+        "next x = pow(3/2, y) + powr(2, x / 4)\n"
+        "next y = pow(x * x + 1, 2) - pow(2, x)\nstep map\n"),
+    "constants and n at 1, 0, -1, a map": (
+        "system consts\nformat fp64\nstate x, y\ntangent v\nconst n = 3\n"
+        "next x = pow(1 + x * x, 5/2) + pown(y, 1) + pown(x + 2, 0)\n"
+        "next y = rootn(2 + y * y, n) * pown(x + 3, -1) + compound(y / 4, n)\n"
+        "step map\n"),
+    "a drag law, rk4": (
+        "system drag\nformat fp64\nstate alt, v\ntangent w\n"
+        "param k = 1/8\nparam H = 3/2\n"
+        "d/dt alt = v\n"
+        "d/dt v = -1 + k * pow(1 + alt * alt / H, -9/4) * v * abs(v)\n"
+        "step rk4, h = 1/64\n"),
+    "a let, rdn": (
+        "system rotor\nformat fp128\nround rdn\nstate phi, w\ntangent v\n"
+        "param kappa = 1/3\nlet s = rootn(1 + phi * phi, 3)\n"
+        "d/dt phi = w + powr(1 + w * w, 1/2) * kappa\n"
+        "d/dt w = -(kappa * s) - pown(w, 3) / 4\nstep rk4, h = 1/64\n"),
+    "stormer-verlet": (
+        "system pot\nformat fp32\nround rup\nstate q, p\ntangent v\n"
+        "d/dt q = p + compound(p / (1 + abs(p)), 3) / 8\n"
+        "d/dt p = -pow(1 + q * q, 3/2) * pown(q, 2)\n"
+        "step stormer-verlet, h = 1/32, q = (q), p = (p)\n"),
+    "euler, two vectors": (
+        "system e\nformat fp256\nround rmm\nstate x\ntangent v, w\n"
+        "d/dt x = pown(x, 3) / 8 - rootn(2 + x * x, 2) + "
+        "pow(1 + x * x, 1/3)\nstep euler, h = 1/8\n"),
+}
+
+
+def _m5_expr(rng, names, depth):
+    """A random expression with the five, each call's first operand inside
+    the function's domain at every point: pow's and powr's (and rootn's) is
+    1 + r * r, pown's is any value, compound's is r / (1 + |r|) (inside
+    (-1, 1)); n is one of N5, never 0 for rootn."""
+    if depth <= 0 or rng.random() < 0.3:
+        return rng.choice(names + ["2", "(1/3)", "0.5"])
+    k = rng.choice(["+", "-", "*", "/", "fma", "five", "five", "five"])
+
+    def sub():
+        return _m5_expr(rng, names, depth - 1)
+    if k == "five":
+        fn, r = rng.choice(FIVE), rng.choice(names)
+        n = rng.choice(N5)
+        if fn in ("pow", "powr"):
+            return f"{fn}(1 + {r} * {r}, ({sub()}) / 8)"
+        if fn == "pown":
+            return f"pown({sub()} * {r}, {n})"
+        if fn == "rootn":
+            return f"rootn(1 + {r} * {r}, {n or 3})"
+        return f"compound({r} / (1 + abs({r})), {n})"
+    if k == "fma":
+        return f"fma({sub()}, {sub()}, {sub()})"
+    return f"({sub()} {k} {sub()})"
+
+
+def primal_unchanged5(g, primal_text, states, top):
+    """primal_unchanged's first two checks and its by-value comparison of
+    the primal sections, without its allowance of the constants a rule may
+    add (0, 1, -1 and 2): the five's rules read n - 1, 1 - n and b - 1,
+    whatever they are, so the constants added are not held to a set here,
+    and the primal sections' nodes and outputs, constants read by value,
+    are."""
+    g0 = lang.compile_text(primal_text, "primal").graph
+    r0 = lang.run(g0, states, top)
+    tans = [[[0] * g.n_state for _ in g.tangent] for _ in states]
+    r1 = lang.run(g, states, top, tangents=tans)
+    return (r0.states == r1.states and r0.flags == r1.primal_flags
+            and by_value(g) == by_value(g0))
+
+
+def _pw(op, a, b):
+    """pow, powr, rootn or log of exact rationals as the exact evaluations
+    take them (the language's own: an irrational value is mpmath's at 1,024
+    bits)."""
+    from cft_golden.lang import graph as lang_graph
+    return lang_graph.exact_transcendental(op, a, b)
+
+
+def _dual5(op, a, tie=0, zero=1, L=None):
+    """_dual4 with the five, each derivative written again here, by
+    calculus: pow's and powr's (b a^(b-1)) da + (a^b ln a) db, the second
+    term 0 at a = 0; pown's n a^(n-1) da and compound's n (1 + a)^(n-1) da,
+    exact in Fractions; rootn's (r^(1 - n) da) / n, r the exact root. An
+    ArithmeticError where a value is no real number or at a pole."""
+    if op not in FIVE:
+        return _dual4(op, a, tie, zero, L)
+    v = [p[0] for p in a]
+    d = [p[1] for p in a]
+    if op in ("pow", "powr"):
+        val = _pw(op, v[0], v[1])
+        t = (v[1] * _pw(op, v[0], v[1] - 1)) * d[0]
+        if v[0] != 0:
+            t += (val * _pw("log", v[0], None)) * d[1]
+        return val, t
+    n = int(v[1])
+    if op == "pown":
+        return v[0] ** n, ((n * v[0] ** (n - 1)) * d[0] if n
+                           else Fraction(0))
+    if op == "compound":
+        if v[0] < -1:
+            raise ArithmeticError("compound below -1")
+        return (1 + v[0]) ** n, ((n * (1 + v[0]) ** (n - 1)) * d[0] if n
+                                 else Fraction(0))
+    r = _pw("rootn", v[0], n)
+    return r, (r ** (1 - n) * d[0]) / n
+
+
+def dual_derivative5(g, section, st, tv, pa, la):
+    """dual_derivative's, by _dual5."""
+    sec = g.section(section)
+    nil = Fraction(0)
+    vals = {"s": list(zip(st, tv)), "l": [(x, nil) for x in la],
+            "p": [(x, nil) for x in pa],
+            "c": [(v, nil) for v, *_r in g.const]}
+    nodes = []
+
+    def get(r):
+        return nodes[int(r[1:])] if r[0] == "n" else vals[r[0]][int(r[1:])]
+    for op, args, _l in sec.nodes:
+        nodes.append(_dual5(op, [get(a) for a in args]))
+    return [get(o)[1] for o in sec.out]
+
+
+def exact_misses5(g, rng, points, bound=2):
+    """exact_misses4's, by dual_derivative5."""
+    tot = bad_n = 0
+    for primal, tangent in (("field", "tangent_field"),
+                            ("step", "tangent_step")):
+        if g.section(primal) is None:
+            continue
+        for _ in range(points):
+            st = _inside4(rng, g.n_state, bound)
+            tv = [_q(rng) for _ in range(g.n_state)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            try:
+                want = dual_derivative5(g, primal, st, tv, pa, la)
+            except ArithmeticError:
+                continue
+            tot += 1
+            try:
+                got = g.exact_eval(tangent, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                bad_n += 1
+                continue
+            bad_n += got != want
+    return tot, bad_n
+
+
+def _one5(fn, case="both", fmtname="fp64", rnd="rne", n=None):
+    """y = fn(a, b) with tangent v: pow's and powr's three cases (both
+    operands states; b the constant 5/2, a's tangent alone; a a lane param,
+    b's alone), and for the three y = fn(a, n)."""
+    head = f"system r\nformat {fmtname}\nround {rnd}\n"
+    if fn in INT5:
+        return lang.compile_text(head + f"state a, y\ntangent v\nnext a = a\n"
+                                 f"next y = {fn}(a, {n})\nstep map\n").graph
+    body = {"both": ("state a, b, y\ntangent v\nnext a = a\nnext b = b\n",
+                     f"{fn}(a, b)"),
+            "bconst": ("state a, y\ntangent v\nnext a = a\n",
+                       f"{fn}(a, 5/2)"),
+            "da0": ("state b, y\nlane param a\ntangent v\nnext b = b\n",
+                    f"{fn}(a, b)")}[case]
+    return lang.compile_text(head + body[0] + f"next y = {body[1]}\n"
+                             "step map\n").graph
+
+
+def _run5(fn, case, g, a, b, da, db):
+    """(the primal y, the tangent of y, FLAGS, the primal's FLAGS) of one
+    lane: a the first operand, b the second (pow, powr), da and db the
+    tangents."""
+    if fn in INT5 or case == "bconst":
+        r = lang.run(g, [[a, 0]], 1, tangents=[[[da, 0]]])
+    elif case == "both":
+        r = lang.run(g, [[a, b, 0]], 1, tangents=[[[da, db, 0]]])
+    else:
+        r = lang.run(g, [[b, 0]], 1, lane_params=[[a]], tangents=[[[db, 0]]])
+    return r.states[0][-1], r.tangents[0][0][-1], r.flags, r.primal_flags
+
+
+def _rule5(fn, case, fmt, code, a, b, da, db, n=None):
+    """The rules' tangent on one lane in softfloat (the text of tangent.py:
+    pow's (b * pow(a, b - 1)) * da + select(a == 0, 0, pow(a, b) * log(a))
+    * db, pown's and compound's (n * f(a, n - 1)) * da, rootn's
+    (pown(r, 1 - n) * da) / n), every constant rounded once under `code`,
+    every routine transcend.compute's with n the exact integer -> bits."""
+    one = K.round_once(fmt, code, Fraction(1))[0]
+    zero = 0
+    if fn in INT5:
+        kn = K.round_once(fmt, code, Fraction(n))[0]
+        if fn == "rootn":
+            r = transcend.compute(fmt, "rootn", a, 0, code, n)[0]
+            p = transcend.compute(fmt, "pown", r, 0, code, 1 - n)[0]
+            return sf.div(fmt, sf.mul(fmt, p, da, code)[0], kn, code)[0]
+        if n == 0:
+            return zero
+        p = transcend.compute(fmt, fn, a, 0, code, n - 1)[0]
+        return sf.mul(fmt, sf.mul(fmt, kn, p, code)[0], da, code)[0]
+    if case == "bconst":
+        kb = K.round_once(fmt, code, Fraction(5, 2))[0]
+        km = K.round_once(fmt, code, Fraction(3, 2))[0]
+        p = transcend.compute(fmt, fn, a, km, code)[0]
+        return sf.mul(fmt, sf.mul(fmt, kb, p, code)[0], da, code)[0]
+    t1 = t2 = None
+    if case != "da0":
+        bm1 = sf.sub(fmt, b, one, code)[0]
+        p = transcend.compute(fmt, fn, a, bm1, code)[0]
+        t1 = sf.mul(fmt, sf.mul(fmt, b, p, code)[0], da, code)[0]
+    m = sf.mul(fmt, transcend.compute(fmt, fn, a, b, code)[0],
+               transcend.compute(fmt, "log", a, 0, code)[0], code)[0]
+    eq = sf.cmpeq(fmt, a, zero)[0]
+    t2 = sf.mul(fmt, sf.select(fmt, zero, m, eq)[0], db, code)[0]
+    if t1 is None:
+        return t2
+    return sf.add(fmt, t1, t2, code)[0]
+
+
+def _domain5(fn, rng):
+    if fn in ("pow", "powr", "rootn"):
+        return Fraction(rng.randint(250, 8000), 1000)
+    if fn == "compound":
+        return Fraction(rng.randint(-900, 4000), 1000)
+    return Fraction(rng.randint(-4000, 4000) or 1, 1000)
+
+
+def rounding_misses5(fn, case, fmtname, rnd, rng, lanes=6, ns=None):
+    """(lanes, lanes whose tangent is not the rule's bits) on y = fn(a, b)
+    in `case` (pow, powr) or fn(a, n) for each n of `ns` (the three), a and
+    the tangents drawn within each function's domain; the expected bits are
+    _rule5's. The pow and powr case "bconst" has no db term and "da0" no da
+    term."""
+    fmt, code = FORMATS[fmtname], K.RND_BY_NAME[rnd]
+    bad_n = tot = 0
+    for n in (ns if fn in INT5 else (None,)):
+        if fn == "rootn" and n == 0:
+            continue                    # refused: irrational-constant
+        g = _one5(fn, case, fmtname, rnd, n)
+        for _ in range(lanes):
+            a = _bits4(fmt, _domain5(fn, rng))
+            b = _bits4(fmt, Fraction(rng.randint(-3000, 3000), 1000))
+            da = _bits4(fmt, Fraction(rng.randint(-4000, 4000) or 1, 1000))
+            db = _bits4(fmt, Fraction(rng.randint(-4000, 4000) or 1, 1000))
+            if case == "da0":
+                da = 0
+            _y, t, _f, _pf = _run5(fn, case, g, a, b, da, db)
+            tot += 1
+            bad_n += t != _rule5(fn, case, fmt, code, a, b, da, db, n)
+    return tot, bad_n
+
+
+def five_golden_misses(fn, fmtname, rnd, rng, ns=None):
+    """(lanes, lanes where the interpreter's node is not transcend.compute's
+    bits, with the flags' OR counted as one more lane) for pow and powr over
+    pairs of the specials and a few drawn values, first operand first, and
+    for the three over the same values for each n of `ns`, n the exact
+    integer (an encoding of 2^31 - 1 at fp32 and of 2^63 - 1 at fp64 is not
+    n)."""
+    fmt, code = FORMATS[fmtname], K.RND_BY_NAME[rnd]
+    sp = [0, fmt.sign_mask, sf.inf_bits(fmt), sf.inf_bits(fmt) ^ fmt.sign_mask,
+          sf.qnan_bits(fmt), sf.snan_bits(fmt, 1), _bits4(fmt, 1),
+          _bits4(fmt, -1), _bits4(fmt, 2), _bits4(fmt, Fraction(1, 2)),
+          _bits4(fmt, -3)]
+    sp += [_bits4(fmt, Fraction(rng.randint(-1 << 12, 1 << 12), 997))
+           for _ in range(3)]
+    tot = bad_n = 0
+    if fn in ("pow", "powr"):
+        pairs = [(a, b) for a in sp for b in sp]
+        g = lang.compile_text(f"system r\nformat {fmtname}\nround {rnd}\n"
+                              f"state x, y\nnext x = {fn}(x, y)\nnext y = y\n"
+                              "step map\n").graph
+        want = [transcend.compute(fmt, fn, a, b, code) for a, b in pairs]
+        run = lang.run(g, [list(p) for p in pairs], 1)
+        flags = 0
+        for (a, b), st, w in zip(pairs, run.states, want):
+            tot += 1
+            bad_n += st != [w[0], b]
+            flags |= w[1]
+        return tot + 1, bad_n + (run.flags != flags)
+    for n in ns:
+        if fn == "rootn" and n == 0:
+            continue                    # refused: irrational-constant
+        g = lang.compile_text(
+            f"system r\nformat {fmtname}\nround {rnd}\nstate a, y\n"
+            f"next a = a\nnext y = {fn}(a, {n})\nstep map\n").graph
+        want = [transcend.compute(fmt, fn, a, 0, code, n) for a in sp]
+        run = lang.run(g, [[a, 0] for a in sp], 1)
+        flags = 0
+        for a, st, w in zip(sp, run.states, want):
+            tot += 1
+            bad_n += st[1] != w[0]
+            flags |= w[1]
+        tot += 1
+        bad_n += run.flags != flags
+    return tot, bad_n
+
+
+def five_specials_misses():
+    """The rules at the lanes where the table is not the derivative, bit for
+    bit against _rule5 and by name (every format, every attribute): pow's
+    and powr's first term at a = 0 for b = 2, 1, 1/2, 0, -1, +inf and a NaN
+    (b = 0: 0 * pow(0, -1) = 0 * inf, the invalid NaN where a derivative
+    exists), a at -0, +-inf, a NaN and 1; the second term +0 at a = 0;
+    rootn at a = 0 with n = 3, compound at a = -1 with n = 2 and -1, pown at
+    0 with n = 1, 2, -1, at +inf and at a NaN. -> a list of what missed."""
+    miss = []
+    for fmtname in FORMATS:
+        fmt = FORMATS[fmtname]
+        sign, inf, qnan = fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)
+        three = _bits4(fmt, 3)
+        for rnd in RNDS5:
+            code = K.RND_BY_NAME[rnd]
+            for fn in ("pow", "powr"):
+                g = _one5(fn, "both", fmtname, rnd)
+                for a in (0, sign, inf, inf ^ sign, qnan, _bits4(fmt, 1)):
+                    for b in (_bits4(fmt, 2), _bits4(fmt, 1),
+                              _bits4(fmt, Fraction(1, 2)), 0,
+                              _bits4(fmt, -1), inf, qnan):
+                        _y, t, _f, _pf = _run5(fn, "both", g, a, b, three,
+                                               three)
+                        if t != _rule5(fn, "both", fmt, code, a, b, three,
+                                       three):
+                            miss.append(f"{fn} at {hex(a)}, {hex(b)} under "
+                                        f"{rnd} at {fmtname}")
+                gd = _one5(fn, "da0", fmtname, rnd)
+                for b in (_bits4(fmt, 2), _bits4(fmt, Fraction(1, 2))):
+                    _y, t, _f, _pf = _run5(fn, "da0", gd, 0, b, 0, three)
+                    if t != 0:
+                        miss.append(f"{fn}'s db term at a = 0 is not +0 "
+                                    f"under {rnd} at {fmtname}")
+            for fn, a, n in (("rootn", 0, 3), ("compound", -1, 2),
+                             ("compound", -1, -1), ("pown", 0, 1),
+                             ("pown", 0, 2), ("pown", 0, -1),
+                             ("pown", inf, 2), ("pown", qnan, 3)):
+                if fn == "compound":
+                    a = _bits4(fmt, a)
+                g = _one5(fn, "both", fmtname, rnd, n)
+                _y, t, f, _pf = _run5(fn, None, g, a, 0, three, 0)
+                if t != _rule5(fn, None, fmt, code, a, 0, three, 0, n):
+                    miss.append(f"{fn} at {hex(a)}, n = {n} under {rnd} at "
+                                f"{fmtname}")
+                if (fn, n) == ("compound", -1) and \
+                        (t == qnan or not f & sf.FLAG_DIVZERO):
+                    miss.append(f"compound(-1, -1)'s tangent not an "
+                                f"infinity with divideByZero under {rnd} at "
+                                f"{fmtname}")
+            gp = _one5("pow", "both", fmtname, rnd)
+            _y, t, f, _pf = _run5("pow", "both", gp, 0, 0, three, three)
+            if t != qnan or not f & sf.FLAG_INVALID:
+                miss.append(f"pow(0, 0)'s tangent is not the invalid NaN "
+                            f"under {rnd} at {fmtname}")
+    return miss
+
+
+class _M5Plant(lang_tangent.Derivation):
+    """The derivation with one of the five's rules changed (kind)."""
+    kind = None
+
+    def rule(self, node):
+        a, R = node.args, self.read
+        op = node.op
+
+        def N(o, *args):
+            return Node(o, args, node.line)
+        k, t = self.kind, [self.of(x) for x in a]
+        if op in ("pow", "powr") and t[0] is not None:
+            da = t[0]
+            if k == f"{op}'s rule: b * {op}(a, b)":
+                return N("mul", N("mul", R(a[1]), N(op, R(a[0]), R(a[1]))),
+                         da)
+            if k == f"{op}'s rule rounded otherwise" and t[1] is None:
+                return N("mul", R(a[1]), N("mul", N(op, R(a[0]), N(
+                    "sub", R(a[1]), self.one)), da))
+            if k == f"{op}'s select form: {op}(a, b) * log(a) * db" \
+                    and t[1] is not None:
+                first = N("mul", N("mul", R(a[1]), N(op, R(a[0]), N(
+                    "sub", R(a[1]), self.one))), da)
+                return N("add", first, N("mul", N("mul", N(
+                    op, R(a[0]), R(a[1])), N("log", R(a[0]))), t[1]))
+        if op in INT5 and t[0] is not None:
+            n = a[1][1][0]
+            if k == f"{op}'s rule: wrong" and op != "rootn":
+                return N("mul", N("mul", R(a[1]), N(op, R(a[0]), R(a[1]))),
+                         t[0])
+            if k == "rootn's rule without its division" and op == "rootn":
+                return N("mul", N("pown", R(node), self.const(1 - n)), t[0])
+            if k == f"{op}'s rule rounded otherwise":
+                if op == "rootn":
+                    return N("mul", N("pown", R(node), self.const(1 - n)),
+                             N("div", t[0], R(a[1])))
+                if n != 0:
+                    return N("mul", R(a[1]), N("mul", N(
+                        op, R(a[0]), self.const(n - 1)), t[0]))
+        return super().rule(node)
+
+
+def math_pow(count, rng):
+    """Leg M's checks for pow, powr, pown, rootn and compound (M3's build),
+    after the four's: the same five checks, then the plants. The exact dual
+    numbers are leg D's discipline, made on these systems; the central
+    difference in high precision is this leg's own, at eps = 2^-64 within
+    2^-100 for all five (the study's closing paragraph of section 7: rules
+    that hold powers and roots, whose central difference loses bits at
+    2^-256), at states of magnitude below 2. n is held to the set N5 in the
+    generated systems and N5_ROUND at the rounding check, -2^63 the
+    refusal, tested apart."""
+    t0 = time.perf_counter()
+    texts = m1_texts(count, "tangent math five", M5_SHAPES, _m5_expr)
+    graphs = m1_graphs(texts)
+    tot = bad_n = 0
+    cd = cd_bad = 0
+    decided = dict.fromkeys(FIVE, 0)
+    cd_decided = dict.fromkeys(FIVE, 0)
+    changed = []
+    for g, text, what in graphs:
+        held = set(FIVE) & set(g.op_counts("step"))
+        a, b = exact_misses5(g, rng, 3)
+        tot, bad_n = tot + a, bad_n + b
+        for fn in held:
+            decided[fn] += a
+        a, b = cd_misses4(g, rng, 3, ROOT_EPS, ROOT_TOL, 2)
+        cd, cd_bad = cd + a, cd_bad + b
+        for fn in held:
+            cd_decided[fn] += a
+        states = LC.lanes_for(g.fmt, g.n_state, rng, 3)
+        states += LC.special_lanes(g.fmt, g.n_state, states[0], rng)
+        if not primal_unchanged5(g, without_tangent(text), states, 2):
+            changed.append(what)
+    ops = set()
+    for g, _t, _w in graphs:
+        ops |= set(g.op_counts("step"))
+    check(bad_n == 0 and set(FIVE) <= ops and
+          all(v >= FLOOR5 for v in decided.values()),
+          f"{len(graphs)} systems holding pow, powr, pown, rootn and "
+          f"compound, {tot} points: the tangent sections evaluated exactly "
+          f"equal this stage's own derivative (leg D's check, made on the "
+          f"five; n in {N5}); points decided per function (the floor is "
+          f"{FLOOR5}): {', '.join(f'{k} {decided[k]}' for k in FIVE)}",
+          f"{bad_n} differ, decided {decided}")
+    check(cd_bad == 0 and all(v >= FLOOR5 for v in cd_decided.values()),
+          f"{cd} points: every tangent component within 2^-100 of the "
+          f"central difference at eps = 2^-64 of 1,024-bit values, states "
+          f"of magnitude below 2 - leg M's own check; points decided per "
+          f"function (the floor is {FLOOR5}): "
+          f"{', '.join(f'{k} {cd_decided[k]}' for k in FIVE)}",
+          f"{cd_bad} differ, decided {cd_decided}")
+    check(not changed, "the primal unchanged in each: its states and flags "
+          "without the tangent, on lanes that overflow, hold a signalling "
+          "NaN and hold subnormals, and its sections' nodes, constants read "
+          "by value", f"changed: {changed[:4]}")
+    lanes = bits = glanes = gbad = cells = 0
+    for fn in FIVE:
+        for case in (("both", "bconst", "da0") if fn in ("pow", "powr")
+                     else (None,)):
+            for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+                for rnd in RNDS5:
+                    n, b = rounding_misses5(fn, case, fmtname, rnd, rng, 4,
+                                            N5_ROUND)
+                    lanes, bits = lanes + n, bits + b
+                    cells += 1
+        for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+            for rnd in RNDS5:
+                n, b = five_golden_misses(fn, fmtname, rnd, rng, N5_GOLDEN)
+                glanes, gbad = glanes + n, gbad + b
+    check(bits == 0 and gbad == 0 and cells == 9 * 4 * 5,
+          f"{lanes} lanes of y = f(a) over {cells} cells (pow and powr's "
+          f"three cases, the three's n in {N5_ROUND}, every format and "
+          f"attribute): each tangent the rule's operations rounded as the "
+          f"rule writes them, every constant once, every routine "
+          f"transcend.compute's; and {glanes} lanes in which the node's own "
+          f"result is the golden function's, bit for bit and flags' OR "
+          f"(the three's n in {N5_GOLDEN}, the exact integer)",
+          f"{bits} in bits, {gbad} golden")
+    miss = five_specials_misses()
+    check(not miss, "the specials, bit for bit at every format under every "
+          "attribute: pow's and powr's first term at a = 0, -0, +-inf, a "
+          "NaN and 1 for b = 2, 1, 1/2, 0, -1, +inf and a NaN, the second "
+          "term +0 at a = 0, pow(0, 0)'s tangent the invalid NaN; rootn at "
+          "a = 0 (n = 3), compound at a = -1 (n = 2, -1), pown at 0 (n = "
+          "1, 2, -1), +inf and a NaN", "; ".join(miss[:6]))
+    # the refusal: n - 1 or 1 - n beyond int64, the primal standing
+    refused = []
+    for fn, n in (("pown", -2 ** 63), ("compound", -2 ** 63),
+                  ("rootn", -2 ** 63), ("rootn", 1 - 2 ** 63)):
+        text = (f"system r\nformat fp64\nstate a\ntangent v\n"
+                f"next a = {fn}(a, {n})\nstep map\n")
+        try:
+            lang.compile_text(text, "n")
+            refused.append(f"{fn} at n = {n} compiled")
+        except lang.Refusal as e:
+            if e.name != "integer-operand":
+                refused.append(f"{fn} at n = {n}: {e.name}")
+        try:
+            lang.compile_text(without_tangent(text), "n")
+        except lang.Refusal as e:
+            refused.append(f"the primal {fn} at n = {n}: {e.name}")
+    check(not refused, "pown, rootn and compound at n = -2^63 (and rootn at "
+          "1 - 2^63): the derivation refused `integer-operand`, the primal "
+          "compiled without the tangent", "; ".join(refused))
+    plant_texts = m1_texts(4, "tangent math plants five", M5_SHAPES, _m5_expr)
+    original = lang_check_mod.Derivation
+    from cft_golden.lang import interp as lang_interp
+    orig_t, orig_b = lang_interp._transcend, lang_interp._bound
+    plants = ("pow's rule: b * pow(a, b)", "powr's rule: b * powr(a, b)",
+              "pown's rule: wrong", "compound's rule: wrong",
+              "rootn's rule without its division",
+              "pow's rule rounded otherwise", "powr's rule rounded otherwise",
+              "pown's rule rounded otherwise",
+              "rootn's rule rounded otherwise",
+              "compound's rule rounded otherwise",
+              "pow's select form: pow(a, b) * log(a) * db",
+              "pow's golden function swapped for powr's",
+              "pow's operands swapped in the interpreter",
+              "n read from the encoding", "n off by one")
+    try:
+        for kind in plants:
+            lang_check_mod.Derivation = original
+            lang_interp._transcend = orig_t
+            lang_interp._bound = orig_b
+            fn = kind.split("'")[0].split(" ")[0]
+            golden = kind.startswith(("pow's golden", "pow's operands",
+                                      "n "))
+            if kind.startswith("pow's golden"):
+                lang_interp._transcend = (
+                    lambda fmt, f, rnd: orig_t(fmt, "powr" if f == "pow"
+                                               else f, rnd))
+            elif kind.startswith("pow's operands"):
+                def swapped(fmt, f, rnd):
+                    h = orig_t(fmt, f, rnd)
+                    return (lambda a, b: h(b, a)) if f == "pow" else h
+                lang_interp._transcend = swapped
+            elif kind == "n read from the encoding":
+                def enc(fns, fmt, rnd, graph, op, args, slot):
+                    if op in INT5:
+                        k = int(args[1][1:])
+                        n = int(K.value_of(fmt, graph.const[k][2]))
+                        return (lambda a, _f=fns[op], _n=n: _f(a, _n)), \
+                            (slot(args[0]),)
+                    return orig_b(fns, fmt, rnd, graph, op, args, slot)
+                lang_interp._bound = enc
+            elif kind == "n off by one":
+                def off(fns, fmt, rnd, graph, op, args, slot):
+                    if op in INT5:
+                        n = int(graph.const[int(args[1][1:])][0]) + 1
+                        return (lambda a, _f=fns[op], _n=n: _f(a, _n)), \
+                            (slot(args[0]),)
+                    return orig_b(fns, fmt, rnd, graph, op, args, slot)
+                lang_interp._bound = off
+            else:
+                class P(_M5Plant):
+                    pass
+                P.kind = kind
+                lang_check_mod.Derivation = P
+            if golden:
+                fns = ("pow",) if kind.startswith("pow") else INT5
+                gl = sum(five_golden_misses(f, fm, rnd, rng, N5_GOLDEN)[1]
+                         for f in fns for fm in ("fp32", "fp64")
+                         for rnd in ("rne", "rdn"))
+                check(gl > 0, f"plant {kind!r}: the golden check {gl} lanes "
+                      f"differ (pow, or the three, at fp32 and fp64 under "
+                      f"rne and rdn) - red on the golden check")
+                continue
+            ex = hp = exd = 0
+            for g, _text, _w in m1_graphs(plant_texts):
+                a, b = exact_misses5(g, rng, 3)
+                exd, ex = exd + a, ex + b
+                hp += cd_misses4(g, rng, 3, ROOT_EPS, ROOT_TOL, 2)[1]
+            per = dict.fromkeys(RNDS5, 0)
+            sp = 0
+            for fmtname in ("fp32", "fp64", "fp256"):
+                for rnd in RNDS5:
+                    for case in (("both", "bconst", "da0")
+                                 if fn in ("pow", "powr") else (None,)):
+                        per[rnd] += rounding_misses5(
+                            fn, case, fmtname, rnd, rng, 12, (2, 3, -2))[1]
+            if "select form" in kind:
+                sp = len(five_specials_misses())
+            said = (f"plant {kind!r}: the exact check {ex}, the central "
+                    f"difference {hp}, the rounding in bits at finite lanes "
+                    f"under rne, rtz, rdn, rup, rmm "
+                    f"{', '.join(str(per[r]) for r in RNDS5)}, the "
+                    f"specials {sp}")
+            check(exd >= FLOOR5, f"plant {kind!r}: the exact check decided "
+                  f"{exd} points (the floor is {FLOOR5}), so a check that "
+                  f"decides none is red", f"{exd}")
+            if "rounded otherwise" in kind:
+                check(ex == 0 and hp == 0 and all(v > 0 for v in per.values()),
+                      said + " - exact in rationals: green on both exact "
+                      "checks, red on the rounding under every attribute "
+                      "(measured: both forms differ under rne, rtz, rdn, "
+                      "rup and rmm at these formats and lanes)")
+            elif "select form" in kind:
+                check(ex == 0 and hp == 0 and sp > 0, said + " - green on "
+                      "both exact checks, red on the specials (a = 0)")
+            else:
+                check(ex > 0 and hp > 0 and all(v > 0 for v in per.values()),
+                      said + " - red on the exact check, the difference "
+                      "and the rounding, under every attribute")
+    finally:
+        lang_check_mod.Derivation = original
+        lang_interp._transcend = orig_t
+        lang_interp._bound = orig_b
+    print(f"  (pow, powr, pown, rootn and compound: "
+          f"{time.perf_counter() - t0:.1f} s)")
+
+
 def leg_math(count, rng):
     section(f"M. the math library's rules, golden - the six (M1's build, "
             f"item 3) and sin, cos and tan (M2's build): "
@@ -3308,6 +3975,7 @@ def leg_math(count, rng):
     print(f"  (the six: {time.perf_counter() - t0:.1f} s)")
     math_three(count, rng)
     math_four(count, rng)
+    math_pow(count, rng)
 
 
 # ---- N: the math library's six, compiled with tangent vectors (item 5) -----

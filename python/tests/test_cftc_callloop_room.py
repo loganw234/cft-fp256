@@ -46,6 +46,7 @@ from lang_mathform import NO_MPMATH, have_mpmath  # noqa: E402
 
 needs_mpmath = pytest.mark.skipif(not have_mpmath(), reason=NO_MPMATH)
 ROOM = len(regalloc.REGS)
+FIVE = ("pow", "powr", "pown", "rootn", "compound")
 FIXED = ((), ("a",), ("b",))
 # atan2's fixed input, as the source writes it: x from one constant, or y
 FORM = {(): "atan2(x[i], y[i])", ("b",): "atan2(x[i], 1.5)",
@@ -63,7 +64,9 @@ def test_the_room_table_has_exactly_fifteen_plans_past_the_room():
     at fp32 needs more than ROOM, at every attribute and every fixed."""
     assert ROOM == 29
     rows = []
-    for op in R.ROUTINES:
+    # the fifteen of M4's build: the five of M3's build are planned in
+    # test_cftc_pow.py (pown, rootn and compound need an n to ask for a plan)
+    for op in [op for op in R.ROUTINES if op not in FIVE]:
         for fn in ("fp32", "fp64", "fp128", "fp256"):
             for rnd in sf.RND_MODES:
                 for fx in _fixed_of(op):

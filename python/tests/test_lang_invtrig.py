@@ -94,12 +94,13 @@ EPS_ROOT, TOL_ROOT = F(1, 1 << 64), F(1, 1 << 100)
 
 # ---- the nodes -------------------------------------------------------------
 
-# The contract's item 3, the order of lang.OPS, as a literal.
+# The contract's item 3 (M3L and M3C's), the order of lang.OPS, as a literal.
 OPS_ITEMS = [("fma", 3), ("add", 2), ("sub", 2), ("mul", 2), ("div", 2),
              ("sqrt", 1), ("exp", 1), ("expm1", 1), ("exp2", 1), ("log", 1),
              ("log1p", 1), ("log2", 1), ("sin", 1), ("cos", 1), ("tan", 1),
-             ("atan", 1), ("asin", 1), ("acos", 1), ("atan2", 2), ("neg", 1),
-             ("abs", 1), ("copysign", 2), ("min", 2), ("max", 2),
+             ("atan", 1), ("asin", 1), ("acos", 1), ("atan2", 2), ("pow", 2),
+             ("powr", 2), ("pown", 2), ("rootn", 2), ("compound", 2),
+             ("neg", 1), ("abs", 1), ("copysign", 2), ("min", 2), ("max", 2),
              ("minnum", 2), ("maxnum", 2), ("cmplt", 2), ("cmple", 2),
              ("cmpeq", 2), ("select", 3)]
 
@@ -113,7 +114,8 @@ def test_the_four_are_nodes_between_tan_and_neg():
     assert list(lang.OPS.items()) == OPS_ITEMS
     assert lang_graph.TRANSCEND == ("exp", "expm1", "exp2", "log", "log1p",
                                     "log2", "sin", "cos", "tan", "atan",
-                                    "asin", "acos", "atan2")
+                                    "asin", "acos", "atan2", "pow", "powr",
+                                    "pown", "rootn", "compound")
     for fn in FOUR:
         arity = 2 if fn == "atan2" else 1
         assert fn in transcend.TRANSCEND_FNS
@@ -201,15 +203,16 @@ def test_a_graph_holding_atan2_is_read_back_with_two_operands():
             ": step node 0: atan2 takes 2 operands"), info.value.sentence
 
 
-def test_transcendental_is_still_raised_for_the_other_22():
-    """atan, asin, acos and atan2 left the reserved list with M4's build;
-    the other 22 stay on it, refused `transcendental` at run time and
-    `irrational-constant` of a constant, for the rounds after M4."""
-    rest = {"exp10", "log10", "pow", "pown", "powr", "rootn", "hypot",
+def test_transcendental_is_still_raised_for_the_other_18():
+    """atan, asin, acos and atan2 left the reserved list with M4's build,
+    and pow, pown, powr and rootn with M3's; the other 18 stay on it,
+    refused `transcendental` at run time and `irrational-constant` of a
+    constant, for the rounds after M3."""
+    rest = {"exp10", "log10", "hypot",
             "sinpi", "cospi", "tanpi", "asinpi", "acospi", "atanpi",
             "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
             "cbrt", "rsqrt"}
-    assert len(rest) == 22 and set(lang_check.TRANSCENDENTAL) == rest
+    assert len(rest) == 18 and set(lang_check.TRANSCENDENTAL) == rest
     for name in sorted(rest):
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = {name}(x)", state="x"))

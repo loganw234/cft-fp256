@@ -102,6 +102,37 @@ refusals, identical; the generated sources are tools of the parcel's
 scratch, not committed). The pack's 21 sources were not compiled at both
 trees, and for them, as for any other source outside those sets, it is
 believed, not shown (2026-11-11).
+9 is the math library's pow, powr, pown, rootn and compound (M3's build,
+2026-11-24; the language at 1.4): a source that names any of them - at run
+time, or folded where its operands are constants that give an exact value -
+which 8 refused, compiles, each run-time call an inlined routine,
+mathlib.py's fragment; pow and powr are routines of two inputs, x then y;
+pown, rootn and compound take an integer constant n, the second operand of
+their node, which keys the fragment (an instance a distinct n: `pown(3)`)
+and is in no bank slot; the exponents 2, 1 and -1 of pow, pown and rootn
+are written as one multiplication or division before the lowering; and
+pown, rootn and compound at fp32, which the math library has not built
+(parcel M3F2's), are `routine-unavailable` unless a rewrite takes them. For
+each source of the sets measured below, 9 writes the same images, banks and
+text files as 8, and its manifests say version 9; nothing else in them moved
+(a manifest's routines block carries the five's own sentence, and
+instance-keyed entries, only where its step holds one of the five, and
+`lowering.rewritten` only where a rewrite was made). That is what parcel M3C
+measured at both trees (the base f7a1ce95's python and the tip's, the
+language's 1.4 merged): the 55 .cftl files committed at f7a1ce95 outside
+the hard-workload pack (165 compiles on sw, u50-rev8 and u50-rev7 at 3
+steps: 124 images, only each manifest's version line moving, and 41
+refusals, identical; the 26 committed manifests of programs/systems/compiled
+and compiled-tangent change in that line alone, and the atmosphere
+reference adds 16 files) and 440 compiles of 110 generated sources without
+the five (330 on the three targets and 110 on sw with the call loop's
+constant lowered to 400: 362 images, 25 of them looped, only that line
+moving, and 78 refusals, identical; the generated sources are the
+generators of programs/lang_check.py at fixed seeds - corpus_texts(40),
+g_routine 25, g_six 20, g_three 13 and g_four 12 - and the script is a tool
+of the parcel's scratch, not committed). The pack's 21 sources were not
+compiled at both trees, and for them, as for any other source outside those
+sets, it is believed, not shown (2026-11-24).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -136,26 +167,52 @@ take past 512 is `bank-capacity`. Until C4 such a system was refused
 `runtime-routine`, a name that went with it.
 
 The math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
-items 3 and 4, 2026-10-15), its sin, cos and tan (M2's build) and its
-atan, asin, acos and atan2 (M4's build) are routines too: each run-time node is inlined as its fragment, which the
-golden model's generator builds (cft_golden/mathlib.py; routines.fragment
+items 3 and 4, 2026-10-15), its sin, cos and tan (M2's build), its
+atan, asin, acos and atan2 (M4's build) and its pow, powr, pown, rootn and
+compound (M3's build) are routines too: each run-time node is inlined as
+its fragment, which the golden model's generator builds (cft_golden/mathlib.py; routines.fragment
 hands it out by name), quiet, then a RAISE of its flag word - its
 operation's IEEE flags in [4:0] and, where its in-lane test cannot decide
 the last bit, the MARK in [7], which marks the lane (R23's [7],
 STATUS[6]): the lane's value is then the routine's best guess, which the
-definition replays (docs/LANGUAGE.md, "A marked lane"). The thirteen's
+definition replays (docs/LANGUAGE.md, "A marked lane"). The eighteen's
 words are bank slots of the routine kind as division's are, after them in
-the fifteen's one order (routines.ROUTINES, the language's: div, sqrt, the
-six, sin, cos, tan, atan, asin, acos, atan2); the internal check holds
+the twenty's one order (routines.ROUTINES, the language's: div, sqrt, the
+six, sin, cos, tan, atan, asin, acos, atan2, pow, powr, pown, rootn,
+compound); the internal check holds
 each instance to its fragment and each fragment to its routine's
 statement (routines.invariants), division's and root's C4's, the six's
-widened, and the three's and the four's the six's under live caps of
-their own (routines.LIVE_CAP: 23, 26, 17 and 16 at fp32, fp64, fp128 and
-fp256 for each of the three; 25, 15, 15 and 15 for atan, 25, 16, 16 and 16
-for asin and acos, 31, 19, 19 and 19 for atan2). atan2 is the one routine
-of two inputs besides division: its fragment's inputs are (y, x), bound
-in that order to the node's operands, so a call loop's record is two
-slots for it. sin's and cos's fragments hold two MIN and two MAX (their
+widened, and the three's, the four's and the five's the six's under live
+caps of their own (routines.LIVE_CAP: 23, 26, 17 and 16 at fp32, fp64,
+fp128 and fp256 for each of the three; 25, 15, 15 and 15 for atan, 25, 16,
+16 and 16 for asin and acos, 31, 19, 19 and 19 for atan2; pow 32, 30, 30
+and 30 and powr 29, 23, 22 and 22 at the same four formats, pown 21, rootn
+19 and compound 22 at fp64, fp128 and fp256). atan2, pow and powr are the
+routines of two inputs besides division: atan2's fragment's inputs are
+(y, x) and pow's and powr's (x, y), bound in that order to the node's
+operands, so a call loop's record is two slots for each.
+
+pown, rootn and compound are keyed by an INTEGER n, the second operand of
+their node in the language: a const entry of the step graph, read from
+its EXACT value (ir.Graph.integer, an int in [-2^63, 2^63 - 1]; the
+encoding at fp32 and fp64 does not carry it), dropped from the lowered
+node's operands - so it is in no bank slot, unless the same entry is read as
+a value elsewhere - and kept as the node's n (lower.LNode.n). A routine
+instance is (op, n), spelt `pown(3)`: a distinct n is a distinct
+fragment, hash-consing key, bank words, manifest entry and call loop
+batch, and instances are in the routines' order and n signed within an op.
+The exponents 2, 1 and -1 are REWRITTEN before the lowering (ir.REWRITE):
+pow(x, 2) and pown(x, 2) are x * x, pow(x, 1), pown(x, 1) and rootn(x, 1)
+x * 1, pow(x, -1), pown(x, -1) and rootn(x, -1) 1 / x, in the step's
+nodes and in a tangent section's, bit for bit and flag for flag the
+node's golden function (python/tests/test_cftc_pow.py), and the manifest's
+graph_by_op stays the graph's, with `lowering.rewritten` saying what was
+written. powr, rootn(x, 2), compound(x, 1) and pow(x, 1/2) are not
+rewritten. pown, rootn and compound have no fp32 until parcel M3F2: at fp32
+a node of them that no rewrite takes is `routine-unavailable`, first of
+all (NOT_BUILT_FP32; refuse_unavailable); pow and powr are built at fp32
+(the triple word, parcel M3F1's; pow keeps 32 values live, past the
+allocator's 29). sin's and cos's fragments hold two MIN and two MAX (their
 clamp), asin's and acos's one of each and atan's and atan2's one MIN,
 against bank words (MEASURED at the four formats under rne), which no
 other routine does: the emitter writes them, the assembler takes them and
@@ -164,7 +221,7 @@ test_cftc_trig.py, test_cftc_invtrig.py). A
 function of a constant folds in the language, exactly, or is refused there
 by name, and so compiles as the constant it is. The generator derives its
 constants through mpmath, so on a host without it a source whose graph
-holds a run-time node of the thirteen is refused `routine-unavailable` - by
+holds a run-time node of the eighteen is refused `routine-unavailable` - by
 name, never an ImportError or an internal error - after the refusals that
 depend on the arguments alone
 (segment-steps, target-format, a run value's) and before anything builds
@@ -294,7 +351,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 8               # the output version: the module docstring, outputs.py
+VERSION = 9               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -545,20 +602,31 @@ def _call_loops(g, pb, src, low0, prog0):
     return low, prog, looped, declined
 
 
-# The math library's thirteen (the six, M1's build, item 4, 2026-10-15; sin,
-# cos and tan, M2's build; and atan, asin, acos and atan2, M4's), in the
-# language's order: each run-time node a
+# The math library's eighteen (the six, M1's build, item 4, 2026-10-15; sin,
+# cos and tan, M2's build; atan, asin, acos and atan2, M4's; and pow, powr,
+# pown, rootn and compound, M3's), in the language's order: each run-time node a
 # routine whose fragment mathlib.py builds, through mpmath (the module
 # docstring). It is cft_golden/routines.py's BUILT, which
 # python/tests/test_cftc_trig.py pins it to: a routine left out of this
 # tuple would be an ImportError on a host without mpmath, where the rule is
 # `routine-unavailable`.
 MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan",
-        "atan", "asin", "acos", "atan2")
+        "atan", "asin", "acos", "atan2", "pow", "powr", "pown", "rootn",
+        "compound")
+
+# The three of MATH the math library has not built at fp32 (parcel M3F2's,
+# wave 5: they have no measured fp32 design; pow and powr are built there, the
+# triple word, parcel M3F1's), which the compiler refuses by name at fp32 and
+# no other format. ONE table, which parcel M3F2 deletes, and a test that fails
+# by name when mathlib builds one of them at fp32 while this still says it does
+# not. A node of these the rewrites take (ir.REWRITE: pown(x, 2), pown(x, 1),
+# pown(x, -1), rootn(x, 1), rootn(x, -1)) is a mul or a div by then and is not
+# refused.
+NOT_BUILT_FP32 = ("pown", "rootn", "compound")
 
 
 def math_nodes(graph):
-    """The thirteen a step graph holds as run-time nodes, in MATH's order - what
+    """The eighteen a step graph holds as run-time nodes, in MATH's order - what
     a compilation of it needs mpmath for. A fold is a constant, and needs
     none."""
     found = set()
@@ -569,11 +637,46 @@ def math_nodes(graph):
     return [op for op in MATH if op in found]
 
 
+def unbuilt_at_fp32(graph):
+    """[(op, n)]: the routine instances of NOT_BUILT_FP32 the graph holds at
+    fp32 that the rewrites do not take, in the order of the routines and n
+    signed - what the compiler refuses there (refuse_unavailable). The graph
+    is read through the compiler's own IR, which has the rewrites applied
+    (ir.Graph), so that pown(x, 2) at fp32, a multiplication, is none of
+    them. Empty at any other format."""
+    fmt = getattr(graph, "fmt", None)       # a stand-in graph has none
+    if fmt is None or fmt.name != "fp32" or \
+            not set(math_nodes(graph)) & set(NOT_BUILT_FP32):
+        return []
+    g = Graph(graph.to_bytes())
+    found = {(op, g.integer(refs[1], f"step node {k} ({op})"))
+             for k, (op, refs, _l) in enumerate(g.nodes)
+             if op in NOT_BUILT_FP32}
+    return sorted(found, key=lambda e: (NOT_BUILT_FP32.index(e[0]), e[1]))
+
+
 def refuse_unavailable(graph, source=None):
-    """`routine-unavailable` where the graph holds a run-time node of the
-    thirteen and mpmath does not import here: the routine's fragment cannot be
-    built on this host (the module docstring). Otherwise nothing. Line
-    None: the cause is the host, not a line of the source."""
+    """`routine-unavailable` where the graph holds a run-time node of
+    NOT_BUILT_FP32 at fp32 that the rewrites do not take - FIRST, before the
+    test below, which needs no import - or a run-time node of the eighteen
+    and mpmath does not import here: the routine's fragment cannot be built
+    on this host (the module docstring). Otherwise nothing. Line None: the
+    cause is the host or the format, not a line of the source."""
+    unbuilt = unbuilt_at_fp32(graph)
+    if unbuilt:
+        names = names_and(f"{op}({n})" for op, n in unbuilt)
+        them = "it" if len(unbuilt) == 1 else "them"
+        refuse("routine-unavailable",
+               f"this system computes {names} at run time at fp32, where "
+               f"the math library has not built {them}: pown, rootn and "
+               f"compound at fp32 are parcel M3F2's (pow and powr are "
+               f"built there, the triple word, parcel M3F1's), and are "
+               f"refused by name until it merges. "
+               f"At the other formats the same source compiles; at fp32 an "
+               f"exponent the compiler rewrites (pown(x, 2), pown(x, 1), "
+               f"pown(x, -1), rootn(x, 1) and rootn(x, -1)) compiles as the "
+               f"one multiplication or division it is",
+               source=source or "<graph>")
     ops = math_nodes(graph)
     if not ops:
         return

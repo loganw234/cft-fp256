@@ -63,7 +63,17 @@ that is not negative - its zero - and otherwise mpmath's at 1,024 bits of
 the arguments, each rounded to nearest at 1,024 bits; arcsin and arccos
 outside [-1, 1] raise an ArithmeticError.
 
-Only the thirteen need mpmath, here as in the language: have_mpmath() says,
+pow, powr, pown, rootn and compound (M3's build) print as the generic call,
+pow(a, b), powr(a, b), pown(a, n), rootn(a, n) and compound(a, n), a first
+and n an integer (read here as the rational it is, and refused as no integer
+otherwise). They are taken as the step graph's convention takes them
+(graph.exact_transcendental), computed here by another route (power(),
+below: integer roots by bisection, where the checker's are Newton's): exact
+where the value is rational - a perfect power - and otherwise mpmath's at
+1,024 bits of the arguments rounded to nearest at 1,024 bits; a value that
+is no real number, a pole, or past 2^+-1048576 raises an ArithmeticError.
+
+Only the eighteen need mpmath, here as in the language: have_mpmath() says,
 without importing it, whether this host has it, so that the tests that
 run or evaluate the thirteen skip by name on a host without it while the rest -
 the checker, the renderers and cftc's refusal of the thirteen among them - run.
@@ -118,10 +128,12 @@ def _mpvalue(fn, q, q2=None):
     lib, ctx = _MP[0]
     x = ctx.make_mpf(lib.from_rational(q.numerator, q.denominator,
                                        TRANS_BITS, lib.round_nearest))
-    if fn == "atan2":
+    if fn in ("atan2", "power"):
         x2 = ctx.make_mpf(lib.from_rational(q2.numerator, q2.denominator,
                                             TRANS_BITS, lib.round_nearest))
-        y = ctx.atan2(x, x2)
+        y = ctx.atan2(x, x2) if fn == "atan2" else ctx.power(x, x2)
+    elif fn == "root":
+        y = ctx.root(x, int(q2))
     else:
         y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v),
              "ln": ctx.log, "log2": lambda v: ctx.log(v) / ctx.ln2,
@@ -187,8 +199,86 @@ def transcendental(name, q, q2=None):
     raise MathFormError(f"unknown function {name}")
 
 
+def _iroot(n, k):
+    """The integer k-th root of n >= 0 where n is a perfect k-th power, else
+    None - by bisection, a route the checker's Newton iteration does not
+    share."""
+    lo, hi = 0, 1
+    while hi ** k <= n:
+        hi *= 2
+        if hi.bit_length() > n.bit_length() + 2:
+            break
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if mid ** k < n:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo if lo ** k == n else None
+
+
+def _qroot(q, k):
+    """The k-th root of the positive rational q where it is rational."""
+    a = _iroot(q.numerator, k)
+    b = _iroot(q.denominator, k)
+    return None if a is None or b is None else Fraction(a, b)
+
+
+def power(name, q, q2):
+    """pow, powr, pown, rootn or compound of the rationals q and q2 as the
+    exact checks take them (the module docstring)."""
+    q, q2 = Fraction(q), Fraction(q2)
+    if name in ("pown", "rootn", "compound"):
+        if q2.denominator != 1:
+            raise MathFormError(f"{name}'s n, {q2}, is no integer")
+    if name == "compound":
+        name, q = "pown", 1 + q
+        if q < 0:
+            raise ArithmeticError("compound below -1")
+    if name == "rootn":
+        n = int(q2)
+        if n == 0:
+            raise ArithmeticError("rootn of order 0")
+        if q == 0:
+            if n < 0:
+                raise ArithmeticError("a pole")
+            return Fraction(0)
+        if q < 0 and n % 2 == 0:
+            raise ArithmeticError("an even root of a negative")
+        r = _qroot(abs(q), abs(n))
+        if r is None:
+            x = _mpvalue("root", abs(q), q2)
+            r = x if n > 0 else 1 / x
+            return -r if q < 0 else r
+        r = -r if q < 0 else r
+        return r if n > 0 else 1 / r
+    if name == "powr" and q < 0:
+        raise ArithmeticError("powr of a negative")
+    if name == "powr" and q == 0 and q2 == 0:
+        raise ArithmeticError("powr(0, 0)")
+    if q == 0:
+        if q2 < 0:
+            raise ArithmeticError("a pole")
+        return Fraction(1 if q2 == 0 else 0)
+    if q2 == 0 or q == 1:
+        return Fraction(1)
+    if q2.denominator == 1:
+        v = q ** int(q2)
+    elif q < 0:
+        raise ArithmeticError("a negative base, a non-integer power")
+    else:
+        r = _qroot(q, q2.denominator)
+        if r is None:
+            return _mpvalue("power", q, q2)
+        v = r ** q2.numerator
+    if v != 0 and abs(v.numerator.bit_length() - v.denominator.bit_length())             > LIMIT + 1:
+        raise ArithmeticError(f"{name}({q}, {q2}) is past 2^+-{LIMIT}")
+    return v
+
+
 _TRANSCENDENTAL = ("exp", "expm1", "ln", "log1p", "log₂", "sin", "cos",
                    "tan", "arctan", "arcsin", "arccos")
+_POWERS = ("pow", "powr", "pown", "rootn", "compound")
 
 
 class MathFormError(ValueError):
@@ -591,6 +681,10 @@ class MathForm:
                 if len(vals) != 1:
                     raise MathFormError(f"{name} of {len(vals)} values")
                 return transcendental(name, vals[0])
+            if name in _POWERS:
+                if len(vals) != 2:
+                    raise MathFormError(f"{name} of {len(vals)} values")
+                return power(name, vals[0], vals[1])
             if name == "atan2":
                 if len(vals) != 2:
                     raise MathFormError(f"{name} of {len(vals)} values")

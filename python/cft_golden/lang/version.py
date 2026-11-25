@@ -59,7 +59,23 @@ The steps:
        accepted. A source that was refused one way and is refused another
        now - atan(h), which was `irrational-constant` at 1.2 and is
        `h-nonlinear` at 1.3 - changes no accepted source.
+  1.4  2026-11-24, M3's build: pow, powr, pown, rootn and compound, each an
+       operation with transcend.py's golden function (two operands, x first;
+       the second of pown, rootn and compound an integer constant within
+       int64, refused `integer-operand` otherwise), their folds (exact
+       rationals where the value is rational: pow(4, 1/2) is 2), and their
+       tangent rules. Functions the language refused before only because it
+       did not have them, as at 1.1 to 1.3 (Logan's answer 10 to the M3
+       study, 2026-11-19: "the language to 1.4"): every source accepted at
+       1.3 is accepted at 1.4 and computes the same, and a source refused
+       at 1.3 is refused still, or, using one of the five, accepted - WITH
+       ONE EXCEPTION: `compound`, which no 1.3 rule reserved, is a built-in
+       from 1.4, and a source naming a value `compound` is refused
+       `reserved-name`. No committed source does (`git grep -w -l compound
+       -- '*.cftl'` finds none of the 76 at f7a1ce95). A source refused one
+       way and refused another now - pow(x, 2), `transcendental` at 1.3 and
+       a node at 1.4 - changes no accepted source.
 """
 
-# (major, minor): spelt "1", or "1.3" once a minor step is taken
-VERSION = (1, 3)
+# (major, minor): spelt "1", or "1.4" once a minor step is taken
+VERSION = (1, 4)

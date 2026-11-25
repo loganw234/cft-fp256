@@ -365,6 +365,7 @@ REFUSALS = {
     "transcendental": (_src("state x", "next x = sinh(x)"), 4),
     "irrational-constant": (_src("state x", "next x = x * sqrt(2)"), 4),
     "power": (_src("state x", "next x = x^2"), 4),
+    "integer-operand": (_src("state x", "next x = pown(x, 2.5)"), 4),
     "not-equal": (_src("state x", "next x = select(x != 1, 1, 2)"), 4),
     "chained-comparison": (_src("state x", "next x = 0 < x < 1"), 4),
     "time-dependence": (_src("state x", "d/dt x = t",
@@ -1422,10 +1423,13 @@ def test_intention_out_of_random_systems():
     # draws are what they were before M1's build, item 3 - and sin, cos and
     # tan (M2's build), whose systems are test_lang_trig.py's, and atan,
     # asin, acos and atan2 (M4's build), whose systems are
-    # test_lang_invtrig.py's
+    # test_lang_invtrig.py's, and pow, powr, pown, rootn and compound (M3's
+    # build), whose systems are test_lang_pow.py's
     assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
     assert ops == set(lang.OPS) - set(SIX) - {"sin", "cos", "tan", "atan",
-                                              "asin", "acos", "atan2"}
+                                              "asin", "acos", "atan2", "pow",
+                                              "powr", "pown", "rootn",
+                                              "compound"}
     assert fmts == set(FORMATS) and rnds == set(C.RND_BY_NAME)
     assert arrays and lanes and lets
 
@@ -2350,7 +2354,9 @@ def test_m1_the_six_are_nodes():
     operand, named as transcend.py names the function, listed after sqrt;
     each is a built-in - reserved, and held to one argument - and every
     other name of the reserved list is still `transcendental` at run time
-    and `irrational-constant` of a constant, for the rounds after M4."""
+    and `irrational-constant` of a constant, for the rounds after M3; the
+    union below says what the reserved names before M1's build were made
+    of."""
     from cft_golden import transcend
     assert list(lang.OPS)[:12] == ["fma", "add", "sub", "mul", "div", "sqrt",
                                    *SIX]
@@ -2369,12 +2375,17 @@ def test_m1_the_six_are_nodes():
         assert "a built-in" in info.value.sentence
     rest = set(lang_check.TRANSCENDENTAL)
     # sin, cos and tan left the list in M2's build (2026-11-02) and atan,
-    # asin, acos and atan2 in M4's: they are nodes now (test_lang_trig.py,
-    # test_lang_invtrig.py), and the 22 others still refused
+    # asin, acos and atan2 in M4's, and pow, pown, powr and rootn in M3's:
+    # they are nodes now (test_lang_trig.py, test_lang_invtrig.py,
+    # test_lang_pow.py), and the 18 others still refused. compound was never
+    # in the list: it is a built-in since M3's build and the one name
+    # RESERVED_BEFORE does not hold
     three = {"sin", "cos", "tan"}
     four = {"atan", "asin", "acos", "atan2"}
-    assert rest | set(SIX) | three | four == RESERVED_BEFORE
-    assert not rest & (set(SIX) | three | four) and len(rest) == 22
+    five = {"pow", "powr", "pown", "rootn", "compound"}
+    assert rest | set(SIX) | three | four | (five - {"compound"})         == RESERVED_BEFORE
+    assert "compound" not in RESERVED_BEFORE and "compound" in lang_check.MATH
+    assert not rest & (set(SIX) | three | four | five) and len(rest) == 18
     for name in sorted(rest):
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = {name}(x)", state="x"))
@@ -2826,22 +2837,24 @@ def test_m1_mpmath_is_needed_only_by_a_run_of_the_six(tmp_path):
     assert lines[4] == "exact_eval ImportError"
 
 
-def test_m4_the_language_is_at_1_3():
-    """The six (M1's build), sin, cos and tan (M2's build) and atan, asin,
-    acos and atan2 (M4's build) are minor steps (CONFORMANCE.md, "The
-    language's version"): lang/version.py is 1.3, and cft.h's macros, which
-    cft-segrun and cft-audit compile in, are the same. (This was
-    test_m2_the_language_is_at_1_2, at 1.2 and cft.h's 2, until M4's build;
-    before it test_m1_the_language_is_at_1_1, at 1.1 and cft.h's 1, until
-    M2's build, 2026-11-02.)"""
+def test_m3_the_language_is_at_1_4():
+    """The six (M1's build), sin, cos and tan (M2's build), atan, asin, acos
+    and atan2 (M4's build) and pow, powr, pown, rootn and compound (M3's
+    build) are minor steps (CONFORMANCE.md, "The language's version"):
+    lang/version.py is 1.4, and cft.h's macros, which cft-segrun and
+    cft-audit compile in, are the same. (This was
+    test_m4_the_language_is_at_1_3, at 1.3 and cft.h's 3, until M3's build;
+    before it test_m2_the_language_is_at_1_2, at 1.2 and cft.h's 2, until
+    M4's build; before that test_m1_the_language_is_at_1_1, at 1.1 and
+    cft.h's 1, until M2's build, 2026-11-02.)"""
     from cft_golden import cert2
     from cft_golden.lang import version
-    assert version.VERSION == (1, 3)
-    assert cert2.version_text(version.VERSION) == "1.3"
+    assert version.VERSION == (1, 4)
+    assert cert2.version_text(version.VERSION) == "1.4"
     text = (REPO / "host" / "include" / "cft.h").read_text(encoding="utf-8")
     got = dict(re.findall(r"^#define (CFT_LANGUAGE_(?:MAJOR|MINOR))\s+(\d+)",
                           text, re.M))
-    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "3"}
+    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "4"}
 
 
 # ---- the documents -------------------------------------------------------------

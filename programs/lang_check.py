@@ -89,7 +89,11 @@ besides.
      refused until 1.3: the run-time source `routine-unavailable` the same
      way, a fold of atan(0) + asin(0) + acos(1) + atan2(0, 1) compiled
      without mpmath, and the run-time source compiled and run by lang.run
-     with it
+     with it; and since M3's build the same for pow, powr, pown, rootn and
+     compound, which the language refused until 1.4: the run-time source
+     `routine-unavailable` the same way, a fold of pow(4, 1/2) + pown(2, 3)
+     + rootn(8, 3) + compound(1, 3) + powr(1, 2) compiled without mpmath,
+     and the run-time source compiled and run by lang.run with it
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted;
      with the routines' (C4): a raise dropped, a raise inside its quiet
@@ -2115,9 +2119,25 @@ def leg_refusals():
     invfold = ("system i\nformat fp64\nstate x\n"
                "const k = atan(0) + asin(0) + acos(1) + atan2(0, 1)\n"
                "next x = x * k + 1\nstep map\n")
+    # M3's build: pow, powr, pown, rootn and compound likewise; a fold of
+    # five exact cases is the constant it is
+    power = ("system p\nformat fp64\nstate x, y\n"
+             "next x = pow(x, y) + powr(y, x)\n"
+             "next y = pown(x, 3) + rootn(y, 3) + compound(x, 5)\n"
+             "step map\n")
+    powfold = ("system p\nformat fp64\nstate x\n"
+               "const k = pow(4, 1/2) + pown(2, 3) + rootn(8, 3) "
+               "+ compound(1, 3) + powr(1, 2)\nnext x = x * k + 1\n"
+               "step map\n")
     held = sys.modules.get("mpmath", _ABSENT)
     sys.modules["mpmath"] = None
     try:
+        expect("routine-unavailable",
+               lambda: cftc.compile_text(power, 2, target="u50-rev7",
+                                         source="p.cftl"),
+               "pow, powr, pown, rootn and compound at run time with mpmath "
+               "taken away (sys.modules), on revision 7's single, before "
+               "target-feature (M3's build)")
         expect("routine-unavailable",
                lambda: cftc.compile_text(runtime, 2, target="u50-rev7",
                                          source="m.cftl"),
@@ -2153,6 +2173,13 @@ def leg_refusals():
             ifold = None
             bad(f"a fold of atan(0) + asin(0) + acos(1) + atan2(0, 1), in a "
                 f"const, with mpmath taken away: refused {e.name}")
+        try:
+            pfold = cftc.compile_text(powfold, 2, source="p.cftl").image
+        except lang.Refusal as e:
+            pfold = None
+            bad(f"a fold of pow(4, 1/2) + pown(2, 3) + rootn(8, 3) + "
+                f"compound(1, 3) + powr(1, 2), in a const, with mpmath taken "
+                f"away: refused {e.name}")
     finally:
         if held is _ABSENT:
             del sys.modules["mpmath"]
@@ -2174,10 +2201,17 @@ def leg_refusals():
               "const - refused irrational-constant until the language's 1.3 "
               "(M4's build) - compiles with mpmath taken away, the same "
               "image as with it")
+    if pfold is not None:
+        check(pfold == cftc.compile_text(powfold, 2, source="p.cftl").image,
+              "a fold of pow(4, 1/2) + pown(2, 3) + rootn(8, 3) + "
+              "compound(1, 3) + powr(1, 2), in a const - refused until the "
+              "language's 1.4 (M3's build) - compiles with mpmath taken "
+              "away, the same image as with it")
     if not have_mpmath():
-        skip("the thirteen at run time: log1p, sin, cos and tan, and atan, "
-             "asin, acos and atan2, compiled and run by lang.run",
-             "python has no mpmath module, which the thirteen's golden "
+        skip("the eighteen at run time: log1p, sin, cos and tan, atan, "
+             "asin, acos and atan2, and pow, powr, pown, rootn and compound, "
+             "compiled and run by lang.run",
+             "python has no mpmath module, which the eighteen's golden "
              "functions and routines need")
     else:
         c = cftc.compile_text(runtime, 2, source="m.cftl")
@@ -2198,6 +2232,14 @@ def leg_refusals():
               "atan, asin, acos and atan2 at run time - refused by the "
               "language until 1.3 (M4's build) - compile for sw, each "
               "inlined, and lang.run runs them")
+        c = cftc.compile_text(power, 2, source="p.cftl")
+        check(set(c.manifest["routines"]["calls"]) ==
+              {"pow", "powr", "pown(3)", "rootn(3)", "compound(5)"}
+              and len(lang.run(c.graph, [[1] * c.ir.n_state], 2).states) == 1,
+              "pow, powr, pown, rootn and compound at run time - refused by "
+              "the language until 1.4 (M3's build) - compile for sw, each "
+              "inlined (the three's instances keyed by n), and lang.run runs "
+              "them")
     want = set(cftc.NAMES) | set(cftc.refusals.SHARED)
     check(made == want, f"every one of the compiler's {len(cftc.NAMES)} "
           f"names was made, and the language's bank-capacity it raises "

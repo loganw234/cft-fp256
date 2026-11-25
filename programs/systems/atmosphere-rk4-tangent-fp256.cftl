@@ -1,0 +1,30 @@
+; A body falling through a power-law atmosphere with drag, with its
+; variational equations: the altitude alt, the speed v and the mass m,
+; d/dt alt = v, d/dt v = -g + k * pow(1 + alt / H, -4.5) * v * abs(v) and
+; d/dt m = -c * pown(v, 3), the shape of the density laws of JB2008 and
+; NRLMSISE-00 (the study, docs/studies/M3-pow.md, section 7's reference;
+; the sign of k is the study's), with one tangent vector stepped beside the
+; state by the same program. Two of the math library's power routines are
+; in its step - pow with a non-integer constant exponent and a
+; state-dependent base, and pown with the constant n = 3 - and their rules
+; in the tangent (M3's build; the study's section 7): pow's
+; (-4.5 * pow(a, -5.5)) * da, whose exponent -5.5 is a pow of its own that
+; the primal does not hold, and pown's (3 * pown(v, 2)) * dv, whose
+; pown(v, 2) the compiler writes as the product v * v (so the compiled
+; bytes hold a multiplication where the graph holds a pown). It is
+; compiled round rdn, every rounded operation toward negative infinity,
+; where the rules' roundings, written in another shape, are other bytes.
+; The run keeps the base 1 + alt / H positive (alt in [0, 4], H = 8) and no
+; lane on a structured case of the pow family (an exact power, the zeros
+; and the infinities), which would mark by design: leg G fails a segment
+; that marks one.
+system atmosphere
+format fp256
+round  rdn
+state  alt, v, m
+tangent w
+param  g = 5/4, H = 8, k = 1/16, c = 1/32
+d/dt alt = v
+d/dt v = -g + k * pow(1 + alt / H, -4.5) * v * abs(v)
+d/dt m = -(c * pown(v, 3))
+step   rk4, h = 1/64

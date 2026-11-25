@@ -23,7 +23,7 @@ from .. import softfloat as sf
 from .. import transcend
 from . import constants as C
 from .check import constant_of
-from .graph import SECTIONS, TRANSCEND
+from .graph import INT_OPERAND, SECTIONS, TRANSCEND
 from .refusals import Refusal
 
 
@@ -44,23 +44,44 @@ class Run:
 
 
 def _transcend(fmt, fn, rnd):
-    """The golden function of one of the thirteen (graph.TRANSCEND):
+    """The golden function of one of the eighteen (graph.TRANSCEND):
     transcend.py's, by the name the node carries, under the program's
     attribute - the correctly rounded result and its exact flags (M1's
-    build, item 3, M2's and M4's). atan2's takes its two operands, y first
-    as the node holds them, and every other one's takes one."""
-    if fn == "atan2":
+    build, item 3, M2's, M4's and M3's). atan2's, pow's and powr's take
+    their two operands as the node holds them (atan2's y first, pow's x
+    first), and every other one's takes one. pown, rootn and compound take
+    one operand and the integer n, which is not an encoding: `_bound` gives
+    each its n, read exactly from the graph's const entry, so no lambda here
+    is ever called with it."""
+    if fn in ("atan2", "pow", "powr"):
         return lambda a, b: transcend.compute(fmt, fn, a, b, rnd)
+    if fn in INT_OPERAND:
+        return lambda a, n: transcend.compute(fmt, fn, a, 0, rnd, n)
     return lambda a: transcend.compute(fmt, fn, a, 0, rnd)
 
 
+def _bound(fns, fmt, rnd, graph, op, args, slot):
+    """(function, operand slots) of one node. For pown, rootn and compound
+    the second operand is a const entry whose exact value is n, the integer
+    the golden function takes: n is read from the graph (never from the
+    constant's encoding, which at fp32 and fp64 does not hold every int64)
+    and bound into the function, which then takes the one lane operand."""
+    if op in INT_OPERAND:
+        assert args[1][0] == "c", (op, args)
+        n = graph.const[int(args[1][1:])][0]
+        assert n.denominator == 1, (op, n)
+        n = int(n)
+        return (lambda a, _f=fns[op], _n=n: _f(a, _n)), (slot(args[0]),)
+    return fns[op], tuple(slot(a) for a in args)
+
+
 def _ops(fmt, rnd):
-    """The golden function for each node operation. The nineteen that round
+    """The golden function for each node operation. The twenty-four that round
     take the program's attribute - division and the square root among
     them, sf.div and sf.sqrt, correctly rounded with their exact flags
-    (L4), and the math library's thirteen, transcend.py's (M1's build,
-    item 3, M2's and M4's) - and the rest are called as softfloat.compute calls them,
-    and ignore it."""
+    (L4), and the math library's eighteen, transcend.py's (M1's build,
+    item 3, M2's, M4's and M3's) - and the rest are called as
+    softfloat.compute calls them, and ignore it."""
     return {
         "fma": lambda a, b, c: sf.fma(fmt, a, b, c, rnd),
         "add": lambda a, b: sf.add(fmt, a, b, rnd),
@@ -84,7 +105,7 @@ def _ops(fmt, rnd):
 
 
 def transcendentals(graph):
-    """The thirteen (graph.TRANSCEND) a graph's sections hold, in their order:
+    """The eighteen (graph.TRANSCEND) a graph's sections hold, in their order:
     what makes a run of it need mpmath."""
     held = set()
     for name in SECTIONS:
@@ -95,7 +116,7 @@ def transcendentals(graph):
 
 
 def need_mpmath(graph):
-    """Nothing for a graph without the thirteen; for one with them, nothing where
+    """Nothing for a graph without the eighteen; for one with them, nothing where
     mpmath imports, and otherwise transcend.ZivEscalation naming it - the
     golden model's own failure for a transcendental it cannot decide here,
     which the certificate auditor maps to `definition-unavailable`. Raised
@@ -333,7 +354,7 @@ def run(graph, states, steps, lane_params=None, params=None,
                 cbits[k] = _round_run(graph, f"{C.h_form(factor)}",
                                       factor * hv)
 
-    # a graph holding one of the thirteen needs mpmath for its golden functions,
+    # a graph holding one of the eighteen needs mpmath for its golden functions,
     # named here, after the inputs' refusals and before any lane runs
     need_mpmath(graph)
 
@@ -358,12 +379,12 @@ def run(graph, states, steps, lane_params=None, params=None,
         if kind == "d":
             return dbase + i
         return slot(ref)
-    prog = [(fns[op], tuple(slot(a) for a in args))
+    prog = [_bound(fns, fmt, rnd, graph, op, args, slot)
             for op, args, _label in graph.step.nodes]
     outs = [slot(o) for o in graph.step.out]
     tprog, touts = [], []
     if T:
-        tprog = [(fns[op], tuple(tslot(a) for a in args))
+        tprog = [_bound(fns, fmt, rnd, graph, op, args, tslot)
                  for op, args, _label in graph.tangent_step.nodes]
         touts = [tslot(o) for o in graph.tangent_step.out]
     size = dbase + len(tprog)

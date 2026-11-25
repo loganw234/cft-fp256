@@ -34,6 +34,12 @@ Each operation's tangent is a rule written in the language
   asin(a)         da / sqrt(fma(-a, a, 1))      one division a vector, no
   acos(a)         da / (-sqrt(fma(-a, a, 1)))   routine node
   atan2(a, b)     fma(b, da, -(a * db)) / fma(b, b, a * a)
+  pow(a, b)       (b * pow(a, b - 1)) * da      M3's build: the routines
+                  + select(a == 0, 0, pow(a, b) * log(a)) * db   are nodes
+  powr(a, b)      the same, powr for pow        of the tangent, as sin's
+  pown(a, n)      (n * pown(a, n - 1)) * da     cos(a) is; n - 1, 1 - n
+  rootn(a, n)     (pown(r, 1 - n) * da) / n     exact integer constants
+  compound(a, n)  (n * compound(a, n - 1)) * da
   abs(a)          copysign(1, a) * da
   copysign(a, b)  copysign(1, b) * (copysign(1, a) * da)
   min, max, minnum, maxnum (a, b) with result r
@@ -151,6 +157,9 @@ select's condition and copysign's sign get none.
 """
 
 from .graph import Node
+from .refusals import Refusal
+
+INT64 = (-(1 << 63), (1 << 63) - 1)
 
 CMP = frozenset({"cmplt", "cmple", "cmpeq"})
 MINMAX = frozenset({"min", "max", "minnum", "maxnum"})
@@ -183,14 +192,17 @@ class Derivation:
     rule written out reads back as what was derived (`copysign(1, 2)` is
     the constant 1, and `copysign(1, -2)` the constant -1). `ln2()` makes
     the leaf of L, ln 2 rounded once (exp2's and log2's rules), where a
-    rule reads it."""
+    rule reads it. `const(m)` makes the leaf of the exact integer m as the
+    checker rounds it (the rules of pown, rootn and compound, which read
+    n - 1 and 1 - n; M3's build)."""
 
-    def __init__(self, zero, one, fold, two, ln2=None):
+    def __init__(self, zero, one, fold, two, ln2=None, const=None):
         self.zero = zero
         self.one = one
         self.two = two
         self.fold = fold
         self.ln2 = ln2
+        self.const = const
         self.memo = {}
 
     def of(self, v):
@@ -410,6 +422,62 @@ class Derivation:
             if da is None:
                 return N("div", minus, den)
             return N("div", N("fma", R(a[1]), da, minus), den)
+        if op in ("pow", "powr"):
+            # (b * pow(a, b - 1)) * da + select(a == 0, 0, pow(a, b) *
+            # log(a)) * db, powr for pow in both; a term of an identically
+            # zero tangent is left out. Where b is a constant the first
+            # factor is b * pow(a, K) with b - 1 folded to K, a constant
+            # expression (N folds it). pow(a, b - 1) and log(a) are routine
+            # nodes of the tangent the primal need not hold. The select's
+            # condition a == 0 is the NaN of 0 * log(0) kept out of the
+            # db term: where a == 0 the term is 0 (pow(0, b) is 0 for every
+            # b > 0, and no derivative in b exists elsewhere). log(a) is a
+            # Node even where a is a constant, never folded: the logarithm
+            # of a constant is irrational (`irrational-constant`), and the
+            # tangent of pow(2, b) is a rule of the language, not a source
+            # (so pow(c, b) of a constant base c has a tangent, its log a
+            # run-time operation on a constant)
+            da, db = t
+            if da is None and db is None:
+                return None
+            first = second = None
+            if da is not None:
+                first = N("mul", N("mul", R(a[1]),
+                                   N(op, R(a[0]), N("sub", R(a[1]),
+                                                    self.one))), da)
+            if db is not None:
+                second = N("mul", N("select", self.zero,
+                                    N("mul", N(op, R(a[0]), R(a[1])),
+                                      Node("log", (R(a[0]),), line)),
+                                    N("cmpeq", R(a[0]), self.zero)), db)
+            if first is None:
+                return second
+            if second is None:
+                return first
+            return N("add", first, second)
+        if op in ("pown", "rootn", "compound"):
+            # pown: (n * pown(a, n - 1)) * da; compound: (n * compound(a,
+            # n - 1)) * da; rootn: (pown(r, 1 - n) * da) / n, r the rootn
+            # itself. n = 0 is no tangent (the value is constant) for pown
+            # and compound; n - 1 or 1 - n beyond int64 is refused
+            # `integer-operand` - the primal stands (n = -2^63 for pown and
+            # compound, and -2^63 and -2^63 + 1 for rootn)
+            if t[0] is None:
+                return None
+            n = a[1][1][0]
+            m = 1 - n if op == "rootn" else n - 1
+            if not INT64[0] <= m <= INT64[1]:
+                raise Refusal("integer-operand", f"the tangent of {op} "
+                              f"of n = {n} reads {'1 - n' if op == 'rootn' else 'n - 1'}"
+                              f" = {m}, outside int64: n must be an integer "
+                              f"constant within int64 here too", line)
+            if op != "rootn":
+                if n == 0:
+                    return None
+                return N("mul", N("mul", R(a[1]),
+                                  N(op, R(a[0]), self.const(m))), t[0])
+            return N("div", N("mul", N("pown", R(node), self.const(m)),
+                              t[0]), R(a[1]))
         if op == "abs":
             if t[0] is None:
                 return None
