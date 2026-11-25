@@ -507,9 +507,10 @@ CONTRACT = {"div": C4_CONTRACT, "sqrt": C4_CONTRACT,
 # five (Logan's answer 8 of 2026-11-19, M3's study): pow 30 at fp64, fp128
 # and fp256 and 32 at fp32 (parcel M3F1's, the triple word: every register);
 # powr 23, 22 and 22 and 29 at fp32; pown 21, rootn 19 and compound 22 at the
-# three formats, and NO fp32 key for those three: they have no measured fp32
-# design until parcel M3F2 (mathlib.fragment refuses them there by name), and
-# a format left out of a row is no cap there. mathlib.POW_LIVE_CAP is a view
+# three formats, pown 28 and rootn 27 at fp32 (parcel M3F2's, the triple word),
+# and NO fp32 key for compound: its fp32 design is not built (mathlib.fragment
+# refuses it there by name), and a format left out of a row is no cap there.
+# mathlib.POW_LIVE_CAP is a view
 # of these five rows. A format left out of a row is no cap at that format
 # (invariants() reads LIVE_CAP.get(op, {}).get(format) and holds a fragment
 # to a cap only if it finds one), so test_routines.py pins every row's
@@ -534,8 +535,8 @@ LIVE_CAP = {
     # the five (Logan's answer 8 of 2026-11-19)
     "pow": {"fp32": 32, "fp64": 30, "fp128": 30, "fp256": 30},
     "powr": {"fp32": 29, "fp64": 23, "fp128": 22, "fp256": 22},
-    "pown": {"fp64": 21, "fp128": 21, "fp256": 21},
-    "rootn": {"fp64": 19, "fp128": 19, "fp256": 19},
+    "pown": {"fp32": 28, "fp64": 21, "fp128": 21, "fp256": 21},
+    "rootn": {"fp32": 27, "fp64": 19, "fp128": 19, "fp256": 19},
     "compound": {"fp64": 22, "fp128": 22, "fp256": 22},
 }
 LIVE_MAX = 16           # C4's name for division's and root's cap: theirs above

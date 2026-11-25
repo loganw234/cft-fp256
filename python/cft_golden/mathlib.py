@@ -10256,8 +10256,10 @@ def _build_pow_tw_family(name, fmt, rnd, guard, shift, plant, n):
     a Build (a _PowTwBuild) with its inputs named ("a", "b") = (x, y), its
     meta set, the front end called and the Build finished. build() routes
     here, before the double word's _pow_args, for every name of POW_NAMES at
-    fp32. Refused by name: pown, rootn and compound ("not built: parcel
-    M3F2's"), an integer operand `n` given to pow or powr, a plant outside
+    fp32. pown and rootn (parcel M3F2) go to _build_pow_tw_n_family, keyed by
+    n, inputs ("a",). Refused by name: compound ("compound at fp32 is not
+    built": its budget is over 1 Bv at n = 1000), an integer operand `n` given
+    to pow or powr, a plant outside
     _POW_TW_PLANTS (listing them), a guard other than 40, an attribute outside
     the five. `shift` inflates the bound 2^shift times (the mark-rate law).
 
@@ -10282,10 +10284,21 @@ def _build_pow_tw_family(name, fmt, rnd, guard, shift, plant, n):
     has the 29 registers r3 to r31) gives 30 less the cap = -2 for pow and +1
     for powr, so a caller spills at once beside a pow call, as M4's atan2
     does, and from its first other value beside a powr call; cftc's
-    allocator is not run here."""
+    allocator is not run here. pown and rootn (parcel M3F2) keep 28 and 27
+    live and reach r27 and r26 (routines.LIVE_CAP's rows): 2 other values beside
+    a pown call and 3 beside a rootn call."""
+    if name in _POW_TW_N_BUILDERS:
+        # pown and rootn (parcel M3F2): n is a constant of the fragment
+        return _build_pow_tw_n_family(name, fmt, rnd, guard, shift, plant, n)
+    if name == "compound":
+        raise ValueError("compound at fp32 is not built: its first-order "
+                         "budget is over 1 Bv at n = 1000 in the model "
+                         "(docs/studies/m3/, M3XN's box run); it waits for a "
+                         "model follow-up and a decision (pow and powr are "
+                         "the triple word, parcel M3F1's; pown and rootn, "
+                         "parcel M3F2's)")
     if name not in _POW_TW_BUILDERS:
-        raise ValueError(f"{name} at fp32 is not built: parcel M3F2's (pow and "
-                         f"powr are the triple word, parcel M3F1's)")
+        raise ValueError(f"{name} at fp32 is not built")
     if n is not None:
         raise ValueError(f"{name} takes no integer operand (n = {n!r}): its "
                          f"second operand is an input")
@@ -10650,6 +10663,607 @@ def check_pow_tw_constants(builder=None, attrs=sf.RND_MODES, names=None):
             f"the IEEE fields; {n_lanes} lanes pow(2, n/8) of the scale "
             f"words")
     return lines, findings
+
+
+# ---- fp32: pown and rootn on the triple word (parcel M3F2) ----
+#
+# pown(x, n) and rootn(x, n) at fp32 are the triple word of pow and powr
+# (parcel M3F1's core, the section above) with the integer operand n a CONSTANT
+# of the fragment: Y = n (pown) or 1/n (rootn) is not an input but up to three
+# words of the bank, the lane is x alone, and the product t = Y L, the bound's
+# |Y k| term, the exact rule and the rows are the n-keyed ones. They are built
+# as docs/studies/m3/pw32n.py (parcel M3XN's model, measured) builds them,
+# instruction for instruction, on _pow_tw_n_core: a copy of _pow_tw_core with
+# those four places changed, never a parameter on it, so that pow's and powr's
+# ten fragments do not move.
+#
+# compound at fp32 is NOT built: its first-order budget is over 1 Bv at n =
+# 1000 in the model (M3XN's box run), and Logan's answer of 2026-11-24 splits
+# it from this parcel. It is refused by name by _build_pow_tw_family, and
+# POW_LIVE_CAP["compound"] keeps no fp32 key.
+#
+# What is in this section:
+#   _POW_TW_N_BUILDERS   {"pown", "rootn"}: a table of its own, beside
+#                        _POW_TW_BUILDERS, which stays pow and powr (every
+#                        loop over that one takes a pair lane and no n)
+#   _POW_TW_N_PLANTS     this parcel's plants, a table of its own beside
+#                        _POW_TW_PLANTS (whose nine keys a test pins); the two
+#                        keys of _POW_TW_PLANTS the copied core reaches,
+#                        l3_dropped and mark_silenced, act here too, and the
+#                        other seven are refused by name
+#   _pow_tw_y_words, _pow_tw_n_proofs, _pow_tw_n_core, _build_pown_tw,
+#   _build_rootn_tw, _check_pow_tw_n_plant_fired
+#   check_pow_tw_n_constants   the constants' check of the new words
+# Where the facts come from: pown's n is held in as many words as it needs (one
+# up to 24 bits, two up to 48, three for the rest of an int64: each word exact,
+# their sum n); rootn's 1/n is THREE words (one where n is a power of two: the
+# word is exact), because at two words rootn is red in the model's budget
+# (M3XN, report section 2). Registers: pown keeps 28 values live and reaches
+# r27, rootn 27 and r26 (routines.LIVE_CAP's rows; MEASURED over the n list at
+# the five attributes): M4C's first-spill rule (the allocator has r3 to r31, 29
+# registers: 30 less the cap) gives 2 other values beside a pown call and 3
+# beside a rootn call, and cftc's allocator is not run here.
+
+_POW_TW_N_PLANTS = {
+    "n_word_ulp": "the first word of n (pown) or of 1/n (rootn) one ulp off "
+                  "(the same fault as the double word's n_word_ulp)",
+    "n_low_dropped": "pown: the words of n below the first left out, so the "
+                     "same fragment where n has one word (refused where n "
+                     "has one word)",
+    "n_word3_dropped": "rootn: the third word of 1/n dropped (refused for "
+                       "pown: it has no lane at a three-word n)",
+    "n_row_loud": "the x = +-inf row's flag word left inexact: the answer "
+                  "right, a flag raised (the double word's n_row_loud)",
+    "rootn_m0_neg": "rootn(-0, n even) answered -0 (squareRoot's row): the "
+                    "sign of x, not +0 (the double word's rootn_m0_neg)",
+}
+# the keys of _POW_TW_PLANTS the copied core reaches (the same fault in the
+# same lines: M3XN's l3_dropped red in bound, mark_silenced red in rate and
+# pools); the other seven are refused by name at a fragment of an integer
+# operand
+_POW_TW_N_SHARED_PLANTS = ("l3_dropped", "mark_silenced")
+
+
+def _pow_tw_y_words(fn, n, words=None):
+    """Y as encodings, zero words dropped (pw32n.y_words): pown's n as w0 =
+    RN(n), w1 = RN(n - w0), w2 = RN of the rest, each exact, their sum n (an
+    int64 is under 64 bits and three words of 24 hold it); rootn's 1/n as
+    `words` words (default 3), each the nearest to what those before leave."""
+    fmt = FP32
+    if fn == "rootn":
+        ws = _words(fmt, Fraction(1, n), 3 if words is None else words)
+    else:
+        ws, rest = [], Fraction(n)
+        for _ in range(3 if words is None else words):
+            if rest == 0:
+                break
+            w = _enc(fmt, rest)
+            ws.append(w)
+            rest -= _dec(fmt, w)
+    return [w for w in ws if _dec(fmt, w) != 0]
+
+
+def _pow_tw_y_error(fn, n, ws):
+    """|Y - the sum of the words| / |Y|, an exact Fraction (Y = n or 1/n)."""
+    y = Fraction(1, n) if fn == "rootn" else Fraction(n)
+    s = sum((_dec(FP32, w) for w in ws), Fraction(0))
+    return abs(y - s) / abs(y)
+
+
+def _pow_tw_n_proofs(fn, n, G, GL, plog, pexp, ws, truncated=False, **over):
+    """The seventeen static proofs of a pown or rootn build: _pow_tw_proofs'
+    twelve and the five of the integer operand (n-int64, n-not-0-1,
+    words-at-most-3, product-floor-3-words, and n-words-exact for pown or
+    rootn-1/n-words for rootn), each evaluated, each a ValueError naming it
+    ("static proof 'n-int64' failed: ..."), one doctored input naming each it
+    breaks. `truncated` (a plant that drops a word, or a word count below what
+    Y needs) leaves out the last, the one the truncation is meant to break;
+    `over` is _pow_tw_proofs'. Returns the names that held, in order."""
+    p = FP32.prec
+    failed = []
+    try:
+        held = list(_pow_tw_proofs(G, GL, plog, pexp, **over))
+    except ValueError as e:
+        held = []
+        failed.append(str(e))
+
+    def proof(name, ok, why):
+        if ok:
+            held.append(name)
+        else:
+            failed.append(f"static proof {name!r} failed: {why}")
+    proof("n-int64", -2 ** 63 <= n <= 2 ** 63 - 1,
+          f"n = {n} is outside int64")
+    proof("n-not-0-1", n not in (0, 1),
+          "n = 0 and n = 1 are the small fragments (_build_pow_small)")
+    proof("words-at-most-3", len(ws) <= 3, f"{len(ws)} words of Y")
+    proof("product-floor-3-words", 3 * p >= p + GL,
+          f"the product's three levels reach {3 * p} bits, GL asks {p + GL}")
+    if not truncated:
+        err = _pow_tw_y_error(fn, n, ws) if n != 0 else Fraction(1)
+        if fn == "rootn":
+            proof("rootn-1/n-words", err <= Fraction(1, 2 ** (3 * p - 2)),
+                  f"1/n in {len(ws)} words is short by {float(err):.3e} of "
+                  f"itself, over 2^-(3p-2); t = Y L needs 2^-(p+G) = "
+                  f"2^-{p + G}")
+        else:
+            proof("n-words-exact", err == 0,
+                  f"n = {n} in {len(ws)} words is short by {float(err):.3e}")
+    if failed:
+        raise ValueError("; ".join(failed))
+    return held
+
+
+def _pow_tw_n_core(b: Build, k_, cl, Yw, *, fn, n, negres, sgnw, up):
+    """The core of fp32's pown and rootn, appended to the Build `b` (a
+    _PowTwBuild whose meta holds fn, G, GL, GE, KL, KE, B1, B2, shift, plant,
+    n): sign |x|^Y as three words and its one rounding, with Y = n or 1/n a
+    constant of up to three words `Yw` (bank refs), the model's order
+    (docs/studies/m3/pw32n.py :247 to :559), instruction for instruction. It is
+    _pow_tw_core with four places changed: the product t = Y L takes Y in
+    words (one word: the body of _pow_tw_core's), the bound's |Y k| term is the
+    constant |n| (or 1/|n|) times |k|, the exact rule has the t_l = 0 test for
+    pown and none for rootn (whose 1/n is inexact, so t1 is junk where t is an
+    integer; V = 1 where the rule holds), and the rule beside 1's `up` is the
+    sign of n's. Takes k_ (_pow_words(b)'s), cl (_classify_common's), negres
+    (a SELECT condition set where the result is negative, or None), sgnw (the
+    sign word or None) and up (a function of no arguments for the rule beside
+    1). The screens (overflow and underflow of t) are here; the n-keyed rows
+    are _pow_tw_n_rows'. Returns a namespace: bits and fl."""
+    fmt = FP32
+    p, mw = fmt.prec, fmt.man_w
+    m = b.meta
+    rnd = b.rnd
+    G, GL, plog, pexp = m["G"], m["GL"], m["KL"], m["KE"]
+    B1, B2, sh = m["B1"], m["B2"], m["shift"]
+    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
+    INF, INX = k_["INF"], k_["INX"]
+    INXUNF, OVFINX, MARKW = k_["INXUNF"], k_["OVFINX"], k_["MARKW"]
+    two_sum, fast_two_sum = b.two_sum, b.fast_two_sum
+    at = _pow_tw_at
+    cl_, ce = _pow_tw_constants(G, GL, plog, pexp, None)
+
+    # ---- the logarithm: L = log2|x| in three words -----------------------
+    at(b, "log-reduce", "reduce")
+    clx = types.SimpleNamespace(x=cl.ax, ax=cl.ax)
+    red = _log_reduce(b, "log2", cl_, k_, clx, None)
+    r, kf = red.r, red.kf
+    at(b, "log-table", "table")
+    t0_, t1_, t2_ = _table(b, cl_, red.tc, k_,
+                           tuple(lambda j, i=i: f"L{j}_{i}" for i in range(3)))
+    nr = b.neg(r)
+    y0, y1, y2 = _pow_tw_poly(b, cl_, *plog, r, nr, "L", "log")
+    at(b, "log-Z", "Z")
+    P0 = b.mul(y0, r)
+    nE0 = b.fma(y0, nr, P0)                           # = -e0
+    P1 = b.mul(y1, r)
+    nE1 = b.fma(y1, nr, P1)
+    P2 = b.mul(y2, r)
+    at(b, "log-sum", "recon")
+    F0s, Ea = fast_two_sum(t0_, P0)                   # |L0| >= |P0| or L0 = 0
+    S1, errs = _cascade(b, [(Ea, False), (t1_, False), (nE0, True),
+                            (P1, False)])
+    S2 = _plain_sum(b, [(P2, False), (nE1, True), (t2_, False)]
+                    + [(e, False) for e in errs])
+    F0, F1 = fast_two_sum(F0s, S1)
+    F1, F2 = fast_two_sum(F1, S2)
+    F0, F1 = fast_two_sum(F0, F1)
+    I0, I1, I2 = (b.const(f"IL2_{i}", cl_[f"IL2_{i}"]) for i in range(3))
+    NI0, NI1 = (b.const(f"NIL2_{i}", cl_[f"NIL2_{i}"]) for i in range(2))
+    g0 = b.mul(F0, I0)
+    ng0 = b.fma(F0, NI0, g0)
+    g1 = b.mul(F0, I1)
+    ng1 = b.fma(F0, NI1, g1)
+    g2 = b.mul(F1, I0)
+    ng2 = b.fma(F1, NI0, g2)
+    q0, q1, q2 = b.mul(F0, I2), b.mul(F1, I1), b.mul(F2, I0)
+    Sk0, Ek_ = fast_two_sum(kf, g0)                   # |k| >= |g0| or k = 0
+    Sk1, errs = _cascade(b, [(Ek_, False), (ng0, True), (g1, False),
+                             (g2, False)])
+    Sk2 = _plain_sum(b, [(q2, False), (q1, False), (q0, False),
+                         (ng2, True), (ng1, True)]
+                     + [(e, False) for e in errs])
+    L0, L1 = fast_two_sum(Sk0, Sk1)
+    L1, L2 = fast_two_sum(L1, Sk2)
+    L0, L1 = fast_two_sum(L0, L1)
+    if _act(b, "l3_dropped"):
+        L2 = ZERO
+    b.probes.update(L0=L0, L1=L1, L2=L2, r=r, kf=kf)
+
+    # ---- t = Y L in three words: Y in up to three words ------------------
+    # levels 0 (Y0 L0) and 1 (Y0 L1, Y1 L0) by TwoProd, level 2 (Y0 L2, Y1 L1,
+    # Y2 L0) rounded, level 3 and below dropped (2^-72 of t, the logarithm's
+    # own floor)
+    at(b, "product", "reduce")
+    nL0, nL1 = b.neg(L0), b.neg(L1)
+    Y0 = Yw[0]
+    Q0 = b.mul(Y0, L0)
+    pnE0 = b.fma(Y0, nL0, Q0)                         # -(the error of Q0)
+    Q1 = b.mul(Y0, L1)
+    pnE1 = b.fma(Y0, nL1, Q1)
+    Q2 = b.mul(Y0, L2)
+    th0 = Q0
+    if len(Yw) == 1:
+        u0, u1 = b.two_diff(Q1, pnE0)                 # e0 + Q1 = u0 + u1
+        lv2 = b.sub(b.add(Q2, u1), pnE1)              # Q2 + u1 + e1
+        t0, tc1 = fast_two_sum(Q0, u0)                # |Q0| >= |u0|
+        t1, t2 = two_sum(tc1, lv2)
+    else:
+        Y1 = Yw[1]
+        R10 = b.mul(Y1, L0)
+        pnE10 = b.fma(Y1, nL0, R10)
+        R11 = b.mul(Y1, L1)
+        lv2t = [(R11, False), (Q2, False)]
+        if len(Yw) > 2:
+            lv2t.insert(0, (b.mul(Yw[2], L0), False))
+        # level 1: Q1 + Y1 L0 + e0 by a TwoSum chain (exact); the errors fall
+        # to level 2 with the TwoProd errors of the level-1 products
+        S1p, errsp = _cascade(b, [(Q1, False), (R10, False), (pnE0, True)])
+        S2p = _plain_sum(b, lv2t + [(pnE1, True), (pnE10, True)]
+                         + [(e, False) for e in errsp])
+        t0, t1 = fast_two_sum(Q0, S1p)
+        t1, t2 = fast_two_sum(t1, S2p)
+        t0, t1 = fast_two_sum(t0, t1)
+    b.probes.update(th0=th0, t0=t0, t1=t1, t2=t2)
+    # the screens, on the rounded product (an overflowed product is +-inf)
+    hi_t = fmt.emax + 2
+    ovs = b.cmple(b.const("TOVF", _enc_exact(fmt, hi_t)), th0)
+    uns = b.cmple(th0, b.const("TUNF", _enc_exact(fmt, fmt.emin - p - 2)))
+
+    # ---- the bound's coefficient w: Bv = |V0| w --------------------------
+    at(b, "test", "head2")
+    wB = b.const("BREL", _pow2(fmt, -(p + G) + sh))
+    if B1:
+        wB = b.fma(b.fabs(t0), b.const("B1", _enc(fmt, B1 * 2 ** sh)), wB, RUP)
+    if B2:
+        # |Y k| is |k| times |n| (pown) or 1/|n| (rootn), a constant
+        ay = Fraction(1, abs(n)) if fn == "rootn" else Fraction(abs(n))
+        wB = b.fma(b.fabs(kf), b.const("YB2", _enc(fmt, ay * B2 * 2 ** sh,
+                                                   RUP)), wB, RUP)
+
+    # ---- 2^t: M1's fp32 exp2 with a three-word argument ------------------
+    at(b, "exp-reduce", "reduce")
+    MAGIC = b.const("MAGIC", ce["MAGIC"])
+    tq = b.fma(t0, b.const("EIGHT", ce["EIGHT"]), MAGIC)
+    nf = b.sub(tq, MAGIC)
+    rp = b.fma(nf, b.const("NINV8", ce["NINV8"]), t0)  # t0 - n/8: exact
+    a0, a1 = fast_two_sum(rp, t1)                     # rp = 0 or |rp| >= |t1|
+    R1_, R2_ = two_sum(a1, t2)
+    R0_ = a0
+    LN0, LN1, LN2 = (b.const(f"LN2_{i}", ce[f"LN2_{i}"]) for i in range(3))
+    NLN0, NLN1 = (b.const(f"NLN2_{i}", ce[f"NLN2_{i}"]) for i in range(2))
+    c00 = b.mul(R0_, LN0)
+    n00 = b.fma(R0_, NLN0, c00)
+    c01 = b.mul(R0_, LN1)
+    n01 = b.fma(R0_, NLN1, c01)
+    c10 = b.mul(R1_, LN0)
+    n10 = b.fma(R1_, NLN0, c10)
+    d02, d11, d20 = b.mul(R0_, LN2), b.mul(R1_, LN1), b.mul(R2_, LN0)
+    s0, E1 = fast_two_sum(c00, c01)                   # |c00| >= |c01|
+    acc, errs = _cascade(b, [(E1, False), (c10, False), (n00, True)])
+    s2 = _plain_sum(b, [(d20, False), (d11, False), (d02, False),
+                        (n10, True), (n01, True)]
+                    + [(e, False) for e in errs])
+    r0, r1 = fast_two_sum(s0, acc)
+    r1, r2 = fast_two_sum(r1, s2)
+    r0, r1 = fast_two_sum(r0, r1)
+    nr0 = b.neg(r0)
+    b.probes.update(tq=tq, nf=nf, rp=rp, r0=r0, r1=r1, r2=r2)
+    at(b, "exp-table", "lookup")
+    T0, T1, T2 = _table(b, ce, tq, k_,
+                        tuple(lambda j, i=i: f"T{j}_{i}" for i in range(3)))
+    b.probes.update(T0=T0, T1=T1, T2=T2)
+    at(b, "exp-scale", "scale")
+    sc = _scale(b, "exp2", rnd, tq, ce, G, None, k_)
+    y0, y1, y2 = _pow_tw_poly(b, ce, *pexp, r0, nr0, "E", "exp")
+    at(b, "exp-Z", "Z")
+    z0 = b.mul(y0, r0)
+    nze0 = b.fma(y0, nr0, z0)                         # -e
+    z1a = b.mul(y1, r0)
+    nze1 = b.fma(y1, nr0, z1a)
+    ep0, ep1 = fast_two_sum(ONE, z0)
+    z1b = b.mul(ep0, r1)
+    nze2 = b.fma(ep0, b.neg(r1), z1b)
+    zz, e_a = two_sum(z1a, z1b)
+    zz, e_b = two_sum(zz, b.neg(nze0))
+    lvl2 = b.sub(b.sub(b.add(b.add(e_a, e_b), b.mul(y2, r0)), nze1), nze2)
+    ep1 = b.add(ep1, b.sub(z1a, nze0))
+    lvl2 = b.fma(ep1, r1, lvl2)
+    lvl2 = b.fma(ep0, r2, lvl2)
+    half_r1 = b.mul(b.mul(r1, b.const("HALF", ce["HALF"])), ep0)
+    lvl2 = b.fma(half_r1, r1, lvl2)
+    Z0, Z1 = fast_two_sum(z0, zz)
+    Z1, Z2 = fast_two_sum(Z1, lvl2)
+    at(b, "exp-recon", "recon")
+    Pa = b.mul(T0, Z0)
+    nPa = b.fma(T0, b.neg(Z0), Pa)
+    Pb = b.mul(T0, Z1)
+    nPb = b.fma(T0, b.neg(Z1), Pb)
+    Qa = b.mul(T1, Z0)
+    nQa = b.fma(T1, b.neg(Z0), Qa)
+    S0, s1 = fast_two_sum(T0, Pa)
+    mm, m1 = two_sum(s1, T1)
+    mm, m2 = two_sum(mm, b.neg(nPa))
+    mm, m3 = two_sum(mm, Pb)
+    mm, m4 = two_sum(mm, Qa)
+    l2_ = b.add(b.add(b.add(m1, m2), b.add(m3, m4)), T2)
+    l2_ = b.sub(b.sub(l2_, nPb), nQa)
+    l2_ = b.fma(T0, Z2, l2_)
+    l2_ = b.fma(T1, Z1, l2_)
+    l2_ = b.fma(T2, Z0, l2_)
+    V0, V1 = fast_two_sum(S0, mm)
+    V1, V2 = fast_two_sum(V1, l2_)
+    V0, V1 = fast_two_sum(V0, V1)
+
+    # ---- the exact power of two, in-lane ---------------------------------
+    at(b, "exact", "final")
+    jz = b.icmplt(b.iand(tq, ib(N - 1)), INT1)
+    ex = b.sel(b.cmpeq(rp, ZERO), ZERO, jz)
+    if fn != "rootn":
+        ex = b.sel(b.cmpeq(t1, ZERO), ZERO, ex)       # pown's t_l = 0
+    ex = b.sel(b.cmpeq(r, ZERO), ZERO, ex)
+    if fn == "rootn":                         # V = 1 where the rule holds
+        V0, V1, V2 = b.sel(ONE, V0, ex), b.sel(ZERO, V1, ex), \
+            b.sel(ZERO, V2, ex)
+    if sgnw is not None:
+        V0, V1, V2 = (b.ixor(v, sgnw) for v in (V0, V1, V2))
+    b.probes.update(V0=V0, V1=V1, V2=V2, Vh=V0, ex=ex)
+
+    # ---- the final rounding and the in-lane test -------------------------
+    at(b, "test", "final")
+    lo = _round_to_odd_add(b, V1, V2, INT1)
+    R = b.add(V0, lo, rnd)
+    aV0 = b.fabs(V0)
+    ath = b.fabs(t0)
+    Bv = b.mul(aV0, wB, RUP)
+    lo_dn = _round_to_odd_add(b, V1, b.sub(V2, Bv, RDN), INT1)
+    lo_up = _round_to_odd_add(b, V1, b.add(V2, Bv, RUP), INT1)
+    R1 = b.add(V0, lo_dn, rnd)
+    R2 = b.add(V0, lo_up, rnd)
+    mk = b.ixor(R1, R2)
+    if rnd in (RNE, RMM):
+        g1 = b.add(V0, lo_dn, RUP)
+        g2 = b.add(V0, lo_up, RDN)
+        mk = b.sel(ONE, mk, b.cmple(g1, g2))
+    b.probes.update(R=R, R1=R1, R2=R2, Bv=Bv)
+
+    # ---- the fixed grid: a result that may be subnormal ------------------
+    at(b, "fixed-grid", "fixed-grid")
+    Cu = sc.Cu if sgnw is None else b.ixor(sc.Cu, sgnw)
+    Zg = b.add(Cu, V0)
+    Wg = b.sub(Zg, Cu)
+    zr = b.sub(V0, Wg)
+    ro = _round_to_odd_add(b, zr, lo, INT1)
+    Ws = b.sub(b.add(Zg, ro, rnd), Cu)
+    if sgnw is not None:
+        Ws = b.ior(Ws, sgnw)
+    if sc.hu is not None:
+        c1 = b.cmpeq(b.fabs(zr), sc.hu)
+        c1 = b.sel(ONE, c1, b.cmpeq(zr, ZERO))
+    else:
+        c1 = b.cmpeq(zr, ZERO)
+    smallo = b.cmple(b.fabs(lo), Bv)
+    msub = b.sel(smallo, ZERO, c1)
+    Wsel = b.sel(Ws, R, sc.sub_p)
+    mk = b.sel(ONE, mk, b.sel(msub, ZERO, sc.sub_p))
+    tn = b.sel(ONE, b.cmplt(b.fabs(R), ONE), sc.klt)
+    tinyu = b.sel(tn, ZERO, sc.sub_p)
+
+    # ---- the scaling, the flag word, the mark ----------------------------
+    at(b, "final", "final")
+    Y1 = b.mul(Wsel, sc.S1)
+    FIN = b.mul(Y1, sc.S2, rnd)
+    ovf = b.cmpeq(b.mul(b.fabs(Y1), sc.S2, RUP), INF)
+    fl = b.sel(OVFINX, b.sel(INXUNF, INX, tinyu), ovf)
+    tinyt = b.icmplt(ath, b.const("TINYT", _pow2(fmt, -(p + 3))))
+    mk = b.sel(ZERO, mk, tinyt)
+    mk = b.sel(ZERO, mk, ex)
+    if not _act(b, "mark_silenced"):
+        fl = b.ior(fl, b.sel(MARKW, ZERO, mk))
+    OFF = m["OFF"]
+    lowk = b.icmplt(sc.Ek, ib(fmt.emin - p + 1 + fmt.bias + OFF, "K_SUBMIN"))
+    exrep = b.sel(b.sel(ZERO, b.sel(ZERO, ONE, lowk), ovf), ZERO, ex)
+    fl = b.sel(ZERO, fl, exrep)
+    bits = FIN
+
+    # ---- the rule beside 1 -----------------------------------------------
+    at(b, "beside-1", "final")
+    upref = up()
+    one_m = 1 << (p - 1)
+
+    def nbr(sign, away):
+        return b.const(f"NB{sign}{int(away)}", sf.round_pack(
+            fmt, sign, 8 * one_m + (1 if away else -1), -(p - 1) - 3,
+            rnd)[0])
+    nb = b.sel(nbr(0, True), nbr(0, False), upref)
+    if negres is not None:
+        nb = b.sel(b.sel(nbr(1, True), nbr(1, False), upref), nb, negres)
+    side = b.sel(ZERO, tinyt, ex)
+    bits = b.sel(nb, bits, side)
+    fl = b.sel(INX, fl, side)
+    b.probes.update(FIN=FIN, mk=mk, tinyt=tinyt)
+
+    # ---- the screens -----------------------------------------------------
+    at(b, "special", "special")
+
+    def signed_pair(role, pos, neg):
+        if negres is None:
+            return b.const(role + "_P", pos)
+        return b.sel(b.const(role + "_N", neg), b.const(role + "_P", pos),
+                     negres)
+    ovfb = signed_pair("OVFB", sf.round_pack(fmt, 0, 3, fmt.emax, rnd)[0],
+                       sf.round_pack(fmt, 1, 3, fmt.emax, rnd)[0])
+    unfb = signed_pair("UNFB", sf.round_pack(fmt, 0, 1, fmt.emin - mw - 2,
+                                             rnd)[0],
+                       sf.round_pack(fmt, 1, 1, fmt.emin - mw - 2, rnd)[0])
+    bits = b.sel(ovfb, bits, ovs)
+    fl = b.sel(OVFINX, fl, ovs)
+    bits = b.sel(unfb, bits, uns)
+    fl = b.sel(INXUNF, fl, uns)
+    return types.SimpleNamespace(bits=bits, fl=fl)
+
+
+def _pow_tw_n_rows(b, k_, cl, fn, n, sgnw, bits, fl):
+    """pown's and rootn's rows over the core's answer (pw32n.build :576 to
+    :602, the double word's _pown_rows and _build_rootn's): pown at x = +-0
+    (the sign by x's where n is odd; +-0 for n > 0, +-inf and divideByZero for
+    n < 0), x = +-inf, a NaN; rootn at x = +-inf, +-0 (the sign by x's where n
+    is odd; rootn_m0_neg takes x's at an even n), an even n's negative x
+    (invalid), a NaN. Lowest priority first."""
+    ZERO, INF, QNAN = k_["ZERO"], k_["INF"], k_["QNAN"]
+    INVALID, INX = k_["INVALID"], k_["INX"]
+    DIVZ = k_["ib"](sf.FLAG_DIVZERO, "FL_DIVZERO")
+
+    def sgn(v):
+        return v if sgnw is None else b.ixor(v, sgnw)
+    loud = INX if _act(b, "n_row_loud") else ZERO
+    if fn == "pown":
+        bits = b.sel(sgn(ZERO if n > 0 else INF), bits, cl.iszero)
+        fl = b.sel(DIVZ if n < 0 else ZERO, fl, cl.iszero)
+        bits = b.sel(sgn(INF if n > 0 else ZERO), bits, cl.isinf)
+        fl = b.sel(loud, fl, cl.isinf)
+    else:
+        bits = b.sel(sgn(INF if n > 0 else ZERO), bits, cl.isinf)
+        fl = b.sel(loud, fl, cl.isinf)
+        zsign = sgnw
+        if n % 2 == 0 and _act(b, "rootn_m0_neg"):
+            zsign = b.iand(cl.x, b.const("SIGN", FP32.sign_mask))
+        zb = ZERO if n > 0 else INF
+        bits = b.sel(zb if zsign is None else b.ixor(zb, zsign), bits,
+                     cl.iszero)
+        fl = b.sel(DIVZ if n < 0 else ZERO, fl, cl.iszero)
+        if n % 2 == 0:
+            negnz = b.sel(ZERO, b.sel(ZERO, cl.neg, cl.iszero), cl.isnan)
+            bits = b.sel(QNAN, bits, negnz)
+            fl = b.sel(INVALID, fl, negnz)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, cl.issnan), fl, cl.isnan)
+    return bits, fl
+
+
+def _build_pow_tw_n(b: Build, x, fn):
+    """pown or rootn at fp32 (the shared body of the two front ends): classify
+    x, the sign (x's where n is odd: sgnw = x's sign bit), Y's words from
+    meta["yw"] as bank words (roles N0..N2 for pown, R0..R2 for rootn),
+    _pow_tw_n_core, then the rows. Returns (result, flag word)."""
+    fmt = b.fmt
+    n = b.meta["n"]
+    k_ = _pow_words(b)
+    ZERO, ONE = k_["ZERO"], k_["ONE"]
+    _pow_tw_at(b, "classify", "classify")
+    cl = _classify_common(b, k_)
+    _pow_tw_at(b, "front", "front")
+    odd = n % 2 != 0
+    negres = cl.neg if odd else None
+    sgnw = b.iand(x, b.const("SIGN", fmt.sign_mask)) if odd else None
+    pre = "R" if fn == "rootn" else "N"
+    Yw = [b.const(f"{pre}{i}", w) for i, w in enumerate(b.meta["yw"])]
+
+    def up():
+        gt1 = b.icmplt(ONE, cl.ax)                    # |x| > 1
+        return b.sel(ZERO, ONE, gt1) if n < 0 else gt1
+    core = _pow_tw_n_core(b, k_, cl, Yw, fn=fn, n=n, negres=negres,
+                          sgnw=sgnw, up=up)
+    b.phase = "special"
+    bits, fl = _pow_tw_n_rows(b, k_, cl, fn, n, sgnw, core.bits, core.fl)
+    b.label_of = b.label_of[:len(b.body)]
+    return bits, fl
+
+
+def _build_pown_tw(b: Build, x):
+    """pown(x, n) at fp32, n = b.meta["n"] (not 0 or 1: those are
+    _build_pow_small): n in one to three words (_pow_tw_y_words), the triple
+    word's core, pown's rows. Returns (result, flag word)."""
+    return _build_pow_tw_n(b, x, "pown")
+
+
+def _build_rootn_tw(b: Build, x):
+    """rootn(x, n) at fp32, n = b.meta["n"] (not 1; rootn(x, 0) is refused by
+    pow_n): 1/n in THREE words (one where n is a power of two), the triple
+    word's core with the exact rule's t_l = 0 test left out and V = 1 where it
+    holds, rootn's rows. Returns (result, flag word)."""
+    return _build_pow_tw_n(b, x, "rootn")
+
+
+_POW_TW_N_BUILDERS = {"pown": _build_pown_tw, "rootn": _build_rootn_tw}
+
+
+def _check_pow_tw_n_plant_fired(b: Build):
+    """A plant of _POW_TW_N_PLANTS or the two shared keys whose fault the build
+    never reached is refused by name (as _check_pow_tw_plant_fired does)."""
+    plant = b.meta.get("plant")
+    if (plant in _POW_TW_N_PLANTS or plant in _POW_TW_N_SHARED_PLANTS) \
+            and plant not in b._fired:
+        raise ValueError(f"plant {plant!r} does not apply to {b.meta['fn']} "
+                         f"at fp32: the fault is not reached")
+
+
+def _build_pow_tw_n_family(name, fmt, rnd, guard, shift, plant, n):
+    """pown or rootn at fp32 at the integer operand n, built as the triple
+    word (the section's comment): a Build (a _PowTwBuild) with inputs ("a",)
+    = x, its meta set (the core's, and n, yw: the encodings of Y's words,
+    ywords: their count), the front end called and the Build finished. n = 0
+    and n = 1 are the small fragments (_build_pow_small, no core, no plant).
+    Refused by name: a missing n, an n outside int64 (pow_n's), rootn's n = 0,
+    a plant outside _POW_TW_N_PLANTS and the two shared keys, and one the
+    build cannot reach (n_low_dropped where n has one word, n_word3_dropped
+    for pown: it has no lane at a three-word n, or where Y has under three
+    words, rootn_m0_neg at an odd n or in pown)."""
+    if n is None:
+        raise ValueError(f"{name} needs its integer operand n: a constant of "
+                         f"the fragment (n=...)")
+    n = pow_n(name, n)
+    if rnd not in sf.RND_NAMES:
+        raise ValueError(f"rounding attribute {rnd!r} is not one of the five")
+    if plant is not None and plant not in _POW_TW_N_PLANTS \
+            and plant not in _POW_TW_N_SHARED_PLANTS:
+        if plant in _POW_TW_PLANTS:
+            raise ValueError(f"plant {plant!r} does not apply to {name} at "
+                             f"fp32: the fault is not reached")
+        raise ValueError(f"unknown plant {plant!r} at fp32: "
+                         f"{', '.join(list(_POW_TW_N_PLANTS) + list(_POW_TW_N_SHARED_PLANTS))}")
+    if n in (0, 1):
+        if plant is not None:
+            raise ValueError(f"plant {plant!r} does not apply to {name} at "
+                             f"fp32, n = {n}: the small fragment has no core")
+        return _build_pow_small(name, fmt, rnd, n)
+    P = _plan_pow_tw(guard)
+    ws = _pow_tw_y_words(name, n)
+    if plant == "n_word_ulp":
+        ws[0] += 1
+    if plant == "n_low_dropped":
+        if name == "rootn":
+            raise ValueError("plant 'n_low_dropped' does not apply to rootn "
+                             "at fp32: its Y is 1/n, not n's words")
+        if len(ws) < 2:
+            raise ValueError(f"plant 'n_low_dropped' does not apply to pown "
+                             f"at fp32, n = {n}: n has one word")
+        ws = ws[:1]
+    if plant == "n_word3_dropped":
+        if name == "pown":
+            raise ValueError("plant 'n_word3_dropped' does not apply to pown "
+                             "at fp32: pown has no lane at a three-word n")
+        if len(ws) < 3:
+            raise ValueError(f"plant 'n_word3_dropped' does not apply to "
+                             f"rootn at fp32, n = {n}: 1/n has {len(ws)} "
+                             f"words")
+        ws = ws[:2]
+    if plant == "rootn_m0_neg" and (name != "rootn" or n % 2):
+        raise ValueError(f"plant 'rootn_m0_neg' does not apply to {name} at "
+                         f"fp32, n = {n}: rootn at an even n only")
+    truncated = plant in ("n_word_ulp", "n_low_dropped", "n_word3_dropped")
+    proofs = _pow_tw_n_proofs(name, n, P.G, P.GL, P.KL, P.KE, ws, truncated)
+    b = _PowTwBuild(fmt, rnd, f"{name}-fp32-{sf.RND_NAMES[rnd]}-tw-n{n}")
+    b.inputs = ("a",)
+    b.meta.update(fn=name, G=P.G, GL=P.GL, GE=P.GE, KL=P.KL, KE=P.KE, B1=P.B1,
+                  B2=P.B2, shift=shift, plant=plant, family="triple word",
+                  N=N, n=n, proofs=proofs, yw=tuple(ws), ywords=len(ws))
+    if truncated:
+        b._fired.add(plant)       # the fault is in the words, set above
+    bits, fl = _POW_TW_N_BUILDERS[name](b, ("in", "a"))
+    b.finish(bits, fl)
+    _check_pow_tw_n_plant_fired(b)
+    return b
 
 
 # ---- what is proved of every fragment ---------------------------------------
