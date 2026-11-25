@@ -2732,6 +2732,49 @@ slower staged or at small n), on the typical arguments and on the corpus's
 own lanes alike: the speed leg of plan answer 3 is met for programs at both
 formats, and the default still waits for the overnight proof.
 
+**The trig and inverse routines on the fixed tier (round 3, G3C,
+2026-11-25).** The programs of sin, cos and tan (M2's) and of atan, asin,
+acos and atan2 (M4's) at fp256 and fp128, every attribute and both shapes,
+hold no AUGADD or AUGERR (0 of 140 by the decoder and by the raw words), so
+on a fixed-tier handle each runs `k_seq_fx` or `k_seq_fx128`; nothing in the
+tree changed for it. Accepted family by family, on both GPUs: each family's
+corpus (the trig part's 30 cases and the inverse part's 40, at each format)
+gives the software handle's output sha256 under both tiers, staged and
+resident, the three parts' outputs concatenated with the six's being the
+whole corpus's; seq_check under the tier compared every trig, inverse and
+pow program with 0 mismatch; and the route was read case by case on a plant
+build (`cfth_plant_tier_probe` after each case): 130 of 130 cases of the
+corpus at each format read the fixed kernel, 60 of exp's six, 30 of trig and
+40 of inverse, and 130 of 130 read `k_seq` on the generic handle, while
+`seqfx-refuse` and `seqfx128-refuse` turn the probe red with the sums still
+equal to the software handle's. A limit: the rmm plants (`seqfx-rmm`,
+`seqfx128-rmm`) are green on the trig and inverse files, which hold no exact
+tie; a fixed-tier rmm defect is caught on the six and on the whole corpus,
+not by a per-family run, and these families' route claim rests on the probe.
+**Rates** (docs/VALIDATION.md's G3C entry; the method of the paragraph above:
+a generic and a fixed handle alternated call by call, five rounds of ten
+calls, the median of the rounds beside their range, rne, stand-alone, typical
+arguments (sin, cos, tan in [-100, 100], atan and atan2's operands in
+[-20, 20], asin and acos in [-1, 1]), every call held to the software
+handle; at 1,048,576 lanes sin, cos and tan on the RX 7600 took 6 calls a
+round). Resident at 262,144 lanes the fixed tier ran at 9.9 to 10.5 M
+lane-programs a second for sin, cos and tan and 15.3 to 19.4 M for the
+inverse four at fp256 on the RTX 5060 Ti (5.4 to 6.3 times the generic
+tier), 30.9 to 62.9 M at fp128 (6.8 to 8.2 times); on the RX 7600 2.7 to
+2.9 M and 4.4 to 5.7 M at fp256 (2.8 to 3.0 times), 6.3 to 6.6 M and 10.4 to
+13.4 M at fp128 (2.9 to 3.2 times); staged 2.2 to 6.2 times. On the 5060 Ti
+that is about 670 to 880 one-core libcft lanes at fp256 and 15 to 140
+one-core MPFR elements at 237 bits (1,550 to 1,840 and 33 to 185 at fp128);
+the card has no measured trig or inverse program rate to set beside it. By
+the rule fixed before the measurement the fixed tier was faster in all 14
+cells at fp256 and all 14 at fp128 (seven routines, two GPUs), on typical
+arguments and on the corpus's own lanes alike: the speed leg of plan answer 3
+is met for these seven at both formats. Not claimed: the default still
+waits for the overnight proof; G3B's `__noinline__` lever was measured on
+these families in scratch (faster only at fp256 on the 5060 Ti, +35 to +38 %
+at 262,144; slower at fp128 there, and on the RX 7600 slower at fp128 in all seven cells and at fp256 in six of the seven, tan within) and is
+not adopted.
+
 ## The device's on-chip capacities, published (2026-09-07)
 
 Item 3 of docs/studies/OPT-D-contract.md, and the defect its section
