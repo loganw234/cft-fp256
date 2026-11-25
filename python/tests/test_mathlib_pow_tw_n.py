@@ -684,12 +684,12 @@ def seq_run(*extra, env_hook=None, timeout=1500):
                     and not (ROOT / "host" / "libcft.so").exists(),
                     reason="host/cft.dll (libcft) is not built here")
 def test_seq_check_runs_the_pow_part_at_fp32_and_the_floor_plant_is_red():
-    """The tool, run: `--formats fp32 --trials 250` clean (exit 0, the pow
+    """The tool, run: `--trials 250 --formats fp32 fp64` (fp32 alone fails in the trig part at the base too: no marked lane there, VM4P) clean (exit 0, the pow
     part's summary line with 90 programs, its absence of compound named, the
     reach check passing); and with one fragment cut to one lane at pown n =
     3 (POW_FRAGMENT_LANE_CUT: the plant), red, naming the fragment and
     beginning with the part's own phrase."""
-    clean = seq_run("--trials", "250", "--formats", "fp32")
+    clean = seq_run("--trials", "250", "--formats", "fp32", "fp64")
     out = clean.stdout + clean.stderr
     assert clean.returncode == 0, out[-1500:]
     line = [ln for ln in out.splitlines()
@@ -698,11 +698,11 @@ def test_seq_check_runs_the_pow_part_at_fp32_and_the_floor_plant_is_red():
     assert "fp32: compound is not run (refused by name at fp32" in line[0]
     assert "THE ROUTINE CORPUS" not in out
     for cut in (10,):                       # 20 a round: red
-        red = seq_run("--trials", "250", "--formats", "fp32",
+        red = seq_run("--trials", "250", "--formats", "fp32", "fp64",
                       env_hook={("pown", 3): cut})
         assert red.returncode == 1 and "under the floor of 24 a round" in \
             red.stdout + red.stderr, cut
-    plant = seq_run("--trials", "250", "--formats", "fp32",
+    plant = seq_run("--trials", "250", "--formats", "fp32", "fp64",
                     env_hook={("pown", 3): 1})
     out = plant.stdout + plant.stderr
     assert plant.returncode == 1, out[-1500:]
