@@ -14,7 +14,7 @@ operand, and the integer for the three keyed by one: pown at n = 0, 1, 3 and
 -2^63, rootn at n = 1, 3 and -2^63 (rootn at 0 is refused by name), compound at
 n = 0, 1, 3 and -2^63. pow and powr are held at the four formats (8 table rows of five, 40 digests: fp32
 is the triple word's, parcel M3F1's), the three at fp64, fp128 and fp256
-(33 table rows of five, 165 digests: they have no fp32 until parcel M3F2). 205 digests, all distinct. These
+(33 table rows of five, 165 digests: they had no fp32 at f7a1ce95, and the fp32 pown and rootn that parcel M3F2 built are not in this table). 205 digests, all distinct. These
 are the set host/tests/seq_check.py's pow part runs (parcel M3P).
 
 A table of its own beside routine_digests.py (the 220 of the eleven at

@@ -181,7 +181,8 @@ Since parcel M3P (M3's build, wave 3, 2026-11-23) the eighth corpus has a
 fourth part, run after the inverse part at each format that has it: pow, powr,
 pown, rootn and compound, the fragments of parcels M3G1 and M3G2
 (mathlib.POW_NAMES at mathlib.POW_FORMATS, fp64, fp128 and fp256, under each
-attribute), which had run on seq.py alone. Same two shapes, lane counts, masks,
+attribute), which had run on seq.py alone, and since parcel M3F2 at fp32 too,
+for the four names built there. Same two shapes, lane counts, masks,
 comparisons, refusals and remote leg, from a stream of their own (POW_SALT),
 with counters, summary, limits, needs and committed-lanes lines of their own,
 and a reach check of its own ("THE ROUTINE CORPUS'S POW PART DID NOT REACH
@@ -192,15 +193,18 @@ libcft's, and a mismatch prints "x = 0x.., y = 0x.." (atan2's is "y =, x =").
 pown, rootn and compound have one input and an integer operand n that is a
 constant of the fragment, so a FRAGMENT of the part is a pair (routine, n) and
 its key carries n (routine_programs, routine_fragments, POW_CORPUS_NS: n = 0, 1,
-3 and -2^63, rootn's 0 being refused by name): 65 fragments at a format, 195 at
-the three, 390 programs a round; a line that names one prints "pown(x, n = 3)"
-and a lane prints "x = 0x.., n = 3". Their lanes are
-python/tests/mathlib_pow_harness.py's, in the same five categories (pow_lanes).
-fp32 is named in the part's summary line ("fp32: the pow part is run at the
-double-word formats; ..."): the triple word's pow and powr are built (parcel
-M3F1) and join with pown, rootn and compound at parcel M3F2. It is a by-design
-absence and no SKIP, held by the part's "unrun" key and pow_clause, which print
-nothing once mathlib.POW_FORMATS has fp32.
+3 and -2^63, rootn's 0 being refused by name): 65 fragments at each of the
+double word's formats, and at fp32 45 (9 pairs of a routine and an n: compound
+is not built there), 240 at the four, 480 programs a round; a line that names
+one prints "pown(x, n = 3)" and a lane prints "x = 0x.., n = 3". Their lanes
+are python/tests/mathlib_pow_harness.py's, in the same five categories
+(pow_lanes). Since parcel M3F2 fp32 runs pow, powr, pown and rootn (the triple
+word); compound is not built there (its first-order budget is over 1 Bv at
+n = 1000 in the model), which the part's summary line says ("; fp32: compound
+is not run (refused by name at fp32 ...)"): a by-design absence and no SKIP,
+held by the part's "unbuilt" key and pow_clause. A fragment of the part must
+compare at least POW_FRAG_FLOOR lanes a round (the reach check): each of its
+programs of a round draws at least one of 63 lanes or more.
 
     python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
 
@@ -2546,6 +2550,22 @@ POW_EDGE_SEED = 31                      # the first region's seed; the next +1
 # one at fp128 and fp256). rootn(x, 0) is refused by name (mathlib.pow_n), so
 # rootn's fragments are the other three.
 POW_CORPUS_NS = (0, 1, 3, -2 ** 63)
+# the per-fragment floor of the reach check: a fragment of the pow part must
+# compare at least this many lanes a round (over its two programs). The part's
+# own draw gives every fragment one program of 63 lanes or more each round
+# (routine_corpus), of which a mask keeps each lane with probability 0.7 in a
+# third of them, and the other program compares at least one lane: under the
+# floor needs 22 or fewer of 63 kept, which has probability about 10^-8 in
+# that third (COMPUTED, the binomial tail: test_mathlib_pow_tw_n.py), about
+# 10^-5 over a run's thousand fragment-rounds. 24 is above twice ten, so that
+# a plant cutting every program of a fragment to ten lanes is red
+POW_FRAG_FLOOR = 24
+# a test hook, empty in every run: {(routine, n): lanes} cuts every program of
+# that fragment of the pow part to that many lanes (the plant "one fragment's
+# lanes cut to one" of the floor; test_mathlib_pow_tw_n.py sets it in a
+# process of its own); a fragment's round is two programs, so a cut to c lanes
+# compares 2 c a round
+POW_FRAGMENT_LANE_CUT = {}
 # the pow family raises every IEEE flag (pow(0, -1) divides by zero, a large y
 # overflows or underflows, a negative x with a fractional y is invalid), so the
 # pow part's reach check requires all five
@@ -2575,7 +2595,15 @@ def routine_counters():
     # (format, routine, attribute, n) it drew: n is the integer operand of a
     # pow part's pown, rootn and compound fragment and None for every other
     C["fragments"] = set()
-    C["unrun"] = []             # formats asked for that the part does not run
+    # (format, the routines of the part that are not built at it): the pow
+    # part's by-design absence of compound at fp32 (parcel M3F2), said in the
+    # summary and no SKIP
+    C["unbuilt"] = []
+    # the pow part's per-fragment floor: lanes compared, programs compared and
+    # programs the device refused, by (format, routine, attribute, n)
+    C["frag_lanes"] = collections.Counter()
+    C["frag_progs"] = collections.Counter()
+    C["frag_refused"] = collections.Counter()
     return C
 
 
@@ -2636,13 +2664,27 @@ def routine_label(fn, n=None):
     return fn if n is None else f"{fn}(x, n = {n})"
 
 
-def routine_fragments(ml, part):
+def pow_built_at(ml, fn, fmt_name):
+    """The pow part's routine `fn` is built at the format named: at the formats
+    of mathlib.POW_FORMATS all five; at fp32 (the triple word) the names whose
+    mathlib.POW_LIVE_CAP row has an fp32 key (pow, powr, pown and rootn, parcel
+    M3F2: compound has none and is refused by name there). A public table of
+    mathlib is read, no private one."""
+    if fmt_name != "fp32":
+        return True
+    return "fp32" in ml.POW_LIVE_CAP[fn]
+
+
+def routine_fragments(ml, part, fmt_name=None):
     """[(routine, n)] of one part, in the order it draws them. n is None for
     all but the pow part's pown, rootn and compound, which have one fragment at
     each n of POW_CORPUS_NS (rootn's 0 is refused by name, mathlib.pow_n, and
-    is not one)."""
+    is not one). `fmt_name` leaves out of the pow part what is not built at that
+    format (compound at fp32, pow_built_at); None is the double word's list."""
     out = []
     for fn in routine_part_names(ml, part):
+        if part == "pow" and fmt_name and not pow_built_at(ml, fn, fmt_name):
+            continue
         if part == "pow" and fn in ml.POW_INT_NAMES:
             out += [(fn, n) for n in POW_CORPUS_NS
                     if not (fn == "rootn" and n == 0)]
@@ -3220,7 +3262,10 @@ def pow_edge_pool(ph, fn, fmt, n_op):
                 out += ph.region(fmt, fn, region, POW_EDGE_N,
                                  POW_EDGE_SEED + i)
         else:
-            for i, region in enumerate(ph.region_names_n(fn, fmt)):
+            # fp32 has no ZONE_BIG key: the harness's own list of regions
+            for i, region in enumerate(
+                    ph.REGION_NAMES_TW_N if fmt.name == "fp32"
+                    else ph.region_names_n(fn, fmt)):
                 if ph.region_n_of(region, fmt) not in (n_op, None):
                     continue
                 out += [x for x, k in ph.region_n(fmt, fn, region, POW_EDGE_N,
@@ -3254,8 +3299,13 @@ def pow_struct(ph, fn, fmt, n_op):
     for the n-keyed names (the rows' (x, n) lanes kept as x). The rows do not
     depend on the attribute."""
     def make():
-        rows = (ph.structured_rows(fn, fmt) if n_op is None
-                else ph.structured_rows_n(fn, fmt, n_op))
+        if n_op is None:
+            # structured_rows builds the double word's plants, which fp32
+            # refuses by name: the harness's own rows at fp32
+            rows = (ph.structured_rows_tw(fn) if fmt.name == "fp32"
+                    else ph.structured_rows(fn, fmt))
+        else:
+            rows = ph.structured_rows_n(fn, fmt, n_op)
         marked, rest = [], []
         for _label, lanes, expect in rows:
             for lane in lanes:
@@ -3481,10 +3531,10 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
     (parcel M4P: atan, asin, acos and atan2, at the formats of
     mathlib.INV_FORMATS, fp32 since parcel M4F2) or "pow" (parcel M3P: pow,
     powr, pown, rootn and compound, at the formats of mathlib.POW_FORMATS; the
-    last three at each n of POW_CORPUS_NS, one fragment each), each from a
-    stream of its own and lanes of its own, MR being that part's counters. A
-    format the pow part does not run is named in MR["unrun"] and run for
-    nothing."""
+    last three at each n of POW_CORPUS_NS, one fragment each; at fp32 the
+    triple word's four, compound not built there and named in MR["unbuilt"]),
+    each from a stream of its own and lanes of its own, MR being that part's
+    counters."""
     mods = routine_modules()
     if mods is None:
         return
@@ -3495,11 +3545,16 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
         ih = inv_modules()
     if part == "pow":
         ph = pow_modules()
-        if fmt not in ml.POW_FORMATS:
-            MR["unrun"].append(name)
+        if fmt not in ml.POW_FORMATS and fmt.name != "fp32":
+            MR["unbuilt"].append((name, tuple(ml.POW_NAMES)))
             return
     corpus, suffix, _word, salt = ROUTINE_PART[part]
-    fragments = routine_fragments(ml, part)
+    fragments = routine_fragments(ml, part, name)
+    if part == "pow":
+        gone = tuple(fn for fn in ml.POW_NAMES
+                     if fn not in {f for f, _n in fragments})
+        if gone:
+            MR["unbuilt"].append((name, gone))
     # a lane prints its pair in its routine's order: atan2's is (y, x), pow's
     # and powr's (x, y)
     order = "xy" if part == "pow" else "yx"
@@ -3525,6 +3580,12 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
                     tag = f"{routine_label(fn, n_op)} {sf.RND_NAMES[rnd]} " \
                           f"{shape}"
                     n = sub.choice(ROUTINE_NS)
+                    if part == "pow":
+                        # the pow part's own draw: the first program of a
+                        # fragment in a round is 63 lanes or more (the floor)
+                        if shape == ROUTINE_SHAPES[0]:
+                            n = sub.choice(ROUTINE_NS[2:])
+                        n = min(n, POW_FRAGMENT_LANE_CUT.get((fn, n_op), n))
                     if part == "trig":
                         xs, tags = trig_lanes(ml, th, tf, fmt, fn, rnd, n,
                                               sub)
@@ -3543,6 +3604,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
                     lf = shape == "compiled" or sub.random() < 0.5
                     if routine_refuses(lib, dev, prog, keep is not None, lf,
                                        MR, corpus):
+                        MR["frag_refused"][(name, fn, rnd, n_op)] += 1
                         continue
                     zeros = [0] * n
                     # the operand streams: a pair (atan2's) gives y to a and
@@ -3708,6 +3770,8 @@ def routine_corpus(lib, dev, fmt, name, args, MR, part="six"):
                     lanes_done += compared
                     MR["total"] += 1
                     MR["lanes"] += compared
+                    MR["frag_lanes"][(name, fn, rnd, n_op)] += compared
+                    MR["frag_progs"][(name, fn, rnd, n_op)] += 1
                     MR["lane_bytes"] += lane_bytes
                     MR[shape] += 1
                     MR["blocked"] += n > 64
@@ -3834,20 +3898,41 @@ def routine_summary(MC, what, part="six"):
 
 
 def pow_clause(MC):
-    """The pow part's absence at a format, in words (not a SKIP, which fails
-    every --require-all run): '' where every format asked for is run.
-    mathlib.POW_FORMATS decides, so that the clause is empty on its own once
-    parcel M3F2 adds fp32 to it - and M3F2 then deletes this function, its one
-    call in routine_summary, the "unrun" key's other two uses (routine_corpus's
-    append and main's "ran no program" line), and gives fp32 its
-    lanes from the harness's *_tw section (the lane functions above call the
-    double-word section's)."""
-    if not MC["unrun"]:
+    """The pow part's by-design absences, in words (not a SKIP, which fails
+    every --require-all run): '' where every routine of the part is run at
+    every format asked for. Since parcel M3F2 the part runs at fp32 for pow,
+    powr, pown and rootn, and compound is not built there: MC["unbuilt"] holds
+    (format, the routines left out), written by routine_corpus from what
+    routine_fragments leaves out."""
+    if not MC["unbuilt"]:
         return ""
-    return (f"; {', '.join(MC['unrun'])}: the pow part is run at the "
-            f"double-word formats; the triple word's pow and powr are built "
-            f"(parcel M3F1) and join with pown, rootn and compound at parcel "
-            f"M3F2")
+    return "; " + "; ".join(
+        f"{fmt}: {', '.join(gone)} {'is' if len(gone) == 1 else 'are'} not "
+        f"run (refused by name at {fmt}: compound's first-order budget is "
+        f"over 1 Bv at n = 1000 in the model)"
+        for fmt, gone in MC["unbuilt"])
+
+
+def pow_floor_findings(MC, rounds, floor=POW_FRAG_FLOOR):
+    """The pow part's per-fragment floor (VM3P: the part's lane total can hold
+    while one fragment compares a lane a program, which no check saw): a line
+    for each fragment (format, routine, attribute, n) that compared fewer than
+    `floor` lanes a round over `rounds` rounds, naming it ("pown(x, n = 3) at
+    fp32 under rne compared 1 lanes in 1 round, under the floor of 10 a round
+    (10)"). A fragment none of whose programs was compared (the device refused
+    them all, its capacity account's) is not held to it."""
+    out = []
+    for key in sorted(MC["fragments"], key=str):
+        k, fn, rnd, n_op = key
+        if not MC["frag_progs"][key]:
+            continue
+        got, want = MC["frag_lanes"][key], floor * rounds
+        if got < want:
+            out.append(f"{routine_label(fn, n_op)} at {k} under "
+                       f"{sf.RND_NAMES[rnd]} compared {got} lanes in "
+                       f"{rounds} round{'s' if rounds != 1 else ''}, under "
+                       f"the floor of {floor} a round ({want})")
+    return out
 
 
 def routine_needed(part="six"):
@@ -3931,7 +4016,7 @@ def pow_family_line(MP, ph):
             cells.append(f"{r} " + "/".join(str(MP[f"{tag} {name} {r}"])
                                             for tag in ("centre", "struct")))
         parts.append(f"{name}: " + ", ".join(cells))
-        for fn, n_op in routine_fragments(ml, "pow"):
+        for fn, n_op in routine_fragments(ml, "pow", name):
             label = routine_label(fn, n_op)
             if not pow_struct(ph, fn, fmt, n_op)[0]:
                 no_mark.setdefault(label, []).append(name)
@@ -4437,7 +4522,7 @@ def main():
         routine_limits(MP["caps"], "pow")
         routine_needed("pow")
         print(pow_family_line(MP, pow_modules()))
-    elif MP["unrun"]:
+    elif MP["unbuilt"]:
         print(f"the routine corpus's pow part ran no program"
               f"{pow_clause(MP)}")
     bad += (S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
@@ -4515,7 +4600,8 @@ def main():
             # POW_FORMATS) that the run asked for and the device carries:
             # none run is a gap, not an absence, unless there was none to run
             built = {"inv": routine_modules()[0].INV_FORMATS,
-                     "pow": routine_modules()[0].POW_FORMATS}[part]
+                     "pow": routine_modules()[0].POW_FORMATS
+                     + (FORMATS["fp32"],)}[part]
             asked = [k for k in args.formats
                      if FORMATS[k] in built
                      and (DEVICE is None
@@ -4531,18 +4617,26 @@ def main():
         # every format that was run - so a loop that drops a fragment, a
         # shape or a round is counted short here, whatever else it compares
         mlib = routine_modules()[0]
-        frags = len(routine_fragments(mlib, part)) * len(sf.RND_MODES)
-        per_format = frags * len(ROUTINE_SHAPES)
+        # the pow part's fragments differ by format (compound is not built at
+        # fp32), so the count is taken per format and summed
+        def frags_at(k, mlib=mlib, part=part):
+            return (len(routine_fragments(mlib, part, k))
+                    * len(sf.RND_MODES))
         rounds = routine_rounds(args)
-        want_drawn = rounds * per_format * len(MC["formats"])
+        want_drawn = rounds * len(ROUTINE_SHAPES) * sum(
+            frags_at(k) for k in MC["formats"])
         short = [] if MC["drawn"] == want_drawn else [
             f"{MC['drawn']} programs were drawn where {rounds} round"
-            f"{'s' if rounds != 1 else ''} of {per_format} programs at each "
-            f"of {len(MC['formats'])} formats is {want_drawn}"]
+            f"{'s' if rounds != 1 else ''} of "
+            + " + ".join(f"{frags_at(k) * len(ROUTINE_SHAPES)} ({k})"
+                         for k in MC["formats"])
+            + f" programs is {want_drawn}"]
         for k in MC["formats"]:
             have = len({f for f in MC["fragments"] if f[0] == k})
-            if have != frags:
-                short.append(f"{k} ran {have} of {frags} fragments")
+            if have != frags_at(k):
+                short.append(f"{k} ran {have} of {frags_at(k)} fragments")
+        if part == "pow":
+            short += pow_floor_findings(MC, rounds)
         if short:
             print(f"{ran} - " + "; ".join(short))
             return 1

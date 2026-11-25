@@ -561,3 +561,151 @@ def test_the_commands_refuse_compound_and_the_budgetless_ones_by_name(capsys):
                        ("pow-family", "no structured families")):
         with pytest.raises(SystemExit, match=words):
             run_cmd(capsys, cmd, "--fn", "pown", "--formats", "fp32")
+
+
+# ---- seq_check's pow part at fp32 ---------------------------------------------------------------
+
+import collections  # noqa: E402
+import subprocess  # noqa: E402
+
+SEQ = ROOT / "host" / "tests" / "seq_check.py"
+FORBIDDEN = ("waits for parcel", '["waiting"]', "inv_waiting",
+             "INV_FORMATS has no", "not built (parcel", "(parcel M2F's)",
+             '["absent"]', "if fmt not in ml.TRIG_FORMATS")
+
+
+def seq_module():
+    sys.path.insert(0, str(ROOT / "host" / "tests"))
+    import seq_check
+    return seq_check
+
+
+def test_seq_check_runs_the_pow_part_at_fp32_for_four_names_in_its_source():
+    text = SEQ.read_text(encoding="utf-8")
+    assert text.count("THE ROUTINE CORPUS DID NOT REACH EVERY FORM") == 1
+    assert text.count("THE ROUTINE CORPUS'S POW PART DID NOT RUN EVERY "
+                      "FRAGMENT") == 1
+    assert "mathlib.POW_FORMATS" in text
+    for bad in FORBIDDEN:
+        assert bad not in text, bad
+    sc = seq_module()
+    fp32 = sc.routine_fragments(ml, "pow", "fp32")
+    assert fp32 == [("pow", None), ("powr", None), ("pown", 0), ("pown", 1),
+                    ("pown", 3), ("pown", -2 ** 63), ("rootn", 1),
+                    ("rootn", 3), ("rootn", -2 ** 63)]
+    assert not [f for f in fp32 if f[0] == "compound"]
+    for k in ("fp64", "fp128", "fp256"):
+        assert len(sc.routine_fragments(ml, "pow", k)) == 13
+    assert len(sc.routine_fragments(ml, "pow")) == 13
+    # the part's own count: 9 pairs x 5 attributes = 45 fragments, 90 programs
+    # at fp32; 65 and 130 at each of the three; 240 and 480 over the four
+    per = {k: len(sc.routine_fragments(ml, "pow", k)) * len(MODES)
+           for k in ("fp32", "fp64", "fp128", "fp256")}
+    assert per == {"fp32": 45, "fp64": 65, "fp128": 65, "fp256": 65}
+    assert sum(per.values()) == 240 and 2 * sum(per.values()) == 480
+    # the other parts' fragment lists do not take the format
+    for part in ("six", "trig", "inv"):
+        assert sc.routine_fragments(ml, part, "fp32") == \
+            sc.routine_fragments(ml, part)
+    # the absence is named, in words, no SKIP
+    C = sc.routine_counters()
+    C["unbuilt"].append(("fp32", ("compound",)))
+    clause = sc.pow_clause(C)
+    assert "fp32: compound is not run (refused by name at fp32" in clause
+    assert "SKIP" not in clause
+    assert sc.pow_clause(sc.routine_counters()) == ""
+
+
+def counters(lanes, fmts=("fp32",), progs=2, n_op=3):
+    sc = seq_module()
+    C = sc.routine_counters()
+    for k in fmts:
+        for rnd in MODES:
+            key = (k, "pown", rnd, n_op)
+            C["fragments"].add(key)
+            C["frag_lanes"][key] = lanes
+            C["frag_progs"][key] = progs
+    return C
+
+
+def test_the_floor_names_a_fragment_that_compared_too_few_lanes():
+    """pow_floor_findings, the reach check's own function (counters hold a
+    fragment's lanes over a round's two programs): the plant 'one fragment's
+    lanes cut to one' is red at fp64, fp128, fp256 and fp32, and so are totals
+    of two, of twenty (every program cut to ten) and of the floor less one;
+    the floor itself is green. The clean draw's tail is COMPUTED below."""
+    sc = seq_module()
+    floor = sc.POW_FRAG_FLOOR
+    assert floor == 24
+    # a clean fragment-round compares at least the 63 lanes of its guaranteed
+    # program less its mask's, and one lane of the other program: under the
+    # floor needs floor - 2 or fewer of 63 kept at 0.7, in the third of the
+    # programs that are masked
+    from fractions import Fraction
+    from math import comb
+    p = Fraction(7, 10)
+    tail = sum(comb(63, k) * p ** k * (1 - p) ** (63 - k)
+               for k in range(floor - 1)) / 3
+    assert tail < Fraction(1, 10 ** 7), float(tail)
+    assert float(tail) * 1000 < 1e-4
+    for k in ("fp32", "fp64", "fp128", "fp256"):
+        for cut in (1, 2, 20, floor - 1):
+            out = sc.pow_floor_findings(counters(cut, (k,)), 1)
+            assert len(out) == len(MODES), (k, cut, out)
+            assert out[0].startswith(f"pown(x, n = 3) at {k} under ")
+            assert f"compared {cut} lanes in 1 round" in out[0]
+            assert f"the floor of {floor} a round" in out[0]
+        assert sc.pow_floor_findings(counters(floor, (k,)), 1) == []
+        assert sc.pow_floor_findings(counters(5 * floor, (k,)), 5) == []
+        assert len(sc.pow_floor_findings(counters(5 * floor - 1, (k,)), 5)) \
+            == len(MODES)
+    # a fragment none of whose programs was compared (a device's refusals) is
+    # not held to it, and the lane total does not hide a fragment: another
+    # fragment with plenty of lanes does not carry this one
+    assert sc.pow_floor_findings(counters(0, progs=0), 1) == []
+    C = counters(1)
+    C["frag_lanes"][("fp32", "pown", MODES[0], 0)] = 10 ** 6
+    assert len(sc.pow_floor_findings(C, 1)) == len(MODES)
+
+
+def seq_run(*extra, env_hook=None, timeout=1500):
+    code = (
+        "import sys; sys.path.insert(0, %r); import seq_check as sc;"
+        " %s sys.argv = ['seq_check.py'] + %r; sys.exit(sc.main())"
+        % (str(ROOT / "host" / "tests"),
+           f"sc.POW_FRAGMENT_LANE_CUT.update({env_hook!r});" if env_hook else
+           "", list(extra)))
+    return subprocess.run([sys.executable, "-B", "-c", code],
+                          capture_output=True, text=True, cwd=ROOT,
+                          timeout=timeout)
+
+
+@pytest.mark.skipif(not (ROOT / "host" / "cft.dll").exists()
+                    and not (ROOT / "host" / "libcft.so").exists(),
+                    reason="host/cft.dll (libcft) is not built here")
+def test_seq_check_runs_the_pow_part_at_fp32_and_the_floor_plant_is_red():
+    """The tool, run: `--formats fp32 --trials 250` clean (exit 0, the pow
+    part's summary line with 90 programs, its absence of compound named, the
+    reach check passing); and with one fragment cut to one lane at pown n =
+    3 (POW_FRAGMENT_LANE_CUT: the plant), red, naming the fragment and
+    beginning with the part's own phrase."""
+    clean = seq_run("--trials", "250", "--formats", "fp32")
+    out = clean.stdout + clean.stderr
+    assert clean.returncode == 0, out[-1500:]
+    line = [ln for ln in out.splitlines()
+            if "programs from the routine corpus's pow part" in ln]
+    assert len(line) == 1 and "fp32 90 programs" in line[0]
+    assert "fp32: compound is not run (refused by name at fp32" in line[0]
+    assert "THE ROUTINE CORPUS" not in out
+    for cut in (10,):                       # 20 a round: red
+        red = seq_run("--trials", "250", "--formats", "fp32",
+                      env_hook={("pown", 3): cut})
+        assert red.returncode == 1 and "under the floor of 24 a round" in \
+            red.stdout + red.stderr, cut
+    plant = seq_run("--trials", "250", "--formats", "fp32",
+                    env_hook={("pown", 3): 1})
+    out = plant.stdout + plant.stderr
+    assert plant.returncode == 1, out[-1500:]
+    assert ("THE ROUTINE CORPUS'S POW PART DID NOT RUN EVERY FRAGMENT - "
+            "pown(x, n = 3) at fp32 under rne compared") in out
+    assert "under the floor of 24 a round" in out
