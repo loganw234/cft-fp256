@@ -330,7 +330,38 @@ authority:
     a failure, and each leg's log names its device, every line the same one. On NVIDIA it is built three
     ways, each held to the same sums: HIP 7.2.4's NVIDIA layer (`hip`),
     plain nvcc through study GPU-A's header (`hip-nvcc`), and HIP built
-    from ROCm's own sources (`hip-source`).
+    from ROCm's own sources (`hip-source`). Since 2026-11-26 (parcel
+    G3D-1) `hip` also reads the tier word of every device line it prints
+    (`tier generic`: the default tier is what it runs), and the GPU
+    stages unset `CFT_HIP_TIER` with three more names of
+    cert2.ENVIRONMENT_NAMES that a caller's shell could carry into a run
+    (`CFT_TRANSCEND_MINPREC`, `XCL_EMULATION_MODE`, `CFT_SEGRUN_PLANT`),
+    each of the 24 unset or left out for a reason the runner's comment
+    gives. **The stage `hip-tier`** (gate budget, beside `hip` and
+    sharing its set-up; for `hip` alone, so `hip-nvcc` and `hip-source`
+    have no tier stage) holds the fixed tier the GPU backend's round 3
+    put under `CFT_HIP_TIER=fixed` - fp256's and fp128's FMA, ADD, SUB
+    and MUL in `cft_run` and inside programs, a second implementation -
+    on every build. Plants first: round 3's 27, each on its cheapest red
+    and green without it (G3A's and G3A2's fourteen on the elementwise
+    corpora under the tier and on hip-test's `fixed` leg, G3B's thirteen
+    on its `progtier` leg; the cover plants and seqna-aug by the literal
+    test's own sentence, the refuse plants by the route proof alone with
+    the bits green), beside them the differential tools' own plants, the
+    rmm pair at the routines files' ties and on the referee's file, the
+    earlier rounds' program plants under the tier, and a stray plant on
+    the default build refused by name by each tool. Then the
+    differential streams on the default build - hip-fmadiff, the two FMA
+    lanes on the device, and hip-progdiff, the same streams as program
+    lanes - at both formats, the four operations and both streams, every
+    lane green and each first chunk the sums on record; GPU-A's corpora
+    under each tier, staged and resident, against the software handle; a
+    referee whose expected values are the golden model's
+    (host/tests/fma_edge_corpus.py's hard classes, under each tier);
+    hip-test's `fixed` and `progtier` legs; and seq_check under the
+    tier, the golden model the authority. Every leg names its device and
+    its tier, and the stage's last lines print its seconds against its
+    ceiling on that device (a NOTE when over, never a FAIL).
 
 The `estimates` stage (gate budget) and the `estimates-full` stage (the
 full census only) hold a study's numbers rather than a layer. They re-make
@@ -475,7 +506,7 @@ is the only thing that skips work. (cft-rebound is the sibling repo with
 a content-addressed gate cache and a warm five-second check; this runner
 does not have one.)
 
-`bash verify/run.sh --list` prints all fifty-six stages with a marker
+`bash verify/run.sh --list` prints all fifty-seven stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second
