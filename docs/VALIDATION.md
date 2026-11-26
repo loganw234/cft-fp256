@@ -29976,7 +29976,20 @@ At a huge |k|, the faithful root of 2^E with E >= 1 is exactly 1, so the irratio
 - **The floor on a device:** a device that refused the masked 63-lane program would fire the floor. The hip stage on both GPUs is to check that before the push.
 - **The golden order's cost:** 1,512.74 s in the parcel's run and 1,739.5 s in the verifier's, on the shared desktop at different loads. The base's three files were not timed against them.
 
-**Before the push:** Not yet. The hip stage on both GPUs and the box gate at this merge.
+**The hip stage and the box gate,** added before the push:
+- **The hip stage on both GPUs,** MEASURED at 0c05ce52 on 2026-11-25 by the lead's replay in a bundle clone (the SHA and M3F2's markers asserted apart): `verify/run.sh --only hip --require-all`.
+  - The RTX 5060 Ti (WSL cft-gpu): rc 0 in 1,180 s (the stage 1,177 s), PASS, nothing skipped, 0 inner skips.
+  - The RX 7600: rc 0 in 1,552 s (the stage 1,549 s), the same.
+  - On both, the log's counts are G2D's: RED 16, GREEN 9, ok 360, NOTE 0, FAIL 0, 106 device lines, 23 CHUNK lines.
+  - The pow part's lines are VM3F2's desktop counts on both GPUs: fp32 90 programs and 6,180 lanes, fp64 130 and 8,615, fp128 130 and 8,783, fp256 130 and 8,197. Neither log has a MISMATCH line or an "under the floor" line, so the floor's device risk above did not occur.
+  - **Both are past the recorded ceilings** (docs/VERIFICATION.md's hip row: 1,000 s and 1,400 s; the stage enforces none). seq_check's two legs account for the rise: 194 s and 246 s on the 5060 Ti against 134 s and 205 s at f7a1ce95, and 311 s and 326 s on the RX against 257 s and 274 s. Parcel G3D-1 measures the ceilings again at its base, which is this push.
+- **The box gate,** MEASURED: box_gate_m3f2.sh at 5fff2868 on amd-arc-box, 2026-11-26 08:59:10 to 12:11:02, two clones of one bundle at nice 10. In both clones the chain was asserted (three first-parent commits from f3f4ab31: the merge, the lead's commit and night 29's page data), with M3F2's markers, the lead's entry and the rtl tree.
+  - golden alone: PASS, 8,469 passed and 6 skipped in 8,786 s. Its 6 inner skips are named: two of compound at fp32, rootn(x, 0) refused, two serial-replay loopbacks, and math.fma before Python 3.13.
+  - the card-stress plants' anchors: 497 checks, 0 failed.
+  - the other 44 stages of `--budget gate`, in one run: 35 ok and 8 skipped by name (buildargs, the six language bindings the box lacks, and hip). **mpfr FAILED** three checks of hw/test_routine_sweep.py (836 checks, 3 failed, 2 skipped). All three expected the sweep generator to skip pown and rootn as not built at fp32. This merge builds them, and the test is f3f4ab31's, so it is out of date here. **Parcel M3NR's merge, two entries below, rewrites those checks and goes in the same push;** its entry gives the three and the re-gate.
+  - cardstress alone: PASS, 828 s, with its 4 inner skips.
+  - Beside it, the lead's memory log (once a minute) never read under 26,373 MB available, with another project's Vivado run on the box.
+- **The changes after the gate** are M3NR's merge and the lead's entry for it, which the re-gate in that entry tested, and this paragraph and that entry's last, which are docs only: docs and generated are run again before the push.
 
 ## 2026-11-26 - parcel M3NR: the card's 14 n-keyed rows, pown and rootn at fp32's seven n (author M3NR)
 
@@ -30052,4 +30065,10 @@ M3F2 builds pown and rootn at fp32, so the sweep generator no longer skips them,
 - Neither the parcel nor its verifier ran the real tool's `list` at n = -2^63 (Windows' 32-bit `long`) or MPFR 4.2.2's oracle legs for rootn (WSL's 4.1.0). The lead's re-gate on the box runs them.
 - Three files outside the brief's list changed by the lead's approval: hw/test_card_stress_report.py and python/tests/test_figure_extracts.py (57 to 71), and hw/test-card-stress.sh at the send-back.
 
-**Before the push:** Not yet. The re-gate of the merged tip on the box: docs, innerskips, generated and mpfr in one run; cardstress alone; the routine sweep's test with `--names pown,rootn,compound`; golden's files that read the changed table or the generator.
+**The re-gate,** added before the push, MEASURED: box_regate_m3nr.sh at 32a2e99a on amd-arc-box, 2026-11-26 12:15:17 to 12:54:49, at nice 10 beside another project's Vivado run. The clone's chain was asserted: ten commits from 5fff2868, one of them the merge, moving exactly the 13 files M3NR touched, with three markers (pown's n = 3 row, rootn's n = -2^63 row and this entry).
+- docs, innerskips, generated and mpfr in one run: PASS, 1,416 s. **mpfr's routine-sweep test: 837 checks, 0 failed, 2 skipped, 351 s**, where the gate's at 5fff2868 had 836 checks and 3 failed. Its 2 inner skips are named: an n that fits int64 and not the host's long (the box's long is 64 bits), and other ops' stdout byte for byte (it needs a baseline tree).
+- cardstress alone: PASS, 834 s, with its 4 inner skips.
+- `hw/test_routine_sweep.py --only build,images,oracle,refuse --names pown,rootn,compound` (MPFR 4.2.2, n = -2^63 included): 689 checks, 0 failed, 1 skipped, 104 s. This is the run the parcel and its verifier could not make.
+- golden's files that load hw/card_stress_lib.py or run the generator: test_figure_extracts.py 14 passed; the generator tests of test_mathlib_inv_tw.py and test_mathlib_inv_tw2.py (`-k sweep_generator`) 2 passed. The rest of golden passed at 5fff2868 in the gate, and no other file under python/tests names a file M3NR changed or the tools that read them (READ: `git grep` at 32a2e99a for each).
+- The clone's status was 0 after; its records' sums 13 of 13 OK on this desktop.
+- **This paragraph,** and the end of M3F2's merge entry above, are the one change after the re-gate. Both are docs only, and docs and generated are run again before the push.
