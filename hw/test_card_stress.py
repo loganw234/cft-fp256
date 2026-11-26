@@ -7167,7 +7167,7 @@ def routine_pow_checks(src: str = HERE) -> list:
               rc == 2 and "compound-n3-fp32-rne.cftp" in txt and "pown-n3-fp32-rne.cftp" in fixture(fname) and "cannot read" in txt and "cannot read" in fixture(fname)
               and " cases," not in txt, txt[:200])
         rc, txt = rs_standin(["pown-f32-n3-d70850195", "0", "5", "all"], src=src)
-        c("routine stand-in (parcel M3NR): pown at n = 3 with its row's digest runs (exit 0, a verdict of 25 cases, no mark), as the real tool ran it on 2026-11-26; pown at n = 4, which has no row and "
+        c("routine stand-in (parcel M3NR): pown at n = 3 with its row's digest runs (exit 0, a verdict of 25 cases = 5 encodings x the five attributes of `all`: the stand-in's own count, card_stress_standin.py's `cases = enc * len(attrs)`; the real tool's run on 2026-11-26 was `pown-f32-n3-d70850195 0 5 rne`, ONE attribute, 5 cases, 0 mismatches, a different slice and mode, so the two counts are not compared); pown at n = 4, which has no row and "
           "no image, is refused `cannot read ...pown-n4-fp32-rne.cftp`; and pown n = 3 with another digest is refused by the digest, naming the images' own (the tool's wording)",
           rc == 0 and "25 cases, 0 value mismatches, 0 flag mismatches, 5 encodings, 0 skipped" in txt
           and rs_standin(["pown-f32-n4", "0", "5", "all"], src=src)[0] == 2 and "pown-n4-fp32-rne.cftp" in rs_standin(["pown-f32-n4", "0", "5", "all"], src=src)[1]
@@ -7600,9 +7600,9 @@ def routine_fe_checks(src: str = HERE) -> list:
     spec = importlib.util.spec_from_file_location("m4x2_figure_extracts", fe_path)
     fe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fe)
-    ops = list(DOC_ROUTINE_OPS) + list(DOC_POW_OPS)
-    c("routine figure_extracts: the rule - each of the 57 routine op words (the 21 and the pow family's 36, atan2's with its x, pow's and powr's with their x or y) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
-      all(fe.is_tile_op(op) and op not in fe.STRESS_TILE_OPS for op in ops) and fe.is_tile_op("atan2-f32-x3f800000-d12345678") and not fe.is_tile_op("exp-f32-d043b3bb")
+    ops = list(DOC_ROUTINE_OPS) + list(DOC_POW_OPS) + list(DOC_N_OPS)
+    c("routine figure_extracts: the rule - each of the 71 routine op words (the 21, the pow family's 36 and the 14 n-keyed, atan2's with its x, pow's and powr's with their x or y, pown's and rootn's with their n) is a tile op, though none is in the table of fifty-one; a word outside the grammar is not",
+      len(ops) == 71 and all(fe.is_tile_op(op) and op not in fe.STRESS_TILE_OPS for op in ops) and fe.is_tile_op("atan2-f32-x3f800000-d12345678") and not fe.is_tile_op("exp-f32-d043b3bb")
       and not fe.is_tile_op("pow-f32-x3f000000-y3f000000") and fe.is_tile_op("pown-f32-nm3") and not fe.is_tile_op("pow-f32-n3")
       and not fe.is_tile_op("exp-f32-d043b3bb5-all") and not fe.is_tile_op("sqrt33") and fe.is_tile_op("sqrt32"), str([op for op in ops if not fe.is_tile_op(op)]))
     served = set(ops) | {"sqrt32", "rem32"}
@@ -10272,9 +10272,15 @@ def plants(env: Env) -> None:
         ("M3X2: --sweep-items accepts an n-keyed op word with a message that names no table",
          [("card_stress.py", "            if n and n not in known and re.match(r\"^(?:pown|rootn|compound)-f32-n\", n):", "            if False and re.match(r\"^(?:pown|rootn|compound)-f32-n\", n):")],
          lambda env, src: scn_routine_build(env, src), ["routine items: --sweep-items compound-f32-n3-d00000000-all is refused by name"]),
-        ("M3NR: --sweep-items refuses an n-keyed op word with a row (pown at n = 3 with its digest)",
+        ("M3NR: --sweep-items refuses an item of pown (pown at n = 3 with its row's digest is left out of the known items)",
+         [("card_stress.py", "        known = {it.name for it in L.sweep_items(mpfr=True)}", "        known = {it.name for it in L.sweep_items(mpfr=True) if not it.op.startswith(\"pown-\")}")],
+         lambda env, src: scn_routine_build(env, src), ["routine items: ... and pown at n = 3 with its row's digest is ACCEPTED"]),
+        ("M3NR: --sweep-items gives a word with a row and another digest the n-keyed message (naming the table), not the wrong-digest refusal",
          [("card_stress.py", "                if not (parts and parts[1] and (parts[0], parts[1][1]) in L.ROUTINE_N_DIGESTS):", "                if True:")],
-         lambda env, src: scn_routine_build(env, src), ["routine items: ... and pown at n = 3 with its row's digest is ACCEPTED", "routine items: ... and pown at n = 3 with another digest is refused as any"]),
+         lambda env, src: scn_routine_build(env, src), ["routine items: ... and pown at n = 3 with another digest is refused as any"]),
+        ("M3NR: the figure extracts' rule has no n-keyed rule for rootn",
+         [("figure_extracts.py", "r\"|(?:pown|rootn|compound)-f32-n(?:0|m?[1-9][0-9]*))\"", "r\"|(?:pown|compound)-f32-n(?:0|m?[1-9][0-9]*))\"")],
+         lambda env, src: routine_fe_checks(src), ["routine figure_extracts: the rule"]),
         ("M3NR: --sweep-items does not refuse an n-keyed op word that has no row by the table's name (compound, pown at n = 4)",
          [("card_stress.py", "                if not (parts and parts[1] and (parts[0], parts[1][1]) in L.ROUTINE_N_DIGESTS):", "                if not (parts and parts[1]):")],
          lambda env, src: scn_routine_build(env, src), ["routine items: --sweep-items compound-f32-n3-d00000000-all is refused by name", "routine items: ... and pown at an n with no row"]),
