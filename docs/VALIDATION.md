@@ -30021,3 +30021,35 @@ Base 5fff2868. The parcel adds the 14 rows of `ROUTINE_N_DIGESTS` (hw/card_stres
 - Runs at the new tip: see the lines below (WSL cft2204 inside B0423; desktop inside B0422).
   - WSL cft2204 (B0423), a clone of 36bb7f31, the code tip: the 10 M3NR plants, 10 checks, 0 failed, 424 s, each red in the named check; the whole dry suite `--no-plants` 1,456 checks, 0 failed, 4 skipped, 853 s; APPLY_ONLY 506 checks, 0 failed (504 + the 2 new plants). The marks checks again showed red beside the two `--sweep-items` plants run in one process (untraced).
   - Desktop (B0422): `--only routine,testfiles --no-plants` 183 checks, 0 failed, 5 skipped, 183 s; test_figure_extracts.py 14 passed; `project_figures.py --check`, `check_docs_index.py` rc 0; `verify/run.sh --only docs,generated` 0 failed (one inner skip, the packager's backslash plant on Windows); `git diff --check` clean.
+
+## 2026-11-26 - parcel M3NR's merge, the lead's: the merge, verifier VM3NR's two passes, why it goes in M3F2's push, and the known limits (the lead)
+
+**The merge** (branch merge-m3f2, on 5fff2868: M3F2's merge, the lead's entry for it and night 29's page data): f702fb15, `git merge --no-ff` of m3nr at e20fef45, M3NR's base being 5fff2868. The merge's tree is e20fef45's. It goes to main in one push with M3F2's merge.
+
+**Why in the same push,** MEASURED: the box gate of M3F2's merge at 5fff2868 (box_gate_m3f2.sh, 2026-11-26 08:59:10 to 12:11:02) passed golden, cardstress and every stage of `--budget gate` that ran but mpfr. mpfr failed three checks of hw/test_routine_sweep.py (836 checks, 3 failed, 2 skipped, 353 s, the gate's mpfr.log):
+- `build: RED - the list check above, evaluated on lists in memory, is red when list says no image for a name the account did not skip ...`;
+- `images: --names pown,rootn,compound does not fail (exit 0): each name is skipped by name once (skipped pown not built at fp32 ...) while parcel M3F2's fragments are not built ...`;
+- `images: GREEN - a name moved from built to skipped ... is still a whole account; this runs for the case on the real lists`.
+
+M3F2 builds pown and rootn at fp32, so the sweep generator no longer skips them, and those checks, f3f4ab31's (M3F2 touched no file under hw/), still expected the skip. Drafter D-M3W5's notes and M3F2's brief said no hw/ check would be red at M3F2's own merge, only once the rows went in. That was true of the table's pins in hw/test_card_stress.py and false of this test, which runs the real generator. M3NR's rewrite of those checks (the images account exact: pown and rootn built, compound skipped) is the fix, so the two merges go together. No night ran the n-keyed items in between: night 1126 runs at f3f4ab31.
+
+**Verified** by VM3NR (Haiku) in two passes.
+- Pass 1 at c6052848: no (a), four (b)s. They were a count of 57 left in hw/test-card-stress.sh:32; a check saying "each of the 57 routine op words" over 57 of the 71; the stand-in's 25 cases credited to the real tool, whose run was 5 cases at rne; and a plant not red for the reason its name gave (its edit refused only words that are not items).
+- The lead's send-back: M3NR fixed the four at e20fef45. The plant was split into two, each red for its name, and a plant was added for the 71-word check.
+- Pass 2 at e20fef45: no (a), no (b).
+
+**What VM3NR ran,** MEASURED by it in its frozen trees (this desktop, and WSL cft2204 under the lead's bookings):
+- the generator's 14 digest lines against the table, key by key, and no compound key;
+- doctored copies of the table: a row dropped 5 checks red, a digest changed 4, a compound row 5, the control 0;
+- the refusals by the driver's argument parser: pown at n = 3 with its digest accepted; with another digest refused as not an item; compound refused naming the table and parcel M3F3;
+- in WSL: the whole dry suite (`--no-plants`) 1,456 checks, 0 failed, 4 skipped (840 s, at e20fef45); APPLY_ONLY 506 checks, 0 failed; the 10 M3NR plants 10 checks, 0 failed (384 s, its second clean run); hw/test_routine_sweep.py with `--names pown,rootn,compound` 529 checks, 0 failed, 10 skipped (MPFR 4.1.0, at c6052848);
+- on this desktop: the routine and testfiles groups 183 checks, 0 failed, 5 skipped; test_figure_extracts.py 14 passed; the report's test 5,262 checks, 0 failed.
+
+**Known limits** (the lead's):
+- hw/test_routine_sweep.py's `agree` and `whole` legs skip the n-keyed names by name (each needs an n), so the 14 rows are outside those two legs.
+- The build step names, and does not fail on, a compound digest in a manifest that the table lacks; the routine-sweep test's judge is what fails once M3F3 builds compound and the table has no row for it.
+- With several of the `--sweep-items` plants in one process, two unrelated checks ("marks that are not the smoke's") go red, and one plant also turns "a generator that writes no manifest" red. Both are order-dependent and untraced (VM3NR); no run without plants shows them. VM3NR's first full plant run crashed with FileNotFoundError, which it attributes to two overlapping chains of its own runs (unproven); two clean reruns passed.
+- Neither the parcel nor its verifier ran the real tool's `list` at n = -2^63 (Windows' 32-bit `long`) or MPFR 4.2.2's oracle legs for rootn (WSL's 4.1.0). The lead's re-gate on the box runs them.
+- Three files outside the brief's list changed by the lead's approval: hw/test_card_stress_report.py and python/tests/test_figure_extracts.py (57 to 71), and hw/test-card-stress.sh at the send-back.
+
+**Before the push:** Not yet. The re-gate of the merged tip on the box: docs, innerskips, generated and mpfr in one run; cardstress alone; the routine sweep's test with `--names pown,rootn,compound`; golden's files that read the changed table or the generator.
