@@ -7550,7 +7550,7 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
          "the manifest has no digest line for a (name, n) of the table (pown, 3)")
     redn("moved", {"FAKE_GEN_MOVE": "pown-n3"}, "routine images", ("pown-n3: the generator's digest is 70850190", "ROUTINE_N_DIGESTS has 70850195"),
          "the manifest's digest of a (name, n) is not the table's (pown, 3)")
-    redn("moved-rootn", {"FAKE_GEN_MOVE": "rootn-nm9223372036854775808"}, "routine images", ("rootn-nm9223372036854775808: the generator's digest is 37a80322", "ROUTINE_N_DIGESTS has 37a80323"),
+    redn("moved-rootn", {"FAKE_GEN_MOVE": "rootn-nm9223372036854775808"}, "routine images", ("rootn-nm9223372036854775808: the generator's digest is 37a80320", "ROUTINE_N_DIGESTS has 37a80323"),
          "the manifest's digest of a (name, n) is not the table's (rootn, -2^63)")
     redn("no-row", {"CFT_STANDIN_LIST_N": rows_but_n3}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says 'nothing'", "ROUTINE_N_DIGESTS"),
          "a `list` with no row for a (name, n) of the table (the row `pown-f32-n3: ...` is one the pattern `^(\\S+)-f32: ` does not read)")
