@@ -29928,3 +29928,52 @@ At a huge |k|, the faithful root of 2^E with E >= 1 is exactly 1, so the irratio
   - Item 9's question of the budget on rootn's tinyt lanes (the box's 37,361 lanes) was not run: the stand-in is the direct error `|V - f| / Bv` over the 13 regions at 6 points a region, a sample; no budget bounds those lanes.
   - Item 14's cftc first-spill was not measured: the stand-in is the room table (pown 28 or 29 registers, rootn 27 or 28, room 29) and the model's "30 less the cap".
   - Item 15b's runs of `pow-pools --seq` and `pow-bound` at `--quick`, at a size under ten minutes, and the full size's ESTIMATE were not taken: only small ones (6 to 12 lanes a region). The lead sizes the box run.
+
+## 2026-11-25 - parcel M3F2's merge, the lead's: the merge, verifier VM3F2's checks, and the known limits the parcel's entry lacks (the lead)
+
+**The merge** (branch merge-m3f2 on main f3f4ab31): 99f8d079, M3F2 at a876ee0a. Main has not moved since the parcel's base, so git took VALIDATION as the branch's, a pure append, and README's counts with it. The merge's tree is a876ee0a's.
+
+**Verified** by verifier VM3F2 (Haiku) at a876ee0a, in two passes. It found no (a). Its one (b) candidate, the pools check at fp32's multi-word n, the lead ruled a missing known limit, given below. Pass 2 was the lead's send-back: pass 1 ended in about 89 of its 150 minutes with several of the brief's own checks not run.
+
+**What VM3F2 ran,** MEASURED by it on its frozen tree (the shared desktop, one process at a time, load not measured):
+- **Nothing moved.** The default `--check`, `--check --only pow` and `--only pow-n` are byte-equal from base to tip. `--only pow-tw` keeps its base lines and adds the three new ones before its count line. The pow and powr census (40 cells, fp32 to fp256, as Build and as fragment) and the n-keyed census at fp64 to fp256 (615 lines) are equal.
+- **compound stays refused at fp32,** by name: `ml.fragment` at n = 3 and n = 1000 and `routines.fragment` give "compound at fp32 is not built"; `cftc.NOT_BUILT_FP32 == ("compound",)`; the generator's manifest has `skipped compound not built at fp32`.
+- **Registers:** pown peaks at 28 live with highest register r27, rootn at 27 with r26. A cap one under is refused by name in every cell it affects, over 16 and 15 n values at five attributes each, n = 5 and 2^35 + 7 among them.
+- **The port against the model,** by its own script importing `docs/studies/m3/pw32n.py` from a scratch copy. In its cells, at an odd n the digest, emitted order, used-word bank and counts are equal. At an even n they differ only in the Build's bank, where the model holds one extra word, SIGN_BIT = 0x80000000, which no instruction reads. Pass 2 confirmed that by script for pown and rootn.
+- **A lane sample,** in place of every pool lane: 420 lanes a cell (20 specials and 400 random, seed 20251125), 60 cells, 25,200 lanes, 0 differ.
+- **seq_check's gate command** (`--trials 250 --formats fp32 fp64 fp128 fp256`) at base and tip: both exit 0 with the same last line, in 3 min 26 s and 4 min 8 s.
+  - Only 17 pow lines differ. fp32's pow line has 90 programs and 6,180 lanes, and compound's absence is named.
+  - The pow lane counts at fp64, fp128 and fp256 rose: 7,328 to 8,615, 6,667 to 8,783 and 6,424 to 8,197. That is the per-fragment floor's draw, which the parcel's entry does not give.
+  - `--formats fp32` alone fails at base and tip in the trig part's reach check, the defect the parcel's entry names.
+- **The golden order,** the four pow files in one call, unniced: 641 passed in 1,739.5 s.
+- **The WSL dry suite** (cft2204, a clone of a876ee0a): `bash hw/test-card-stress.sh --no-plants` gave 1,447 checks, 0 failed, 4 skipped, in 962 s; APPLY_ONLY gave 497 checks, 0 failed.
+- **The plants** (pass 2):
+  - the matrix's 13 rows are each red in their named checks, with the control green;
+  - two doctored rows are refused by the matrix's own assertion;
+  - the floor's plant (pown at n = 3 cut to ten lanes) is red at all four formats, exit 1, with 6 to 20 lanes a round against the floor's 24.
+- **The floor's arithmetic** (pass 2), COMPUTED: P(Bin(63, 0.7) <= 22) = 9.64e-9. Divided by 3, that is 3.21e-9 a fragment-round, and over 240 fragments 7.7e-7 a gate run, the parcel's figure. The verifier held it sound on three grounds: the 63-lane program is masked with probability 1/3, n = 63 is the worst case, and the forced-keep rule only raises counts.
+- **The whole of test_cftc_pow.py** (pass 2), alone and unniced: 274 passed, 1 skipped, 983 s.
+- **Docs and generator:** `check_docs_index.py` and `project_figures.py --check` rc 0. `gen_sweep_images.py --names pown,rootn,compound` rc 0, with 14 n-keyed names and 210 files.
+
+**Not run by VM3F2:**
+- cftc's own allocator at fp32 (the parcel's item 14 limit);
+- every pool lane and the brief's 100 edge lanes, for which the sample above stands in;
+- item 11's blocks compared byte for byte, since the brief gives them in prose. The verifier read the hunks' positions instead;
+- the base's timing of the three older golden files;
+- the certificate, tangent and fp32 language checks.
+
+**Known limits the parcel's entry lacks** (the lead's):
+- **The pools check does not run at fp32's multi-word n.** fp32's pool has no lanes at n = 2^24 + 1, 2^40, 2^48 + 1, 2^62 + 2^37 + 1 and 2^35 + 7 (`tw_n_pool_lanes` is 0), so pools is "not run" there.
+  - At n = 2^24 + 1, the plant `n_low_dropped` is red in bound, constants, regions, shape and specials instead (VM3F2, pass 2).
+  - Lanes there would need a change to the shared vectors (the lead's reading).
+- **test_cftc_pow.py changed beyond the brief's item 11 list:** the MARKED table, the lang.run skip and N_KEYED_AT's parametrization, the tangent test and the compound-only routine-unavailable test. The lead read the diff (+75 -56):
+  - each hunk turns a refused-at-fp32 pin into its built counterpart;
+  - compound's refusal tests keep their assertions;
+  - no assertion is weakened.
+- **The parcel's list of readers missed:**
+  - seq_check's `pow_built_at` (host/tests/seq_check.py:2667 to :2675), the parcel's own new reader of `POW_LIVE_CAP`;
+  - the `LIVE_CAP` readers of the rows the parcel left alone: python/tests/test_mathlib.py, test_mathlib_trig.py, test_mathlib_inv.py, test_mathlib_inv_asin.py, test_cftc_trig.py, test_cftc_invtrig.py and mathlib_runs.py:712.
+- **The floor on a device:** a device that refused the masked 63-lane program would fire the floor. The hip stage on both GPUs is to check that before the push.
+- **The golden order's cost:** 1,512.74 s in the parcel's run and 1,739.5 s in the verifier's, on the shared desktop at different loads. The base's three files were not timed against them.
+
+**Before the push:** Not yet. The hip stage on both GPUs and the box gate at this merge.
