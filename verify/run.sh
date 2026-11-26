@@ -3093,6 +3093,7 @@ do_hip_tier() {
     printf '%-15s %-64s %-9s %-9s %-9s %-9s %s\n' "$c" "${SW[$c]}" "${EXP[$c-generic]}" "${EXP[$c-generic-res]}" \
       "${EXP[$c-fixed]}" "${EXP[$c-fixed-res]}" "$( [ "$g" = - ] && echo - || hip_same "$g" "${SW[$c]}")"
   done
+  cat "$L/corpora-generic.txt" "$L/corpora-fixed.txt"
   for t in generic fixed; do
     hip_named "$L/corpora-$t.txt" "corpora, $t" || bad+=("the corpora under CFT_HIP_TIER=$t: a run did not name the stage's device")
     hip_tier "$L/corpora-$t.txt" "corpora, $t" $t || bad+=("the corpora under CFT_HIP_TIER=$t: a run's device line says another tier")
@@ -3285,7 +3286,7 @@ progdiff fp128 edge mul 26728df98926a6b4510a84886ab138b32162948af7890cc4b7c46701
 # runs at the commit the row names. The stage prints its seconds against
 # its device's, a NOTE when over and never a FAIL; verify/test-hip-stage.sh
 # holds this line and the row to each other.
-HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=0;AMD Radeon RX 7600=0"
+HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=1100;AMD Radeon RX 7600=1200"
 need hipcc gpu host-cc python mpmath
 stage hip-tier "the GPU backend's fixed tier (CFT_HIP_TIER=fixed, round 3) on this host's GPU through hip:0, beside hip and sharing its set-up: plants first (round 3's 27, each on its cheapest red and green without it, the differentials' own, the earlier rounds' program plants under the tier, a stray plant refused by name), then the differential streams held to their recorded sums, GPU-A's corpora under each tier against sw, the golden referee under each tier, hip-test's fixed and progtier legs and seq_check under the tier, each leg's log naming its device and its tier, its seconds against its ceiling; skipped by name without hipcc or a GPU" -- do_hip_tier
 

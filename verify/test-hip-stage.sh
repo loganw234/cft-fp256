@@ -326,17 +326,18 @@ fi
 # a scratch tree with no host/ stops it at the copy; with
 # CFT_TRANSCEND_MINPREC out of a copy's unset it stops at the environment
 # check instead, naming the variable - in hip and in hip-tier, which share
-# hip_setup
+# hip_setup (HIP_DEVICE=0 on each run: the stub lists one GPU, and a host's
+# own HIP_DEVICE, the 5060 Ti's 1 in cft-gpu, would skip the stage)
 envvars=(CFT_TRANSCEND_MINPREC=4000 XCL_EMULATION_MODE=hw_emu CFT_SEGRUN_PLANT=x CFT_HIP_TIER=fixed)
 repl=$(grep '^  unset CFT_DIVSQRT_FULL ' "$RUNSH" | sed 's/ CFT_TRANSCEND_MINPREC / /')
 mkhip "$T/env0" || exit 1
 mkhip "$T/env1" 'unset CFT_DIVSQRT_FULL' "$repl" || exit 1
 stagelog() { ls -d "$1"/verify/state/*/"$2".log 2>/dev/null | tail -n 1; }
-go "$T/env0" env0 HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia PATH="$T/one:$PATH" "${envvars[@]}"
+go "$T/env0" env0 HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=0 PATH="$T/one:$PATH" "${envvars[@]}"
 l0=$(stagelog "$T/env0" hip); r0=$RC
-go "$T/env1" env1 HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia PATH="$T/one:$PATH" "${envvars[@]}"
+go "$T/env1" env1 HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=0 PATH="$T/one:$PATH" "${envvars[@]}"
 l1=$(stagelog "$T/env1" hip); r1=$RC
-gotier "$T/env1" env1t HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia PATH="$T/one:$PATH" "${envvars[@]}"
+gotier "$T/env1" env1t HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=0 PATH="$T/one:$PATH" "${envvars[@]}"
 l2=$(stagelog "$T/env1" hip-tier); r2=$RC
 CASES=$((CASES + 1))
 if [ "${ROW:-}" != "" ] && [[ $ROW == *SKIP* ]]; then
