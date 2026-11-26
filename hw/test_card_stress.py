@@ -5762,9 +5762,9 @@ def format_table_checks(src: str = HERE) -> list:
           str(sorted(Counter(wide_c5.values()).items())))
         c("format: the table names every op of the full catalog (80 ops) and no other, and the documents' table is over the same 80",
           set(L2.OP_FORMAT) - routine_ops == ops and len(ops) == 80 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
-        c("format: the routine ops (parcels M4X2, M4CAT: twelve routines one op each and atan2 at nine x, 21 op words; parcel M3X2: pow and powr at eighteen each, 36 more) are the table's other 57 - 137 ops in all - and each is fp32, the format of the programs they run",
-          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) == 57
-          and routine_ops == {n.rsplit("-all", 1)[0] for n in DOC_ROUTINE_NAMES + DOC_POW_NAMES} and all(L2.OP_FORMAT[op] == "fp32" for op in routine_ops),
+        c("format: the routine ops (parcels M4X2, M4CAT: twelve routines one op each and atan2 at nine x, 21 op words; parcel M3X2: pow and powr at eighteen each, 36 more; parcel M3NR: pown and rootn at seven n each, 14 more) are the table's other 71 - 151 ops in all - and each is fp32, the format of the programs they run",
+          set(L2.OP_FORMAT) == ops | routine_ops and len(routine_ops) == len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) + len(DOC_N_NAMES) == 71
+          and routine_ops == {n.rsplit("-all", 1)[0] for n in DOC_ROUTINE_NAMES + DOC_POW_NAMES + DOC_N_NAMES} and all(L2.OP_FORMAT[op] == "fp32" for op in routine_ops),
           str(sorted(routine_ops)))
         want.update({op: "fp32" for op in routine_ops})
         ops = ops | routine_ops
@@ -5997,7 +5997,7 @@ def wide_c5_catalog_checks(src: str = HERE) -> list:
         c("wide c5 catalog: the 60 wide clause-5 items follow the 227 - the 125 and HXc's 102, every one a divsqrt item - in the study's order "
           "(rank 3: the class modes of rint and scaleB; rank 5: the fp32 slice through the wide rint; then the wide conversions), each under "
           "all five attributes (parcel M4X2: the 287 are the first 287 of the catalog, the routine items follow them; the routine group's own count is "
-          "its catalog check)", len(full) == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) and [it.name for it in full[227:287]] == DOC_WIDE_C5_NAMES
+          "its catalog check)", len(full) == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) + len(DOC_N_NAMES) and [it.name for it in full[227:287]] == DOC_WIDE_C5_NAMES
           and [it.name for it in full[125:227]] == DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]),
           f"{len(full)}: {[it.name for it in full[227:]][:3]}")
         bad = []
@@ -6163,9 +6163,9 @@ def wide_driver_checks(env: Env, src: str = HERE) -> list:
             q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
             c("wide driver: with it the make lines gain MPFR=1 MPFR_PREFIX=<the prefix> and the catalog the 102 wide items after the 125, "
               "and parcel HXb's 60 wide clause-5 items after those",
-              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES)
+              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) + len(DOC_N_NAMES)
               and [it.name for it in d.items[125:227]] == DOC_WIDE_NAMES and [it.name for it in d.items[227:287]] == DOC_WIDE_C5_NAMES
-              and [it.name for it in d.items[287:]] == DOC_ROUTINE_NAMES + DOC_POW_NAMES)       # parcel M4X2: the routine items after the 287; parcel M3X2: the pow family's 36 after them
+              and [it.name for it in d.items[287:]] == DOC_ROUTINE_NAMES + DOC_POW_NAMES + DOC_N_NAMES)       # parcel M4X2: the routine items after the 287; parcel M3X2: the pow family's 36 after them; parcel M3NR: the 14 n-keyed
             j = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
             b = d.soak_binary(j["item"])
             c("wide plan: div256-hard-rtz's first slice is `divsqrt-soak div256-hard 0 2^20 rtz`, four checks an index, no fixed case count, "
@@ -10230,11 +10230,11 @@ def plants(env: Env) -> None:
          [("card_stress_standin.py", '("rootn", "17"): "5dc14439"', '("rootn", "17"): "5dc14438"')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: the stand-in's own table of the 14 n-keyed digests"]),
         ("M3NR: the stand-in's `list` gives pown no rows (as before parcel M3F2)",
-         [("card_stress_standin.py", 'nrows: dict = {nm: [] for nm in ("pown", "rootn")}', 'nrows: dict = {nm: [] for nm in ()}')],
+         [("card_stress_standin.py", "            nrows.setdefault(nm, []).append((tok, dg))\n        listed_by_env", "            pass\n        listed_by_env")],
          lambda env, src: routine_parser_checks(src), ["routine stand-in: `list` prints the real tool's thirty lines"]),
-        ("M3NR: the stand-in runs compound as it runs pown (a row of compound without an image)",
-         [("card_stress_standin.py", "    have = nkey in ROUTINE_STANDIN_N_DIGESTS if nkey else name in ROUTINE_STANDIN_DIGESTS", "    have = True if nkey else name in ROUTINE_STANDIN_DIGESTS")],
-         lambda env, src: routine_pow_checks(src), ["routine stand-in: compound, which has no image until parcel M3F3 builds it", "routine stand-in (parcel M3NR): pown at n = 3"]),
+        ("M3NR: the stand-in has a row for compound (not built at fp32: no image)",
+         [("card_stress_standin.py", '("rootn", "m9223372036854775808"): "37a80323"}', '("rootn", "m9223372036854775808"): "37a80323", ("compound", "3"): "0123abcd"}')],
+         lambda env, src: routine_pow_checks(src), ["routine stand-in: compound, which has no image until parcel M3F3 builds it", "routine stand-in: `list` prints the real tool's thirty lines"]),
         ("M3X2: the marks parser does not need the exact line of a pow op",
          [("card_stress_lib.py", "    elif routine_has_exact(op):\n        raise VerdictError(", "    elif False:\n        raise VerdictError(")],
          lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact line gone"]),

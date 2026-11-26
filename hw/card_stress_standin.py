@@ -180,9 +180,9 @@ def routine_main(real, do: str) -> int:
             return 2
         missing = [x for x in (os.environ.get("CFT_STANDIN_LIST_MISSING") or "").split(",") if x]
         # CFT_STANDIN_LIST_N=pown:3:0123abcd,pown:m3:0123abcd: the rows of an n-keyed name that has images (the tool's `<name>-f32-n<token>: ...`), which the stand-in has none of
-        nrows: dict = {nm: [] for nm in ("pown", "rootn")}       # parcel M3NR: the rows of pown and rootn at each n, in the tool's order (the real `list` at 5fff2868)
+        nrows: dict = {}       # parcel M3NR: the rows of pown and rootn at each n, in the tool's order (the real `list` at 5fff2868)
         for (nm, tok), dg in ROUTINE_STANDIN_N_DIGESTS.items():
-            nrows[nm].append((tok, dg))
+            nrows.setdefault(nm, []).append((tok, dg))
         listed_by_env = {}
         for item in (os.environ.get("CFT_STANDIN_LIST_N") or "").split(","):
             if item:
