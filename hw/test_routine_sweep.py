@@ -399,11 +399,12 @@ def group_build(tool, log, tree, work, imgs, manifest):
           "that is built, one `no image` row for a name that has none), in the tool's order", got_rows == want_rows and noimg == skipped and not account_problems(built, skipped),
           f"{rows} {built} {skipped}")
     # the same comparison on doctored accounts: an n-keyed name built at its seven n has seven rows where `list` shows one `no image` row, so today's rows are not those
-    fb = [x for x in built if base_of(x[0]) != "pown"] + [(f"pown-n{ntoken(v)}", "00000000") for v in N_LIST]
-    fake_rows = expected_rows(fb, [x for x in skipped if x != "pown"])
+    # (parcel M3NR: pown and rootn are built, compound is the name `list` shows `no image` for)
+    fb = [x for x in built if base_of(x[0]) != "compound"] + [(f"compound-n{ntoken(v)}", "00000000") for v in N_LIST]
+    fake_rows = expected_rows(fb, [x for x in skipped if x != "compound"])
     check("build: RED - the `list` check above, evaluated on lists in memory, is red when `list` says `no image` for a name the account did not skip (a doctored noimg with one built name added), "
-          "when a built name is dropped, and when pown is taken as built at its seven n (seven rows for the one `pown-f32: no image`: a pattern that reads only `<name>-f32: ` rows would not see them)",
-          not (noimg + [built[0][0]] == skipped) and got_rows[1:] != want_rows and fake_rows != got_rows and len([r for r in fake_rows if r[0].startswith("pown-f32-n")]) == 7, "")
+          "when a built name is dropped, and when compound is taken as built at its seven n (seven rows for the one `compound-f32: no image`: a pattern that reads only `<name>-f32: ` rows would not see them)",
+          not (noimg + [built[0][0]] == skipped) and got_rows[1:] != want_rows and fake_rows != got_rows and len([r for r in fake_rows if r[0].startswith("compound-f32-n")]) == 7, "")
     rc, out, err = tool.raw("list", imgs=os.path.join(work, "nowhere"))
     check("build: `list` with no images directory says `no image` eighteen times, one row a name and none for an n", rc == 0 and out.count("no image") == 18
           and len(out.splitlines()) == 18, out[:200])
@@ -437,7 +438,7 @@ def group_images(tool, tree, work, imgs, manifest):
     check("images: a DIR that exists is refused (exit 2), nothing written", rc == 2 and "exists" in o, o[-200:])
     rc, o = gen(os.path.join(work, "img-bad"), "--names", "exp,nonesuch")
     check("images: an unknown name is refused, exit 2", rc == 2, o[-200:])
-    rc, o = gen(os.path.join(work, "img-nk"), "--names", ",".join(NKEYED), "--attrs", "rne")
+    rc, o = gen(os.path.join(work, "img-nk"), "--names", ",".join(NKEYED))      # all five attributes: a name has a `digest` line only when its five images are built (with --attrs rne the account was empty and this check passed vacuously, before parcel M3NR)
     nk_man = open(os.path.join(work, "img-nk", "manifest.txt")).read() if rc == 0 else ""
     nk_built, nk_skipped = gen_account(nk_man) if nk_man else ([], [])
     nk_keys = [k for k, _ in nk_built]
@@ -469,8 +470,9 @@ def group_images(tool, tree, work, imgs, manifest):
           any("neither built nor skipped" in x for x in account_problems(built[1:], skipped)), "")
     check("images: RED - an image line dropped: the manifest's image lines are not 5 for each built name",
           len(image_line.findall(manifest.replace(image_line.findall(manifest)[0] + "\n", "", 1))) != 5 * len(built), "")
-    check("images: GREEN - a name moved from built to skipped (the last built, as the generator would report it unbuilt) is still a whole account; this runs for the case on the real lists",
-          len(built) > 0 and account_problems(built[:-1], skipped + [built[-1][0]]) == [], "")
+    last_plain = [x for x in built if base_of(x[0]) not in NKEYED][-1]
+    check("images: GREEN - a name moved from built to skipped (the last built that is not n-keyed, as the generator would report it unbuilt) is still a whole account; this runs for the case on the real lists",
+          len(built) > 0 and account_problems([x for x in built if x != last_plain], skipped + [last_plain[0]]) == [], "")
     # parcel M4X2: the generator's `digest` lines against hw/card_stress_lib.py's table of them, which the card driver holds its build step to: a moved fragment
     # fails the gate at its merge and not a night. The judge is a function, so that it is shown red on a doctored table as well as green on the real one.
     mdig = built
