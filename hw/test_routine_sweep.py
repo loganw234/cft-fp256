@@ -670,6 +670,9 @@ def group_agree(tool, names):
     FP32, ml, routines, sf, T, har = mods()
     rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
     for n in names:
+      if n in NKEYED:
+          skip(f"agree: {n}", "an n-keyed name has seven n and its fragment needs one: its lanes are held by `images` (positive-run at each n) and `oracle` (each n), not by this leg (parcel M3NR: named, not a crash)")
+          continue
       if n in NEEDS_42 and not has_42(tool):
           skip_leg("agree", n, tool)
           continue
@@ -920,6 +923,9 @@ def slices_of(bits):
 
 def group_whole(tool, names, bits):
     for name in names:
+      if name in NKEYED:
+          skip(f"whole: {name}", "an n-keyed name has seven n: its slices are the card's items' (the lead's slice logs), not this leg's (parcel M3NR: named, not a crash)")
+          continue
       if name in NEEDS_42 and not has_42(tool):
           skip_leg("whole", name, tool)
           continue
