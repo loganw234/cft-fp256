@@ -110,8 +110,10 @@ OP = ""      # a soak job's op (argv[1] after the binary), for rules that name o
 # them to hw/card_stress_lib.py's ROUTINE_DIGESTS and to the real `routine-sweep list`, the fixture hw/card_stress_fixtures/rs-list.txt): the digests of the thirteen
 # routines that have images, and the instructions and words of exp's five (the tool's own image lines, step1 of the same run); every
 # other routine's image lines carry the exp numbers - a count that adds up, not a measurement - and a hash the stand-in makes up.
-# Parcel M3X2: the eighteen of routine_sweep.c's RTNS: pow and powr have images and a digest; pown, rootn and compound have none (parcel M3F2's), so `list`
-# says `no image` for them and an op word of theirs is refused as a tool refuses a name with no image (exit 2).
+# Parcel M3X2: the eighteen of routine_sweep.c's RTNS: pow and powr have images and a digest. Parcel M3NR (2026-11-26): pown and rootn have images at each of the seven n (their
+# digests ROUTINE_STANDIN_N_DIGESTS, keyed (name, token): the library's ROUTINE_N_DIGESTS, to which the suite holds them, and the real tool's `list` at 5fff2868), so `list` has
+# a row `pown-f32-n3: images ..., digest ...` for each of the 14 and the tool runs them; compound, not built at fp32 (parcel M3F3), has none: `list` says `compound-f32: no image`
+# and an op word of compound is refused as a tool refuses a name with no image (exit 2).
 ROUTINE_NAMES = ("exp", "exp2", "expm1", "log", "log2", "log1p", "sin", "cos", "tan", "atan", "asin", "acos", "atan2",
                  "pow", "powr", "pown", "rootn", "compound")
 ROUTINE_FAMILY = ("pow", "powr", "pown", "rootn", "compound")      # the names that have the exact family and its line
@@ -120,6 +122,10 @@ ROUTINE_STANDIN_DIGESTS = {"exp": "043b3bb5", "exp2": "ce1e05a9", "expm1": "e63a
                            "log1p": "38ea27d9", "sin": "05eb28b1", "cos": "98b93d46", "tan": "dbfd4a4e",
                            "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8",
                            "pow": "7043fd38", "powr": "8aefb175"}
+ROUTINE_STANDIN_N_DIGESTS = {("pown", "2"): "c0dbd1ed", ("pown", "m2"): "7b7e380e", ("pown", "3"): "70850195", ("pown", "m3"): "405367c2", ("pown", "17"): "7cf40cd5",
+                             ("pown", "2147483647"): "713ef7b0", ("pown", "m9223372036854775808"): "4e97c4d7",
+                             ("rootn", "2"): "eb9c2d7d", ("rootn", "m2"): "ec791a25", ("rootn", "3"): "2fcd23e4", ("rootn", "m3"): "05c656e7", ("rootn", "17"): "5dc14439",
+                             ("rootn", "2147483647"): "93319d6c", ("rootn", "m9223372036854775808"): "37a80323"}
 ROUTINE_EXP_SIZES = {"rne": (387, 71), "rtz": (385, 71), "rdn": (385, 71), "rup": (384, 70), "rmm": (387, 71)}
 ROUTINE_POW_SIZES = {"rne": (930, 143), "rtz": (925, 145), "rdn": (926, 146), "rup": (926, 144), "rmm": (930, 143)}     # pow's, the tool's own image lines (MEASURED 2026-11-24)
 _NTOK = r"(?:0|m?[1-9][0-9]*)"
@@ -174,11 +180,15 @@ def routine_main(real, do: str) -> int:
             return 2
         missing = [x for x in (os.environ.get("CFT_STANDIN_LIST_MISSING") or "").split(",") if x]
         # CFT_STANDIN_LIST_N=pown:3:0123abcd,pown:m3:0123abcd: the rows of an n-keyed name that has images (the tool's `<name>-f32-n<token>: ...`), which the stand-in has none of
-        nrows: dict = {}
+        nrows: dict = {}       # parcel M3NR: the rows of pown and rootn at each n, in the tool's order (the real `list` at 5fff2868)
+        for (nm, tok), dg in ROUTINE_STANDIN_N_DIGESTS.items():
+            nrows.setdefault(nm, []).append((tok, dg))
+        listed_by_env = {}
         for item in (os.environ.get("CFT_STANDIN_LIST_N") or "").split(","):
             if item:
                 nm, tok, dg = item.split(":")
-                nrows.setdefault(nm, []).append((tok, dg))
+                listed_by_env.setdefault(nm, []).append((tok, dg))
+        nrows.update(listed_by_env)             # CFT_STANDIN_LIST_N names a name's rows in full: they replace that name's own
         dropped = [x for x in (os.environ.get("CFT_STANDIN_LIST_DROP") or "").split(",") if x]       # a `list` that leaves a name's row out altogether
         for n in ROUTINE_NAMES:
             if n in dropped:
@@ -208,12 +218,15 @@ def routine_main(real, do: str) -> int:
     attrs = ROUTINE_ATTRS if mode == "all" else (mode,)
     imgdir = os.environ.get("CFT_SWEEP_IMAGES") or "sweep-images"
     out(f"standin: env CFT_SWEEP_IMAGES={os.environ.get('CFT_SWEEP_IMAGES', '<unset>')}")
-    if do == "noimage" or name not in ROUTINE_STANDIN_DIGESTS:       # pown, rootn and compound have no image until parcel M3F2 has merged
+    nkey = (name, m.group("t")) if m.group("n_nkey") else None
+    have = nkey in ROUTINE_STANDIN_N_DIGESTS if nkey else name in ROUTINE_STANDIN_DIGESTS
+    if do == "noimage" or not have:       # compound has no image (parcel M3F3's), nor has pown or rootn at an n the generator does not build
         stem = f"{name}-n{m.group('t')}" if m.group("n_nkey") else name
         err(f"routine-sweep: cannot read {imgdir}/{stem}-fp32-{attrs[0] if d is None else 'rne'}.cftp")
         return 2
-    if do == "digest" or (d is not None and name in ROUTINE_STANDIN_DIGESTS and d != ROUTINE_STANDIN_DIGESTS[name]):
-        want = ROUTINE_STANDIN_DIGESTS.get(name, "00000000")
+    real_d = ROUTINE_STANDIN_N_DIGESTS[nkey] if nkey else ROUTINE_STANDIN_DIGESTS[name]
+    if do == "digest" or (d is not None and d != real_d):
+        want = real_d
         err(f"routine-sweep: {op} names digest {d or '00000000'}, the images' digest is {want if d != want else 'ffffffff'}")
         return 2
     art = os.environ.get("CFT_SOAK_ARTIFACT")

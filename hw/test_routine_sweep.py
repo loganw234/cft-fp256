@@ -399,11 +399,12 @@ def group_build(tool, log, tree, work, imgs, manifest):
           "that is built, one `no image` row for a name that has none), in the tool's order", got_rows == want_rows and noimg == skipped and not account_problems(built, skipped),
           f"{rows} {built} {skipped}")
     # the same comparison on doctored accounts: an n-keyed name built at its seven n has seven rows where `list` shows one `no image` row, so today's rows are not those
-    fb = [x for x in built if base_of(x[0]) != "pown"] + [(f"pown-n{ntoken(v)}", "00000000") for v in N_LIST]
-    fake_rows = expected_rows(fb, [x for x in skipped if x != "pown"])
+    # (parcel M3NR: pown and rootn are built, compound is the name `list` shows `no image` for)
+    fb = [x for x in built if base_of(x[0]) != "compound"] + [(f"compound-n{ntoken(v)}", "00000000") for v in N_LIST]
+    fake_rows = expected_rows(fb, [x for x in skipped if x != "compound"])
     check("build: RED - the `list` check above, evaluated on lists in memory, is red when `list` says `no image` for a name the account did not skip (a doctored noimg with one built name added), "
-          "when a built name is dropped, and when pown is taken as built at its seven n (seven rows for the one `pown-f32: no image`: a pattern that reads only `<name>-f32: ` rows would not see them)",
-          not (noimg + [built[0][0]] == skipped) and got_rows[1:] != want_rows and fake_rows != got_rows and len([r for r in fake_rows if r[0].startswith("pown-f32-n")]) == 7, "")
+          "when a built name is dropped, and when compound is taken as built at its seven n (seven rows for the one `compound-f32: no image`: a pattern that reads only `<name>-f32: ` rows would not see them)",
+          not (noimg + [built[0][0]] == skipped) and got_rows[1:] != want_rows and fake_rows != got_rows and len([r for r in fake_rows if r[0].startswith("compound-f32-n")]) == 7, "")
     rc, out, err = tool.raw("list", imgs=os.path.join(work, "nowhere"))
     check("build: `list` with no images directory says `no image` eighteen times, one row a name and none for an n", rc == 0 and out.count("no image") == 18
           and len(out.splitlines()) == 18, out[:200])
@@ -437,15 +438,15 @@ def group_images(tool, tree, work, imgs, manifest):
     check("images: a DIR that exists is refused (exit 2), nothing written", rc == 2 and "exists" in o, o[-200:])
     rc, o = gen(os.path.join(work, "img-bad"), "--names", "exp,nonesuch")
     check("images: an unknown name is refused, exit 2", rc == 2, o[-200:])
-    rc, o = gen(os.path.join(work, "img-nk"), "--names", ",".join(NKEYED), "--attrs", "rne")
+    rc, o = gen(os.path.join(work, "img-nk"), "--names", ",".join(NKEYED))      # all five attributes: a name has a `digest` line only when its five images are built (with --attrs rne the account was empty and this check passed vacuously, before parcel M3NR)
     nk_man = open(os.path.join(work, "img-nk", "manifest.txt")).read() if rc == 0 else ""
     nk_built, nk_skipped = gen_account(nk_man) if nk_man else ([], [])
     nk_keys = [k for k, _ in nk_built]
-    check("images: `--names pown,rootn,compound` does not fail (exit 0): each name is skipped by name once (`skipped pown not built at fp32`, as the inverse names were) while parcel M3F2's "
-          "fragments are not built, and built at each of the seven n, in N_LIST's order, once they are; never both, never an error",
-          rc == 0 and all((n in nk_skipped) != any(base_of(k) == n for k in nk_keys) for n in NKEYED)
-          and all([k for k in nk_keys if base_of(k) == n] in ([], [f"{n}-n{ntoken(v)}" for v in N_LIST]) for n in NKEYED)
-          and len(nk_skipped) == len(set(nk_skipped)), f"rc {rc} {nk_skipped} {nk_keys} {o[-200:]}")
+    check("images: `--names pown,rootn,compound` does not fail (exit 0): pown and rootn (parcel M3F2's, merged) are built at each of the seven n, in N_LIST's order, and compound, not built at fp32 "
+          "(parcel M3F3's), is skipped by name once (`skipped compound not built at fp32`); a name is never both, never an error. PINS today's account exactly: when parcel M3F3 builds compound this check "
+          "fails by name, and the row check below with it, until compound's seven rows are in ROUTINE_N_DIGESTS",
+          rc == 0 and nk_skipped == ["compound"] and nk_keys == [f"{n}-n{ntoken(v)}" for n in ("pown", "rootn") for v in N_LIST]
+          and all((n in nk_skipped) != any(base_of(k) == n for k in nk_keys) for n in NKEYED), f"rc {rc} {nk_skipped} {nk_keys} {o[-200:]}")
     check("images: ... and the `skipped` check itself is red on a manifest with the name skipped twice and on one that is both built and skipped (a doctored account in memory)",
           account_problems([], NKEYED + ("pown",))[:1] == ["a name twice"] and any("both built and skipped" in x for x in account_problems([(f"pown-n{ntoken(N_LIST[0])}", "00000000")], ["pown"])), "")
     image_line = re.compile(r"^image \S+ \S+ instructions \d+ words \d+ image_sha256 [0-9a-f]{64} bank_sha256 [0-9a-f]{64} "
@@ -469,8 +470,9 @@ def group_images(tool, tree, work, imgs, manifest):
           any("neither built nor skipped" in x for x in account_problems(built[1:], skipped)), "")
     check("images: RED - an image line dropped: the manifest's image lines are not 5 for each built name",
           len(image_line.findall(manifest.replace(image_line.findall(manifest)[0] + "\n", "", 1))) != 5 * len(built), "")
-    check("images: GREEN - a name moved from built to skipped (the last built, as the generator would report it unbuilt) is still a whole account; this runs for the case on the real lists",
-          len(built) > 0 and account_problems(built[:-1], skipped + [built[-1][0]]) == [], "")
+    last_plain = [x for x in built if base_of(x[0]) not in NKEYED][-1]
+    check("images: GREEN - a name moved from built to skipped (the last built that is not n-keyed, as the generator would report it unbuilt) is still a whole account; this runs for the case on the real lists",
+          len(built) > 0 and account_problems([x for x in built if x != last_plain], skipped + [last_plain[0]]) == [], "")
     # parcel M4X2: the generator's `digest` lines against hw/card_stress_lib.py's table of them, which the card driver holds its build step to: a moved fragment
     # fails the gate at its merge and not a night. The judge is a function, so that it is shown red on a doctored table as well as green on the real one.
     mdig = built
@@ -489,8 +491,13 @@ def group_images(tool, tree, work, imgs, manifest):
     # parcel M3X2: ROUTINE_N_DIGESTS, keyed (name, n), against the generator's `digest pown-n3 <8 hex>` lines: a row of the table needs the line with an equal digest
     ntab = {f"{nm}-n{ntoken(v)}": d for (nm, v), d in L.ROUTINE_N_DIGESTS.items()}
     nf, nn_ = digest_judge(mdig, ntab)
-    check(f"images: every row of ROUTINE_N_DIGESTS ({len(ntab)} today: it is empty until parcel M3F2 has merged and the lead has added the rows) is among the generator's `digest` lines (pown-n3 ...) "
-          f"with an equal digest; the n-keyed names built without a row are named, not failed ({[n for n in nn_ if base_of(n) in NKEYED] or 'none built today'})", not nf, f"{nf}")
+    check(f"images: every row of ROUTINE_N_DIGESTS ({len(ntab)} today: parcel M3NR's, pown's and rootn's at the seven n) is among the generator's `digest` lines (pown-n3 ...) "
+          f"with an equal digest, and EVERY n-keyed name the generator built has its row (an n-keyed key named without one - compound's seven, once parcel M3F3 builds it - FAILS here, by name: "
+          f"{[n for n in nn_ if base_of(n) in NKEYED] or 'none today'})", not nf and len(ntab) == 14 and not [n for n in nn_ if base_of(n) in NKEYED], f"{nf} {nn_}")
+    check("images: RED - the row check above, evaluated on a doctored account in memory with compound built at n = 3 and the table as it is (no row for compound), names compound-n3 as built without "
+          "a row (the condition `not [n-keyed names without a row]` is then false), and is green on the real account",
+          [n for n in digest_judge(mdig + [("compound-n3", "00000000")], ntab)[1] if base_of(n) in NKEYED] == ["compound-n3"]
+          and not [n for n in nn_ if base_of(n) in NKEYED], "")
     check("images: ... and the same judge is red on a row for a name and n that can never be built (nonesuch-n3), on a row for pown at an n outside N_LIST, and, when the generator built an "
           "n-keyed name, on one digit of its digest changed",
           digest_judge(mdig, {"nonesuch-n3": "00000000"})[0] and digest_judge(mdig, {"pown-n4": "00000000"})[0]
@@ -539,7 +546,7 @@ def group_images(tool, tree, work, imgs, manifest):
                       p.returncode == 0 and dep == [ml.evaluate(f, pr)[0] for pr in pairs], f"rc {p.returncode} {p.stderr[-200:]}")
     nb = [k for k, _ in built if base_of(k) in NKEYED]
     if not nb:
-        skip("images: pown, rootn and compound positive-run", f"not built at fp32 (the generator skipped {[n for n in skipped if n in NKEYED]} by name): parcel M3F2's fragments")
+        skip("images: pown, rootn and compound positive-run", f"not built at fp32 (the generator skipped {[n for n in skipped if n in NKEYED]} by name)")
     ntok = {ntoken(v): v for v in N_LIST}
     for key in nb:
         nm, tok = key.split("-n")
@@ -665,6 +672,9 @@ def group_agree(tool, names):
     FP32, ml, routines, sf, T, har = mods()
     rnd_of = {sf.RND_NAMES[r]: r for r in sf.RND_NAMES}
     for n in names:
+      if n in NKEYED:
+          skip(f"agree: {n}", "an n-keyed name has seven n and its fragment needs one: its lanes are held by `images` (positive-run at each n) and `oracle` (each n), not by this leg (parcel M3NR: named, not a crash)")
+          continue
       if n in NEEDS_42 and not has_42(tool):
           skip_leg("agree", n, tool)
           continue
@@ -915,6 +925,9 @@ def slices_of(bits):
 
 def group_whole(tool, names, bits):
     for name in names:
+      if name in NKEYED:
+          skip(f"whole: {name}", "an n-keyed name has seven n: its slices are the card's items' (the lead's slice logs), not this leg's (parcel M3NR: named, not a crash)")
+          continue
       if name in NEEDS_42 and not has_42(tool):
           skip_leg("whole", name, tool)
           continue

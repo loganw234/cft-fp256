@@ -29,7 +29,7 @@
 # without --rate-probe, what it does when the card misbehaves, and host/tools/rate_probe.c on the software backend (POSIX with cc and make; skipped by name
 # elsewhere). The plants of parcel TP are CARD_STRESS_PLANT='TP: '; CARD_STRESS_PLANT_EXCEPT='TP: ' leaves them out, and CARD_STRESS_PLANT_APPLY_ONLY=1 only
 # checks that every plant's edit matches once where it is. `wide` (parcel HXc, 2026-10-26): the 102
-# wide-format items, --mpfr-prefix and the build line with MPFR=1. `routine` (parcels M4X2, M4CAT, M3X2): the 57 routine items (the 21 of the thirteen routines and, since 2026-11-24, pow's and powr's 36), the tool's marks and its exact line, and the build step's `routine images` and `mpfr routine-sweep`; the build checks are POSIX-only (skipped by name on Windows). `trees` skips its
+# wide-format items, --mpfr-prefix and the build line with MPFR=1. `routine` (parcels M4X2, M4CAT, M3X2): the 71 routine items (the 21 of the thirteen routines, since 2026-11-24 pow's and powr's 36, and since 2026-11-26 pown's and rootn's 14), the tool's marks and its exact line, and the build step's `routine images` and `mpfr routine-sweep`; the build checks are POSIX-only (skipped by name on Windows). `trees` skips its
 # one check of the recorded tree, by name, where git cannot read this tree (a worktree whose .git file
 # names a Windows path, read from WSL). The four groups of parcel DR3 (2026-10-21): `items` the 35 hard-case
 # and class-level items (real logs, plans, served and refused), `chunk` --sweep-chunk and its streams, `records`

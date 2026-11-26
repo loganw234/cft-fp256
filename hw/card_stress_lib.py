@@ -1110,12 +1110,18 @@ ROUTINE_DIGESTS = {
     "atan": "d22abd22", "asin": "005fc862", "acos": "2f8ca421", "atan2": "a86a60d8",
     "pow": "7043fd38", "powr": "8aefb175",
 }
-# pown, rootn and compound are built at seven n each (gen_sweep_images.py's N_LIST), so their digests are keyed (name, n): ONE row is one item. THE TABLE IS
-# EMPTY at parcel M3X2's merge, because the fragments are parcel M3F2's (fp32's pown, rootn and compound): until it has merged the generator skips the
-# three by name, `routine-sweep list` says `no image` for them, and no op word of them is an item (--sweep-items names one: refused, naming this table). The
-# lead adds the 21 rows, each the generator's `digest pown-n3 <8 hex>` line (the key (name, n) of the line `digest <name>-n<token> <8 hex>`), after M3F2's merge,
-# as ROUTINE_DIGESTS' rows are added: the same rules (HOW A DIGEST MOVES above) hold for each row.
-ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}
+# pown, rootn and compound are built at seven n each (gen_sweep_images.py's N_LIST), so their digests are keyed (name, n): ONE row is one item. THE TABLE HAS 14 ROWS
+# (parcel M3NR, 2026-11-26): pown's seven, then rootn's seven, each the generator's `digest pown-n3 <8 hex>` line (the key (name, n) of the line `digest <name>-n<token> <8 hex>`)
+# of gen_sweep_images.py at 5fff2868 (parcel M3F2's merge and what followed it), equal to M3F2's report, approved by the lead; the rows are in ROUTINE_NS' order.
+# compound HAS NO ROW: it is not built at fp32 (parcel M3F3, after M3F2), so the generator skips it by name, `routine-sweep list` says `compound-f32: no image`, and no op word of
+# compound is an item (--sweep-items names one: refused, naming this table and parcel M3F3). Parcel M3F3 adds its seven rows when it has built it. The same rules as for
+# ROUTINE_DIGESTS' rows hold for each row (HOW A DIGEST MOVES above): a moved fragment moves the digest, the lead changes the row, the item is new.
+ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {
+    ("pown", 2): "c0dbd1ed", ("pown", -2): "7b7e380e", ("pown", 3): "70850195", ("pown", -3): "405367c2", ("pown", 17): "7cf40cd5",
+    ("pown", 2 ** 31 - 1): "713ef7b0", ("pown", -2 ** 63): "4e97c4d7",
+    ("rootn", 2): "eb9c2d7d", ("rootn", -2): "ec791a25", ("rootn", 3): "2fcd23e4", ("rootn", -3): "05c656e7", ("rootn", 17): "5dc14439",
+    ("rootn", 2 ** 31 - 1): "93319d6c", ("rootn", -2 ** 63): "37a80323",
+}
 # atan2 is swept as every y for one fixed x, nine x (the lead's, plan.md decision 9), in the lead's order: (the x, what it is)
 ATAN2_X = (
     (0x3f800000, "1"), (0xbf800000, "-1"), (0x3f800001, "one ulp above 1"), (0x53800000, "2^40"),
@@ -1384,8 +1390,8 @@ class Item:
 
 
 def routine_items(digests: Optional[Dict[str, str]] = None, n_digests: Optional[Dict[Tuple[str, int], str]] = None) -> List[Item]:
-    """The routine items of a table of digests (ROUTINE_DIGESTS by default) and of the n-keyed ones (ROUTINE_N_DIGESTS, empty at parcel M3X2's merge): the
-    thirteen, then pow and powr's 36, in the tool's order; a test passes a table of its own (atan2 among them), after putting its ops into OP_REACH and
+    """The routine items of a table of digests (ROUTINE_DIGESTS by default) and of the n-keyed ones (ROUTINE_N_DIGESTS: pown's and rootn's 14 rows since parcel M3NR): the
+    thirteen, then pow and powr's 36, then the 14, in the tool's order; a test passes a table of its own (atan2 among them), after putting its ops into OP_REACH and
     OP_FORMAT as the module does for the real ones."""
     return [Item(f"{op}-all", ROUTINE_TOOL, "exhaustive", op, "all", verdict_mode="all", exact=True, per_encoding=len(ROUTINE_ATTRS),
                  space=EXH, level="exhaustive", whole=(len(ROUTINE_ATTRS) * EXH, 0), mpfr=True, claim=routine_claim(name, d, x))
@@ -1528,7 +1534,7 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
                                   per_encoding=k, space=space, level="exhaustive" if f32 else "class", whole=(k * space, 0),
                                   mpfr=True, claim=f"{wide_c5_claim(op)}, under {mode}"))
         # Parcel M3X2 (2026-11-24): the pow family's 36 items (pow and powr, eighteen each) come with the routine items, appended at the end of them, so that the
-        # 308 keep their places and the catalog is 344; the n-keyed items are not items until ROUTINE_N_DIGESTS has rows.
+        # 308 keep their places and the catalog was 344; parcel M3NR (2026-11-26) appended the 14 n-keyed items (pown's and rootn's, one a row of ROUTINE_N_DIGESTS): 358.
         # Parcel M4X2: the routine items, APPENDED after HXb's 60 so that the 287 keep their places, one an op word (routine_ops): all five
         # attributes in one job (`all`), five checks an encoding, exactly E encodings and none skipped, so exact, and the whole space is
         # (5 x 2^32, 0). The tool links the pinned MPFR, so they run only with --mpfr-prefix as the wide items do.

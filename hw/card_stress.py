@@ -2890,7 +2890,7 @@ class Driver:
                         bad.append(f"{name}: the generator's digest is {got.get(name, 'not given (no digest line)')}, ROUTINE_DIGESTS has {want}: "
                                    f"the fragment moved (or its images were not all built) - update hw/card_stress_lib.py ROUTINE_DIGESTS with "
                                    f"the lead's approval; the item it makes is new, its coverage from nothing")
-                for (name, nn), want in L.ROUTINE_N_DIGESTS.items():       # parcel M3X2: pown, rootn, compound at each n a row names (empty until M3F2's merge)
+                for (name, nn), want in L.ROUTINE_N_DIGESTS.items():       # parcel M3X2: the n-keyed names at each n a row names (parcel M3NR: pown's and rootn's 14; compound has none until parcel M3F3)
                     key = f"{name}-n{L.routine_ntoken(nn)}"
                     if got.get(key) != want:
                         bad.append(f"{key}: the generator's digest is {got.get(key, 'not given (no digest line)')}, ROUTINE_N_DIGESTS has {want}: "
@@ -3574,9 +3574,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         known = {it.name for it in L.sweep_items(mpfr=True)}
         for n in a.sweep_items.split(","):
             if n and n not in known and re.match(r"^(?:pown|rootn|compound)-f32-n", n):
-                ap.error(f"--sweep-items {n!r}: refused, it is not an item. pown, rootn and compound are items only at an n that "
-                         f"hw/card_stress_lib.py's ROUTINE_N_DIGESTS has a row for, and the table is empty until parcel M3F2 (fp32's pown, rootn and compound) "
-                         f"has merged and the lead has added its rows ({len(L.ROUTINE_N_DIGESTS)} now)")
+                parts = L.routine_op_parts(n[:-4] if n.endswith("-all") else n)       # an op word of a (name, n) that HAS a row, with another digest, is refused below as any wrong digest is
+                if not (parts and parts[1] and (parts[0], parts[1][1]) in L.ROUTINE_N_DIGESTS):
+                    ap.error(f"--sweep-items {n!r}: refused, it is not an item. pown and rootn are items at the seven n of hw/card_stress_lib.py's ROUTINE_N_DIGESTS "
+                             f"({len(L.ROUTINE_N_DIGESTS)} rows now), each with the digest of its row; compound at fp32 is not built (parcel M3F3) and has no row, and "
+                             f"this word names no row of that table")
             if n and n not in known:
                 ap.error(f"--sweep-items {n!r}: not an item ({', '.join(sorted(known)[:6])}, ...)")
     if a.soak_jobs != "auto" and not a.soak_jobs.isdigit():
