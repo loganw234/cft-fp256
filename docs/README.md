@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Sixty files, 106,652 lines. Flat in one directory they look like one
+Sixty files, 106,684 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **30,334 lines you consult while working** — the three under *Start here*,
+- **30,338 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,978 lines of tool manual**, one per shipped program;
 - **4,436 lines of operations**, read when you are about to do something to
   hardware;
-- **63,904 lines of record and argument** — the ledger, the roadmap and the
+- **63,932 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
