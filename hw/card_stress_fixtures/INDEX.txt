@@ -199,6 +199,8 @@ rs-atan2-xneg.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep atan2-f32-xb
 # `oracle` of pown at n = 3 (it needs no image, MPFR 4.1.0 and 4.2 both run pown); rs3-exact-pow-y2: `exact` classes of six lanes at y = 2. powr, rootn and compound need MPFR 4.2.0: their logs are the
 # lead's box run (rs3-box-*, hw/card_stress_fixtures/box_m3x2_fixtures.sh), and the tests that read them are SKIPPED by name until those files exist. The n-keyed names have no slice log here
 # because they have no images until parcel M3F2 has merged.
+# 2026-11-26 (parcel M3NR): the two sentences above are the record of this run, true of it: since parcel M3F2's merge pown and rootn have images and 14 rows in ROUTINE_N_DIGESTS (the real tool's `list` now has
+# a row for each n of them and `compound-f32: no image`); compound has none until parcel M3F3. These files are not rewritten.
 rs3-list.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep list [0 s]
 rs3-pow-x-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-x40000000-d7043fd38 0x3f800000 0x3f800100 all [0 s]
 rs3-pow-y-exact-all.txt	0	env CFT_SWEEP_IMAGES=$IMAGES host/routine-sweep pow-f32-y40000000-d7043fd38 0x40400000 0x40400100 all [0 s]

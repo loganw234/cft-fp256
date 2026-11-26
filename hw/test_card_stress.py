@@ -72,9 +72,13 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             a missing image, an oracle naming MPFR 4.1.0, a tool with no `list` and marks that are not the smoke's; python/figure_extracts.py's rule for the routine op words and host/Makefile's
             rule for routine-sweep. Plants: CARD_STRESS_PLANT='M4X2: ' (some also run the report's and the page's tests, as HXd's do).
             Parcel M3X2 (2026-11-24) added the pow family: the catalog is 344 with mpfr (the first 308 held by hash of vars() to f7a1ce95's, pow's and powr's 36 typed in this file from the study's lists, the n-keyed names
-            having no item while ROUTINE_N_DIGESTS is empty), the digests of the fifteen held to rs3-list.txt and rs3-images-manifest.txt, parse_routine_marks on the real pow logs (rs3-*) and its exact line (every damage refused,
+            having no item until parcel M3NR), the digests of the fifteen held to rs3-list.txt and rs3-images-manifest.txt, parse_routine_marks on the real pow logs (rs3-*) and its exact line (every damage refused,
             the line refused for any other op), the stand-in's lines for pow ops held to the real ones and each of its misbehaviours through the parser, the build step red by name on a moved pow digest, a `list` that lacks a pow row or an
-            n-keyed row, and a table of n-keyed rows (a copy of the code whose ROUTINE_N_DIGESTS has a row), and `--sweep-items pown-f32-n3-...` refused naming the table. Plants: CARD_STRESS_PLANT='M3X2: '.
+            n-keyed row, and `--sweep-items pown-f32-n3-...` refused naming the table. Plants: CARD_STRESS_PLANT='M3X2: '.
+            Parcel M3NR (2026-11-26) added the 14 n-keyed rows (pown's and rootn's at the seven n): the catalog is 358 with mpfr and the routine op words 71, the rows a literal typed in this file
+            (DOC_N_ROWS), the 14 items after the 344 in the table's order, compound with no row (not built at fp32, parcel M3F3) and `--sweep-items` of it refused naming the table and M3F3, a pown
+            word at a row's n with another digest refused as any wrong digest is, the stand-in's `list` and its runs of the 14, and the build step red by name on a row's moved or missing digest line
+            and on a `list` that lacks a row or gives another digest, in the driver's own tables. Plants: CARD_STRESS_PLANT='M3NR: '.
 
   probe    (parcel TP, 2026-10-28) the card's rates and the probe leg: the driver's dry run with --rate-probe (the quad's tile 1 alone, then its four tiles together, one
             process a tile; the single's and the deep's one; kind `probe`, no sweep, no rate, no skipped leg), the same run without the flag (nothing recorded, built or
@@ -5651,7 +5655,16 @@ DOC_POW_XS = [0x3f000000, 0x3f7fffff, 0x3f800001, 0x3fc00000, 0x40000000, 0x4040
 DOC_POW_YS = [0xc0000000, 0xbf800000, 0xbf000000, 0x3f000000, 0x3fc00000, 0x40000000, 0x40400000, 0x35800000, 0x49800000]
 DOC_POW_OPS = [f"{n}-f32-{k}{w:08x}-d{d}" for n, d in DOC_POW_DIGESTS for k, ws in (("x", DOC_POW_XS), ("y", DOC_POW_YS)) for w in ws]
 DOC_POW_NAMES = [f"{op}-all" for op in DOC_POW_OPS]
-DOC_NKEYED = ("pown", "rootn", "compound")                     # no item until parcel M3F2 has merged and the lead has added the rows of ROUTINE_N_DIGESTS
+DOC_NKEYED = ("pown", "rootn", "compound")                     # the three n-keyed names of routine_sweep.c: pown and rootn have 7 rows each (parcel M3NR), compound none (parcel M3F3's)
+# parcel M3NR (2026-11-26): the 14 rows of ROUTINE_N_DIGESTS, TYPED here (name, n, the op word's token, digest) from the generator's `digest pown-n3 <8 hex>` lines
+# (gen_sweep_images.py --names pown,rootn,compound at 5fff2868, equal to parcel M3F2's report and to the real tool's `list`), never read from the table they pin.
+DOC_N_ROWS = [("pown", 2, "n2", "c0dbd1ed"), ("pown", -2, "nm2", "7b7e380e"), ("pown", 3, "n3", "70850195"), ("pown", -3, "nm3", "405367c2"),
+              ("pown", 17, "n17", "7cf40cd5"), ("pown", 2147483647, "n2147483647", "713ef7b0"), ("pown", -9223372036854775808, "nm9223372036854775808", "4e97c4d7"),
+              ("rootn", 2, "n2", "eb9c2d7d"), ("rootn", -2, "nm2", "ec791a25"), ("rootn", 3, "n3", "2fcd23e4"), ("rootn", -3, "nm3", "05c656e7"),
+              ("rootn", 17, "n17", "5dc14439"), ("rootn", 2147483647, "n2147483647", "93319d6c"), ("rootn", -9223372036854775808, "nm9223372036854775808", "37a80323")]
+DOC_N_OPS = [f"{nm}-f32-{tok}-d{d}" for nm, _, tok, d in DOC_N_ROWS]
+DOC_N_NAMES = [f"{op}-all" for op in DOC_N_OPS]
+DOC_N_LIST_ENV = ",".join(f"{nm}:{tok[1:]}:{d}" for nm, _, tok, d in DOC_N_ROWS)         # CFT_STANDIN_LIST_N's form: name:token:digest, token without its n
 BASE_VARS_308 = "0cc63fa2a23102828f06fdf6e659dd8c0b69a3879715c9700d303e7a1df304dd"    # vars() of the 308, hashed, at f7a1ce95 (the base of parcel M3X2)
 WIDE_C5_LOGS = (("wc-rint128-class.txt", "rint128-class-rne"), ("wc-rint256-class.txt", "rint256-class-rmm"),
                 ("wc-scaleb128-class.txt", "scaleb128-class-rup"), ("wc-scaleb256-class.txt", "scaleb256-class-rdn"),
@@ -6408,7 +6421,7 @@ def scn_wide_c5_refused(env: Env, src: str = HERE) -> list:
 
 FAKE_GEN = """import os, subprocess, sys
 # a test double for host/tools/gen_sweep_images.py (parcel M4X2): writes the manifest of a real generation (FAKE_GEN_MANIFEST: the suite's
-# rs3-images-manifest.txt since parcel M3X2, the fifteen digests and the three skipped names) with this tree's HEAD as its commit, into the --out directory it is given, which it refuses to find there already.
+# rs3-images-manifest.txt since parcel M3X2, with pown's and rootn's 14 digest lines in place of their `skipped` lines since parcel M3NR: nkeyed_manifest) with this tree's HEAD as its commit, into the --out directory it is given, which it refuses to find there already.
 # FAKE_GEN_FAIL=<rc> exits so; FAKE_GEN_MOVE=<name> changes that routine's digest; FAKE_GEN_DROP=<name> leaves its digest line out;
 # FAKE_GEN_EXTRA=<line> adds a line; FAKE_GEN_COMMIT=<sha> says another commit; FAKE_GEN_NOMAN=1 writes no manifest.
 out = sys.argv[sys.argv.index("--out") + 1]
@@ -6435,6 +6448,19 @@ os.makedirs(out)
 if not os.environ.get("FAKE_GEN_NOMAN"):
     open(os.path.join(out, "manifest.txt"), "w", newline="\\n").write("\\n".join(lines) + "\\n")
 """
+
+
+def nkeyed_manifest(env: Env) -> str:
+    """The manifest the fake generator copies (parcel M3NR): the fixture rs3-images-manifest.txt (the real generator's at M3X2: fifteen digests, `skipped` for pown, rootn and compound) with the
+    `skipped pown` and `skipped rootn` lines replaced by the 14 `digest pown-n3 <8 hex>` lines of DOC_N_ROWS (typed in this file), as the generator writes them since parcel M3F2: compound is
+    still skipped. A test double's manifest, not a record of a run; the fixture is not touched."""
+    path = os.path.join(env.tmp, "rs4-images-manifest.txt")
+    if not os.path.exists(path):
+        keep = [ln for ln in open(os.path.join(FIX, "rs3-images-manifest.txt"), encoding="utf-8").read().splitlines()
+                if ln not in ("skipped pown not built at fp32", "skipped rootn not built at fp32")]
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("\n".join(keep + [f"digest {nm}-{tok} {d}" for nm, _, tok, d in DOC_N_ROWS]) + "\n")
+    return path
 
 
 def fake_build_tree(env: Env, src: str, tag: str):
@@ -6488,7 +6514,7 @@ def fake_build_tree(env: Env, src: str, tag: str):
                "--build-jobs", "2", "--make-xrt-flags", "XRT=0", "--sweep-items", items]
         for n, pth in env.imgs.items():
             cmd += ["--image", f"{n}={pth}", "--sha", f"{n}={env.shas[n]}"]
-        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, FAKE_GEN_MANIFEST=os.path.join(FIX, "rs3-images-manifest.txt"),
+        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, FAKE_GEN_MANIFEST=nkeyed_manifest(env),
                  **(env_extra or {}))
         p = subprocess.run(cmd + extra, capture_output=True, text=True, env=e, cwd=ROOT, timeout=300)
         r = Run(o)
@@ -6643,11 +6669,12 @@ def routine_catalog_checks(src: str = HERE) -> list:
           and all(i.group == "base" for i in full[:125]) and all(i.group == "wide" for i in full[125:287]) and not any(i.tool == "routine" for i in full[:287]),
           f"{len(old)} {h(old)[:12]} {h(full[:287])[:12]}")
         rs = full[287:308]
-        pw = full[308:]
-        c("routine catalog: the 21 routine items (twelve routines one each, atan2 nine) follow the 287, in the tool's order, named <op word>-all; the pow family's 36 follow them, and the catalog is "
-          "344 items with mpfr and 125 without",
-          len(full) == 344 == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) and [it.name for it in rs] == DOC_ROUTINE_NAMES and [it.name for it in pw] == DOC_POW_NAMES
-          and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
+        pw = full[308:344]
+        nk = full[344:]
+        c("routine catalog: the 21 routine items (twelve routines one each, atan2 nine) follow the 287, in the tool's order, named <op word>-all; the pow family's 36 follow them, then the 14 n-keyed "
+          "(parcel M3NR), and the catalog is 358 items with mpfr and 125 without",
+          len(full) == 358 == 287 + len(DOC_ROUTINE_NAMES) + len(DOC_POW_NAMES) + len(DOC_N_NAMES) and [it.name for it in rs] == DOC_ROUTINE_NAMES and [it.name for it in pw] == DOC_POW_NAMES
+          and [it.name for it in nk] == DOC_N_NAMES and not any(it.tool == "routine" for it in old), f"{len(full)}: {[it.name for it in rs][:2]}")
         c("routine catalog: the first 308 items with mpfr are the base's, field for field (vars() of each, hashed; the digest is f7a1ce95's, the base of parcel M3X2): the pow family's 36 add to them and "
           "change none, in places, names or fields",
           h(full[:308]) == BASE_VARS_308 and h(full[:287]) == BASE_VARS_287, f"{h(full[:308])[:12]}")
@@ -6672,13 +6699,29 @@ def routine_catalog_checks(src: str = HERE) -> list:
         c("routine catalog: the pow family's 36 items have the 21's fields (parcel M3X2: the `all` mode, exact, five checks over 2^32 encodings, tile, fp32, no seed, group routine, so that "
           "no figure of the report, the reducer or the page moves for them), and are 18 an op: every y at each of nine x, then every x at each of nine y, pow then powr",
           not bad and len(pw) == 36 and [it.op for it in pw] == DOC_POW_OPS and len(set(DOC_POW_OPS)) == 36, "; ".join(bad[:2]))
-        c("routine catalog: the n-keyed names have no item (ROUTINE_N_DIGESTS is empty until parcel M3F2 has merged), and --sweep-items names of them are refused by name; "
-          "ROUTINE_NS is the seven n of the study, in the generator's order",
-          L2.ROUTINE_N_DIGESTS == {} and not any(it.op.split("-")[0] in DOC_NKEYED for it in full) and list(L2.ROUTINE_NS) == [2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63]
+        bad = []
+        for it, op_ in zip(nk, DOC_N_OPS):
+            got = (it.tool, it.kind, it.op, it.mode, it.verdict_mode, it.exact, it.per_encoding, it.space, it.level, it.whole, it.mpfr, it.reach, it.format,
+                   it.extra_cases, it.seed_index, it.group, it.base_seed, it.layout_dependent)
+            want = ("routine", "exhaustive", op_, "all", "all", True, 5, 1 << 32, "exhaustive", (5 << 32, 0), True, "tile", "fp32",
+                    0, None, "routine", 0, False)
+            if got != want:
+                bad.append(f"{it.name}: {got} vs {want}")
+        c("routine catalog: the 14 n-keyed items have the 21's fields (parcel M3NR: the `all` mode, exact, five checks over 2^32 encodings, tile, fp32, no seed, group routine), and each says "
+          "its images' digest in its claim",
+          not bad and len(nk) == 14 and all(f"(its images' digest {d})" in it.claim and "swept" not in it.claim for it, (_, _, _, d) in zip(nk, DOC_N_ROWS)), "; ".join(bad[:2]))
+        c("routine catalog: ROUTINE_N_DIGESTS is the 14 rows typed in this file (DOC_N_ROWS: the generator's `digest` lines at 5fff2868, M3F2's report) and no other - pown's seven then rootn's seven, in "
+          "ROUTINE_NS' order, none for compound (not built at fp32: parcel M3F3 adds its seven and changes this pin) - and the n-keyed names have an item for each row and for nothing else; ROUTINE_NS is "
+          "the seven n of the study, in the generator's order",
+          list(L2.ROUTINE_N_DIGESTS.items()) == [((nm, v), d) for nm, v, _, d in DOC_N_ROWS] and len(L2.ROUTINE_N_DIGESTS) == 14
+          and not any(k[0] == "compound" for k in L2.ROUTINE_N_DIGESTS) and not any(it.op.split("-")[0] == "compound" for it in full)
+          and [it.op for it in full if it.op.split("-")[0] in DOC_NKEYED] == DOC_N_OPS
+          and list(L2.ROUTINE_NS) == [2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63] and [v for _, v, _, _ in DOC_N_ROWS[:7]] == list(L2.ROUTINE_NS)
           and L2.ROUTINE_NKEYED == DOC_NKEYED and all(L2.routine_op_parts(f"{n}-f32-n3") for n in DOC_NKEYED), str(L2.ROUTINE_N_DIGESTS))
-        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the 57 op words (the 21 and the pow family's 36), both built from the digest table (a new digest needs no third edit)",
-          all(L2.OP_REACH.get(it.op) == "tile" and L2.OP_FORMAT.get(it.op) == "fp32" for it in rs + pw)
-          and {op for op in L2.OP_REACH if L2.ROUTINE_OP.match(op)} == {it.op for it in rs + pw} == {op for op in L2.OP_FORMAT if L2.ROUTINE_OP.match(op)})
+        c("routine catalog: OP_REACH says tile and OP_FORMAT fp32 of each of the 71 op words (the 21, the pow family's 36 and the 14 n-keyed), both built from the digest tables (a new digest needs no third edit)",
+          all(L2.OP_REACH.get(it.op) == "tile" and L2.OP_FORMAT.get(it.op) == "fp32" for it in rs + pw + nk)
+          and {op for op in L2.OP_REACH if L2.ROUTINE_OP.match(op)} == {it.op for it in rs + pw + nk} == {op for op in L2.OP_FORMAT if L2.ROUTINE_OP.match(op)}
+          and len({it.op for it in rs + pw + nk}) == 71)
         # the digests: the real tool's own `list` (the box's, at c99df121) and the generator's manifest (the same run's), parsed here, never read from the table they test
         lst = [re.fullmatch(r"(\w+)-f32: (images rne rtz rdn rup rmm, digest ([0-9a-f]{8})|no image)", ln) for ln in fixture("rs-list.txt").splitlines()]
         listed = [(m.group(1), m.group(3)) for m in lst if m and m.group(3)]
@@ -6752,6 +6795,10 @@ def routine_catalog_checks(src: str = HERE) -> list:
         sp = importlib.util.spec_from_file_location("rs_standin_copy", os.path.join(src, "card_stress_standin.py"))
         sm = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(sm)
+        c("routine catalog: the stand-in's own table of the 14 n-keyed digests (parcel M3NR) is the 14 rows typed in this file (DOC_N_ROWS: the real tool's `list` at 5fff2868, held below by the real tool's "
+          "own `list` fixture only where one exists) and the library's, key for key (its token for the library's n)",
+          sm.ROUTINE_STANDIN_N_DIGESTS == {(nm, tok[1:]): d for nm, _, tok, d in DOC_N_ROWS}
+          and sm.ROUTINE_STANDIN_N_DIGESTS == {(nm, L2.routine_ntoken(v)): d for (nm, v), d in L2.ROUTINE_N_DIGESTS.items()} and len(sm.ROUTINE_STANDIN_N_DIGESTS) == 14)
         c("routine catalog: the stand-in's own table of digests (the fifteen) and its list of the eighteen names are the library's and the real tool's `list` (rs3-list.txt), and its op pattern is the library's",
           sm.ROUTINE_STANDIN_DIGESTS == dict(L2.ROUTINE_DIGESTS) and list(sm.ROUTINE_NAMES) == list(L2.ROUTINE_NAMES) == [n for n, _ in listed3] + noimg3
           and list(sm.ROUTINE_ATTRS) == list(L2.ROUTINE_ATTRS) and sm.ROUTINE_OP.pattern == L2.ROUTINE_OP.pattern and tuple(sm.ROUTINE_FAMILY) == ("pow", "powr") + tuple(DOC_NKEYED))
@@ -6962,8 +7009,10 @@ def routine_parser_checks(src: str = HERE) -> list:
         c("routine stand-in: under one attribute (rtz) it prints the real tool's lines (rs-exp-rtz): one image line, nine cases, the four dashes",
           rc == 0 and rs_mask(txt) == rs_mask(fixture("rs-exp-rtz.txt")), "\n".join(rs_mask(txt)[:10]))
         rc, txt = rs_standin(["list"], src=src)
-        c("routine stand-in: `list` prints the real tool's eighteen lines (rs3-list: the fifteen with digests, pown, rootn and compound `no image`), the first thirteen the older rs-list's",
-          rc == 0 and rs_mask(txt) == rs_mask(fixture("rs3-list.txt")) and rs_mask(txt)[:len(rs_mask(fixture("rs-list.txt")))] == rs_mask(fixture("rs-list.txt")), txt[:200])
+        list30 = rs_mask(fixture("rs3-list.txt"))[:15] + [f"{nm}-f32-{tok}: images rne rtz rdn rup rmm, digest {d}" for nm, _, tok, d in DOC_N_ROWS] + ["compound-f32: no image"]
+        c("routine stand-in: `list` prints the real tool's thirty lines (parcel M3NR): the fifteen with digests (rs3-list's, the real tool's at M3X2, the first thirteen the older rs-list's), pown's seven "
+          "rows and rootn's seven (typed in this file: the real tool's `list` on 2026-11-26 at 5fff2868, run on Windows with MPFR 4.2.2 from this tree's own build) and compound `no image`",
+          rc == 0 and rs_mask(txt) == list30 and len(list30) == 30 and rs_mask(txt)[:len(rs_mask(fixture("rs-list.txt")))] == rs_mask(fixture("rs-list.txt")), txt[:200])
         rc, txt = rs_standin(["exp-f32-d00000000", "0x33fffffb", "0x34000004", "all"], src=src)
         c("routine stand-in: a digest that is not the images' is refused as the real tool refuses it (rs-exp-d-wrong), exit 2, no verdict",
           rc == 2 and rs_mask(txt) == rs_mask(fixture("rs-exp-d-wrong.txt")), txt[:200])
@@ -7110,10 +7159,20 @@ def routine_pow_checks(src: str = HERE) -> list:
         rc, txt = rs_standin(["pow-f32-y40000000-d7043fd38", "0x40400000", "0x40400100", "rtz"], src=src)
         c("routine stand-in: the same slice under rtz (rs3-pow-y-exact-rtz): one image line, the four dashes, one mark",
           rc == 0 and [x for x in rs_mask(txt) if not x.startswith("image ")] == [x for x in rs_mask(fixture("rs3-pow-y-exact-rtz.txt")) if not x.startswith("image ")], "\n".join(rs_mask(txt)[:10]))
-        for fname, args in (("rs3-refuse-pown-no-image.txt", ["pown-f32-n3", "0", "5", "all"]),):
+        # (the fixture is the real tool's refusal of pown at M3X2, when pown had no image: the shape of a name with no image, which compound has now)
+        for fname, args in (("rs3-refuse-pown-no-image.txt", ["compound-f32-n3", "0", "5", "all"]),):
             rc, txt = rs_standin(args, src=src)
-            c(f"routine stand-in: pown, which has no image until parcel M3F2 has merged, is refused as the real tool refuses a name with no image ({fname}): exit 2, 'cannot read ...pown-n3-fp32-rne.cftp', no verdict",
-              rc == 2 and "pown-n3-fp32-rne.cftp" in txt and "pown-n3-fp32-rne.cftp" in fixture(fname) and "cannot read" in txt and " cases," not in txt, txt[:200])
+            c(f"routine stand-in: compound, which has no image until parcel M3F3 builds it, is refused as the real tool refuses a name with no image ({fname}, pown's at M3X2): exit 2, "
+              f"'cannot read ...compound-n3-fp32-rne.cftp', no verdict",
+              rc == 2 and "compound-n3-fp32-rne.cftp" in txt and "pown-n3-fp32-rne.cftp" in fixture(fname) and "cannot read" in txt and "cannot read" in fixture(fname)
+              and " cases," not in txt, txt[:200])
+        rc, txt = rs_standin(["pown-f32-n3-d70850195", "0", "5", "all"], src=src)
+        c("routine stand-in (parcel M3NR): pown at n = 3 with its row's digest runs (exit 0, a verdict of 25 cases, no mark), as the real tool ran it on 2026-11-26; pown at n = 4, which has no row and "
+          "no image, is refused `cannot read ...pown-n4-fp32-rne.cftp`; and pown n = 3 with another digest is refused by the digest, naming the images' own (the tool's wording)",
+          rc == 0 and "25 cases, 0 value mismatches, 0 flag mismatches, 5 encodings, 0 skipped" in txt
+          and rs_standin(["pown-f32-n4", "0", "5", "all"], src=src)[0] == 2 and "pown-n4-fp32-rne.cftp" in rs_standin(["pown-f32-n4", "0", "5", "all"], src=src)[1]
+          and rs_standin(["pown-f32-n3-d00000000", "0", "5", "all"], src=src)[0] == 2
+          and "the images' digest is 70850195" in rs_standin(["pown-f32-n3-d00000000", "0", "5", "all"], src=src)[1], txt[:200])
         # each misbehaviour of the stand-in for a pow op, through the driver's parser
         POP = "pow-f32-y40000000-d7043fd38"
 
@@ -7413,8 +7472,8 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
       "lines against the table, and kept the directory; the step `mpfr routine-sweep` listed the thirteen with five images and the table's digests and passed the smoke job (45 cases, 3 marked lanes) with "
       "the oracle line at the pin - while the driver itself held an image in its environment (the job was started without it, or the soak's CPU rule would have refused its DEVICE line)",
       s1.get("ok") is True and s2.get("ok") is True and os.path.basename(d1).startswith("sweep-images-") and os.path.dirname(d1) == os.path.abspath(A.out) and os.path.isdir(d1)
-      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 15 routines and ROUTINE_N_DIGESTS' 0 rows" in s1.get("detail", "")
-      and "the generator skipped pown, rootn, compound by name (not built at fp32)" in s1.get("detail", "")
+      and os.path.exists(os.path.join(d1, "manifest.txt")) and "equal ROUTINE_DIGESTS for the 15 routines and ROUTINE_N_DIGESTS' 14 rows" in s1.get("detail", "")
+      and "the generator skipped compound by name (not built at fp32)" in s1.get("detail", "")
       and "names the 15 routines with five images" in s2.get("detail", "") and "45 cases, 3 marked lanes right and on the list" in s2.get("detail", "")
       and "pow job pow-f32-y40000000-d7043fd38 0x40400000 0x40400100 all passed (1280 cases, 5 marked lanes, all on an exact lane)" in s2.get("detail", "")
       and "names MPFR 4.2.2 with GMP 6.3.0" in s2.get("detail", "") and A.rc == 0, f"rc {A.rc}: {s1} {s2}")
@@ -7451,8 +7510,10 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     red("dropped-powr", {"FAKE_GEN_DROP": "powr"}, "routine images", ("powr: the generator's digest is not given", "ROUTINE_DIGESTS has 8aefb175"), "powr, whose digest line the manifest lacks")
     red("missing-pow", {"CFT_STANDIN_LIST_MISSING": "pow"}, "mpfr routine-sweep", ("pow: `routine-sweep list` says", "4 of 5 images found"), "an image of pow the tool cannot find (list: four of the five)")
     red("list-lacks-powr", {"CFT_STANDIN_LIST_DROP": "powr"}, "mpfr routine-sweep", ("powr: `routine-sweep list` says 'nothing'",), "a `list` that lacks powr's row (a name with a row in the table)")
-    red("list-lacks-nkeyed", {"CFT_STANDIN_LIST_DROP": "rootn"}, "mpfr routine-sweep", ("rootn: `routine-sweep list` has neither a row of an n nor `rootn-f32: no image`",),
-        "a `list` that lacks rootn's row (an n-keyed name with neither a row of an n nor `no image`)")
+    red("list-lacks-nkeyed", {"CFT_STANDIN_LIST_DROP": "compound"}, "mpfr routine-sweep", ("compound: `routine-sweep list` has neither a row of an n nor `compound-f32: no image` for it",),
+        "a `list` that lacks compound's row (an n-keyed name with no row in the table, and neither a row of an n nor `no image`)")
+    red("list-lacks-rootn", {"CFT_STANDIN_LIST_DROP": "rootn"}, "mpfr routine-sweep", ("rootn-f32-n2: `routine-sweep list` says 'nothing'", "ROUTINE_N_DIGESTS"),
+        "a `list` that lacks rootn's rows (a name whose seven rows are in the table)")
     with open(os.path.join(env.tmp, "routine-pow-scenario.json"), "w") as fh:
         json.dump([{"leg": "soak", "op": "pow-f32-y40000000-d7043fd38", "nth": [1], "do": "offlist"}], fh)
     red("pow-marks", {"CFT_STANDIN_SCENARIO": os.path.join(env.tmp, "routine-pow-scenario.json"), "CFT_STANDIN_STATE": os.path.join(env.tmp, "routine-pow-scenario-state")},
@@ -7472,43 +7533,52 @@ def scn_routine_build(env: Env, src: str = HERE) -> list:
     s = E.steps.get("routine images") or {}
     c("routine build: a manifest digest the table lacks (a name that is none of the eighteen) is SAID in the step, with its digest, and does not fail it",
       s.get("ok") is True and "also has digests for nosuch 12345678" in s.get("detail", "") and E.rc == 0, f"rc {E.rc}: {s}")
-    # the n-keyed rows: a copy of the code whose ROUTINE_N_DIGESTS has one row (pown at n = 3), on the driver's real path
-    srcn = make_plant_copy(env, "routine-n-table", [])           # the directory (and the python/ beside it), then the code UNDER TEST copied over it, so that a plant of `src` acts here too
-    for f in os.listdir(src):
-        if f.endswith((".py", ".sh")):
-            shutil.copy(os.path.join(src, f), os.path.join(srcn, f))
-    lib_n = os.path.join(srcn, "card_stress_lib.py")
-    with open(lib_n, "r", encoding="utf-8", newline="") as fh:
-        text_n = fh.read()
-    old_n = "ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}"
-    if text_n.count(old_n) == 1:
-        with open(lib_n, "w", encoding="utf-8", newline="") as fh:
-            fh.write(text_n.replace(old_n, 'ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {("pown", 3): "0123abcd"}'))
-    rootn_, fbn, pfxn, driven = fake_build_tree(env, srcn, "routine-n")
-    envn = {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd", "CFT_STANDIN_LIST_N": "pown:3:0123abcd"}
-    G = driven("routine-n-green", ["--mpfr-prefix", pfxn], envn, names)
+    # the n-keyed rows (parcel M3NR: the 14 of the table, on the driver's real path over the stand-in's `list` and nkeyed_manifest's digest lines)
+    G = rd("routine-n-green", ["--mpfr-prefix", pfx])
     sg1, sg2 = G.steps.get("routine images") or {}, G.steps.get("mpfr routine-sweep") or {}
-    c("routine build (n-keyed): with a row (pown, 3) in ROUTINE_N_DIGESTS, a manifest `digest pown-n3 0123abcd` line and a `list` row `pown-f32-n3: ... digest 0123abcd`, both steps pass and name the row",
-      sg1.get("ok") is True and sg2.get("ok") is True and "ROUTINE_N_DIGESTS' 1 rows" in sg1.get("detail", "") and "(1) or `no image`" in sg2.get("detail", "") and G.rc == 0, f"rc {G.rc}: {sg1} {sg2}")
+    c("routine build (n-keyed): with the table's 14 rows, a manifest with the 14 `digest pown-n3 <8 hex>` lines (DOC_N_ROWS) and compound skipped, and the stand-in's `list` rows `pown-f32-n3: ... digest "
+      "70850195` ..., both steps pass and name the 14 rows",
+      sg1.get("ok") is True and sg2.get("ok") is True and "ROUTINE_N_DIGESTS' 14 rows" in sg1.get("detail", "") and "(14) or `no image`" in sg2.get("detail", "") and G.rc == 0, f"rc {G.rc}: {sg1} {sg2}")
 
     def redn(name, envx, step, want, why):
-        X = driven(f"routine-n-{name}", ["--mpfr-prefix", pfxn], envx, names)
+        X = rd(f"routine-n-{name}", ["--mpfr-prefix", pfx], envx)
         s = X.steps.get(step) or {}
         c(f"routine build red (n-keyed): {why} - the step `{step}` fails, by name ({want}), the run stops before any leg (build_failed, exit 3)",
           s.get("ok") is False and all(w in s.get("detail", "") for w in want) and X.rc == 3 and not X.legs(kind="sweep"), f"rc {X.rc}: {s}")
-    redn("no-digest", {"CFT_STANDIN_LIST_N": "pown:3:0123abcd"}, "routine images", ("pown-n3: the generator's digest is not given", "ROUTINE_N_DIGESTS has 0123abcd"),
-         "the manifest has no digest line for a (name, n) of the table")
-    redn("moved", {"FAKE_GEN_EXTRA": "digest pown-n3 0123abce", "CFT_STANDIN_LIST_N": "pown:3:0123abcd"}, "routine images", ("pown-n3: the generator's digest is 0123abce", "ROUTINE_N_DIGESTS has 0123abcd"),
-         "the manifest's digest of a (name, n) is not the table's")
-    redn("no-row", {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd"}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says 'nothing'", "ROUTINE_N_DIGESTS"),
+    rows_but_n3 = ",".join(f"{nm}:{tok[1:]}:{d}" for nm, _, tok, d in DOC_N_ROWS if (nm, tok) != ("pown", "n3"))
+    redn("no-digest", {"FAKE_GEN_DROP": "pown-n3"}, "routine images", ("pown-n3: the generator's digest is not given", "ROUTINE_N_DIGESTS has 70850195"),
+         "the manifest has no digest line for a (name, n) of the table (pown, 3)")
+    redn("moved", {"FAKE_GEN_MOVE": "pown-n3"}, "routine images", ("pown-n3: the generator's digest is 70850190", "ROUTINE_N_DIGESTS has 70850195"),
+         "the manifest's digest of a (name, n) is not the table's (pown, 3)")
+    redn("moved-rootn", {"FAKE_GEN_MOVE": "rootn-nm9223372036854775808"}, "routine images", ("rootn-nm9223372036854775808: the generator's digest is 37a80322", "ROUTINE_N_DIGESTS has 37a80323"),
+         "the manifest's digest of a (name, n) is not the table's (rootn, -2^63)")
+    redn("no-row", {"CFT_STANDIN_LIST_N": rows_but_n3}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says 'nothing'", "ROUTINE_N_DIGESTS"),
          "a `list` with no row for a (name, n) of the table (the row `pown-f32-n3: ...` is one the pattern `^(\\S+)-f32: ` does not read)")
-    redn("row-digest", {"FAKE_GEN_EXTRA": "digest pown-n3 0123abcd", "CFT_STANDIN_LIST_N": "pown:3:ffffffff"}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says", "digest ffffffff"),
+    redn("row-digest", {"CFT_STANDIN_LIST_N": rows_but_n3 + ",pown:3:ffffffff"}, "mpfr routine-sweep", ("pown-f32-n3: `routine-sweep list` says", "digest ffffffff"),
          "a `list` row of a (name, n) whose digest is not the table's")
-    # --sweep-items names an n-keyed op while the table is empty: refused by name by the command itself
-    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", os.path.join(env.tmp, "routine-nkeyed-refused"), "--quick", "--legs", "api-test",
-                        "--sweep-items", "pown-f32-n3-d00000000-all"], capture_output=True, text=True, timeout=120, cwd=ROOT)
-    c("routine items: --sweep-items pown-f32-n3-d00000000-all is refused by name - the table ROUTINE_N_DIGESTS and parcel M3F2 are named - exit 2 (argparse), nothing run",
-      p.returncode == 2 and "ROUTINE_N_DIGESTS" in p.stderr and "parcel M3F2" in p.stderr and "refused" in p.stderr, p.stderr[-300:])
+    X = rd("routine-n-compound-built", ["--mpfr-prefix", pfx], {"FAKE_GEN_EXTRA": "digest compound-n3 12345678"})
+    s = X.steps.get("routine images") or {}
+    c("routine build (n-keyed): a manifest digest of compound, which the table has no row for, is SAID in the step, with its digest, and does not fail it (the build step holds the table's rows, not "
+      "the generator's names: when parcel M3F3 builds compound the rows are added with its merge, and hw/test_routine_sweep.py's `images` leg fails by name on a built n-keyed name with no row)",
+      s.get("ok") is True and "also has digests for compound-n3 12345678" in s.get("detail", "") and X.rc == 0, f"rc {X.rc}: {s}")
+    # --sweep-items: an n-keyed op word with no row is refused by name by the command itself; one with a row is accepted with its digest and refused as any wrong digest with another
+    def sweep_items_run(item, tag):
+        return subprocess.run([sys.executable, "-B", "-I", "-c",
+                               "import sys; sys.path.insert(0, sys.argv[1]); import card_stress as C; a = C.parse_args(['--root', sys.argv[2], '--out', sys.argv[3], '--quick', '--legs', 'api-test', "
+                               "'--sweep-items', sys.argv[4]]); print('ACCEPTED', a.sweep_items)", src, root, os.path.join(env.tmp, f"routine-nkeyed-{tag}"), item],
+                              capture_output=True, text=True, timeout=120, cwd=ROOT)
+    p = sweep_items_run("compound-f32-n3-d00000000-all", "compound")
+    c("routine items: --sweep-items compound-f32-n3-d00000000-all is refused by name - compound is not built at fp32 and has no row: the table ROUTINE_N_DIGESTS and parcel M3F3 are named - exit 2 (argparse), nothing run",
+      p.returncode == 2 and "ROUTINE_N_DIGESTS" in p.stderr and "parcel M3F3" in p.stderr and "compound at fp32 is not built" in p.stderr and "refused" in p.stderr and "ACCEPTED" not in p.stdout, p.stderr[-300:])
+    p = sweep_items_run("pown-f32-n4-d00000000-all", "pown-n4")
+    c("routine items: ... and pown at an n with no row (n = 4) is refused by the same words, the table named", p.returncode == 2 and "ROUTINE_N_DIGESTS" in p.stderr and "no row of that table" in p.stderr
+      and "refused" in p.stderr, p.stderr[-300:])
+    p = sweep_items_run("pown-f32-n3-d70850195-all", "pown-n3-right")
+    c("routine items: ... and pown at n = 3 with its row's digest is ACCEPTED (an item of the catalog), as rootn at -2^63 with its row's", p.returncode == 0 and "ACCEPTED pown-f32-n3-d70850195-all" in p.stdout
+      and sweep_items_run("rootn-f32-nm9223372036854775808-d37a80323-all", "rootn-last").returncode == 0, p.stderr[-300:] + p.stdout[-100:])
+    p = sweep_items_run("pown-f32-n3-d00000000-all", "pown-n3-wrong")
+    c("routine items: ... and pown at n = 3 with another digest is refused as any routine item with a wrong digest is (`not an item`, the n-keyed message not used)",
+      p.returncode == 2 and "not an item" in p.stderr and "ROUTINE_N_DIGESTS" not in p.stderr and "compound" not in p.stderr, p.stderr[-300:])
     p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", os.path.join(env.tmp, "routine-nosuch-refused"), "--quick", "--legs", "api-test",
                         "--sweep-items", "pow-f32-x3f000000-d00000000-all"], capture_output=True, text=True, timeout=120, cwd=ROOT)
     c("routine items: ... and a pow op word with the wrong digest is refused as any name that is not an item (not by the n-keyed message)",
@@ -10146,9 +10216,25 @@ def plants(env: Env) -> None:
         ("M3X2: a pow claim forgets that it is not the whole space of pairs",
          [("card_stress_lib.py", '                 f"not the whole space of (x, y) pairs")\n    elif fixed[0] == "y":', '                 f"")\n    elif fixed[0] == "y":')],
          lambda env, src: routine_catalog_checks(src), ["routine catalog: a pow or powr claim says"]),
-        ("M3X2: the n-keyed names have items before parcel M3F2",
-         [("card_stress_lib.py", "ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {}", 'ROUTINE_N_DIGESTS: Dict[Tuple[str, int], str] = {("pown", 3): "0123abcd"}')],
-         lambda env, src: routine_catalog_checks(src), ["routine catalog: the n-keyed names have no item"]),
+        # -- parcel M3NR (2026-11-26): the 14 n-keyed rows of ROUTINE_N_DIGESTS (CARD_STRESS_PLANT='M3NR: ' runs just these)
+        ("M3NR: a row's digest is not the generator's (pown at n = 3, one digit)",
+         [("card_stress_lib.py", '("pown", 3): "70850195"', '("pown", 3): "70850194"')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_N_DIGESTS is the 14 rows typed in this file"]),
+        ("M3NR: compound has a row before it is built at fp32 (parcel M3F3's)",
+         [("card_stress_lib.py", '    ("rootn", 2 ** 31 - 1): "93319d6c", ("rootn", -2 ** 63): "37a80323",\n}', '    ("rootn", 2 ** 31 - 1): "93319d6c", ("rootn", -2 ** 63): "37a80323",\n    ("compound", 3): "0123abcd",\n}')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_N_DIGESTS is the 14 rows typed in this file", "routine catalog: the 21 routine items"]),
+        ("M3NR: a row is dropped (rootn at n = -2^63)",
+         [("card_stress_lib.py", ', ("rootn", -2 ** 63): "37a80323",\n}', ',\n}')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: ROUTINE_N_DIGESTS is the 14 rows typed in this file", "routine catalog: the 21 routine items"]),
+        ("M3NR: the stand-in's digest of a row is not the table's (rootn at n = 17)",
+         [("card_stress_standin.py", '("rootn", "17"): "5dc14439"', '("rootn", "17"): "5dc14438"')],
+         lambda env, src: routine_catalog_checks(src), ["routine catalog: the stand-in's own table of the 14 n-keyed digests"]),
+        ("M3NR: the stand-in's `list` gives pown no rows (as before parcel M3F2)",
+         [("card_stress_standin.py", 'nrows: dict = {nm: [] for nm in ("pown", "rootn")}', 'nrows: dict = {nm: [] for nm in ()}')],
+         lambda env, src: routine_parser_checks(src), ["routine stand-in: `list` prints the real tool's thirty lines"]),
+        ("M3NR: the stand-in runs compound as it runs pown (a row of compound without an image)",
+         [("card_stress_standin.py", "    have = nkey in ROUTINE_STANDIN_N_DIGESTS if nkey else name in ROUTINE_STANDIN_DIGESTS", "    have = True if nkey else name in ROUTINE_STANDIN_DIGESTS")],
+         lambda env, src: routine_pow_checks(src), ["routine stand-in: compound, which has no image until parcel M3F3 builds it", "routine stand-in (parcel M3NR): pown at n = 3"]),
         ("M3X2: the marks parser does not need the exact line of a pow op",
          [("card_stress_lib.py", "    elif routine_has_exact(op):\n        raise VerdictError(", "    elif False:\n        raise VerdictError(")],
          lambda env, src: routine_pow_checks(src), ["routine exact damage: the exact line gone"]),
@@ -10171,7 +10257,7 @@ def plants(env: Env) -> None:
          [("card_stress_standin.py", "POW_SMOKE_GUESS = {\"rne\": 0x41100000,", "POW_SMOKE_GUESS = {\"rne\": 0x41100001,")],
          lambda env, src: routine_pow_checks(src), ["routine stand-in: for the pow slice at y = 2"]),
         ("M3X2: the build step does not hold the n-keyed digests",
-         [("card_stress.py", "                for (name, nn), want in L.ROUTINE_N_DIGESTS.items():       # parcel M3X2: pown, rootn, compound at each n a row names (empty until M3F2's merge)",
+         [("card_stress.py", "                for (name, nn), want in L.ROUTINE_N_DIGESTS.items():       # parcel M3X2: the n-keyed names at each n a row names (parcel M3NR: pown's and rootn's 14; compound has none until parcel M3F3)",
            "                for (name, nn), want in []:       # parcel M3X2")],
          lambda env, src: scn_routine_build(env, src), ["routine build red (n-keyed): the manifest has no digest line"]),
         ("M3X2: the build step does not hold the n-keyed rows of `list`",
@@ -10179,13 +10265,19 @@ def plants(env: Env) -> None:
          lambda env, src: scn_routine_build(env, src), ["routine build red (n-keyed): a `list` with no row"]),
         ("M3X2: the build step lets an n-keyed name have neither a row nor `no image`",
          [("card_stress.py", "        for name in L.ROUTINE_NKEYED:\n", "        for name in ():\n")],
-         lambda env, src: scn_routine_build(env, src), ["routine build red: a `list` that lacks rootn's row"]),
+         lambda env, src: scn_routine_build(env, src), ["routine build red: a `list` that lacks compound's row"]),
         ("M3X2: the build step runs no pow job",
          [("card_stress.py", "        rc, pout = runr([pop, plo, phi, pmode])", "        rc, pout = 0, \"\"\n        if False:\n            pass")],
          lambda env, src: scn_routine_build(env, src), ["routine build red: marks that are not the pow smoke's"]),
         ("M3X2: --sweep-items accepts an n-keyed op word with a message that names no table",
          [("card_stress.py", "            if n and n not in known and re.match(r\"^(?:pown|rootn|compound)-f32-n\", n):", "            if False and re.match(r\"^(?:pown|rootn|compound)-f32-n\", n):")],
-         lambda env, src: scn_routine_build(env, src), ["routine items: --sweep-items pown-f32-n3-d00000000-all is refused by name"]),
+         lambda env, src: scn_routine_build(env, src), ["routine items: --sweep-items compound-f32-n3-d00000000-all is refused by name"]),
+        ("M3NR: --sweep-items refuses an n-keyed op word with a row (pown at n = 3 with its digest)",
+         [("card_stress.py", "                if not (parts and parts[1] and (parts[0], parts[1][1]) in L.ROUTINE_N_DIGESTS):", "                if True:")],
+         lambda env, src: scn_routine_build(env, src), ["routine items: ... and pown at n = 3 with its row's digest is ACCEPTED", "routine items: ... and pown at n = 3 with another digest is refused as any"]),
+        ("M3NR: --sweep-items does not refuse an n-keyed op word that has no row by the table's name (compound, pown at n = 4)",
+         [("card_stress.py", "                if not (parts and parts[1] and (parts[0], parts[1][1]) in L.ROUTINE_N_DIGESTS):", "                if not (parts and parts[1]):")],
+         lambda env, src: scn_routine_build(env, src), ["routine items: --sweep-items compound-f32-n3-d00000000-all is refused by name", "routine items: ... and pown at an n with no row"]),
         ("M3X2: the report leaves the exact class out of its marks sentence",
          [("card_stress_report.py", "+ (f\", {a['exact_marked']} of them on an exact lane (the routine's design: a lane whose result is exact, counted apart from off the list)\" if \"exact_marked\" in a else \"\")", "+ \"\"")],
          plant_report, ["routine pow: the text's marks sentence says the exact class"]),

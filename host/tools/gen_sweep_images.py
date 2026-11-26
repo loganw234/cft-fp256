@@ -14,7 +14,7 @@ For each routine name and each rounding attribute at fp32 it writes, into the ne
     <name>-fp32-<attr>.marks   the lanes (encodings) that MUST mark, one 8-digit hex word a line, in ascending order; maybe none
 
 The names are the eighteen of routine_sweep.c, in its order: the thirteen of parcel M4X, then pow, powr (built at fp32 since parcel M3F1), pown,
-rootn and compound (parcel M3F2's: a name whose fragment is refused as "is not built" is skipped, once, by name, and is not an error). pown, rootn
+rootn (parcel M3F2's, built at fp32 since its merge) and compound (not built at fp32 yet, parcel M3F3's: a name whose fragment is refused as "is not built" is skipped, once, by name, and is not an error). pown, rootn
 and compound take an integer operand n that is a constant of the fragment, so each is built at every n of N_LIST, in that order, and its files and
 its manifest lines carry the n in the name: pown-n3 (stem pown-n3-fp32-rne.cftp), pown-nm3 for -3. The tool's own table of the seven n is its NLIST
 (host/tools/routine_sweep.c), and hw/test_routine_sweep.py holds the two equal. pow and powr, whose second operand is an input, have one set each, for
@@ -99,7 +99,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True, help="the directory to make (it must not exist)")
     ap.add_argument("--names", default=",".join(NAMES18),
                     help="comma list of routine names (default: the eighteen; pown, rootn and compound are built at each of the seven n, or skipped by name "
-                         "while parcel M3F2's fragments are not built)")
+                         "while their fragment is not built: compound's, until parcel M3F3)")
     ap.add_argument("--attrs", default=",".join(ATTRS), help="comma list of rne,rtz,rdn,rup,rmm (default: all five)")
     ap.add_argument("--plant", default=None, help="build every selected routine with this plant (mathlib.build's)")
     ap.add_argument("--bound-shift", type=int, default=0, help="widen the in-lane bound by 2^S (mathlib.build's bound_shift)")
@@ -150,7 +150,7 @@ def main(argv=None) -> int:
                     else:
                         f = ml.build(name, FP32, rnd, bound_shift=a.bound_shift, plant=a.plant, n=nval).fragment()
                 except ValueError as exc:
-                    # an n-keyed name whose fragment is "not built" (parcel M3F2's, until it merges) is skipped by name, once: its first build says so
+                    # an n-keyed name whose fragment is "not built" (compound's, until parcel M3F3 builds it at fp32) is skipped by name, once: its first build says so
                     if name in NKEYED and "is not built" in str(exc) and nval == N_LIST[0] and x == attrs[0]:
                         refused = True
                         break

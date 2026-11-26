@@ -441,11 +441,11 @@ def group_images(tool, tree, work, imgs, manifest):
     nk_man = open(os.path.join(work, "img-nk", "manifest.txt")).read() if rc == 0 else ""
     nk_built, nk_skipped = gen_account(nk_man) if nk_man else ([], [])
     nk_keys = [k for k, _ in nk_built]
-    check("images: `--names pown,rootn,compound` does not fail (exit 0): each name is skipped by name once (`skipped pown not built at fp32`, as the inverse names were) while parcel M3F2's "
-          "fragments are not built, and built at each of the seven n, in N_LIST's order, once they are; never both, never an error",
-          rc == 0 and all((n in nk_skipped) != any(base_of(k) == n for k in nk_keys) for n in NKEYED)
-          and all([k for k in nk_keys if base_of(k) == n] in ([], [f"{n}-n{ntoken(v)}" for v in N_LIST]) for n in NKEYED)
-          and len(nk_skipped) == len(set(nk_skipped)), f"rc {rc} {nk_skipped} {nk_keys} {o[-200:]}")
+    check("images: `--names pown,rootn,compound` does not fail (exit 0): pown and rootn (parcel M3F2's, merged) are built at each of the seven n, in N_LIST's order, and compound, not built at fp32 "
+          "(parcel M3F3's), is skipped by name once (`skipped compound not built at fp32`); a name is never both, never an error. PINS today's account exactly: when parcel M3F3 builds compound this check "
+          "fails by name, and the row check below with it, until compound's seven rows are in ROUTINE_N_DIGESTS",
+          rc == 0 and nk_skipped == ["compound"] and nk_keys == [f"{n}-n{ntoken(v)}" for n in ("pown", "rootn") for v in N_LIST]
+          and all((n in nk_skipped) != any(base_of(k) == n for k in nk_keys) for n in NKEYED), f"rc {rc} {nk_skipped} {nk_keys} {o[-200:]}")
     check("images: ... and the `skipped` check itself is red on a manifest with the name skipped twice and on one that is both built and skipped (a doctored account in memory)",
           account_problems([], NKEYED + ("pown",))[:1] == ["a name twice"] and any("both built and skipped" in x for x in account_problems([(f"pown-n{ntoken(N_LIST[0])}", "00000000")], ["pown"])), "")
     image_line = re.compile(r"^image \S+ \S+ instructions \d+ words \d+ image_sha256 [0-9a-f]{64} bank_sha256 [0-9a-f]{64} "
@@ -489,8 +489,13 @@ def group_images(tool, tree, work, imgs, manifest):
     # parcel M3X2: ROUTINE_N_DIGESTS, keyed (name, n), against the generator's `digest pown-n3 <8 hex>` lines: a row of the table needs the line with an equal digest
     ntab = {f"{nm}-n{ntoken(v)}": d for (nm, v), d in L.ROUTINE_N_DIGESTS.items()}
     nf, nn_ = digest_judge(mdig, ntab)
-    check(f"images: every row of ROUTINE_N_DIGESTS ({len(ntab)} today: it is empty until parcel M3F2 has merged and the lead has added the rows) is among the generator's `digest` lines (pown-n3 ...) "
-          f"with an equal digest; the n-keyed names built without a row are named, not failed ({[n for n in nn_ if base_of(n) in NKEYED] or 'none built today'})", not nf, f"{nf}")
+    check(f"images: every row of ROUTINE_N_DIGESTS ({len(ntab)} today: parcel M3NR's, pown's and rootn's at the seven n) is among the generator's `digest` lines (pown-n3 ...) "
+          f"with an equal digest, and EVERY n-keyed name the generator built has its row (an n-keyed key named without one - compound's seven, once parcel M3F3 builds it - FAILS here, by name: "
+          f"{[n for n in nn_ if base_of(n) in NKEYED] or 'none today'})", not nf and len(ntab) == 14 and not [n for n in nn_ if base_of(n) in NKEYED], f"{nf} {nn_}")
+    check("images: RED - the row check above, evaluated on a doctored account in memory with compound built at n = 3 and the table as it is (no row for compound), names compound-n3 as built without "
+          "a row (the condition `not [n-keyed names without a row]` is then false), and is green on the real account",
+          [n for n in digest_judge(mdig + [("compound-n3", "00000000")], ntab)[1] if base_of(n) in NKEYED] == ["compound-n3"]
+          and not [n for n in nn_ if base_of(n) in NKEYED], "")
     check("images: ... and the same judge is red on a row for a name and n that can never be built (nonesuch-n3), on a row for pown at an n outside N_LIST, and, when the generator built an "
           "n-keyed name, on one digit of its digest changed",
           digest_judge(mdig, {"nonesuch-n3": "00000000"})[0] and digest_judge(mdig, {"pown-n4": "00000000"})[0]
@@ -539,7 +544,7 @@ def group_images(tool, tree, work, imgs, manifest):
                       p.returncode == 0 and dep == [ml.evaluate(f, pr)[0] for pr in pairs], f"rc {p.returncode} {p.stderr[-200:]}")
     nb = [k for k, _ in built if base_of(k) in NKEYED]
     if not nb:
-        skip("images: pown, rootn and compound positive-run", f"not built at fp32 (the generator skipped {[n for n in skipped if n in NKEYED]} by name): parcel M3F2's fragments")
+        skip("images: pown, rootn and compound positive-run", f"not built at fp32 (the generator skipped {[n for n in skipped if n in NKEYED]} by name)")
     ntok = {ntoken(v): v for v in N_LIST}
     for key in nb:
         nm, tok = key.split("-n")
