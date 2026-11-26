@@ -206,8 +206,8 @@ COMPILER_REFUSALS = {
     # M1's build, item 4 (cftc's output version 6), M2's for sin, cos
     # and tan (version 7), M4's for atan, asin, acos and atan2 (version 8)
     # and M3's for pow, powr, pown, rootn and compound (version 9, whose
-    # fp32 case is the three's, parcel M3F2's): the one that depends on the
-    # host
+    # fp32 case is compound's alone: pown and rootn are built there, parcel
+    # M3F2's): the one that depends on the host
     "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p, log2, "
                            "sin, cos, tan, atan, asin, acos, atan2, pow, "
                            "powr, pown, rootn or compound on a host without "

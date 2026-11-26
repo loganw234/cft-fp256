@@ -3796,3 +3796,989 @@ def red_checks_tw(plant, fn="pow", rnds=(RNE,), region_n=6, bound_n=6,
 # 300 lanes (pow-pools) and, for pow-bound, 1,000 points a region
 REGION_LANES_TW = {"pow": 300, "powr": 300}
 BOUND_POINTS_TW = 1000
+
+
+# ---- fp32: pown and rootn (parcel M3F2) ----
+#
+# pown and rootn at fp32 are the triple word of pow and powr with n a constant of
+# the fragment; the harness of the double word's n-keyed checks (INT_FUNCS, from
+# line 1620: pool_n, region_n, special_rows_n, structured_rows_n, check_seq_n,
+# check_shape_n, check_caps_n) is format-generic where it reads no table with
+# no fp32 key (ZONE_BIG, REGION_LANES, POOL_MARKS_N and SPECIAL_MARKS_N are not
+# read at fp32: the wrappers below pass their own, or refuse by name), and is
+# called here at FP32. Every pin is the MODEL's (docs/studies/m3/pw32n.py,
+# parcel M3XN: MEASURED on its builds, scheduled, over the n list at the five
+# attributes, and equal on this build's: the port was shown equal to it by dag
+# digest, emitted order and on lanes), not computed from the code under test.
+
+TW_N_FUNS = ("pown", "rootn")
+_TW_N_COMMON = (2, -2, 3, -3, 17, 2 ** 31 - 1, -2 ** 63, 1000, 2 ** 24 + 1,
+                2 ** 40, 2 ** 48 + 1)
+# the n of each function's checks: the sweeps' seven, 1000, 2^24 + 1 (two words),
+# 2^40 (a power of two: one word), 2^48 + 1 (two words), 2^62 + 2^37 + 1 (three
+# words, pown only: rootn's 1/n has three words at every n that is not a power
+# of two), and n = 0 and 1 (the small fragments; rootn's 0 is refused by name)
+TW_N_NS = {"pown": _TW_N_COMMON + (2 ** 62 + 2 ** 37 + 1, 0, 1),
+           "rootn": _TW_N_COMMON + (1,)}
+# the n beside the list at which the registers and caps are shown too
+# (VM3XN's: 28 and 27 live at an odd n, one fewer at an even)
+TW_N_CAP_EXTRA_NS = (5, 2 ** 35 + 7)
+CHECKS_TW_N = ("pools", "regions", "specials", "structured", "seq", "bound",
+               "shape", "constants")
+# the box's regions (the model's regions.py at fp32): int<N> at n = N, zone at
+# n = 3, zone<N> at n = N; n = 2 and -2 have no region at all
+REGION_NAMES_TW_N = ("int", "int-neg", "int17", "int31", "int63", "int1000",
+                     "int16777217", "int1099511627776",
+                     "int281474976710657", "zone", "zone1000", "zone-3",
+                     "zone17")
+# the lanes a region at the box's size (pw32n_box.sh: 12,000)
+REGION_LANES_TW_N = {"pown": 12000, "rootn": 12000}
+# a region whose lanes the screens may all take (the model's: pown's n = 2^31 - 1
+# and up, rootn's 2^40 and up; int63 is the double word's too): none of them is
+# a finding, each is NOT MEASURED when it measures nothing
+BOUND_NO_MAIN_TW_N = {"int31", "int63", "int1099511627776",
+                      "int281474976710657"}
+
+PINS_TW_N = {
+    ('pown', 'fp32', 'rne', 2): (865, 138, 27, 'fda9d17725e1493de1f2047fee6dfc32', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rtz', 2): (858, 139, 27, '4cc2f971929cdcdadb6a7d0281c4421e', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rdn', 2): (858, 139, 27, '063e75db2cf7f6e4493e2a709a1454d9', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rup', 2): (858, 138, 27, 'fd89017949542788d55d33cb885b6055', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rmm', 2): (865, 138, 27, '2698bce4fa2adc7da07e7bb7db305b75', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rne', -2): (865, 138, 27, '9606f30bfe46d5bd442ae85f2c56cbfe', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rtz', -2): (859, 139, 27, '4aecdfd3c498090c5df3974bce5ba8cf', '2db81b7aa85e531c'),
+    ('pown', 'fp32', 'rdn', -2): (859, 139, 27, 'ca8fd268f65b46051bd3a728e326af80', '2db81b7aa85e531c'),
+    ('pown', 'fp32', 'rup', -2): (859, 138, 27, '1f6d76c1352a1b2a6979ed0e6a433382', '2db81b7aa85e531c'),
+    ('pown', 'fp32', 'rmm', -2): (865, 138, 27, '12ed4ffe3479846bf65a3f0e7edc8040', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rne', 3): (877, 142, 28, 'e556cd310d28002e669250f940507370', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rtz', 3): (871, 144, 28, '6b802ac033b519092bda458560c9698b', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rdn', 3): (871, 145, 28, 'e4eee54928baad9e75e18dc7de631809', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rup', 3): (871, 143, 28, 'b9b99f5a8e6f08806e752e1aec31f992', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rmm', 3): (877, 142, 28, '3d40c34e05e364bb45ef5ad6376756ae', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rne', -3): (877, 142, 28, 'ecfee621e6606fbae95414eff7a0e3bc', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rtz', -3): (872, 144, 28, 'c375bc4b3d35ee7a30efaae01d143d46', 'd08566ed24c8e3f3'),
+    ('pown', 'fp32', 'rdn', -3): (872, 145, 28, '87e4cda0c4d92ea75190f5cd75f8ad6f', 'd08566ed24c8e3f3'),
+    ('pown', 'fp32', 'rup', -3): (872, 143, 28, 'ab379b4f24ad3968a805e7ac59a2db8f', 'd08566ed24c8e3f3'),
+    ('pown', 'fp32', 'rmm', -3): (877, 142, 28, '505ba9f1a43b0adc8ec53a4a80e88dd5', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rne', 17): (877, 142, 28, 'a380b25e01daf76c48398640db89a17b', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rtz', 17): (871, 144, 28, 'd44ddc26510d4f148eb87b6512f7e674', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rdn', 17): (871, 145, 28, 'af027de776ca0cd6187e4422a11d687d', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rup', 17): (871, 143, 28, '624b4acf30690c46434a352e4e56949c', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rmm', 17): (877, 142, 28, 'de7fcfc3dae70cb1430e36b4d3de5c64', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rne', 2147483647): (889, 142, 28, 'ce89c8e36764ca7a6a77987257f9aef6', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rtz', 2147483647): (883, 144, 28, '0b7662292653de326eda3c160fd7bc59', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rdn', 2147483647): (883, 145, 28, '029ad9851cf7f4ffe6bc4cb634ddc50f', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rup', 2147483647): (883, 143, 28, 'c6220f6b448a055ef195eec2e58da3b1', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rmm', 2147483647): (889, 142, 28, 'adc9867d5d65370bbc364dba565925f9', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rne', -9223372036854775808): (865, 138, 27, '21c3e47b208952c7087edffa1a35baf1', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rtz', -9223372036854775808): (859, 139, 27, '8d7339120d7bf823dd2540a5ab7e7402', '2db81b7aa85e531c'),
+    ('pown', 'fp32', 'rdn', -9223372036854775808): (859, 139, 27, '090acbe5cc4074578f48507c06b772d4', '2db81b7aa85e531c'),
+    ('pown', 'fp32', 'rup', -9223372036854775808): (859, 138, 27, '1b4f8e9a6b06ed3c676daaf39ee63abc', '2db81b7aa85e531c'),
+    ('pown', 'fp32', 'rmm', -9223372036854775808): (865, 138, 27, 'decb3a453140bb078c344639dec75eca', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rne', 1000): (865, 139, 27, 'a1fb24e3e0dbfcac2c6b7e24fb8e03c9', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rtz', 1000): (858, 140, 27, '430bcfe7decb31b8bb1311fc5a3bb8a9', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rdn', 1000): (858, 140, 27, '7015a94fde809317ee6fce2bcfa4aecd', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rup', 1000): (858, 139, 27, '1d79ec5a94aff7997e8b03c613ce2adc', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rmm', 1000): (865, 139, 27, 'b91d0116e034522f9133ea556098d17c', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rne', 16777217): (889, 141, 28, '5fe58be5d54c4fe196cee25dd01519ad', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rtz', 16777217): (883, 143, 28, '3b4f572b765fa8e2ede5579828f60a90', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rdn', 16777217): (883, 144, 28, '222b3badbd4693f78e6404efb1433017', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rup', 16777217): (883, 142, 28, '100c185b2c8bef09858c5b87c7ab931f', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rmm', 16777217): (889, 141, 28, '90c9c1827404535f21c85ddc17ec15be', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rne', 1099511627776): (865, 138, 27, '2e81f136433dbcd514decb0b2057d77a', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rtz', 1099511627776): (858, 139, 27, '88f3f1ab585b3a0021f316b07621d341', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rdn', 1099511627776): (858, 139, 27, 'b58a659d48735f758b58e74ad5b58d2d', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rup', 1099511627776): (858, 138, 27, '2b140d72b974bdc0380b3739b7ef3966', '6be8d199c1d83a4c'),
+    ('pown', 'fp32', 'rmm', 1099511627776): (865, 138, 27, '265f10f4b987778506e53a0fb4aa1501', '476680b4a258bd75'),
+    ('pown', 'fp32', 'rne', 281474976710657): (889, 142, 28, 'b80ffeaa6bcb0ba8b548a64279e5f9af', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rtz', 281474976710657): (883, 144, 28, 'a5bb3809c2a1f5cbe14a3ce5e7c25351', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rdn', 281474976710657): (883, 145, 28, '5774b7b26c6a03fecd6bc2c3143523bf', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rup', 281474976710657): (883, 143, 28, 'cddd2b8fba8d10c91d37536770d576d8', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rmm', 281474976710657): (889, 142, 28, '05167dc349c7cf2f632b17c93b804b83', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rne', 4611686155866341377): (891, 143, 28, '662d0f8339eb6dddef00e4b6c84c7c39', '8016f383a4da5b63'),
+    ('pown', 'fp32', 'rtz', 4611686155866341377): (885, 145, 28, '651f1a4ab5a293673c34b5cf8abdc9c1', '7d66182f39d0b3a8'),
+    ('pown', 'fp32', 'rdn', 4611686155866341377): (885, 146, 28, '9a112173fe7ca5335867747d0fd9853b', '7d66182f39d0b3a8'),
+    ('pown', 'fp32', 'rup', 4611686155866341377): (885, 144, 28, '944b40f6bd8ab2847f632817954401b6', '7d66182f39d0b3a8'),
+    ('pown', 'fp32', 'rmm', 4611686155866341377): (891, 143, 28, '1b742ebd5c247a0b2fe83aa255a6c402', '8016f383a4da5b63'),
+    ('pown', 'fp32', 'rne', 0): (6, 7, 2, '1480c8b2218e2222317bea6b8b42cfff', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rtz', 0): (6, 7, 2, '1480c8b2218e2222317bea6b8b42cfff', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rdn', 0): (6, 7, 2, '1480c8b2218e2222317bea6b8b42cfff', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rup', 0): (6, 7, 2, '1480c8b2218e2222317bea6b8b42cfff', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rmm', 0): (6, 7, 2, '1480c8b2218e2222317bea6b8b42cfff', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rne', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rtz', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rdn', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rup', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rmm', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('pown', 'fp32', 'rne', 5): (877, 142, 28, 'fb8ed0e6a125ceb33012f9d56e5f9823', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rtz', 5): (871, 144, 28, '954dadea55b8c29f72c21500f6ac8f75', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rdn', 5): (871, 145, 28, '705a222c67b623de17b9334e7c72af36', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rup', 5): (871, 143, 28, 'f25f90af9d2bdb4920012869dc38339b', 'bccb3d99fe0a8ff0'),
+    ('pown', 'fp32', 'rmm', 5): (877, 142, 28, '64f863b482deb1720050ea1d0d341c15', 'faa1a644b6b3dc39'),
+    ('pown', 'fp32', 'rne', 34359738375): (889, 143, 28, '35d340689eeddfddee8e1134497d7bae', '1f61c7fbe610b845'),
+    ('pown', 'fp32', 'rtz', 34359738375): (883, 145, 28, 'e9e12105382b0ee5d61eb88f1138f4b1', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rdn', 34359738375): (883, 146, 28, '5351b32d726373d600d488d4b12c2a3a', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rup', 34359738375): (883, 144, 28, '654c0c51afd83f70b60e5be72df19636', '36c0fe7898d54036'),
+    ('pown', 'fp32', 'rmm', 34359738375): (889, 143, 28, 'd910ddfd49b58863784503d83237d15a', '1f61c7fbe610b845'),
+    ('rootn', 'fp32', 'rne', 2): (871, 139, 26, 'd856f1ce5ae59a4a162f015eb9015e07', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rtz', 2): (864, 140, 26, '1e7d14cf1ec7dae21a467a6b9221b133', 'f7ffaf9abe436f64'),
+    ('rootn', 'fp32', 'rdn', 2): (864, 140, 26, 'b5af3d4c2548dce2c4fb35f71f8a4aac', 'f7ffaf9abe436f64'),
+    ('rootn', 'fp32', 'rup', 2): (864, 139, 26, '661abae5c73114e88da1a2fdd47f1bf5', 'f7ffaf9abe436f64'),
+    ('rootn', 'fp32', 'rmm', 2): (871, 139, 26, '9a4160873488154d53bf1fa5da66252e', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rne', -2): (871, 139, 26, 'b74898cb6fe9311a1034febbefca5742', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rtz', -2): (865, 140, 26, '618bdc92143aa53e4afe0431c33b7429', '2c87253033971e57'),
+    ('rootn', 'fp32', 'rdn', -2): (865, 140, 26, '990691c0af2ec2c5cd53df1ce2509b56', '2c87253033971e57'),
+    ('rootn', 'fp32', 'rup', -2): (865, 139, 26, '5a180183472c717255b1c05a20e34846', '2c87253033971e57'),
+    ('rootn', 'fp32', 'rmm', -2): (871, 139, 26, 'cf7ea225c2ff7235d0c052b411c4424d', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rne', 3): (892, 141, 27, 'ecf7fd41cb6cc73686988f27bd2b517a', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 3): (886, 143, 27, '15036d4c7e745db09a823aefc5ad55e3', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 3): (886, 144, 27, 'e35209057f0f2303915eb9b76d601c2b', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 3): (886, 142, 27, '9b918fa968ce446c8a0a8b9c0ecb2755', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 3): (892, 141, 27, 'b6b95e22d2324a7849a30f66b7e57963', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', -3): (892, 144, 27, '7f9742e720258faffffd24c125a11942', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', -3): (887, 146, 27, '7c5026790f185604834f120d0bfa222b', 'deaca6652505a500'),
+    ('rootn', 'fp32', 'rdn', -3): (887, 147, 27, 'aba0d4f421e527fc1d903d855bccb7f4', 'deaca6652505a500'),
+    ('rootn', 'fp32', 'rup', -3): (887, 145, 27, 'fee09a06a2307f341aea2bce9282ec0d', 'deaca6652505a500'),
+    ('rootn', 'fp32', 'rmm', -3): (892, 144, 27, '27b8c88ae49db16a2d4d435052017763', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', 17): (892, 143, 27, '3144a3d7f2f8673025f4d34c3f22e355', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 17): (886, 145, 27, '19dd886e21cae54a3c2e15b2913e2f0c', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 17): (886, 146, 27, 'ca641208cb705ac1e39e8cf893f02503', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 17): (886, 144, 27, '254f663e33296cc9b2cf7942510f2549', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 17): (892, 143, 27, '8210dfabaa05a71b95d445bfd91f48c1', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', 2147483647): (892, 144, 27, 'd41396711fbc36505342d3e52732ee42', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 2147483647): (886, 146, 27, 'ed29dd82b6d714392b327a59ca59ffc7', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 2147483647): (886, 147, 27, '4db5c2a7eff6d57649161ff1c0dc69a8', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 2147483647): (886, 145, 27, 'd6ecb3ee538884784fdced943be7453e', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 2147483647): (892, 144, 27, '684d85c5ebd82d8552f442ca03cfc88e', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', -9223372036854775808): (871, 140, 26, 'de17fb7b47a96dccad034b17336ca165', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rtz', -9223372036854775808): (865, 141, 26, '7cd5c8be636886645b258111a14615e5', '2c87253033971e57'),
+    ('rootn', 'fp32', 'rdn', -9223372036854775808): (865, 141, 26, '51dd8b793b9311c5c82161a40143b766', '2c87253033971e57'),
+    ('rootn', 'fp32', 'rup', -9223372036854775808): (865, 140, 26, '7cd6fb8272aeb65d5a2957d6939ca96b', '2c87253033971e57'),
+    ('rootn', 'fp32', 'rmm', -9223372036854775808): (871, 140, 26, '76472311d7e8418f411a9eca941cc52c', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rne', 1000): (885, 142, 26, 'e0ecd3cb612920b3cc28f049ab71cc11', 'e481e0e874799fc8'),
+    ('rootn', 'fp32', 'rtz', 1000): (878, 143, 26, '041af3def3a47db65ed8b69a0f045c0a', 'dfe21b195d5f29c9'),
+    ('rootn', 'fp32', 'rdn', 1000): (878, 143, 26, '431219af33696886a94eeb1988f81708', 'dfe21b195d5f29c9'),
+    ('rootn', 'fp32', 'rup', 1000): (878, 142, 26, '917602cc7b8ab93773629a181a4fceed', 'dfe21b195d5f29c9'),
+    ('rootn', 'fp32', 'rmm', 1000): (885, 142, 26, '603027fe6ebf57eb0dfe185db7a4b0b9', 'e481e0e874799fc8'),
+    ('rootn', 'fp32', 'rne', 16777217): (892, 144, 27, '6b9f003b28867340a104557f9b6c6979', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 16777217): (886, 146, 27, 'f191c4b87d2ca0e496342bdcf578dfd4', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 16777217): (886, 147, 27, 'f03100b68c54e2ce6b9111accfd85e2a', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 16777217): (886, 145, 27, 'a5f79f7b374b7997bb0587835143e829', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 16777217): (892, 144, 27, 'a062690dfefd784b0533eee32ddc850e', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', 1099511627776): (871, 140, 26, 'fc2f226be0b489f89f97fceea4012309', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rtz', 1099511627776): (864, 141, 26, '1037c07996fd7ed49441f3ed7588c31e', 'f7ffaf9abe436f64'),
+    ('rootn', 'fp32', 'rdn', 1099511627776): (864, 141, 26, '66d862a0b294f385d06f4c949e5dd709', 'f7ffaf9abe436f64'),
+    ('rootn', 'fp32', 'rup', 1099511627776): (864, 140, 26, '755e475bf68ee1638f6b00e26cc11b03', 'f7ffaf9abe436f64'),
+    ('rootn', 'fp32', 'rmm', 1099511627776): (871, 140, 26, '992fdd7e08480aa6866be02725b732c2', 'baffe940ed5bd31e'),
+    ('rootn', 'fp32', 'rne', 281474976710657): (892, 144, 27, 'f72cd2f9441a00d212c7a2b99335edf8', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 281474976710657): (886, 146, 27, '54e9fb4433ef25ab972a6092ff0f6197', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 281474976710657): (886, 147, 27, '8e967fddff948b9ebcb03f32a1d1a61e', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 281474976710657): (886, 145, 27, '83739d78098aa9bb0c38c80fb42e2334', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 281474976710657): (892, 144, 27, 'f0a6f88744158e9e3b9d87b18d55d35e', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('rootn', 'fp32', 'rtz', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('rootn', 'fp32', 'rdn', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('rootn', 'fp32', 'rup', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('rootn', 'fp32', 'rmm', 1): (6, 6, 3, 'bde8082e862905cd882ad1ab8a8b3e99', '9286480e7da5e680'),
+    ('rootn', 'fp32', 'rne', 5): (892, 141, 27, '0d936f0918b3ca8661807c03157ac694', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 5): (886, 143, 27, 'e38fba233c3f3240e80e840d369eb3d4', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 5): (886, 144, 27, '506a4d0d6a3822e24bdefbd34ff005ea', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 5): (886, 142, 27, 'd87c9d9958e06c4853793811bba8f73c', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 5): (892, 141, 27, '10840b3b1533e24d1c3bb16736d41e05', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rne', 34359738375): (892, 144, 27, 'fe4a25ef1d4819b754ebae7d2dc49318', 'b8f78802e61d5e6b'),
+    ('rootn', 'fp32', 'rtz', 34359738375): (886, 146, 27, '4e0f4895c6bc6d948bc6b40f568f2092', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rdn', 34359738375): (886, 147, 27, '936b939039fe9652038f15b6022a619d', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rup', 34359738375): (886, 145, 27, '13c51537c0adce8628367ad3197ccbd1', '23fd8459e977db87'),
+    ('rootn', 'fp32', 'rmm', 34359738375): (892, 144, 27, '10ae64a28540d839ce36907a2e38448d', 'b8f78802e61d5e6b'),
+}
+EFT_TW_N = {
+    ('pown', 'fp32', 2): (61, 42),
+    ('pown', 'fp32', -2): (61, 42),
+    ('pown', 'fp32', 3): (61, 42),
+    ('pown', 'fp32', -3): (61, 42),
+    ('pown', 'fp32', 17): (61, 42),
+    ('pown', 'fp32', 2147483647): (63, 42),
+    ('pown', 'fp32', -9223372036854775808): (61, 42),
+    ('pown', 'fp32', 1000): (61, 42),
+    ('pown', 'fp32', 16777217): (63, 42),
+    ('pown', 'fp32', 1099511627776): (61, 42),
+    ('pown', 'fp32', 281474976710657): (63, 42),
+    ('pown', 'fp32', 4611686155866341377): (63, 42),
+    ('pown', 'fp32', 0): (0, 0),
+    ('pown', 'fp32', 1): (0, 0),
+    ('pown', 'fp32', 5): (61, 42),
+    ('pown', 'fp32', 34359738375): (63, 42),
+    ('rootn', 'fp32', 2): (61, 42),
+    ('rootn', 'fp32', -2): (61, 42),
+    ('rootn', 'fp32', 3): (63, 42),
+    ('rootn', 'fp32', -3): (63, 42),
+    ('rootn', 'fp32', 17): (63, 42),
+    ('rootn', 'fp32', 2147483647): (63, 42),
+    ('rootn', 'fp32', -9223372036854775808): (61, 42),
+    ('rootn', 'fp32', 1000): (63, 42),
+    ('rootn', 'fp32', 16777217): (63, 42),
+    ('rootn', 'fp32', 1099511627776): (61, 42),
+    ('rootn', 'fp32', 281474976710657): (63, 42),
+    ('rootn', 'fp32', 1): (0, 0),
+    ('rootn', 'fp32', 5): (63, 42),
+    ('rootn', 'fp32', 34359738375): (63, 42),
+}
+DIGESTS_TW_N = {
+    ('pown', 2, 'rne'): ('fda9d17725e1493de1f2047fee6dfc3236d15ec74d6266d2b18c56e76b5652bd', 'fda9d17725e1493de1f2047fee6dfc3236d15ec74d6266d2b18c56e76b5652bd', '229032a4c42e2df1c4bb9d5c3be7e154cafbd23e1321c0e17be9d43c207e3381'),
+    ('pown', 2, 'rtz'): ('4cc2f971929cdcdadb6a7d0281c4421ef52ec8b943736c8426dfb622f4c17bad', '4cc2f971929cdcdadb6a7d0281c4421ef52ec8b943736c8426dfb622f4c17bad', '70a0a3b283c3023dfa13de8f665848a3b4862f4f1adeb197f5f51569ada5d913'),
+    ('pown', 2, 'rdn'): ('063e75db2cf7f6e4493e2a709a1454d90fa51ae7f404c58fa8b8ba5b694b5a05', '063e75db2cf7f6e4493e2a709a1454d90fa51ae7f404c58fa8b8ba5b694b5a05', 'e05fbcc99d5642c489f22a88e9ffca71da9de5fba85033201451112f745ba32e'),
+    ('pown', 2, 'rup'): ('fd89017949542788d55d33cb885b60554ba427ef3f1fcb3c6dc8f4e38fb3427d', 'fd89017949542788d55d33cb885b60554ba427ef3f1fcb3c6dc8f4e38fb3427d', 'a9738fcf3eb4d7c6f94e9544a23d05082ddb48f6e44ede201ad8b203391b0260'),
+    ('pown', 2, 'rmm'): ('2698bce4fa2adc7da07e7bb7db305b757e6f67067ed034df7e1741505f9c7ea5', '2698bce4fa2adc7da07e7bb7db305b757e6f67067ed034df7e1741505f9c7ea5', '7ec92f0d61733b12c59d0fe72666d38886f9c2f43d060b7938d061d5f95afaf3'),
+    ('pown', -2, 'rne'): ('9606f30bfe46d5bd442ae85f2c56cbfed12d9a3a72ea67ef387ee32c45ee3a9a', '9606f30bfe46d5bd442ae85f2c56cbfed12d9a3a72ea67ef387ee32c45ee3a9a', '7a3f4658574275b9872be130f8361fde0fe8c56f87ec1eea061082e222430681'),
+    ('pown', -2, 'rtz'): ('4aecdfd3c498090c5df3974bce5ba8cf6129f4604483102ab74491e09ec759c1', '4aecdfd3c498090c5df3974bce5ba8cf6129f4604483102ab74491e09ec759c1', 'ea3f2b08a9ca7a423e18f091bd690c58f6d76889d99e5b61df3077b2307f395f'),
+    ('pown', -2, 'rdn'): ('ca8fd268f65b46051bd3a728e326af80de13f47cb59aa56ea3e3bce2a2e8f225', 'ca8fd268f65b46051bd3a728e326af80de13f47cb59aa56ea3e3bce2a2e8f225', '1a1c6dc344a194dc561d755228bc285d2cc8e77ba8239318a9daf129ec9ae37d'),
+    ('pown', -2, 'rup'): ('1f6d76c1352a1b2a6979ed0e6a43338225379a9bfe53784d060683dba9d2952f', '1f6d76c1352a1b2a6979ed0e6a43338225379a9bfe53784d060683dba9d2952f', '41cafa0eb40aedd1ba4b55683f2a83132b7fc3b41f91d937dff5121adc430109'),
+    ('pown', -2, 'rmm'): ('12ed4ffe3479846bf65a3f0e7edc8040c6197bdeb2ffe4c818c4953fb43b37a4', '12ed4ffe3479846bf65a3f0e7edc8040c6197bdeb2ffe4c818c4953fb43b37a4', 'd2943686f943b5f9b74353291a748d31651401753048cb4491210e5f34c16b0d'),
+    ('pown', 3, 'rne'): ('e556cd310d28002e669250f940507370038bc36c4d0abc11ede3df58626f3a81', 'e556cd310d28002e669250f940507370038bc36c4d0abc11ede3df58626f3a81', 'c374b01d73cee8dd5d04ac1ead21f5cf926005cc68cd40a35b557e5c3bcbabdf'),
+    ('pown', 3, 'rtz'): ('6b802ac033b519092bda458560c9698bf516fd7025eed31af1ef1554144db870', '6b802ac033b519092bda458560c9698bf516fd7025eed31af1ef1554144db870', '917a97f2f0f4e5755499c7bc1808557ddbe997266c756dcbbb37d26b444deb04'),
+    ('pown', 3, 'rdn'): ('e4eee54928baad9e75e18dc7de63180943bc46ea0815044ed2ccc730737ec980', 'e4eee54928baad9e75e18dc7de63180943bc46ea0815044ed2ccc730737ec980', '454c1ee4223a39e1ca097d60c82ebced7ead18f8e11a657e1e950a16d3be63dc'),
+    ('pown', 3, 'rup'): ('b9b99f5a8e6f08806e752e1aec31f9925c3aa08765552c0cab038fcd55eeb0b4', 'b9b99f5a8e6f08806e752e1aec31f9925c3aa08765552c0cab038fcd55eeb0b4', 'eb79f3de176e76b047fc1649fa806480091fcc5c330e8ad025576af50158699d'),
+    ('pown', 3, 'rmm'): ('3d40c34e05e364bb45ef5ad6376756ae0d3f0fc7d5a1b47dd03b1b95f2278095', '3d40c34e05e364bb45ef5ad6376756ae0d3f0fc7d5a1b47dd03b1b95f2278095', '5a1602b2c5e2510496491d1710aae893524bc47b1c0f782e4dbc1797bc3dc056'),
+    ('pown', -3, 'rne'): ('ecfee621e6606fbae95414eff7a0e3bcfe8c87311d95f9cde36d9fcc40c25307', 'ecfee621e6606fbae95414eff7a0e3bcfe8c87311d95f9cde36d9fcc40c25307', 'e51e4c97100af0d000cf95dd8e57930ecc892284eeb7a6141ddd5856a0d43015'),
+    ('pown', -3, 'rtz'): ('c375bc4b3d35ee7a30efaae01d143d46cd1e8fc50c88fa240c807b4fefe98a52', 'c375bc4b3d35ee7a30efaae01d143d46cd1e8fc50c88fa240c807b4fefe98a52', 'cfcfd9d4b396f73dbe1a40f5dca258f80146ffb58631853127147564958976db'),
+    ('pown', -3, 'rdn'): ('87e4cda0c4d92ea75190f5cd75f8ad6fb748f29311522c7ae246eeef06811d96', '87e4cda0c4d92ea75190f5cd75f8ad6fb748f29311522c7ae246eeef06811d96', 'c39adc6a56b39bc9f8de04ffb5d454db30a01565b726714d53cdda8eed4ce9d8'),
+    ('pown', -3, 'rup'): ('ab379b4f24ad3968a805e7ac59a2db8f8f3382f2d0061a0326df4732f2c252b3', 'ab379b4f24ad3968a805e7ac59a2db8f8f3382f2d0061a0326df4732f2c252b3', '8cf851ae9620fddb5bdfdc316bffd31d3d507ee5602587b81357b9984d904683'),
+    ('pown', -3, 'rmm'): ('505ba9f1a43b0adc8ec53a4a80e88dd5285e22ed8dfb181b4cd315dd54a5c40c', '505ba9f1a43b0adc8ec53a4a80e88dd5285e22ed8dfb181b4cd315dd54a5c40c', 'f578dc8f9ec446ca2d43588a94d304d2e8453701ea26984cf7d63b29b4165276'),
+    ('pown', 17, 'rne'): ('a380b25e01daf76c48398640db89a17b0f14e94da7d8da324a99667ed7af8702', 'a380b25e01daf76c48398640db89a17b0f14e94da7d8da324a99667ed7af8702', '295f31b7c152c33865b671025dc3ef45e018c9f60540222b99a85598543d6db3'),
+    ('pown', 17, 'rtz'): ('d44ddc26510d4f148eb87b6512f7e6744e4c8b8cb0d4234cec726a2952d94f54', 'd44ddc26510d4f148eb87b6512f7e6744e4c8b8cb0d4234cec726a2952d94f54', 'ea60295372b520b9c7c25feac6faaf4cf6987257528f481ab010062f2459ab8d'),
+    ('pown', 17, 'rdn'): ('af027de776ca0cd6187e4422a11d687dfa013d20248d43cc16c4d039627d0120', 'af027de776ca0cd6187e4422a11d687dfa013d20248d43cc16c4d039627d0120', 'c497f8a8a1a826a19da0465bca2c5fd99a30e2b7ee5a96e0dc7adf1565381e2d'),
+    ('pown', 17, 'rup'): ('624b4acf30690c46434a352e4e56949ce32223b45cb72a30340eb5669db90aa0', '624b4acf30690c46434a352e4e56949ce32223b45cb72a30340eb5669db90aa0', '527b1c657f344f9d4fffa61fecc4a77f52e3275a2271fae912bd958e4f8d8dae'),
+    ('pown', 17, 'rmm'): ('de7fcfc3dae70cb1430e36b4d3de5c6415e6f174ef838e85e82ff628cbb0b487', 'de7fcfc3dae70cb1430e36b4d3de5c6415e6f174ef838e85e82ff628cbb0b487', 'e587d1922ed0b4c933281cd0a1132ef727b1d3e67356361bf0c53cdc45ce241b'),
+    ('pown', 2147483647, 'rne'): ('ce89c8e36764ca7a6a77987257f9aef6f1d110ca84b86ad3016b34a8f3c97c6d', 'ce89c8e36764ca7a6a77987257f9aef6f1d110ca84b86ad3016b34a8f3c97c6d', 'b9a7a39e359c0ce07d2a164e7884c1f61281201156be2a876d1da237c6cfc332'),
+    ('pown', 2147483647, 'rtz'): ('0b7662292653de326eda3c160fd7bc595a909d5bef2617eae24b5581be73d988', '0b7662292653de326eda3c160fd7bc595a909d5bef2617eae24b5581be73d988', 'd2629ce1b5ebd061e2db4ad8a86201f21b289802226fcb3536893571d6db90b4'),
+    ('pown', 2147483647, 'rdn'): ('029ad9851cf7f4ffe6bc4cb634ddc50fe945ced3f5c9ac6f3d0b7e7692a9222b', '029ad9851cf7f4ffe6bc4cb634ddc50fe945ced3f5c9ac6f3d0b7e7692a9222b', '088e723547cc358c686fcad0ba494336a49b42411b1b16fbe8e2d47a0be33f26'),
+    ('pown', 2147483647, 'rup'): ('c6220f6b448a055ef195eec2e58da3b15b30ebe1e273ee01713f7b9df6a9ab1b', 'c6220f6b448a055ef195eec2e58da3b15b30ebe1e273ee01713f7b9df6a9ab1b', 'e86510273c4deed7b6690496bfd6a7e8e8d1912886452c961c3c78688f7dc633'),
+    ('pown', 2147483647, 'rmm'): ('adc9867d5d65370bbc364dba565925f92dc9aee507a211fa1e5ab16edb29e5b5', 'adc9867d5d65370bbc364dba565925f92dc9aee507a211fa1e5ab16edb29e5b5', '3745262880c2a65f8a1c50b36001c2a4e12d80cf6434cf958cf7c0131757affd'),
+    ('pown', -9223372036854775808, 'rne'): ('21c3e47b208952c7087edffa1a35baf17d0ef04083182a42e789a56b230bca36', '21c3e47b208952c7087edffa1a35baf17d0ef04083182a42e789a56b230bca36', '63492654f1608466387cda466e451ba36bb569bc4feb301ce9fc5040e67d7ffa'),
+    ('pown', -9223372036854775808, 'rtz'): ('8d7339120d7bf823dd2540a5ab7e7402c9596a2cb6d275e8652cd8c53c540d44', '8d7339120d7bf823dd2540a5ab7e7402c9596a2cb6d275e8652cd8c53c540d44', 'c0fe9cc40d6e8ed85532dd5e275a9d99ebd29b16560396aec965f0b05ea70992'),
+    ('pown', -9223372036854775808, 'rdn'): ('090acbe5cc4074578f48507c06b772d4bcaba24086340445b1d02cf5d54dc98c', '090acbe5cc4074578f48507c06b772d4bcaba24086340445b1d02cf5d54dc98c', '53f6f06c4c3f1092ab7a8c30cd4f7405ff6a8c81b1c24c286cdae77b82cbad05'),
+    ('pown', -9223372036854775808, 'rup'): ('1b4f8e9a6b06ed3c676daaf39ee63abcc278f66ce4e4900db940100eb0c46014', '1b4f8e9a6b06ed3c676daaf39ee63abcc278f66ce4e4900db940100eb0c46014', '0190c8ebaad8ecc414ba6b6cdcf1e55ec3645cb631f9bff0ee4834ec020ec2e9'),
+    ('pown', -9223372036854775808, 'rmm'): ('decb3a453140bb078c344639dec75ecaadd7a25d3d9f180e1f80b43e02fbbf66', 'decb3a453140bb078c344639dec75ecaadd7a25d3d9f180e1f80b43e02fbbf66', '3dc533645784e2e801971a530e54483559dbff967486214b24480141b127d49e'),
+    ('pown', 1000, 'rne'): ('a1fb24e3e0dbfcac2c6b7e24fb8e03c90d2897848a360b777e06b3a41741f9e9', 'a1fb24e3e0dbfcac2c6b7e24fb8e03c90d2897848a360b777e06b3a41741f9e9', '6649fbee1558337d9d63665780e24f36f3bc891a81424bbc817f7b068fbee85f'),
+    ('pown', 1000, 'rtz'): ('430bcfe7decb31b8bb1311fc5a3bb8a96db19d0f993105287836688de446c9e4', '430bcfe7decb31b8bb1311fc5a3bb8a96db19d0f993105287836688de446c9e4', '0d861cfea16c41858e24d252ede26f06fb252da77b81529b9a68b42f4882582f'),
+    ('pown', 1000, 'rdn'): ('7015a94fde809317ee6fce2bcfa4aecd02325a7b37ac9d2e20eb3f9bcdd09bdc', '7015a94fde809317ee6fce2bcfa4aecd02325a7b37ac9d2e20eb3f9bcdd09bdc', 'cfdcf1d36098be2a90111fd6c6ef5252b26913440abd22fea718f7b861d4c05b'),
+    ('pown', 1000, 'rup'): ('1d79ec5a94aff7997e8b03c613ce2adca0e7c5803815fb5edffb776f416d788a', '1d79ec5a94aff7997e8b03c613ce2adca0e7c5803815fb5edffb776f416d788a', '4cf1e4a5f81cca0bb62ed919fac9a13cac65817e9084d70c4d17af05528b8e0c'),
+    ('pown', 1000, 'rmm'): ('b91d0116e034522f9133ea556098d17cc22afe969b46419de97f6ec06d11b730', 'b91d0116e034522f9133ea556098d17cc22afe969b46419de97f6ec06d11b730', '39ed988d042906e5460dec90235e75dc59b662c378ed5680d8ba2d3c0f267627'),
+    ('pown', 16777217, 'rne'): ('5fe58be5d54c4fe196cee25dd01519ad225823b29c8603c4e6359502f2126236', '5fe58be5d54c4fe196cee25dd01519ad225823b29c8603c4e6359502f2126236', '1e57db9c8b43857d4b590d77649eda1237ca29fd8450c33c98efaef73ac6494f'),
+    ('pown', 16777217, 'rtz'): ('3b4f572b765fa8e2ede5579828f60a902e21f44c218d4b4e4edec2269f871639', '3b4f572b765fa8e2ede5579828f60a902e21f44c218d4b4e4edec2269f871639', 'a14546e61b417054efadbf12e0afd8764ff6a3d002e62995fb3a327df3f05e0e'),
+    ('pown', 16777217, 'rdn'): ('222b3badbd4693f78e6404efb1433017b48f86a75a5d8918a4d2d33e4ed8c35a', '222b3badbd4693f78e6404efb1433017b48f86a75a5d8918a4d2d33e4ed8c35a', 'fe0cb558da65eca6a02be6090218e1543c3a209fc20f0287dd341d48878e132a'),
+    ('pown', 16777217, 'rup'): ('100c185b2c8bef09858c5b87c7ab931fd676e5370a41f22d7c3418bfda26dc5b', '100c185b2c8bef09858c5b87c7ab931fd676e5370a41f22d7c3418bfda26dc5b', 'dda19c07033fa79c25b038aa7f101abfafc5c29535461ef95c002f9f029cf4e0'),
+    ('pown', 16777217, 'rmm'): ('90c9c1827404535f21c85ddc17ec15be232ab20fa6bb155f3e57d2c11c1e0ba9', '90c9c1827404535f21c85ddc17ec15be232ab20fa6bb155f3e57d2c11c1e0ba9', 'de0525d657aec85ba640bae9dd1e6a6266b5be9618706577365e393834a73c08'),
+    ('pown', 1099511627776, 'rne'): ('2e81f136433dbcd514decb0b2057d77a2bbcd6ced6a9a0d874ef2ef3bf60f206', '2e81f136433dbcd514decb0b2057d77a2bbcd6ced6a9a0d874ef2ef3bf60f206', '0c5752a1369135eef02ca8d48f1e297f9b75c22e4c7ba1e1ebd71d9d1922b781'),
+    ('pown', 1099511627776, 'rtz'): ('88f3f1ab585b3a0021f316b07621d34149500eaf6fb90759f4a4764ce3b1165f', '88f3f1ab585b3a0021f316b07621d34149500eaf6fb90759f4a4764ce3b1165f', 'b4cdc1e7921d67fb3a45d6dda92f767812a429204f2c8daebe7a29625486023f'),
+    ('pown', 1099511627776, 'rdn'): ('b58a659d48735f758b58e74ad5b58d2d5f8a11e832b8e309752742b31b373faf', 'b58a659d48735f758b58e74ad5b58d2d5f8a11e832b8e309752742b31b373faf', 'cb9e8c8a5713721b32588b93434e2fe718613af15804429ae140c6606ded6571'),
+    ('pown', 1099511627776, 'rup'): ('2b140d72b974bdc0380b3739b7ef39666d97f2f6654cfbb31b39d818feffbd39', '2b140d72b974bdc0380b3739b7ef39666d97f2f6654cfbb31b39d818feffbd39', 'd09d8218ff31959289e3c60ad8d2042bb54a984a1cdcb0f49c32991570bff5eb'),
+    ('pown', 1099511627776, 'rmm'): ('265f10f4b987778506e53a0fb4aa15015e4f922d417638f821a27a556072c70d', '265f10f4b987778506e53a0fb4aa15015e4f922d417638f821a27a556072c70d', '42006b76605ebece78934b5c3ee6484d448ea3e5e71f7df7bf2dc8bd06044749'),
+    ('pown', 281474976710657, 'rne'): ('b80ffeaa6bcb0ba8b548a64279e5f9afa4fb4dd3c7721a8b98db1a26d255d7b3', 'b80ffeaa6bcb0ba8b548a64279e5f9afa4fb4dd3c7721a8b98db1a26d255d7b3', '758eb6db3c97cd4f03b9192e14f9fa0a3e18e43d276ce5160a28b9f716eeb224'),
+    ('pown', 281474976710657, 'rtz'): ('a5bb3809c2a1f5cbe14a3ce5e7c25351637bd709439671267397abf808b8de2b', 'a5bb3809c2a1f5cbe14a3ce5e7c25351637bd709439671267397abf808b8de2b', '29986f6869f7d5d4ee217bf2b03bb93106690b387bc0a12b45d74f8d61aab592'),
+    ('pown', 281474976710657, 'rdn'): ('5774b7b26c6a03fecd6bc2c3143523bf54d0e9666a15bb72ff86069e924f9bdb', '5774b7b26c6a03fecd6bc2c3143523bf54d0e9666a15bb72ff86069e924f9bdb', '60b15d34e9a5fd65a08b3bbf77b6ec01958a4bc32d8fecd568a36558b1d83994'),
+    ('pown', 281474976710657, 'rup'): ('cddd2b8fba8d10c91d37536770d576d8491c713d159d914b21fbf7945f69fdfe', 'cddd2b8fba8d10c91d37536770d576d8491c713d159d914b21fbf7945f69fdfe', '1397bb06606c45fd2afd9fffa8fc08a0cc30baf5aa1eaabad6362433dd98c380'),
+    ('pown', 281474976710657, 'rmm'): ('05167dc349c7cf2f632b17c93b804b83cedc302d2fa31394a9832df98ae794a1', '05167dc349c7cf2f632b17c93b804b83cedc302d2fa31394a9832df98ae794a1', 'd2009ebbc3f246d487a612a683d2d8ed6f0ed642ef10bc7897740e82b70b1a20'),
+    ('pown', 4611686155866341377, 'rne'): ('662d0f8339eb6dddef00e4b6c84c7c39bb4dedb02747caae72646742ab2d7b48', '662d0f8339eb6dddef00e4b6c84c7c39bb4dedb02747caae72646742ab2d7b48', '60ec33ffcf7de0bc54723d573a15b898a65d7c3f95d2f1a35b0e8f6edde46d36'),
+    ('pown', 4611686155866341377, 'rtz'): ('651f1a4ab5a293673c34b5cf8abdc9c1c404cdf30fce994b105eba1ed5a94006', '651f1a4ab5a293673c34b5cf8abdc9c1c404cdf30fce994b105eba1ed5a94006', '277e6d2ebf2e87aee98eaecaecebdc75e963a0368a6b32bb8ffd5fb96dadf817'),
+    ('pown', 4611686155866341377, 'rdn'): ('9a112173fe7ca5335867747d0fd9853beb2a4ac1e7a08666d918d6777beef085', '9a112173fe7ca5335867747d0fd9853beb2a4ac1e7a08666d918d6777beef085', '4477df5744de1cd5198daab9d7ea47b44daf91d901f8d53d08436ea838bb2b16'),
+    ('pown', 4611686155866341377, 'rup'): ('944b40f6bd8ab2847f632817954401b667497635beb3d807d2a0a8104846a9ea', '944b40f6bd8ab2847f632817954401b667497635beb3d807d2a0a8104846a9ea', '75c0e79f12976c285d9e853fb3bf95409ca7432d58b7fcd234d37b9232edde02'),
+    ('pown', 4611686155866341377, 'rmm'): ('1b742ebd5c247a0b2fe83aa255a6c402523811b2eb0b146faa8b8e16660bb9ec', '1b742ebd5c247a0b2fe83aa255a6c402523811b2eb0b146faa8b8e16660bb9ec', 'b0c3fc41cbcc16241497b2966d4a11745147797d4e540557c7dbd305889c5d8e'),
+    ('pown', 0, 'rne'): ('1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '56d6f056f010074493ecfee042fb16e0b753a1d1582b6cb1859f37aec2ace574'),
+    ('pown', 0, 'rtz'): ('1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '56d6f056f010074493ecfee042fb16e0b753a1d1582b6cb1859f37aec2ace574'),
+    ('pown', 0, 'rdn'): ('1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '56d6f056f010074493ecfee042fb16e0b753a1d1582b6cb1859f37aec2ace574'),
+    ('pown', 0, 'rup'): ('1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '56d6f056f010074493ecfee042fb16e0b753a1d1582b6cb1859f37aec2ace574'),
+    ('pown', 0, 'rmm'): ('1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '1480c8b2218e2222317bea6b8b42cfffc178b70dbd69fb18589fd46552c1eb4b', '56d6f056f010074493ecfee042fb16e0b753a1d1582b6cb1859f37aec2ace574'),
+    ('pown', 1, 'rne'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('pown', 1, 'rtz'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('pown', 1, 'rdn'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('pown', 1, 'rup'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('pown', 1, 'rmm'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('pown', 5, 'rne'): ('fb8ed0e6a125ceb33012f9d56e5f9823e6017c22d0d109e00bc783e82a3c6096', 'fb8ed0e6a125ceb33012f9d56e5f9823e6017c22d0d109e00bc783e82a3c6096', '7b0d05b926ccb1d5a93ce8e9368d925c0bb0b1b466288b11c995613c41420205'),
+    ('pown', 5, 'rtz'): ('954dadea55b8c29f72c21500f6ac8f757ca7503667671d8e05cc102f540ffb17', '954dadea55b8c29f72c21500f6ac8f757ca7503667671d8e05cc102f540ffb17', 'ef51fc390f81ebf5720fb6904e44e34b62748f93299c67d31dac9681b90741f6'),
+    ('pown', 5, 'rdn'): ('705a222c67b623de17b9334e7c72af36d4fcc3f593a18606bfdda52aa2399e03', '705a222c67b623de17b9334e7c72af36d4fcc3f593a18606bfdda52aa2399e03', '6f383965a7f27a7f490e37476e7a4076d3c4772cf7be12e17f7ff157dc5bd6d5'),
+    ('pown', 5, 'rup'): ('f25f90af9d2bdb4920012869dc38339bed9e54052eceb362f38bb5ea1f115b7d', 'f25f90af9d2bdb4920012869dc38339bed9e54052eceb362f38bb5ea1f115b7d', 'e3ef7862801236fbde00b10f971110e22b1b456955ed8098001b1bf35122d2fe'),
+    ('pown', 5, 'rmm'): ('64f863b482deb1720050ea1d0d341c15a2a41fba230f4d1a4245de7ed89cdccd', '64f863b482deb1720050ea1d0d341c15a2a41fba230f4d1a4245de7ed89cdccd', 'cd980aa13e6f06dc878200d915970d037ff9f4e329c56f63d3163d0cbfe2f210'),
+    ('pown', 34359738375, 'rne'): ('35d340689eeddfddee8e1134497d7bae6d28c117a0e4edc3c6dc2de80f8a38e2', '35d340689eeddfddee8e1134497d7bae6d28c117a0e4edc3c6dc2de80f8a38e2', 'cc1ed7ce68a79c4777a8388ee5836ebea6394eb6ed55a95c4107ec94c1cb4ca9'),
+    ('pown', 34359738375, 'rtz'): ('e9e12105382b0ee5d61eb88f1138f4b166f0e7c864ac993e9c3003df99f53652', 'e9e12105382b0ee5d61eb88f1138f4b166f0e7c864ac993e9c3003df99f53652', '72b759e13b7bc3e28babf90fb80e2b292a6c789ad6c3142f572ac17fa7900121'),
+    ('pown', 34359738375, 'rdn'): ('5351b32d726373d600d488d4b12c2a3a7fc4c982d72d68564553f7bcdf2f287a', '5351b32d726373d600d488d4b12c2a3a7fc4c982d72d68564553f7bcdf2f287a', '3d40a5b70137a5bfdd858e751b9eea14cc06ba4d33c6a8c2bc315cb484c14673'),
+    ('pown', 34359738375, 'rup'): ('654c0c51afd83f70b60e5be72df19636aa251c7535fba4cc1448a367646a3821', '654c0c51afd83f70b60e5be72df19636aa251c7535fba4cc1448a367646a3821', 'ae23941ffe48d97d0cac9bd007c60e4c2d8e058cd7b17e77345cf4f795a92b50'),
+    ('pown', 34359738375, 'rmm'): ('d910ddfd49b58863784503d83237d15a806c1347b13e931db6503400317abc9c', 'd910ddfd49b58863784503d83237d15a806c1347b13e931db6503400317abc9c', 'ec749ed2dfde5f76cdf05377d8d15185dda986dc4db9ab6ba18c492a37631853'),
+    ('rootn', 2, 'rne'): ('d856f1ce5ae59a4a162f015eb9015e07a7d6e9f3e7ab8f910c7cc83bbe77a898', 'd856f1ce5ae59a4a162f015eb9015e07a7d6e9f3e7ab8f910c7cc83bbe77a898', '19701151bc1c28152291e0b18a8e8b485f41bbce781eb2788762ee870f019129'),
+    ('rootn', 2, 'rtz'): ('1e7d14cf1ec7dae21a467a6b9221b1336895cb6e987a4b0710c379534f93d7b0', '1e7d14cf1ec7dae21a467a6b9221b1336895cb6e987a4b0710c379534f93d7b0', '8fe669ed8a4c5c2ad20db2a68b95dc81ad737d80c74036dab788d8a842350e51'),
+    ('rootn', 2, 'rdn'): ('b5af3d4c2548dce2c4fb35f71f8a4aac55452d7a86a41e5825a77427426deee4', 'b5af3d4c2548dce2c4fb35f71f8a4aac55452d7a86a41e5825a77427426deee4', '7c05231826256343bcbc89730428819251c15b4ed2ee624f49712cae29442816'),
+    ('rootn', 2, 'rup'): ('661abae5c73114e88da1a2fdd47f1bf5bc7352acbafc85acaf41a4cb491ed9e7', '661abae5c73114e88da1a2fdd47f1bf5bc7352acbafc85acaf41a4cb491ed9e7', '1f415d4d811d081aa6eced3749c9fa3c300c9f83a640241a842bba856bcf6c96'),
+    ('rootn', 2, 'rmm'): ('9a4160873488154d53bf1fa5da66252e7380ff006ec63974c59f27ad6a8de95b', '9a4160873488154d53bf1fa5da66252e7380ff006ec63974c59f27ad6a8de95b', '0f1cb7a15badf7325c9b957627079eae77b5fd10a60ae4a8ee51b146b8ff126d'),
+    ('rootn', -2, 'rne'): ('b74898cb6fe9311a1034febbefca57423e105b84b9ed64f0525c6583c6e1ff96', 'b74898cb6fe9311a1034febbefca57423e105b84b9ed64f0525c6583c6e1ff96', 'eb5ee02d64722e8ea42d96d577a159c9862281c80922149c101d144f43fe1c6c'),
+    ('rootn', -2, 'rtz'): ('618bdc92143aa53e4afe0431c33b7429cb6283bfdef6fe79f9a278489d913658', '618bdc92143aa53e4afe0431c33b7429cb6283bfdef6fe79f9a278489d913658', '63fccb3b8b32cfe6fcd594bbcaed73f6507af6f8687f31ca72a338e2baaba05b'),
+    ('rootn', -2, 'rdn'): ('990691c0af2ec2c5cd53df1ce2509b56e7dbfe613f0a12973adfe875987483e6', '990691c0af2ec2c5cd53df1ce2509b56e7dbfe613f0a12973adfe875987483e6', '5a964edfed86f41d0e20f017ac7dcf901529419bd0338c270c41f05bf4ebab6c'),
+    ('rootn', -2, 'rup'): ('5a180183472c717255b1c05a20e34846fa85b76eed377e0ee4ade71a2009b91b', '5a180183472c717255b1c05a20e34846fa85b76eed377e0ee4ade71a2009b91b', '29f0df8a211cd509d4e44b4b1baff7544893788b16a348bcbb2ce0372315a184'),
+    ('rootn', -2, 'rmm'): ('cf7ea225c2ff7235d0c052b411c4424d2cc59382c077d544e40fba72fd30afed', 'cf7ea225c2ff7235d0c052b411c4424d2cc59382c077d544e40fba72fd30afed', 'fad33ee34958b575cda7dedf7d9d5eb25d7a9723e94f1fef9eccdec7c0e33c0c'),
+    ('rootn', 3, 'rne'): ('ecf7fd41cb6cc73686988f27bd2b517a937922f19b6825ceeb4e5d427c568e56', 'ecf7fd41cb6cc73686988f27bd2b517a937922f19b6825ceeb4e5d427c568e56', '442475acc511bd229071ea9ac70223e16e82fe899d7b61372d87dac36e64cb18'),
+    ('rootn', 3, 'rtz'): ('15036d4c7e745db09a823aefc5ad55e38b70214e0bcf1202afbc919d2eb2a6e0', '15036d4c7e745db09a823aefc5ad55e38b70214e0bcf1202afbc919d2eb2a6e0', '46f0d6bbecd2974d2c94ee128cb593735ed2419b4a5ad55ffcaec129a520ee51'),
+    ('rootn', 3, 'rdn'): ('e35209057f0f2303915eb9b76d601c2b787f7c96e57f34707e785deb2f7ac7a4', 'e35209057f0f2303915eb9b76d601c2b787f7c96e57f34707e785deb2f7ac7a4', '623e3ff49e8a741dfa773051b981d9cb8aa6b3a5477d7cf959c51fad6859d0ba'),
+    ('rootn', 3, 'rup'): ('9b918fa968ce446c8a0a8b9c0ecb2755dcfbb279987e480db4a36f8dbe9a81cb', '9b918fa968ce446c8a0a8b9c0ecb2755dcfbb279987e480db4a36f8dbe9a81cb', 'e6099a5617b7fe7f9bfddeed846a3c7e64aecf30131908a223f915d13de4d5c5'),
+    ('rootn', 3, 'rmm'): ('b6b95e22d2324a7849a30f66b7e5796312c67a2b8b00edb3ac5824228835bc50', 'b6b95e22d2324a7849a30f66b7e5796312c67a2b8b00edb3ac5824228835bc50', '59e158d80f114c4a6b2d1a1bfe0f7e9c80df9f566a8ceac72657e7aad94a1e24'),
+    ('rootn', -3, 'rne'): ('7f9742e720258faffffd24c125a11942578429925f8424ffe3fe7d41ca9f2b06', '7f9742e720258faffffd24c125a11942578429925f8424ffe3fe7d41ca9f2b06', '226683ae76ae35e81d252e56b8e156b69476da35ff943fe34294b01913c41d78'),
+    ('rootn', -3, 'rtz'): ('7c5026790f185604834f120d0bfa222bda1b8f9a080e3893ad9ed8800d6cfa17', '7c5026790f185604834f120d0bfa222bda1b8f9a080e3893ad9ed8800d6cfa17', 'adbd58633f76e37fc287ea3345e4a8db746959f6e12d434f99b0c96a996a0038'),
+    ('rootn', -3, 'rdn'): ('aba0d4f421e527fc1d903d855bccb7f4fa6426cefdc92c16559fbee16a793978', 'aba0d4f421e527fc1d903d855bccb7f4fa6426cefdc92c16559fbee16a793978', '584ccca9a44c1c8493e3dd64dbe51dd77a3ad1e868dfa6880df4817a45c344e5'),
+    ('rootn', -3, 'rup'): ('fee09a06a2307f341aea2bce9282ec0d002349581ce7259a8598d44b427b1d98', 'fee09a06a2307f341aea2bce9282ec0d002349581ce7259a8598d44b427b1d98', '72ff3f7694d903d903b69c51cf5da1e53662f8ef11b3a13ef83576d0cc80eff8'),
+    ('rootn', -3, 'rmm'): ('27b8c88ae49db16a2d4d4350520177635724c046f01a3e46e39690b347a1df3f', '27b8c88ae49db16a2d4d4350520177635724c046f01a3e46e39690b347a1df3f', '1eb9b6bb9a0a97b22c0cea2e9c35ed3b446b23f39f342dc68f6a0afb5773a4f7'),
+    ('rootn', 17, 'rne'): ('3144a3d7f2f8673025f4d34c3f22e35553ed8858dfb43bf05009327701eaa16b', '3144a3d7f2f8673025f4d34c3f22e35553ed8858dfb43bf05009327701eaa16b', 'b8e28a90b4380641d6f1dc9719057982a54954856444809ca81db7c0c41ef7ec'),
+    ('rootn', 17, 'rtz'): ('19dd886e21cae54a3c2e15b2913e2f0cb2c059d266415494ff666562ac63d057', '19dd886e21cae54a3c2e15b2913e2f0cb2c059d266415494ff666562ac63d057', 'a829bf4a3cae9ed16c0b44c84180c3d9de4403052d1458188f570f1de1da72f8'),
+    ('rootn', 17, 'rdn'): ('ca641208cb705ac1e39e8cf893f0250391fa834c1d8439cfe7afd980eb1266b9', 'ca641208cb705ac1e39e8cf893f0250391fa834c1d8439cfe7afd980eb1266b9', '4156764e8250b2a7da261678efbc4b4fd42e9af7fdd6cedcc5ebf3042636faaf'),
+    ('rootn', 17, 'rup'): ('254f663e33296cc9b2cf7942510f254987745d4d681ca3d4f77bcdc09ee059c2', '254f663e33296cc9b2cf7942510f254987745d4d681ca3d4f77bcdc09ee059c2', 'e06f147f909e1e20bf650d53f85c35fd977530cecbcef8cdbe568fc8ef1598e5'),
+    ('rootn', 17, 'rmm'): ('8210dfabaa05a71b95d445bfd91f48c1623269f8160e1c756b54f62c5b959663', '8210dfabaa05a71b95d445bfd91f48c1623269f8160e1c756b54f62c5b959663', 'f152b2274ab415521a67a89d2eb3bcc278dffe05f5c3c779bf9f774a0fe022ec'),
+    ('rootn', 2147483647, 'rne'): ('d41396711fbc36505342d3e52732ee42db7e2c020b4675e053be5530b8ca6a27', 'd41396711fbc36505342d3e52732ee42db7e2c020b4675e053be5530b8ca6a27', 'd5579f06b4be0de388efa30da1875bacde92e76fa64aafb584107153d3bad372'),
+    ('rootn', 2147483647, 'rtz'): ('ed29dd82b6d714392b327a59ca59ffc76683d7769010cc9766cb03dd33f1b94e', 'ed29dd82b6d714392b327a59ca59ffc76683d7769010cc9766cb03dd33f1b94e', '474611bb0d982ed189ff1f1ebc14bc031d6b3f4af12d62e8cc64e0cef0d9286a'),
+    ('rootn', 2147483647, 'rdn'): ('4db5c2a7eff6d57649161ff1c0dc69a8b62e2e344b916a27cef0aa98ea4518df', '4db5c2a7eff6d57649161ff1c0dc69a8b62e2e344b916a27cef0aa98ea4518df', '37fade7b5d689f8916ba50de1fa80dc1f4ad1b7d9de3171464d99c05727a1a6d'),
+    ('rootn', 2147483647, 'rup'): ('d6ecb3ee538884784fdced943be7453e313b23cb2e6f2fb38be198ba93abe54a', 'd6ecb3ee538884784fdced943be7453e313b23cb2e6f2fb38be198ba93abe54a', 'ec22c542fafe0cac07235175c089a87d76b24b0668353c1511987c0aac42ce76'),
+    ('rootn', 2147483647, 'rmm'): ('684d85c5ebd82d8552f442ca03cfc88e75eb7e70d63c8841682ecde4035e251e', '684d85c5ebd82d8552f442ca03cfc88e75eb7e70d63c8841682ecde4035e251e', '6adad7d0111acfeb928e5d05c4ba9c8ce77ddbe8f3250bc163862e1e7664c635'),
+    ('rootn', -9223372036854775808, 'rne'): ('de17fb7b47a96dccad034b17336ca165bee421fbdbde3cd2634b43b3e87dec18', 'de17fb7b47a96dccad034b17336ca165bee421fbdbde3cd2634b43b3e87dec18', 'ad8eae7f83dd751be2455d61a04d12f861d8459f491d2e43da45f9b9c74b1582'),
+    ('rootn', -9223372036854775808, 'rtz'): ('7cd5c8be636886645b258111a14615e54543cb3c30ef57ddd9451cb12a037660', '7cd5c8be636886645b258111a14615e54543cb3c30ef57ddd9451cb12a037660', '1f596d5815a5ce287319d9edee88b1e4b528c001ee3421f711b78c5df5ec32ce'),
+    ('rootn', -9223372036854775808, 'rdn'): ('51dd8b793b9311c5c82161a40143b7665eb5969657876d866a3e194682576be1', '51dd8b793b9311c5c82161a40143b7665eb5969657876d866a3e194682576be1', '0db43360f3aac862e50756a13cd25a85851bf606b5d06d0d13f83e71d75c052b'),
+    ('rootn', -9223372036854775808, 'rup'): ('7cd6fb8272aeb65d5a2957d6939ca96b08bd7121a647381f2146d8dcc26ca72d', '7cd6fb8272aeb65d5a2957d6939ca96b08bd7121a647381f2146d8dcc26ca72d', '047c8f24446370c963c1c46fe37f83996d2e244426ea5a82b9e9a38af017a548'),
+    ('rootn', -9223372036854775808, 'rmm'): ('76472311d7e8418f411a9eca941cc52c261014fc5bef8769aac61bdd087aaf9b', '76472311d7e8418f411a9eca941cc52c261014fc5bef8769aac61bdd087aaf9b', 'df6e70011a5f758e2b9fdf40bc239381406f98affed3f2c415f28a3581b2a64c'),
+    ('rootn', 1000, 'rne'): ('e0ecd3cb612920b3cc28f049ab71cc11e9f467bd308076dc7dcb29c1f1f3268b', 'e0ecd3cb612920b3cc28f049ab71cc11e9f467bd308076dc7dcb29c1f1f3268b', '3bbde3f338958d27e4eb6a9285a1eedff6e49916fa6c94f87da0dd19bbe75450'),
+    ('rootn', 1000, 'rtz'): ('041af3def3a47db65ed8b69a0f045c0ab6bae68f8dc65a61cdd515e3c05e5531', '041af3def3a47db65ed8b69a0f045c0ab6bae68f8dc65a61cdd515e3c05e5531', '9e0d76b55c6b1a8e8120b60f8ed03e87117f1fb110233f57d92fbbae4c59e27d'),
+    ('rootn', 1000, 'rdn'): ('431219af33696886a94eeb1988f8170827fcda000072683a950780146ad84d2e', '431219af33696886a94eeb1988f8170827fcda000072683a950780146ad84d2e', 'b16fd4a7a5002340a9b065b82cd0c808b7cebcdc4109c186f9bc4f6a8a20f09d'),
+    ('rootn', 1000, 'rup'): ('917602cc7b8ab93773629a181a4fceedec0da7bcc7ea935b5d7997d6b4a664c9', '917602cc7b8ab93773629a181a4fceedec0da7bcc7ea935b5d7997d6b4a664c9', '7428efd90bf5bfef469703fd7a0977bc699d75169e967ee6dafa328e5ef95f75'),
+    ('rootn', 1000, 'rmm'): ('603027fe6ebf57eb0dfe185db7a4b0b9253d3513a5fc0b51077f4341364aa559', '603027fe6ebf57eb0dfe185db7a4b0b9253d3513a5fc0b51077f4341364aa559', '62e5d5010a35bc63ecc03d28ef8faa96f3d6577f5655c6a08195429e1bbe59f8'),
+    ('rootn', 16777217, 'rne'): ('6b9f003b28867340a104557f9b6c6979a562dd3f97bedb1da94498a77f1c110d', '6b9f003b28867340a104557f9b6c6979a562dd3f97bedb1da94498a77f1c110d', 'baa4a0446d39e0ff0bc950ccc02dc61e7165b23a12bbe09651bf1f79c2be5543'),
+    ('rootn', 16777217, 'rtz'): ('f191c4b87d2ca0e496342bdcf578dfd4a2a1df934d1d81d471fdcd72930c6993', 'f191c4b87d2ca0e496342bdcf578dfd4a2a1df934d1d81d471fdcd72930c6993', 'a43ad6ea013fc5561e044710fdbda1804f3b3fa22cd8c60eb023759a3d0705bb'),
+    ('rootn', 16777217, 'rdn'): ('f03100b68c54e2ce6b9111accfd85e2a4f2adf7e991bb9be23c552730408b472', 'f03100b68c54e2ce6b9111accfd85e2a4f2adf7e991bb9be23c552730408b472', '472540da875dc5f7a463c5a0fc0d6380124e0e0c95bf7169f967b10a7fe9fcbe'),
+    ('rootn', 16777217, 'rup'): ('a5f79f7b374b7997bb0587835143e829d9de5f1b8424ed73d85b30c8a54c15f6', 'a5f79f7b374b7997bb0587835143e829d9de5f1b8424ed73d85b30c8a54c15f6', '9db1d3cb9744373d84077593dd2e58e4a7df84f7387926d6cbd6b2b1e87725c6'),
+    ('rootn', 16777217, 'rmm'): ('a062690dfefd784b0533eee32ddc850ea190c5c7f79f7968e8bf769ee87579c3', 'a062690dfefd784b0533eee32ddc850ea190c5c7f79f7968e8bf769ee87579c3', '99593975eeef1448e3ca78621990cbb8df17796b736b4322375f64db6388e4e7'),
+    ('rootn', 1099511627776, 'rne'): ('fc2f226be0b489f89f97fceea4012309443a6905b3be7bf81213f0a80ede4af8', 'fc2f226be0b489f89f97fceea4012309443a6905b3be7bf81213f0a80ede4af8', '7c2fcb400384878a3db01b2584e8708263b9c168e6c31245db57f7769bce68d6'),
+    ('rootn', 1099511627776, 'rtz'): ('1037c07996fd7ed49441f3ed7588c31e1ae3909f96552cc88d08af1c3584f61d', '1037c07996fd7ed49441f3ed7588c31e1ae3909f96552cc88d08af1c3584f61d', 'e8d2c928a9a8847d07ce395a36ce92ca00a4ef1c60e5f0f3783f0e48ffae177c'),
+    ('rootn', 1099511627776, 'rdn'): ('66d862a0b294f385d06f4c949e5dd7093db980ae50e56e59bf303bbe763a8e1a', '66d862a0b294f385d06f4c949e5dd7093db980ae50e56e59bf303bbe763a8e1a', '46199b2911b2d3928616f34ed0ecbc45b06cf21ce2145a79c139a518aa919e1a'),
+    ('rootn', 1099511627776, 'rup'): ('755e475bf68ee1638f6b00e26cc11b039425b7106e4aaf383c1314d2890ee581', '755e475bf68ee1638f6b00e26cc11b039425b7106e4aaf383c1314d2890ee581', 'edcf25ec926ca13d283c1c4abd8413310ea17f2101ffdb64108614c55ee3ee8f'),
+    ('rootn', 1099511627776, 'rmm'): ('992fdd7e08480aa6866be02725b732c2a6b4148e67b79942967a8b5987ae424d', '992fdd7e08480aa6866be02725b732c2a6b4148e67b79942967a8b5987ae424d', 'fd1b6fa3127070c6728ec42ba8b1b400dbbac8b4708b3f41b131fd70e900aa92'),
+    ('rootn', 281474976710657, 'rne'): ('f72cd2f9441a00d212c7a2b99335edf8df29f3555a8d75774f58d7e68ddd8097', 'f72cd2f9441a00d212c7a2b99335edf8df29f3555a8d75774f58d7e68ddd8097', '4c8ddaaac6acc6803fa9e71ddc93e5f03057917796bd2ddcedd63b0997239c33'),
+    ('rootn', 281474976710657, 'rtz'): ('54e9fb4433ef25ab972a6092ff0f619771d6ae5a9e6bb8ae2c32546c841be998', '54e9fb4433ef25ab972a6092ff0f619771d6ae5a9e6bb8ae2c32546c841be998', '6b7014b601e491d412d9b5e8925150f17c95ee925547b277cff41f23d396dbe9'),
+    ('rootn', 281474976710657, 'rdn'): ('8e967fddff948b9ebcb03f32a1d1a61e1088080a0e7b60b740f01280e6f601ac', '8e967fddff948b9ebcb03f32a1d1a61e1088080a0e7b60b740f01280e6f601ac', 'f1c8c4cbe1d2a247a068c371d30ab3f47b570471eb9322e8b2e7d577037e9b75'),
+    ('rootn', 281474976710657, 'rup'): ('83739d78098aa9bb0c38c80fb42e233411db1891d8010517c4b03db7c7c6327b', '83739d78098aa9bb0c38c80fb42e233411db1891d8010517c4b03db7c7c6327b', '63ac23a1b13317f80bd720167c45d010f1dfc0e8fad678b6cbb11f3cb3c90694'),
+    ('rootn', 281474976710657, 'rmm'): ('f0a6f88744158e9e3b9d87b18d55d35ea60cc9dba292d3df4a5e82c760bb7d3d', 'f0a6f88744158e9e3b9d87b18d55d35ea60cc9dba292d3df4a5e82c760bb7d3d', '3a87ce7ced419de1d6f020e06dc36e8f2c76dc038704136295965e72b364d80e'),
+    ('rootn', 1, 'rne'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('rootn', 1, 'rtz'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('rootn', 1, 'rdn'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('rootn', 1, 'rup'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('rootn', 1, 'rmm'): ('bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'bde8082e862905cd882ad1ab8a8b3e993ec7870e6d8f225a37d11dcc874cb6c6', 'b118336f52ae67984a343462db4f6f965628d2ce374aad8feb99974a58e93c83'),
+    ('rootn', 5, 'rne'): ('0d936f0918b3ca8661807c03157ac694f4ca862647cec112292c7e8741cdf1bc', '0d936f0918b3ca8661807c03157ac694f4ca862647cec112292c7e8741cdf1bc', 'b5103cf6054bad0d5f09b5878fa76cfebd97f74b0668b7f90855913dd7c5f5f7'),
+    ('rootn', 5, 'rtz'): ('e38fba233c3f3240e80e840d369eb3d468569bfe76bf2345ee1f3edf74079323', 'e38fba233c3f3240e80e840d369eb3d468569bfe76bf2345ee1f3edf74079323', 'e5459f1c6435722ee244bd94cf007114047c8b920843b30c75867fd9df7cb88a'),
+    ('rootn', 5, 'rdn'): ('506a4d0d6a3822e24bdefbd34ff005ea0552c6f2e4ac5ed403e98e5f05117c0b', '506a4d0d6a3822e24bdefbd34ff005ea0552c6f2e4ac5ed403e98e5f05117c0b', '7d9e051fe5c411568ef86252fc7a523abe0bd2f0e77acc49673effbe98d8978c'),
+    ('rootn', 5, 'rup'): ('d87c9d9958e06c4853793811bba8f73c51078151f0161378d482b8f2e27f9fd5', 'd87c9d9958e06c4853793811bba8f73c51078151f0161378d482b8f2e27f9fd5', 'c6966e6696c843cda81905136594d28f072936e3c1cf9f28392ff49a570365a9'),
+    ('rootn', 5, 'rmm'): ('10840b3b1533e24d1c3bb16736d41e0562883b67df207865200f72104878a9a8', '10840b3b1533e24d1c3bb16736d41e0562883b67df207865200f72104878a9a8', '0091cbdd14c1650adf8ef506398bbe5dd9d9a4fb64b7e2249f892e955bae0614'),
+    ('rootn', 34359738375, 'rne'): ('fe4a25ef1d4819b754ebae7d2dc493180662658253f1aef5d1e0b4a7ea5c6472', 'fe4a25ef1d4819b754ebae7d2dc493180662658253f1aef5d1e0b4a7ea5c6472', 'c37432e645a069df4181019c92e8e385cc441415732a9368b3fdf6f67cba9e88'),
+    ('rootn', 34359738375, 'rtz'): ('4e0f4895c6bc6d948bc6b40f568f2092401159e8e9006d085bed4261f9dece99', '4e0f4895c6bc6d948bc6b40f568f2092401159e8e9006d085bed4261f9dece99', '76fc46c15780aa7d659d624f7729d0b9db7a83c121b0206f0be2bc2bee9730eb'),
+    ('rootn', 34359738375, 'rdn'): ('936b939039fe9652038f15b6022a619dd41cfc7892a5d9c3fbb234d6cc55621e', '936b939039fe9652038f15b6022a619dd41cfc7892a5d9c3fbb234d6cc55621e', '565f9b8fdf7f8783546079cb0b32f28b4f85b80ac1483a705536fcaeed1c241b'),
+    ('rootn', 34359738375, 'rup'): ('13c51537c0adce8628367ad3197ccbd1b4876a5879c40a9e2dd2d61a5193a721', '13c51537c0adce8628367ad3197ccbd1b4876a5879c40a9e2dd2d61a5193a721', 'afaa794fc859b8a1c9e94c93bef37a46434e386d8a45080d2c3c6066c20f56c3'),
+    ('rootn', 34359738375, 'rmm'): ('10ae64a28540d839ce36907a2e38448d3c36cb8be297d0607baa9b3b6e6754a0', '10ae64a28540d839ce36907a2e38448d3c36cb8be297d0607baa9b3b6e6754a0', 'cd2e76332f3781d3356ffdfe1a6310d842dd6f547880a1e4ad269d1afec369a4'),
+}
+REG_TOP_TW_N = {
+    ('pown', 2, 'rne'): 26,
+    ('pown', 2, 'rtz'): 26,
+    ('pown', 2, 'rdn'): 26,
+    ('pown', 2, 'rup'): 26,
+    ('pown', 2, 'rmm'): 26,
+    ('pown', -2, 'rne'): 26,
+    ('pown', -2, 'rtz'): 26,
+    ('pown', -2, 'rdn'): 26,
+    ('pown', -2, 'rup'): 26,
+    ('pown', -2, 'rmm'): 26,
+    ('pown', 3, 'rne'): 27,
+    ('pown', 3, 'rtz'): 27,
+    ('pown', 3, 'rdn'): 27,
+    ('pown', 3, 'rup'): 27,
+    ('pown', 3, 'rmm'): 27,
+    ('pown', -3, 'rne'): 27,
+    ('pown', -3, 'rtz'): 27,
+    ('pown', -3, 'rdn'): 27,
+    ('pown', -3, 'rup'): 27,
+    ('pown', -3, 'rmm'): 27,
+    ('pown', 17, 'rne'): 27,
+    ('pown', 17, 'rtz'): 27,
+    ('pown', 17, 'rdn'): 27,
+    ('pown', 17, 'rup'): 27,
+    ('pown', 17, 'rmm'): 27,
+    ('pown', 2147483647, 'rne'): 27,
+    ('pown', 2147483647, 'rtz'): 27,
+    ('pown', 2147483647, 'rdn'): 27,
+    ('pown', 2147483647, 'rup'): 27,
+    ('pown', 2147483647, 'rmm'): 27,
+    ('pown', -9223372036854775808, 'rne'): 26,
+    ('pown', -9223372036854775808, 'rtz'): 26,
+    ('pown', -9223372036854775808, 'rdn'): 26,
+    ('pown', -9223372036854775808, 'rup'): 26,
+    ('pown', -9223372036854775808, 'rmm'): 26,
+    ('pown', 1000, 'rne'): 26,
+    ('pown', 1000, 'rtz'): 26,
+    ('pown', 1000, 'rdn'): 26,
+    ('pown', 1000, 'rup'): 26,
+    ('pown', 1000, 'rmm'): 26,
+    ('pown', 16777217, 'rne'): 27,
+    ('pown', 16777217, 'rtz'): 27,
+    ('pown', 16777217, 'rdn'): 27,
+    ('pown', 16777217, 'rup'): 27,
+    ('pown', 16777217, 'rmm'): 27,
+    ('pown', 1099511627776, 'rne'): 26,
+    ('pown', 1099511627776, 'rtz'): 26,
+    ('pown', 1099511627776, 'rdn'): 26,
+    ('pown', 1099511627776, 'rup'): 26,
+    ('pown', 1099511627776, 'rmm'): 26,
+    ('pown', 281474976710657, 'rne'): 27,
+    ('pown', 281474976710657, 'rtz'): 27,
+    ('pown', 281474976710657, 'rdn'): 27,
+    ('pown', 281474976710657, 'rup'): 27,
+    ('pown', 281474976710657, 'rmm'): 27,
+    ('pown', 4611686155866341377, 'rne'): 27,
+    ('pown', 4611686155866341377, 'rtz'): 27,
+    ('pown', 4611686155866341377, 'rdn'): 27,
+    ('pown', 4611686155866341377, 'rup'): 27,
+    ('pown', 4611686155866341377, 'rmm'): 27,
+    ('pown', 0, 'rne'): 1,
+    ('pown', 0, 'rtz'): 1,
+    ('pown', 0, 'rdn'): 1,
+    ('pown', 0, 'rup'): 1,
+    ('pown', 0, 'rmm'): 1,
+    ('pown', 1, 'rne'): 2,
+    ('pown', 1, 'rtz'): 2,
+    ('pown', 1, 'rdn'): 2,
+    ('pown', 1, 'rup'): 2,
+    ('pown', 1, 'rmm'): 2,
+    ('pown', 5, 'rne'): 27,
+    ('pown', 5, 'rtz'): 27,
+    ('pown', 5, 'rdn'): 27,
+    ('pown', 5, 'rup'): 27,
+    ('pown', 5, 'rmm'): 27,
+    ('pown', 34359738375, 'rne'): 27,
+    ('pown', 34359738375, 'rtz'): 27,
+    ('pown', 34359738375, 'rdn'): 27,
+    ('pown', 34359738375, 'rup'): 27,
+    ('pown', 34359738375, 'rmm'): 27,
+    ('rootn', 2, 'rne'): 25,
+    ('rootn', 2, 'rtz'): 25,
+    ('rootn', 2, 'rdn'): 25,
+    ('rootn', 2, 'rup'): 25,
+    ('rootn', 2, 'rmm'): 25,
+    ('rootn', -2, 'rne'): 25,
+    ('rootn', -2, 'rtz'): 25,
+    ('rootn', -2, 'rdn'): 25,
+    ('rootn', -2, 'rup'): 25,
+    ('rootn', -2, 'rmm'): 25,
+    ('rootn', 3, 'rne'): 26,
+    ('rootn', 3, 'rtz'): 26,
+    ('rootn', 3, 'rdn'): 26,
+    ('rootn', 3, 'rup'): 26,
+    ('rootn', 3, 'rmm'): 26,
+    ('rootn', -3, 'rne'): 26,
+    ('rootn', -3, 'rtz'): 26,
+    ('rootn', -3, 'rdn'): 26,
+    ('rootn', -3, 'rup'): 26,
+    ('rootn', -3, 'rmm'): 26,
+    ('rootn', 17, 'rne'): 26,
+    ('rootn', 17, 'rtz'): 26,
+    ('rootn', 17, 'rdn'): 26,
+    ('rootn', 17, 'rup'): 26,
+    ('rootn', 17, 'rmm'): 26,
+    ('rootn', 2147483647, 'rne'): 26,
+    ('rootn', 2147483647, 'rtz'): 26,
+    ('rootn', 2147483647, 'rdn'): 26,
+    ('rootn', 2147483647, 'rup'): 26,
+    ('rootn', 2147483647, 'rmm'): 26,
+    ('rootn', -9223372036854775808, 'rne'): 25,
+    ('rootn', -9223372036854775808, 'rtz'): 25,
+    ('rootn', -9223372036854775808, 'rdn'): 25,
+    ('rootn', -9223372036854775808, 'rup'): 25,
+    ('rootn', -9223372036854775808, 'rmm'): 25,
+    ('rootn', 1000, 'rne'): 25,
+    ('rootn', 1000, 'rtz'): 25,
+    ('rootn', 1000, 'rdn'): 25,
+    ('rootn', 1000, 'rup'): 25,
+    ('rootn', 1000, 'rmm'): 25,
+    ('rootn', 16777217, 'rne'): 26,
+    ('rootn', 16777217, 'rtz'): 26,
+    ('rootn', 16777217, 'rdn'): 26,
+    ('rootn', 16777217, 'rup'): 26,
+    ('rootn', 16777217, 'rmm'): 26,
+    ('rootn', 1099511627776, 'rne'): 25,
+    ('rootn', 1099511627776, 'rtz'): 25,
+    ('rootn', 1099511627776, 'rdn'): 25,
+    ('rootn', 1099511627776, 'rup'): 25,
+    ('rootn', 1099511627776, 'rmm'): 25,
+    ('rootn', 281474976710657, 'rne'): 26,
+    ('rootn', 281474976710657, 'rtz'): 26,
+    ('rootn', 281474976710657, 'rdn'): 26,
+    ('rootn', 281474976710657, 'rup'): 26,
+    ('rootn', 281474976710657, 'rmm'): 26,
+    ('rootn', 1, 'rne'): 2,
+    ('rootn', 1, 'rtz'): 2,
+    ('rootn', 1, 'rdn'): 2,
+    ('rootn', 1, 'rup'): 2,
+    ('rootn', 1, 'rmm'): 2,
+    ('rootn', 5, 'rne'): 26,
+    ('rootn', 5, 'rtz'): 26,
+    ('rootn', 5, 'rdn'): 26,
+    ('rootn', 5, 'rup'): 26,
+    ('rootn', 5, 'rmm'): 26,
+    ('rootn', 34359738375, 'rne'): 26,
+    ('rootn', 34359738375, 'rtz'): 26,
+    ('rootn', 34359738375, 'rdn'): 26,
+    ('rootn', 34359738375, 'rup'): 26,
+    ('rootn', 34359738375, 'rmm'): 26,
+}
+POOL_MARKS_TW_N = {
+    ('pown', 'fp32', 2): {'rne': 21, 'rtz': 21, 'rdn': 21, 'rup': 21, 'rmm': 21},
+    ('pown', 'fp32', -2): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 3): {'rne': 15, 'rtz': 15, 'rdn': 15, 'rup': 15, 'rmm': 15},
+    ('pown', 'fp32', -3): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 17): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 2147483647): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', -9223372036854775808): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 1000): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 16777217): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 1099511627776): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 281474976710657): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 4611686155866341377): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 0): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 1): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('pown', 'fp32', 5): {'rne': 8, 'rtz': 8, 'rdn': 8, 'rup': 8, 'rmm': 8},
+    ('pown', 'fp32', 34359738375): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 2): {'rne': 6, 'rtz': 6, 'rdn': 6, 'rup': 6, 'rmm': 6},
+    ('rootn', 'fp32', -2): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 3): {'rne': 4, 'rtz': 4, 'rdn': 4, 'rup': 4, 'rmm': 4},
+    ('rootn', 'fp32', -3): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 17): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 2147483647): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', -9223372036854775808): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 1000): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 16777217): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 1099511627776): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 281474976710657): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 1): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 5): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+    ('rootn', 'fp32', 34359738375): {'rne': 0, 'rtz': 0, 'rdn': 0, 'rup': 0, 'rmm': 0},
+}
+SPECIAL_MARKS_TW_N = {
+    ('pown', 'fp32', 2): (2, 2, 2, 2, 2),
+    ('pown', 'fp32', -2): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 3): (2, 2, 2, 2, 2),
+    ('pown', 'fp32', -3): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 17): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 2147483647): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', -9223372036854775808): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 1000): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 16777217): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 1099511627776): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 281474976710657): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 4611686155866341377): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 0): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 1): (0, 0, 0, 0, 0),
+    ('pown', 'fp32', 5): (2, 2, 2, 2, 2),
+    ('pown', 'fp32', 34359738375): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 2): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', -2): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 3): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', -3): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 17): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 2147483647): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', -9223372036854775808): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 1000): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 16777217): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 1099511627776): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 281474976710657): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 1): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 5): (0, 0, 0, 0, 0),
+    ('rootn', 'fp32', 34359738375): (0, 0, 0, 0, 0),
+}
+
+
+def tw_n_ns(fn):
+    """The n of fn's fp32 checks, in order (TW_N_NS)."""
+    return TW_N_NS[fn]
+
+
+@functools.lru_cache(maxsize=None)
+def tw_n_build_of(fn, rnd, n, plant=None, shift=0):
+    """ml.build(fn, FP32, rnd, n=n, plant=plant, bound_shift=shift), once."""
+    return ml.build(fn, FP32, rnd, n=n, plant=plant, bound_shift=shift)
+
+
+@functools.lru_cache(maxsize=None)
+def tw_n_fragment_of(fn, rnd, n, plant=None, shift=0):
+    """The build's scheduled fragment (the library's own where there is no
+    plant and no shift)."""
+    if plant is None and shift == 0:
+        return ml.fragment(fn, FP32, rnd, n)
+    return tw_n_build_of(fn, rnd, n, plant, shift).fragment()
+
+
+def _tag(s, n):
+    return s.replace(":", f": n = {n}:", 1)
+
+
+# ---- the pools, the regions, the specials, the structured lanes, seq ----------
+
+def check_pools_tw_n(fn, rnd, n, plant=None, step=POOL_STEP):
+    """[finding], Tally: pools, at n. check_pools_n at fp32 with the model's
+    pinned marks (POOL_MARKS_TW_N: the lanes pool_n takes at POOL_STEP; a
+    pool with no lane of n pins 0 marks and measures nothing: the n
+    2^31 - 1 and up, 2^24 + 1 and up have few or none, said by
+    tw_n_pool_lanes)."""
+    marks = None
+    if step == POOL_STEP:
+        marks = POOL_MARKS_TW_N.get((fn, "fp32", n), {}).get(
+            sf.RND_NAMES[rnd])
+    return check_pools_n(fn, FP32, rnd, n, plant, step, marks=marks)
+
+
+def tw_n_pool_lanes(fn, n):
+    """The lanes of the pool of fn at n that check_pools_tw_n runs."""
+    return len(pool_n(fn, FP32, n))
+
+
+def check_regions_tw_n(fn, rnd, name, count, plant=None, seed=1):
+    """[finding], (lanes, marked, main-path lanes): regions, one region of
+    REGION_NAMES_TW_N at its n (check_regions_n's body at fp32, with the seed
+    a parameter: check_regions_n reads REGION_LANES, which has no fp32 key). A
+    region with no lane returns (0, 0, 0)."""
+    lanes = region_n_cached(FP32, fn, name, count, seed)
+    out, n_lanes, marked, main = [], 0, 0, 0
+    for n, ls in _by_n(lanes).items():
+        f = fragment_n(fn, FP32, rnd, n, plant)
+        o, (nl, mk) = check_regions(f, {name: ls}, first=[], evaluator=EV_N)
+        out += [_tag(s, n) for s in o]
+        n_lanes += nl
+        marked += mk
+        main += reach_n(fn, FP32, ls, n)[0]
+    return out, (n_lanes, marked, main)
+
+
+def check_specials_tw_n(fn, n, rnds=None, plant=None):
+    """[finding], lanes: specials, at n: check_specials_n at fp32 with the
+    model's marks of the row (SPECIAL_MARKS_TW_N, summed over the five
+    attributes, compared where all five run)."""
+    rnds = RND_MODES if rnds is None else rnds
+    marks = None
+    if tuple(rnds) == tuple(RND_MODES):
+        rows = special_rows_n(fn, FP32, n)
+        marks = {rows[0][0]: sum(SPECIAL_MARKS_TW_N[(fn, "fp32", n)])}
+    return check_specials_n(fn, FP32, n, rnds, plant, marks or {})
+
+
+def check_structured_tw_n(fn, rnd, n, plant=None):
+    """[finding], lanes: structured, at n (check_structured_n at fp32)."""
+    return check_structured_n(fn, FP32, rnd, n, plant)
+
+
+def check_seq_tw_n(fn, rnd, n, plant=None, **kw):
+    """[finding], lanes: seq, at n (check_seq_n at fp32): the compiled shape
+    on seq.py over the pool's lanes of n, the structured lanes and the loud
+    ones."""
+    return check_seq_n(fn, FP32, rnd, n, plant, **kw)
+
+
+# ---- the bound: V0 + V1 + V2 against mpmath, per n ------------------------------
+
+def bound_log2_tw_n(b, lane):
+    """log2(|V - f 2^-k| / Bv) for one main-path lane (x, n) of the fp32 build
+    b of that n: bound_log2_tw's, the build's lane being x alone. None where V
+    is exact or the screens take the lane; 999.0 where V is not finite."""
+    fmt = b.fmt
+    _res, _fl, pr = b.run((lane[0],), ("V0", "V1", "V2", "Bv", "th0", "nf"))
+    if _screened(fmt, pr):
+        return None
+    try:
+        V = (value(fmt, pr["V0"]) + value(fmt, pr["V1"])
+             + value(fmt, pr["V2"]))
+        Bv = abs(value(fmt, pr["Bv"]))
+    except ValueError:
+        return 999.0
+    with mpmath.workprec(4 * fmt.prec + 200):
+        k = int(value(fmt, pr["nf"])) // 8
+        err = abs(_mp(V) - true_value(b.meta["fn"], fmt, lane)
+                  * mpmath.mpf(2) ** -k)
+        if err == 0:
+            return None
+        return float(mpmath.log(err / _mp(Bv), 2))
+
+
+def check_bound_tw_n(b, lanes, label="random", need=1):
+    """[finding], (worst log2(err/Bv), main-path lanes, lanes): bound, at the
+    n of b. Every main-path lane (x, n) of `lanes` under 1 Bv, every lane equal
+    to transcend.py in bits and flag word or marked; fewer than `need` main-path
+    lanes is a finding (the region measures nothing: BOUND_NO_MAIN's are
+    exempt, and the caller says NOT MEASURED, with the lane count, outside
+    its pass count). The worst is the largest found, a sampled lower bound."""
+    fmt, fn = b.fmt, b.meta["fn"]
+    worst, n, over, differ = -1e9, 0, [], []
+    for lane in lanes:
+        res, fw, pr = b.run((lane[0],), ("th0",))
+        if not fw & MARK and (res, fw) != golden(fmt, b.rnd, lane, fn):
+            differ.append(lane)
+        if not in_main_n(fn, fmt, lane) or _screened(fmt, pr):
+            continue
+        r = bound_log2_tw_n(b, lane)
+        n += 1
+        if r is None:
+            continue
+        worst = max(worst, r)
+        if r >= 0:
+            over.append((r, lane))
+    where = f"bound: {fn} {fmt.name} {sf.RND_NAMES[b.rnd]} {label}"
+    out = []
+    if n < need and label.split()[0] not in BOUND_NO_MAIN_TW_N:
+        out.append(f"{where}: only {n} of {len(lanes)} lanes reach the main "
+                   f"path, {need} wanted: the region measures nothing")
+    if over:
+        r, lane = max(over)
+        out.append(f"{where}: {len(over)} of {n} main-path lanes are past the "
+                   f"bound, the worst {_hexes([lane])} at 2^{r:+.2f} of Bv")
+    if differ:
+        out.append(f"{where}: {len(differ)} unmarked lanes differ from "
+                   f"transcend.{fn}, first {_hexes([differ[0]])}")
+    return out, (worst, n, len(lanes))
+
+
+def check_bound_tw_n_region(fn, rnd, name, lanes):
+    """[finding], (worst, main-path lanes, lanes): the bound over one region's
+    lanes at each of its n (check_bound_tw_n on the build of that n)."""
+    out, worst, main, total = [], -1e9, 0, 0
+    for n, ls in _by_n(lanes).items():
+        o, (w, m, t) = check_bound_tw_n(tw_n_build_of(fn, rnd, n), ls,
+                                        f"{name} n = {n}")
+        out += o
+        worst, main, total = max(worst, w), main + m, total + t
+    return out, (worst, main, total)
+
+
+def bound_regions_tw_n(fn, rnd=RNE, count=8, seed=11, names=None):
+    """[finding], {region: (worst, main-path lanes, lanes)}: the bound over the
+    function's regions at fp32 (REGION_NAMES_TW_N), `count` lanes each at that
+    region's n (region_n at fp32). A region with no lane at all is in the dict
+    at (-1e9, 0, 0) and a region none of whose lanes reaches the main path at
+    0 main-path lanes: both are NOT MEASURED (not_measured_tw_n), outside any
+    pass count. n = 2 and -2 have no region."""
+    out, worst = [], {}
+    for name in (names or REGION_NAMES_TW_N):
+        lanes = region_n_cached(FP32, fn, name, count, seed)
+        if not lanes:
+            worst[name] = (-1e9, 0, 0)
+            continue
+        w = [-1e9, 0, 0]
+        for n, ls in _by_n(lanes).items():
+            found, (wn, mn, tn) = check_bound_tw_n(
+                tw_n_build_of(fn, rnd, n), ls, f"{name} n = {n}")
+            out += found
+            w = [max(w[0], wn), w[1] + mn, w[2] + tn]
+        worst[name] = tuple(w)
+    return out, worst
+
+
+def not_measured_tw_n(worst):
+    """[(region, main-path lanes, lanes)] of the regions that measured
+    NOTHING: those of `worst` with 0 main-path lanes. They are outside the
+    pass count."""
+    return sorted((name, w[1], w[2]) for name, w in worst.items()
+                  if w[1] == 0)
+
+
+# ---- the shape, the registers, the port, per n -------------------------------------
+
+def check_registers_tw_n(fn, n, frags, tops=None):
+    """[finding]: shape. routines.program accepts the fragment of fn at n
+    under each attribute of `frags` {rnd: Fragment}, its highest register is
+    REG_TOP_TW_N's, and POW_LIVE_CAP's fp32 row (pown 28, rootn 27) is at
+    least the most values live here (the cap is the maximum over every n of
+    the list, so equal at the odd n and one more at the even)."""
+    tops = REG_TOP_TW_N if tops is None else tops
+    out = []
+    for rnd, f in frags.items():
+        where = f"shape: n = {n}: {fn} fp32 {sf.RND_NAMES[rnd]}"
+        try:
+            prog, _bank = routines.program(f)
+        except AssertionError as e:
+            out.append(f"{where}: routines.program refuses it: {e}")
+            continue
+        got = highest_register(prog)
+        want = tops[(fn, n, sf.RND_NAMES[rnd])]
+        if got != want:
+            out.append(f"{where}: the highest register is r{got}, pinned "
+                       f"r{want}")
+        if f.live_max() > ml.POW_LIVE_CAP[fn]["fp32"]:
+            out.append(f"{where}: {f.live_max()} values live, past "
+                       f"POW_LIVE_CAP's {ml.POW_LIVE_CAP[fn]['fp32']}")
+    return out
+
+
+def check_caps_tw_n(fn, ns=None, caps=None, fragments=None):
+    """[finding]: shape. check_caps_n at fp32 over the n of `ns` (default
+    TW_N_NS[fn] and TW_N_CAP_EXTRA_NS) under all five attributes: the cap is
+    the most values live over them, and a cap one under fails by name."""
+    ns = tuple(TW_N_NS[fn]) + TW_N_CAP_EXTRA_NS if ns is None else ns
+    frags = fragments or {(n, rnd): tw_n_fragment_of(fn, rnd, n)
+                          for n in ns for rnd in RND_MODES}
+    return check_caps_n(fn, FP32, ns, caps=caps, fragments=frags)
+
+
+def check_port_tw_n(fn, n, builds, digests=None, fragments=None):
+    """[finding]: port. The Build's dag_digest (the design's order), the
+    scheduled fragment's dag_digest and its emitted order, each against the
+    model's literal (DIGESTS_TW_N), and every instruction's label a name of
+    _POW_TW_PHASE_MAP whose phase is a PHASE_ORDER name. `builds` {rnd:
+    Build}."""
+    digests = DIGESTS_TW_N if digests is None else digests
+    out = []
+    for rnd, b in builds.items():
+        where = f"port: n = {n}: {fn} fp32 {sf.RND_NAMES[rnd]}"
+        f = fragments[rnd] if fragments else b.fragment()
+        got = (ml.dag_digest(b.fragment(schedule=False)), ml.dag_digest(f),
+               order_digest(f))
+        for what, g, w in zip(("the Build's dag digest",
+                               "the scheduled fragment's dag digest",
+                               "the emitted order"),
+                              got, digests[(fn, n, sf.RND_NAMES[rnd])]):
+            if g != w:
+                out.append(f"{where}: {what} is {g[:16]}, the model's is "
+                           f"{w[:16]}")
+        if n in (0, 1):
+            continue
+        keep = b.live_indices()
+        if len(b.label_of) != len(b.body):
+            out.append(f"{where}: {len(b.label_of)} labels for "
+                       f"{len(b.body)} instructions")
+            continue
+        bad = [i for i in keep
+               if ml._POW_TW_PHASE_MAP.get(b.label_of[i]) not in ml.PHASE_ORDER
+               or b.phase_of[i] not in ml.PHASE_ORDER]
+        if bad:
+            out.append(f"{where}: {len(bad)} instructions whose label maps "
+                       f"to no PHASE_ORDER name or whose phase is not in "
+                       f"PHASE_ORDER, first {b.label_of[bad[0]]!r}")
+    return out
+
+
+def check_shape_tw_n(fn, n, builds=None, fragments=None, plant=None):
+    """[finding]: shape, at n and fp32: check_shape_n with the model's pins
+    (PINS_TW_N: instructions, bank words, live, dag digest, the instructions by
+    phase) and Fast2Sum and TwoSum counts (EFT_TW_N), the flag words, no MIN
+    or MAX, the reordered design and the invariants under POW_LIVE_CAP; then
+    the registers (check_registers_tw_n) and the port (check_port_tw_n).
+    n = 0 and 1 are the small fragments (no phases, no digests of a core):
+    their pins are the model's build_small's."""
+    builds = builds or {rnd: tw_n_build_of(fn, rnd, n, plant)
+                        for rnd in RND_MODES}
+    frags = fragments or {rnd: b.fragment() for rnd, b in builds.items()}
+    out = check_shape_n(fn, FP32, n, RND_MODES, plant, pins=PINS_TW_N,
+                        eft=EFT_TW_N, fragments=frags, builds=builds)
+    out += check_registers_tw_n(fn, n, frags)
+    out += check_port_tw_n(fn, n, builds, fragments=frags)
+    return out
+
+
+# ---- the constants ---------------------------------------------------------------
+
+def check_constants_tw_n(**kw):
+    """[finding], lines: constants. mathlib.check_pow_tw_n_constants() in
+    process."""
+    lines, findings = ml.check_pow_tw_n_constants(**kw)
+    return [f"constants: {s}" for s in findings], lines
+
+
+def check_constants_cli_tw_n():
+    """[finding], output: constants. `python -m cft_golden.mathlib --check
+    --only pow-tw` in a process of its own, exit 0, listing pown and rootn
+    after pow and powr and ending with the integer operand's count line,
+    `0 differences`, the pow-tw line before it unchanged."""
+    r = subprocess.run([sys.executable, "-B", "-m", "cft_golden.mathlib",
+                        "--check", "--only", "pow-tw"], capture_output=True,
+                       text=True, cwd=ROOT / "python")
+    out = r.stdout.strip().splitlines()
+    findings = []
+    if r.returncode != 0:
+        findings.append(f"constants: --check --only pow-tw exited "
+                        f"{r.returncode}")
+    want = (f"mathlib --check (pow, triple word, integer operand): "
+            f"{len(ml._POW_TW_N_BUILDERS)} routines, 1 format, 0 differences")
+    if want not in out:
+        findings.append(f"constants: the integer operand's count line is "
+                        f"not there: {want!r}; the last line is "
+                        f"{out[-1] if out else r.stderr[-200:]!r}")
+    # the integer operand's lines come BEFORE pow-tw's, whose last line a test
+    # of parcel M3F1's pins: pow-tw's count line stays the last
+    if not out or out[-1] != ("mathlib --check (pow, triple word): 2 "
+                              "routines, 1 format, 0 differences"):
+        findings.append("constants: pow-tw's own count line is not the "
+                        "last, unchanged")
+    n = sum(1 for ln in out if ln.split(" ")[0] in ml._POW_TW_N_BUILDERS
+            and "(triple word, integer operand)" in ln)
+    if n != len(ml._POW_TW_N_BUILDERS):
+        findings.append(f"constants: {n} routine lines, "
+                        f"{len(ml._POW_TW_N_BUILDERS)} wanted")
+    return findings, out
+
+
+# ---- the plants: every check on every plant ----------------------------------------
+
+def red_checks_tw_n(plant, fn="pown", n=3, rnds=(RNE,), region_count=6,
+                    bound_count=6, pool_step=3, shift=0):
+    """(red, not_run): red is {check: [findings]} for the checks of
+    CHECKS_TW_N that RAN on `plant` (None: the control) at fp32 on `fn` at n
+    (a check that is green has an empty list), not_run the names of those
+    that did not, so that red, green and not run are disjoint and cover every
+    check (a green check must have run). pools run where the pool has lanes
+    of n (not at 2^31 - 1 and up), regions and bound where a region of
+    REGION_NAMES_TW_N is at this n (not at n = 2 and -2: they have none),
+    shape where the plant reaches all five attributes; specials, structured,
+    seq and constants always. A plant the build cannot reach is refused by
+    name. GREEN means green at this scope, which is smaller than the tests'
+    own on the control."""
+    red = {name: [] for name in CHECKS_TW_N}
+    not_run = []
+    reach = []
+    for rnd in RND_MODES:
+        try:
+            tw_n_build_of(fn, rnd, n, plant, shift)
+        except ValueError as e:
+            if "does not apply" not in str(e):
+                raise
+            continue
+        reach.append(rnd)
+    if not reach:
+        raise ValueError(f"plant {plant!r} does not apply to {fn} at fp32, "
+                         f"n = {n}, under any attribute")
+    rnds = tuple(r for r in rnds if r in reach) or (reach[0],)
+    names = [r for r in REGION_NAMES_TW_N if region_n_of(r) == n]
+    if tw_n_pool_lanes(fn, n):
+        for rnd in rnds:
+            red["pools"] += check_pools_tw_n(fn, rnd, n, plant, pool_step)[0]
+    else:
+        not_run.append("pools")
+    if names:
+        for rnd in rnds:
+            for name in names:
+                red["regions"] += check_regions_tw_n(fn, rnd, name,
+                                                     region_count, plant)[0]
+    else:
+        not_run.append("regions")
+    red["specials"] += check_specials_tw_n(fn, n, rnds, plant)[0]
+    red["structured"] += check_structured_tw_n(fn, rnds[0], n, plant)[0]
+    red["seq"] += check_seq_tw_n(fn, rnds[0], n, plant)[0]
+    b = tw_n_build_of(fn, RNE, n, plant, shift)
+    if names:
+        for name in names:
+            lanes = region_n_cached(FP32, fn, name, bound_count, 11)
+            red["bound"] += check_bound_tw_n(b, lanes, name)[0]
+    else:
+        not_run.append("bound")
+    if len(reach) == len(RND_MODES):
+        red["shape"] += check_shape_tw_n(fn, n, plant=plant)
+    else:
+        not_run.append("shape")
+    red["constants"] += check_constants_tw_n(
+        builder=lambda name, f_, r_, n_: tw_n_build_of(name, r_, n_, plant,
+                                                       shift),
+        attrs=(RNE,), names=(fn,), ns=(n,))[0]
+    for c in not_run:
+        del red[c]
+    return red, not_run

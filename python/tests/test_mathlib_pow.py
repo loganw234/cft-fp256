@@ -183,8 +183,8 @@ def test_pow_names_is_beside_the_other_tuples_which_are_as_they_were():
     assert {fn: ml.POW_LIVE_CAP[fn] for fn in ml.POW_NAMES} == {
         "pow": {"fp64": 30, "fp128": 30, "fp256": 30, "fp32": 32},
         "powr": {"fp64": 23, "fp128": 22, "fp256": 22, "fp32": 29},
-        "pown": {"fp64": 21, "fp128": 21, "fp256": 21},
-        "rootn": {"fp64": 19, "fp128": 19, "fp256": 19},
+        "pown": {"fp64": 21, "fp128": 21, "fp256": 21, "fp32": 28},
+        "rootn": {"fp64": 19, "fp128": 19, "fp256": 19, "fp32": 27},
         "compound": {"fp64": 22, "fp128": 22, "fp256": 22}}
     assert set(ml.POW_PLANTS) == POW_PLANT_NAMES | M3G2_PLANT_NAMES
     assert all(isinstance(t, str) and len(t) > 20
@@ -1576,12 +1576,13 @@ def test_the_pow_commands_run_at_small_sizes_and_refuse_an_existing_out(
     R.FINDINGS.clear()
     with pytest.raises(SystemExit, match="fp64, fp128 or fp256"):
         R.main(["pow-pools", "--formats", "fp16"])
-    with pytest.raises(SystemExit, match="parcel M3F2's"):
-        # pow-bound's default --fn holds all five names (parcel M3G2), and at
-        # fp32 pown, rootn and compound are parcel M3F2's (since wave 2's merge)
+    with pytest.raises(SystemExit, match="compound.*not built at fp32"):
+        # pow-bound's default --fn holds all five names (parcel M3G2), and
+        # compound is not built at fp32 (pown and rootn are, parcel M3F2's)
         R.main(["pow-bound", "--formats", "fp32"])
-    with pytest.raises(SystemExit, match="parcel M3F2's"):
-        R._pow_formats("fp32", [], ["pow", "pown"])
+    assert R._pow_formats("fp32", [], ["pow", "pown", "rootn"]) == [P.FP32]
+    with pytest.raises(SystemExit, match="compound.*not built at fp32"):
+        R._pow_formats("fp32", [], ["pow", "compound"])
     with pytest.raises(SystemExit, match="rootn.x, 0. is invalid for every x"):
         R.main(["pow-bound", "--fn", "rootn", "--ns", "0"])
     # --seq runs the compiled shape over the same lanes, --lanes sizes the
