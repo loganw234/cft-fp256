@@ -126,6 +126,12 @@ host/clause5-soak
 host/rate-probe
 host/routine-sweep
 host/sweep-images/
+# fp256's and fp128's fixed-tier arithmetic on the CPU (GPU round 3: G3A, G3A2), which
+# make test builds and runs since G3D-1's merge: when they were not here, the build
+# id at api-test's run said untracked=present against the library's untracked=none,
+# and the libcft stage failed on Linux (CI run 46034575870, 2026-11-27)
+host/fma256-test
+host/fma128-test
 # the soak tools at another pass size (host/Makefile, SOAK_CHUNK=n): per n
 # the two binaries (the .exe forms are host/*.exe above), the library
 # archive (host/*.a above, which takes any .a in host/) and its object
