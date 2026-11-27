@@ -30517,3 +30517,22 @@ is the software handle's: what fails there is the device line that does not name
   - the clone's status was 0 after, and the gate's records' sums 30 of 30 OK on this desktop.
 - **Night 30's page data** (37a588f8) goes in the same push.
 - **This paragraph** is the one change after the gate. It is docs only, and docs and generated are run again before the push.
+
+## 2026-11-27 - main's CI red after G3D-1's merge: the libcft stage on Linux; the cause (.gitignore lacked the two binaries make test now builds) and the lead's fix (the lead)
+
+**What failed,** MEASURED: CI's gates run 46034575870 on 206cfd56 (G3D-1's merge with night 30's page data). Of its 7 jobs, 6 passed. The host job's `verify/run.sh --require-all --only docs,generated,...` failed one stage, libcft (128 s); every other stage of the job was ok. The run kept no artifacts, so the stage's log was not to be had from it.
+
+**Reproduced on amd-arc-box,** MEASURED: a fresh clone at 37a588f8 (the same code: 206cfd56 adds docs only), `verify/run.sh --only libcft`, rc 1 in 487 s. Its log:
+- `cc ... tests/fma256_test.c -o fma256-test` and `cc ... tests/fma128_test.c -o fma128-test` (lines 275 and 276);
+- `FAIL tests/api_test.c:901: this api-test carries libcft build "commit=37a588f8... tracked=clean untracked=none" and the tree is "commit=37a588f8... tracked=clean untracked=present"`;
+- `api-test: 1 FAILED`, then `make: *** [Makefile:902: test] Error 1`.
+
+**The cause.** G3D-1 put fma256-test and fma128-test among `test:`'s prerequisites in host/Makefile. On Linux they are extensionless binaries in host/, and .gitignore did not name them. The .exe forms are ignored by `host/*.exe`, so the runs on Windows passed. Built during `make test`, they made the tree untracked=present after the library had recorded untracked=none, and api-test's build-id check refused that. .gitignore says it of itself: "Adding a tool means a line here as well as one in host/Makefile."
+
+**Why no gate saw it:** G3D-1 and verifier VG3D-1 ran the libcft stage on Windows only (VG3D-1 named `make test` whole, and any Linux `make test`, as not run), and the lead's box gate of the merge ran `--budget quick`, which does not hold libcft. **A change to host/Makefile's `test:` needs the libcft stage on Linux, whatever the budget a gate runs.**
+
+**The fix** (40f1d2fe): two lines in .gitignore, `host/fma256-test` and `host/fma128-test`, beside the other extensionless host tools, with a comment that names the CI run.
+
+**At the fix,** MEASURED on amd-arc-box in a fresh clone of 40f1d2fe (status 0; the two lines present): `verify/run.sh --only libcft` PASS in 787 s, nothing skipped, 0 inner skips; the log has no FAIL line, the build id "commit=40f1d2fe... tracked=clean untracked=none", and "api-test: all contract checks passed" after fma256-test and fma128-test were built; the clone's status 0 after. (A first run there was cut by the lead's own 900 s timeout after api-test had passed; the stage takes about 800 s on the box, 824 s in M3F2's gate.)
+
+**Before the push:** docs and generated on this desktop at the record's commit, and CI's gates after the push.
