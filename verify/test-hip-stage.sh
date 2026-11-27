@@ -33,6 +33,23 @@
 #      runner, fed three logs: a plant build's, whose `cft hip:
 #      CFT_HIP_CHUNK=<n>` line names no device, passes; one with a second
 #      device fails, naming it; one with no device line fails.
+# Round 3's G3D-1 (the unset fix and the stage `hip-tier`), no GPU:
+#  11. the GPU block's unset line names the ten variables the stage must
+#      not inherit, CFT_HIP_TIER and CFT_TRANSCEND_MINPREC among them, each
+#      one of cert2.ENVIRONMENT_NAMES; a copy with either taken out is red,
+#      naming it;
+#  12. hip-tier's skips, exactly as hip's: no hipcc (and --require-all
+#      FAILS it), no GPU, and HIP_DEVICE past the GPUs listed;
+#  13. HIP_TIER_CEILINGS, the number hip-tier prints its seconds against,
+#      equal to docs/VERIFICATION.md's hip-tier row; a copy with one
+#      changed is red;
+#  14. the unset held by a run: with stub tools that let the stage start
+#      (hipcc, and a lister that lists one GPU) and CFT_TRANSCEND_MINPREC,
+#      XCL_EMULATION_MODE, CFT_SEGRUN_PLANT and CFT_HIP_TIER exported, the
+#      stage gets past its environment check and stops where a scratch
+#      tree must (no host/ to copy); with CFT_TRANSCEND_MINPREC taken out
+#      of a copy's unset it FAILS at the environment check, naming it, in
+#      hip and in hip-tier, which share it.
 # With --gpu, on a host where the stage runs - HIP_ROOT, HIP_PLATFORM and
 # HIP_DEVICE as for the stage, and ROOT's own top-level entries linked into
 # the scratch tree - each a real build in a run of its own:
@@ -53,6 +70,25 @@
 #      the library in the plants' copy is the default build's: a Python
 #      check run under bank-mode through it is green, and the stage FAILS
 #      on that run's missing device line, CFT_HIP_PLANT=bank-mode.
+# Round 3's G3D-1, with --gpu:
+#  15. hip-tier given two plants whose runs are made without them (the
+#      bypass of 6, for a list): fixed-rmm, a lane plant, and fixed-refuse,
+#      a route plant - the stage FAILS naming both, and nothing runs after
+#      the plants;
+#  16. the tier word at the device probe: a copy whose unset leaves out
+#      CFT_HIP_TIER, run with CFT_HIP_TIER=fixed exported - hip FAILS at
+#      the probe, naming it and quoting its line, and nothing runs after;
+#  17. the tier word on a leg: every plant run of hip made under
+#      CFT_HIP_TIER=fixed by its own command (HIP-PLANT-RUN) - the stage
+#      FAILS naming the plant logs whose device lines say fixed;
+#  18. the same tier and CFT_TRANSCEND_MINPREC exported to the real runner,
+#      cut at the plants by 6's bypass of drop-flag: the only failures are
+#      that plant's, and every device line of the stage's log says tier
+#      generic - the unset holds where the legs run;
+#  19. a first chunk that is not the recorded one: hip-tier with its
+#      hip-fmadiff seed changed in a copy (HIP_TIER_FMADIFF_SEED) FAILS
+#      naming each stream whose sums moved, and nothing runs after the
+#      streams.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUNSH="$ROOT/verify/run.sh"
@@ -212,6 +248,111 @@ else
   echo "  FAIL  10. hip_named: the CHUNK log rc $r1 '${o1}'; the second device rc $r2 '${o2:0:160}'; no device line rc $r3 '${o3:0:160}'"
 fi
 
+# 11. the unset (round 3's G3D-1): the names the GPU block's unset line must
+# hold, each one of cert2.ENVIRONMENT_NAMES (python/cft_golden/cert2.py),
+# and a copy with the tier or CFT_TRANSCEND_MINPREC taken out red by name
+unset_want="CFT_DIVSQRT_FULL CFT_DIVSQRT_SEQ CFT_HIP_PLANT CFT_HIP_CHUNK CFT_HIP_PAGE CFT_HIP_UPLOAD CFT_HIP_TIER CFT_TRANSCEND_MINPREC XCL_EMULATION_MODE CFT_SEGRUN_PLANT"
+unset_line() { awk '/^# ---- the GPU backend/ { hip = 1 } /^# ---- report/ { hip = 0 } hip && /^  unset CFT_DIVSQRT_FULL /' "$1"; }
+unset_missing() {  # <runner>: the names of unset_want its unset line does not name
+  local line nm out=""
+  line=$(unset_line "$1")
+  for nm in $unset_want; do
+    case " $line " in *" $nm "*) ;; *) out="$out $nm";; esac
+  done
+  echo "${out# }"
+}
+cert2=$(sed -n '/^ENVIRONMENT_NAMES = (/,/)/p' "$ROOT/python/cft_golden/cert2.py" | grep -oE '"[A-Z0-9_]+"' | tr -d '"' | tr '\n' ' ')
+notcert=""
+for nm in $(unset_line "$RUNSH" | sed 's/^ *unset //'); do
+  case " $cert2 " in *" $nm "*) ;; *) notcert="$notcert $nm";; esac
+done
+m0=$(unset_missing "$RUNSH")
+sed '/^  unset CFT_DIVSQRT_FULL /s/ CFT_HIP_TIER / /' "$RUNSH" > "$T/unset-tier.sh"
+sed '/^  unset CFT_DIVSQRT_FULL /s/ CFT_TRANSCEND_MINPREC / /' "$RUNSH" > "$T/unset-minprec.sh"
+m1=$(unset_missing "$T/unset-tier.sh")
+m2=$(unset_missing "$T/unset-minprec.sh")
+CASES=$((CASES + 1))
+if [ -n "$(unset_line "$RUNSH")" ] && [ -z "$m0" ] && [ -z "$notcert" ] && [ "$(echo $cert2 | wc -w)" = 24 ] \
+   && [ "$m1" = CFT_HIP_TIER ] && [ "$m2" = CFT_TRANSCEND_MINPREC ]; then
+  echo "  ok    11. the unset line names the ten, each of cert2's 24; a copy without CFT_HIP_TIER is red naming it, and one without CFT_TRANSCEND_MINPREC"
+else
+  FAILS=$((FAILS + 1))
+  echo "  FAIL  11. the unset: the runner's line misses '$m0', names '${notcert# }' outside cert2's $(echo $cert2 | wc -w) names; the copies without the tier and MINPREC miss '$m1' and '$m2' (each its one name wanted)"
+fi
+
+# 12. hip-tier's skips, exactly as hip's (its own row, the same reasons)
+gotier() {  # as go, for --only hip-tier
+  local d=$1 tag=$2
+  local -a vars=() args=()
+  shift 2
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do vars+=("$1"); shift; done
+  [ "${1:-}" = -- ] && shift
+  args=("$@")
+  OUT="$T/$tag.out"
+  env "${vars[@]}" bash "$d/verify/run.sh" --only hip-tier "${args[@]}" > "$OUT" 2>&1
+  RC=$?
+  ROW=$(grep -m1 '^hip-tier  ' "$OUT")
+  VERDICT=$(grep -m1 '^VERDICT:' "$OUT")
+}
+rowt() { printf '%-14s %-7s %s' hip-tier SKIP "$1"; }
+want="no hipcc at $nowhere/bin/hipcc (set HIP_ROOT; HIP_PLATFORM=nvidia for HIP 7.2.4's NVIDIA layer, HIP_ROOT=/opt/rocm-7.2.4)"
+gotier "$T/skip" t-nohipcc HIP_ROOT="$nowhere"
+expect "12. hip-tier: a HIP_ROOT with no hipcc: skipped by name, rc 0" 0 "$(rowt "$want")" "$PASS1"
+gotier "$T/skip" t-nohipcc-all HIP_ROOT="$nowhere" -- --require-all
+expect "12. hip-tier: the same under --require-all: FAIL, rc 1" 1 "$(rowt "$want")" "$FAIL1"
+gotier "$T/skip" t-nogpu-nv HIP_ROOT="$T/stubroot" HIP_PLATFORM= PATH="$T/none:$PATH"
+expect "12. hip-tier: hipconfig says nvidia, nvidia-smi lists nothing: skipped by name" \
+  0 "$(rowt "no GPU: nvidia-smi -L lists no device for HIP_PLATFORM=nvidia")" "$PASS1"
+gotier "$T/skip" t-past HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=9 PATH="$T/one:$PATH"
+expect "12. hip-tier: HIP_DEVICE=9 beside one GPU: skipped by name, the count named" \
+  0 "$(rowt "no GPU: nvidia-smi -L lists 1 device for HIP_PLATFORM=nvidia, and HIP_DEVICE=9 is past the 1 it lists")" "$PASS1"
+
+# 13. HIP_TIER_CEILINGS and docs/VERIFICATION.md's hip-tier row: the same
+# seconds a device, and a copy of the runner with one changed red
+ceil_runner() { sed -n 's/^HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=\([0-9]*\);AMD Radeon RX 7600=\([0-9]*\)"$/\1 \2/p' "$1"; }
+ceil_docs=$(grep -m1 '^| `hip-tier`' "$ROOT/docs/VERIFICATION.md" \
+  | sed -n 's/.*its ceilings are \([0-9,]*\) s on the RTX 5060 Ti and \([0-9,]*\) s on the RX 7600.*/\1 \2/p' | tr -d ',')
+sed 's/^\(HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=\)\([0-9]*\)/\11\2/' "$RUNSH" > "$T/ceil-moved.sh"
+c0=$(ceil_runner "$RUNSH"); c1=$(ceil_runner "$T/ceil-moved.sh")
+CASES=$((CASES + 1))
+if [ -n "$c0" ] && [ "$c0" = "$ceil_docs" ] && [ -n "$c1" ] && [ "$c1" != "$ceil_docs" ]; then
+  echo "  ok    13. HIP_TIER_CEILINGS is docs/VERIFICATION.md's row ($c0 s on the 5060 Ti and the RX 7600); a copy with one moved ($c1) is red"
+else
+  FAILS=$((FAILS + 1))
+  echo "  FAIL  13. the ceilings: the runner's '${c0}', the row's '${ceil_docs}', the moved copy's '${c1}' (the first two equal and the third not, wanted)"
+fi
+
+# 14. the unset held by a run, no GPU: stub tools let the stage start, and
+# a scratch tree with no host/ stops it at the copy; with
+# CFT_TRANSCEND_MINPREC out of a copy's unset it stops at the environment
+# check instead, naming the variable - in hip and in hip-tier, which share
+# hip_setup (HIP_DEVICE=0 on each run: the stub lists one GPU, and a host's
+# own HIP_DEVICE, the 5060 Ti's 1 in cft-gpu, would skip the stage)
+envvars=(CFT_TRANSCEND_MINPREC=4000 XCL_EMULATION_MODE=hw_emu CFT_SEGRUN_PLANT=x CFT_HIP_TIER=fixed)
+repl=$(grep '^  unset CFT_DIVSQRT_FULL ' "$RUNSH" | sed 's/ CFT_TRANSCEND_MINPREC / /')
+mkhip "$T/env0" || exit 1
+mkhip "$T/env1" 'unset CFT_DIVSQRT_FULL' "$repl" || exit 1
+stagelog() { ls -d "$1"/verify/state/*/"$2".log 2>/dev/null | tail -n 1; }
+go "$T/env0" env0 HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=0 PATH="$T/one:$PATH" "${envvars[@]}"
+l0=$(stagelog "$T/env0" hip); r0=$RC
+go "$T/env1" env1 HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=0 PATH="$T/one:$PATH" "${envvars[@]}"
+l1=$(stagelog "$T/env1" hip); r1=$RC
+gotier "$T/env1" env1t HIP_ROOT="$T/stubroot" HIP_PLATFORM=nvidia HIP_DEVICE=0 PATH="$T/one:$PATH" "${envvars[@]}"
+l2=$(stagelog "$T/env1" hip-tier); r2=$RC
+CASES=$((CASES + 1))
+if [ "${ROW:-}" != "" ] && [[ $ROW == *SKIP* ]]; then
+  echo "  NOT RUN  14. the stage was skipped here, so the stubs did not let it start: $ROW"
+  CASES=$((CASES - 1))
+elif [ "$r0" = 1 ] && [ -n "$l0" ] && ! grep -q '^FAIL  the environment' "$l0" && grep -q '^FAIL  the copy of host/' "$l0" \
+     && [ "$r1" = 1 ] && [ -n "$l1" ] && grep -q '^FAIL  the environment: the stage.s runs would inherit CFT_TRANSCEND_MINPREC - ' "$l1" \
+     && [ "$r2" = 1 ] && [ -n "$l2" ] && grep -q '^FAIL  the environment: the stage.s runs would inherit CFT_TRANSCEND_MINPREC - ' "$l2"; then
+  echo "  ok    14. with ${envvars[*]} exported the stage passes its environment check (it stops at the copy of host/); without CFT_TRANSCEND_MINPREC in the unset, hip and hip-tier FAIL at it, naming it"
+  grep -m1 '^FAIL  the environment' "$l1" | cut -c1-160 | sed 's/^/          /'
+else
+  FAILS=$((FAILS + 1))
+  echo "  FAIL  14. the unset by a run: the real runner rc $r0 ($(grep -m1 '^FAIL' "${l0:-/dev/null}" | cut -c1-120)); the copy rc $r1 ($(grep -m1 '^FAIL' "${l1:-/dev/null}" | cut -c1-120)) and hip-tier rc $r2 ($(grep -m1 '^FAIL' "${l2:-/dev/null}" | cut -c1-120))"
+fi
+
 if [ "$GPU" = 1 ]; then
   echo "== the failures (a copy of the runner; ROOT links this tree's own entries; real builds)"
   # A tree whose entries are this one's, but for verify/, which holds the copy.
@@ -324,8 +465,112 @@ EOF
     [ -n "$log" ] && tail -n 25 "$log" | sed 's/^/          | /'
     [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
   fi
+
+  # round 3's G3D-1: 15 to 19
+  # the bypass of 6 for a list of plants, by name (HIP_TEST_BYPASS)
+  bplist='  case " $HIP_TEST_BYPASS " in *" $pl "*) "$@" > "$out" 2>&1; rc=$?;; *) CFT_HIP_PLANT=$pl "$@" > "$out" 2>&1; rc=$?;; esac    # the control: the named plants not set'
+  # 15. hip-tier: a lane plant and a route plant, each run made without it
+  link_tree "$T/tbypass"
+  mkhip "$T/tbypass" HIP-PLANT-RUN "$bplist" || exit 1
+  t0=$(date +%s)
+  gotier "$T/tbypass" tbypass HIP_TEST_BYPASS="fixed-rmm fixed-refuse"
+  log=$(stagelog "$T/tbypass" hip-tier)
+  CASES=$((CASES + 1))
+  if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] \
+     && grep -q '^FAIL  plant fixed-rmm did not turn its check red' "$log" \
+     && grep -q '^FAIL  plant fixed-refuse did not turn its check red' "$log" \
+     && grep -q '^FAIL  the plants: a check a plant cannot turn red proves nothing' "$log" \
+     && ! grep -q '^== the differential streams' "$log"; then
+    echo "  ok    15. hip-tier: fixed-rmm (a lane plant) and fixed-refuse (a route plant) run without their plants: FAIL naming both, no leg after the plants ($(( $(date +%s) - t0 )) s)"
+    grep '^FAIL  plant fixed-r' "$log" | cut -c1-220 | sed 's/^/          /'
+  else
+    FAILS=$((FAILS + 1))
+    echo "  FAIL  15. hip-tier's plants run without them: rc $RC, $VERDICT"
+    [ -n "$log" ] && tail -n 25 "$log" | sed 's/^/          | /'
+    [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
+  fi
+
+  # 16. the device probe's tier word: the unset without the tier, the tier exported
+  link_tree "$T/notier"
+  mkhip "$T/notier" 'unset CFT_DIVSQRT_FULL' "$(grep '^  unset CFT_DIVSQRT_FULL ' "$RUNSH" | sed 's/ CFT_HIP_TIER / /')" || exit 1
+  t0=$(date +%s)
+  go "$T/notier" notier CFT_HIP_TIER=fixed
+  log=$(stagelog "$T/notier" hip)
+  CASES=$((CASES + 1))
+  if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] \
+     && grep -q '^FAIL  the device probe (hip-test hip:0 -l open, no tier set by this stage) does not say tier generic: cft hip: hip:0 = .*; tier fixed, ' "$log" \
+     && ! grep -q '^== plants' "$log"; then
+    echo "  ok    16. the unset without CFT_HIP_TIER, the tier exported: FAIL at the device probe, naming it and quoting its line, nothing after it ($(( $(date +%s) - t0 )) s)"
+    grep -m1 '^FAIL  the device probe' "$log" | cut -c1-200 | sed 's/^/          /'
+  else
+    FAILS=$((FAILS + 1))
+    echo "  FAIL  16. the device probe's tier word: rc $RC, $VERDICT"
+    [ -n "$log" ] && tail -n 20 "$log" | sed 's/^/          | /'
+    [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
+  fi
+
+  # 17. a leg's own command setting the tier: every plant run of hip under it
+  link_tree "$T/legtier"
+  mkhip "$T/legtier" HIP-PLANT-RUN \
+    '  CFT_HIP_TIER=fixed CFT_HIP_PLANT=$pl "$@" > "$out" 2>&1; rc=$?    # the control: each plant run made under the fixed tier' || exit 1
+  t0=$(date +%s)
+  go "$T/legtier" legtier
+  log=$(stagelog "$T/legtier" hip)
+  CASES=$((CASES + 1))
+  if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] \
+     && grep -q '^  FAIL  plants, plant-flip: 1 of its 1 device lines say another tier than generic, which this leg runs: cft hip: hip:0 = .*; tier fixed, ' "$log" \
+     && grep -q '^FAIL  plant-flip: a device line says another tier than generic' "$log" \
+     && ! grep -q '^== corpora' "$log"; then
+    echo "  ok    17. every plant run of hip made under CFT_HIP_TIER=fixed by its command: FAIL naming the plant logs whose lines say fixed ($(grep -c '^FAIL  plant-.*: a device line says another tier than generic' "$log") of them; $(( $(date +%s) - t0 )) s)"
+    grep -m1 '^  FAIL  plants, plant-flip: ' "$log" | cut -c1-200 | sed 's/^/          /'
+  else
+    FAILS=$((FAILS + 1))
+    echo "  FAIL  17. a leg's tier word: rc $RC, $VERDICT"
+    [ -n "$log" ] && tail -n 20 "$log" | sed 's/^/          | /'
+    [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
+  fi
+
+  # 18. the real runner under an exported tier and CFT_TRANSCEND_MINPREC, cut at the plants
+  link_tree "$T/heldtier"
+  mkhip "$T/heldtier" HIP-PLANT-RUN \
+    '  if [ "$pl" = "$HIP_TEST_BYPASS" ]; then "$@" > "$out" 2>&1; rc=$?; else CFT_HIP_PLANT=$pl "$@" > "$out" 2>&1; rc=$?; fi    # the control: one plant not set' || exit 1
+  t0=$(date +%s)
+  go "$T/heldtier" heldtier HIP_TEST_BYPASS=drop-flag CFT_HIP_TIER=fixed CFT_TRANSCEND_MINPREC=4000
+  log=$(stagelog "$T/heldtier" hip)
+  nd=$(grep -a '^cft hip: hip:0 = ' "${log:-/dev/null}" | grep -c .)
+  ng=$(grep -a '^cft hip: hip:0 = ' "${log:-/dev/null}" | grep -cF '; tier generic, ')
+  CASES=$((CASES + 1))
+  if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] && [ "$nd" -gt 0 ] && [ "$ng" = "$nd" ] \
+     && [ "$(grep -c '^FAIL  ' "$log")" = 2 ] && grep -q '^FAIL  plant drop-flag did not turn its check red' "$log" \
+     && grep -q '^FAIL  the plants: a check a plant cannot turn red proves nothing' "$log"; then
+    echo "  ok    18. CFT_HIP_TIER=fixed and CFT_TRANSCEND_MINPREC=4000 exported to the real runner: the only FAIL lines drop-flag's, bypassed; $nd device lines, every one tier generic ($(( $(date +%s) - t0 )) s)"
+  else
+    FAILS=$((FAILS + 1))
+    echo "  FAIL  18. the unset under an exported tier: rc $RC, $VERDICT; $ng of $nd device lines say tier generic; FAIL lines: $(grep -c '^FAIL  ' "${log:-/dev/null}") (2 wanted)"
+    [ -n "$log" ] && grep '^FAIL  ' "$log" | head -n 8 | sed 's/^/          | /'
+  fi
+
+  # 19. a stream that is not the recorded one: hip-tier's hip-fmadiff seed moved
+  link_tree "$T/seed"
+  mkhip "$T/seed" 'HIP_TIER_FMADIFF_SEED=' 'HIP_TIER_FMADIFF_SEED=20261111' || exit 1
+  t0=$(date +%s)
+  gotier "$T/seed" seed
+  log=$(stagelog "$T/seed" hip-tier)
+  CASES=$((CASES + 1))
+  if [ "$RC" = 1 ] && [ "$VERDICT" = "$FAIL1" ] && [ -n "$log" ] \
+     && grep -q "^FAIL  the stream hip-fmadiff --format fp256 --stream study --op fma; the first chunk's inputs [0-9a-f]*, not the recorded b07642724a9ebae3" "$log" \
+     && [ "$(grep -c '^FAIL  the stream hip-fmadiff ' "$log")" = 16 ] && ! grep -q '^FAIL  the stream hip-progdiff ' "$log" \
+     && grep -q '^FAIL  the streams: ' "$log" && ! grep -q '^== corpora' "$log"; then
+    echo "  ok    19. hip-tier's hip-fmadiff seed moved: FAIL naming each of its 16 streams by its first chunk, hip-progdiff's held, nothing after the streams ($(( $(date +%s) - t0 )) s)"
+    grep -m1 '^FAIL  the stream hip-fmadiff ' "$log" | cut -c1-200 | sed 's/^/          /'
+  else
+    FAILS=$((FAILS + 1))
+    echo "  FAIL  19. a stream off the record: rc $RC, $VERDICT; $(grep -c '^FAIL  the stream hip-fmadiff ' "${log:-/dev/null}") of 16 fmadiff streams named"
+    [ -n "$log" ] && grep '^FAIL  ' "$log" | head -n 6 | cut -c1-200 | sed 's/^/          | /'
+    [ -z "$log" ] && tail -n 20 "$OUT" | sed 's/^/          | /'
+  fi
 fi
 
 echo
-echo "test-hip-stage: $CASES cases, $FAILS failed$([ "$GPU" = 1 ] || echo "; the failures (5 to 9) need --gpu on a host where the stage runs")"
+echo "test-hip-stage: $CASES cases, $FAILS failed$([ "$GPU" = 1 ] || echo "; the failures (5 to 9 and 15 to 19) need --gpu on a host where the stage runs")"
 [ "$FAILS" -eq 0 ]

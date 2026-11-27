@@ -26,7 +26,8 @@
 #                                      # estimates study (estimates), the variational
 #                                      # equations (tangent), the acceptance set and,
 #                                      # on a host with a GPU and hipcc, the GPU
-#                                      # backend (hip; skipped by name elsewhere)
+#                                      # backend and its fixed tier (hip and
+#                                      # hip-tier; skipped by name elsewhere)
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
 #                                      # node, wasm, images, estimates-full,
 #                                      # acceptance-far, acceptance-rev8, and
@@ -166,7 +167,9 @@ BUDGET=""
 # runs about ten minutes with round 1's checks (564 s on an RTX 5060 Ti
 # under WSL with the desktop loaded, 2026-11-12), and 12 to 20 since
 # round 2's joined them (738 s on that GPU and 1,189 s on an RX 7600,
-# 2026-11-17). `full` is the census.
+# 2026-11-17); and since 2026-11-26 the GPU backend's fixed tier
+# (hip-tier, round 3's gate), skipped by name where hip is. `full` is the
+# census.
 # Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
@@ -177,7 +180,7 @@ BUDGET=""
 # and the two browser replays; on the WSL distro the replay stages take
 # seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance,cardstress,hip
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance,cardstress,hip,hip-tier
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -1936,6 +1939,22 @@ hip_named() {
     return 1
   fi
 }
+# <leg log> <leg> <tier>: every device line of the leg says that tier - the
+# handle's own reading of CFT_HIP_TIER at open, the INFO line's "; tier
+# generic, " or "; tier fixed, " (backend_hip.cpp) - so that a tier the
+# caller's shell exported, or a leg's own command, cannot change unseen
+# what the leg means (round 3's G3D-1). Silent when it holds, as hip_named
+# is; a leg with no device line is hip_named's failure, not this one's.
+hip_tier() {
+  local n m odd
+  n=$(hip_devlines "$1" | grep -c .)
+  m=$(hip_devlines "$1" | grep -cF -- "; tier $3, ")
+  if [ "$m" -ne "$n" ]; then
+    odd=$(hip_devlines "$1" | grep -vF -- "; tier $3, " | head -n 1)
+    echo "  FAIL  $2: $((n - m)) of its $n device lines say another tier than $3, which this leg runs: $odd"
+    return 1
+  fi
+}
 # <log> <command...>: one run, its command and its whole output in the stage's log
 hip_cmd() {
   local log=$1 rc; shift
@@ -2000,23 +2019,52 @@ hip_captured() {
   echo "${s:--}"
 }
 
-do_hip() {
-  local plat dev=${HIP_DEVICE:-0} root=${HIP_ROOT:-/opt/rocm} arch=${HIP_ARCH:-} \
-        tree="$RUNDIR/hip-tree" ptree="$RUNDIR/hip-tree-plants" L="$RUNDIR/hip-logs" \
-        C="$RUNDIR/hip-corpora" O="$RUNDIR/hip-out" V="$RUNDIR/hip-vectors" \
-        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap vendor \
-        V2="$RUNDIR/hip-vectors-formatof" ch args e named what why api rp dp
-  local -a mk bad=() pt=()
-  local -A SW=()
+# The set-up the two GPU stages share, `hip` and `hip-tier` - one copy, so
+# that they cannot drift (round 3's G3D-1): the environment, the platform
+# and the device, the copy of host/ and its build, the device probe, the
+# build's own checks, the corpora and the software handle's sums
+# (hip_setup); then the plants' copy and its build (hip_plants_build). Each
+# runs in its caller's scope and sets the caller's own locals - plat, dev,
+# root, arch, tree, ptree, L, C, O, H, P, t0, rc, b, line, busl, busd, c,
+# vendor, mk, pt and SW - and HIP_INFO and HIP_DEV. Their arguments are the
+# tools a stage builds beside `hip`'s, into both builds (hip-tier's two
+# differentials); with none, every line they print is `hip`'s as it was.
+hip_setup() {
+  local -a extra=("$@")
   # A variable the caller's shell exports must not change what a run here
-  # is (cert2.ENVIRONMENT_NAMES lists what libcft reads): divsqrt.c reads
-  # CFT_DIVSQRT_FULL and CFT_DIVSQRT_SEQ at every cft_div and cft_sqrt, so
-  # an exported FULL=1 would make every default-route run below the whole
-  # operation's, and no log would say so; and an inherited plant-build
-  # instrument (CFT_HIP_PLANT and _CHUNK, which this stage sets run by run,
-  # _PAGE, _UPLOAD) would change every control of the plants' build. A run
-  # that forces a route names it on the command line it prints.
-  unset CFT_DIVSQRT_FULL CFT_DIVSQRT_SEQ CFT_HIP_PLANT CFT_HIP_CHUNK CFT_HIP_PAGE CFT_HIP_UPLOAD
+  # is. cert2.ENVIRONMENT_NAMES lists the 24 that libcft and cft-segrun
+  # read, and each is unset here or left out for a reason in the code.
+  # Unset: divsqrt.c reads CFT_DIVSQRT_FULL and CFT_DIVSQRT_SEQ at every
+  # cft_div and cft_sqrt, so an exported FULL=1 would make every
+  # default-route run below the whole operation's, and no log would say
+  # so; an inherited plant-build instrument (CFT_HIP_PLANT and _CHUNK, which
+  # this stage sets run by run, _PAGE, _UPLOAD) would change every control
+  # of the plants' build; backend_hip.cpp reads CFT_HIP_TIER at every open,
+  # so an exported tier would make every default leg the other tier's
+  # (round 3's G3D-1: hip_tier reads each leg's word); transcend.c reads
+  # CFT_TRANSCEND_MINPREC, the first precision of a transcendental on the
+  # software handle, in every process here that runs one there; device-test
+  # reads XCL_EMULATION_MODE (two of its legs NOT RUN "under emulation"),
+  # and cft-segrun its own plant, CFT_SEGRUN_PLANT. Left out: CFT_HIP_INFO,
+  # CUDA_VISIBLE_DEVICES and HIP_VISIBLE_DEVICES are the stage's own, set
+  # below and on every GPU run's line, every device line held to them
+  # (hip_named); CFT_TIMEOUT_MS is read by the remote backend
+  # (backend_remote.c), which no run here opens, and by backend_xrt.cpp, as
+  # are the ten CFT_XRT_* - and a HIP=1 build has no backend_xrt.o
+  # (host/Makefile refuses HIP=1 with XRT=1), while device-test reads
+  # CFT_XRT_CAPS for its card plants, on an xclbin alone. A run that forces
+  # a route names it on the command line it prints.
+  unset CFT_DIVSQRT_FULL CFT_DIVSQRT_SEQ CFT_HIP_PLANT CFT_HIP_CHUNK CFT_HIP_PAGE CFT_HIP_UPLOAD CFT_HIP_TIER CFT_TRANSCEND_MINPREC XCL_EMULATION_MODE CFT_SEGRUN_PLANT
+  # ...and held, as a process of this stage sees its environment (env, a
+  # child of it): none of the unset names but the tier may reach a run.
+  # CFT_TRANSCEND_MINPREC cannot change a result (transcend.c), so no leg's
+  # bits would show it; the tier is read where it acts instead, on every
+  # leg's device lines (the probe's below, and hip_tier's).
+  b=$(env | sed -n -E 's/^(CFT_DIVSQRT_FULL|CFT_DIVSQRT_SEQ|CFT_HIP_PLANT|CFT_HIP_CHUNK|CFT_HIP_PAGE|CFT_HIP_UPLOAD|CFT_TRANSCEND_MINPREC|XCL_EMULATION_MODE|CFT_SEGRUN_PLANT)=.*/\1/p' | tr '\n' ' ')
+  if [ -n "$b" ]; then
+    echo "FAIL  the environment: the stage's runs would inherit ${b% } - the unset above did not take, so a run here would not be the run its line names"
+    return 1
+  fi
   plat=$(hip_platform)
   case "$plat" in nvidia|amd|cuda) ;;
     *) echo "FAIL  HIP_PLATFORM=$plat: the stage builds for nvidia, amd or cuda (plain nvcc)"; return 1;; esac
@@ -2026,7 +2074,7 @@ do_hip() {
     return 1
   fi
   dev=$((10#$dev))
-  mkdir -p "$L" "$C" "$O" "$V"
+  mkdir -p "$L" "$C" "$O" ${V:+"$V"}
   hip_list "$plat"
   # The chosen GPU is the only one this stage's processes see: hip:0 inside
   # is HIP_DEVICE outside.
@@ -2084,13 +2132,13 @@ do_hip() {
   fi
   H="$tree/host"; P="$ptree/host"
   t0=$(date +%s)
-  echo "\$ ${mk[*]} -C $H all device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun"
-  "${mk[@]}" -C "$H" all device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun \
+  echo "\$ ${mk[*]} -C $H all device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun${extra[*]:+ ${extra[*]}}"
+  "${mk[@]}" -C "$H" all device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun "${extra[@]}" \
     > "$L/build.txt" 2>&1 || { tail -n 40 "$L/build.txt"; echo "FAIL  the HIP=1 build"; return 1; }
   echo "hip: built in $(( $(date +%s) - t0 )) s; warnings: $(grep -ci 'warning' "$L/build.txt")"
   grep -i 'warning' "$L/build.txt" | head -n 20
   grep '^hip-symcheck: ' "$L/build.txt"
-  for b in libcft.a libcft.so device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun; do
+  for b in libcft.a libcft.so device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun "${extra[@]}"; do
     printf '  built  %-14s %s\n' "$b" "$(date -r "$H/$b" '+%F %T' 2>/dev/null || echo MISSING)"
   done
 
@@ -2105,6 +2153,11 @@ do_hip() {
   HIP_INFO=$(grep -m1 '^cft hip: hip:0 = ' "$L/open.txt")
   HIP_DEV=$(printf '%s\n' "$HIP_INFO" | hip_devpart)
   [ -n "$HIP_DEV" ] || { echo "FAIL  hip-test printed no CFT_HIP_INFO line it can be named by"; return 1; }
+  # The probe opens hip:0 with no tier set by this stage, so its handle is
+  # the default's, generic: anything else is CFT_HIP_TIER past the unset,
+  # and every leg below would run another tier than its line names
+  case "$HIP_INFO" in *"; tier generic, "*) ;;
+    *) echo "FAIL  the device probe (hip-test hip:0 -l open, no tier set by this stage) does not say tier generic: $HIP_INFO"; return 1;; esac
   busd=$(printf '%s\n' "$HIP_DEV" | sed -n 's/.*, bus [0-9a-f]*:\([0-9a-f]*:[0-9a-f]*\.[0-9]\),.*/\1/p')
   case "$HIP_DEV" in *"; of 1 visible"*) ;;
     *) echo "FAIL  the runtime sees more than the one GPU the stage chose: $HIP_INFO"; return 1;; esac
@@ -2118,7 +2171,7 @@ do_hip() {
   hip_cmd "$L/symplant.txt" "${mk[@]}" -C "$H" hip-symcheck-plant \
     && grep -q '^hip-symcheck-plant: RED, as it must be' "$L/symplant.txt" \
     || { echo "FAIL  hip-symcheck-plant did not say RED: the symbol check is not shown to fail"; return 1; }
-  for b in device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun libcft.so; do
+  for b in device-test hip-test hip-corpus cft-bench cft-selftest cft-segrun libcft.so "${extra[@]}"; do
     line=$(ldd "$H/$b" 2>&1 | grep -E 'libamdhip64|libcudart' | head -n 1)
     if [ -n "$line" ]; then printf '  ldd    %-14s %s\n' "$b" "$(echo $line)"
     else echo "FAIL  ldd $H/$b names no GPU runtime (libamdhip64 or libcudart): a result from it would not be the GPU's"; rc=1; fi
@@ -2139,8 +2192,8 @@ do_hip() {
       || { echo "FAIL  hip-corpus sw $c.bin"; return 1; }
     SW[$c]=$(hip_sum "$O/$c.sw")
   done
-
-  # ---- the plants, before anything is believed
+}
+hip_plants_build() {
   echo "== plants (HIP_PLANTS=1, a copy of the build: $P)"
   cp -a "$tree" "$ptree" || { echo "FAIL  the plants' copy"; return 1; }
   t0=$(date +%s)
@@ -2152,12 +2205,27 @@ do_hip() {
   # runs it), and each plant run's own device line, CFT_HIP_PLANT=<name>,
   # is the proof that what ran carried it.
   pt=(hip-corpus hip-test "$SHLIB_NAME" cft-selftest)    # HIP-PLANTS-BUILD
+  pt+=("$@")
   "${mk[@]}" -C "$P" HIP_PLANTS=1 "${pt[@]}" > "$L/build-plants.txt" 2>&1 \
     || { tail -n 40 "$L/build-plants.txt"; echo "FAIL  the HIP_PLANTS=1 build"; return 1; }
   echo "hip: the plants' build (${pt[*]}) in $(( $(date +%s) - t0 )) s; warnings: $(grep -ci 'warning' "$L/build-plants.txt")"
   for b in "${pt[@]}"; do
     printf '  built  %-14s %s\n' "$b" "$(date -r "$P/$b" '+%F %T' 2>/dev/null || echo MISSING)"
   done
+}
+
+do_hip() {
+  local plat dev=${HIP_DEVICE:-0} root=${HIP_ROOT:-/opt/rocm} arch=${HIP_ARCH:-} \
+        tree="$RUNDIR/hip-tree" ptree="$RUNDIR/hip-tree-plants" L="$RUNDIR/hip-logs" \
+        C="$RUNDIR/hip-corpora" O="$RUNDIR/hip-out" V="$RUNDIR/hip-vectors" \
+        H P t0 rc=0 n f b line busl busd want got pl nd nf c s h r g cap vendor \
+        V2="$RUNDIR/hip-vectors-formatof" ch args e named what why api rp dp
+  local -a mk bad=() pt=()
+  local -A SW=()
+  hip_setup || return 1
+
+  # ---- the plants, before anything is believed
+  hip_plants_build || return 1
   for pl in flip drop-flag; do
     hip_plant_run "$pl" "$L/plant-$pl.txt" env CFT_HIP_INFO=1 "$P/hip-corpus" hip:0 "$C/conf-fp64.bin" "$O/plant-$pl.out"; rc=$?
     line=$(grep -m1 "against the corpus's expected values [0-9]* results and [0-9]* flags differ" "$L/plant-$pl.txt")
@@ -2323,6 +2391,7 @@ do_hip() {
   hip_cmd "$L/plant-leg.txt" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l plants \
     || bad+=("hip-test's plants leg: a malformed CFT_HIP_PLANT, CFT_HIP_CHUNK, CFT_HIP_PAGE or CFT_HIP_INFO is not refused by name")
   for f in "$L"/plant-*.txt; do hip_named "$f" "plants, $(basename "$f" .txt)" || bad+=("$(basename "$f" .txt): its device is not the stage's"); done
+  for f in "$L"/plant-*.txt; do hip_tier "$f" "plants, $(basename "$f" .txt)" generic || bad+=("$(basename "$f" .txt): a device line says another tier than generic, the tier of every run here"); done
   if [ ${#bad[@]} -gt 0 ]; then
     printf 'FAIL  %s\n' "${bad[@]}"
     echo "FAIL  the plants: a check a plant cannot turn red proves nothing, so no leg runs after them"
@@ -2386,7 +2455,9 @@ PY
     fi
   done
   hip_named "$L/corpora.txt" corpora || bad+=("the corpora: a run did not name the stage's device")
+  hip_tier "$L/corpora.txt" corpora generic || bad+=("the corpora: a run's device line says another tier than generic")
   hip_named "$L/refuse-hip.txt" refuse || bad+=("bank513.bin: its run on hip:0 did not name the stage's device")
+  hip_tier "$L/refuse-hip.txt" refuse generic || bad+=("bank513.bin: its run on hip:0 says another tier than generic")
   [ ${#bad[@]} -eq 0 ] && echo "hip: $(echo $HIP_CORPORA | wc -w) corpora, each the software handle's sha256 on hip:0 and on hip:0 --resident"
 
   # ---- c. the vectors: the same sets and cases on sw and on hip:0
@@ -2422,6 +2493,7 @@ PY
     bad+=("vectors: sw exited $r (${s:-no sets line}; ${n:-no count}), hip:0 exited $rc (${h:-no sets line}; ${f:-no count})")
   fi
   hip_named "$L/vectors-hip.txt" vectors || bad+=("vectors: the replay did not name the stage's device")
+  hip_tier "$L/vectors-hip.txt" vectors generic || bad+=("vectors: the replay's device line says another tier than generic")
 
   # ---- d. seq_check, the `seq` stage's command, through the device: at
   # the default depth, and opened at 2,048 slots (--device-depth, G2B's
@@ -2455,6 +2527,7 @@ PY
       bad+=("seq_check --device-depth $dp: the device line does not say max_scratch $dp - the depth did not take")
     fi
     hip_named "$f" "seq_check${dp:+ at $dp}" || bad+=("seq_check${dp:+ at $dp}: it did not name the stage's device")
+    hip_tier "$f" "seq_check${dp:+ at $dp}" generic || bad+=("seq_check${dp:+ at $dp}: its device line says another tier than generic")
   done
 
   # ---- e. the certificate corpus's conformance test through the device
@@ -2481,6 +2554,7 @@ PY
     bad+=("corpus.py check --device hip:0: exit $rc - $(grep -m1 '^corpus check: ' "$L/corpus.txt"); its count line: ${line:-none}; it must remake every case but one and refuse that one by name - $want")
   fi
   hip_named "$L/corpus.txt" "the certificate corpus" || bad+=("the certificate corpus: a run did not name the stage's device")
+  hip_tier "$L/corpus.txt" "the certificate corpus" generic || bad+=("the certificate corpus: a run's device line says another tier than generic")
 
   # ---- f. device-test, both legs, and at 2,048 scratch slots (G2B's
   # depth, a few seconds). Since round 2 hip:N publishes the software
@@ -2510,6 +2584,7 @@ PY
       bad+=("device-test hip:0 ${b:+$b }-n 96: $n NOT COMPARED line(s), where hip:N publishes the software handle's features since round 2: $(grep -v '^not on this device' "$g" | grep -m1 ': NOT COMPARED')")
     fi
     hip_named "$g" "device-test${b:+ $b}" || bad+=("device-test${b:+ $b}: it did not name the stage's device")
+    hip_tier "$g" "device-test${b:+ $b}" generic || bad+=("device-test${b:+ $b}: its device line says another tier than generic")
   done
 
   # ---- g. hip-test, leg by leg, the small reductions (the large ones are
@@ -2538,6 +2613,7 @@ PY
       bad+=("hip-test hip:0 -l ${n%%:*} -s $s${f:+ -f $f}: exit $rc (${line:-no summary})$([ "${line%% *}" = 0 ] && echo ' - it ran no check')")
     fi
     hip_named "$L/hiptest-${n/:/-}.txt" "hip-test ${n}" || bad+=("hip-test $n: it did not name the stage's device")
+    hip_tier "$L/hiptest-${n/:/-}.txt" "hip-test ${n}" generic || bad+=("hip-test $n: its device line says another tier than generic")
   done
 
   # ---- h. augmentedAddition through the API (G2A): augmented_check.py on
@@ -2557,6 +2633,7 @@ PY
     bad+=("augmented_check: the software handle exited $r with ${s:-no} comparisons, hip:0 exited $rc with ${h:-no}$(grep -qx 'augmented_check: device hip:0' "$L/augcheck.txt" || echo ', and no line names the device')")
   fi
   hip_named "$L/augcheck.txt" augmented_check || bad+=("augmented_check: it did not name the stage's device")
+  hip_tier "$L/augcheck.txt" augmented_check generic || bad+=("augmented_check: its device line says another tier than generic")
 
   # ---- i. the divide and the square root through the API (G2C):
   # divsqrt_check.py on the software handle, then through hip:0 under each
@@ -2590,6 +2667,7 @@ PY
       bad+=("divsqrt_check --device hip:0${e:+, $e}: exit $rc, ${h:-no} cases against the software handle's ${s:-none} ($(grep -m1 '^FAIL: ' "$f"))")
     fi
     hip_named "$f" "divsqrt_check${e:+ $e}" || bad+=("divsqrt_check${e:+ $e}: it did not name the stage's device")
+    hip_tier "$f" "divsqrt_check${e:+ $e}" generic || bad+=("divsqrt_check${e:+ $e}: its device line says another tier than generic")
   done
 
   # ---- j. the formatOf sets (754-2019 5.4.1), whose divides and roots are
@@ -2632,6 +2710,7 @@ PY
         bad+=("the formatOf sets${e:+, $e}: sw ${s:-no sets line} (${n:-no count}), hip:0 exited $rc (${h:-no sets line}; ${f:-no count})")
       fi
       hip_named "$g" "formatOf${e:+ $e}" || bad+=("the formatOf sets${e:+ $e}: the replay did not name the stage's device")
+      hip_tier "$g" "formatOf${e:+ $e}" generic || bad+=("the formatOf sets${e:+ $e}: the replay's device line says another tier than generic")
     done
   else
     bad+=("gen_vectors.py, the formatOf sets: it exited nonzero, so nothing of them was replayed")
@@ -2646,8 +2725,570 @@ PY
   echo "device: $HIP_INFO"
 }
 HIP_CORPORA="conf-fp32 conf-fp64 conf-fp128 conf-fp256 routines-fp32 routines-fp64 routines-fp128 routines-fp256 fuzz-fp32 fuzz-fp64 fuzz-fp128 fuzz-fp256 systems bench refuse"
+# <hip-fmadiff log> <leg>: its last line names the stage's device. The tool
+# links no libcft and prints no CFT_HIP_INFO line, so its own "on <name>
+# (<architecture>, bus <bus>)" is held to the stage's device line's name
+# and bus (round 3's G3D-1)
+hip_fxnamed() {
+  local nm bus got
+  nm=${HIP_DEV%% (*}
+  bus=$(printf '%s\n' "$HIP_DEV" | sed -n 's/.*, bus \([0-9a-fA-F:.]*\), .*/\1/p' | tr 'A-F' 'a-f')
+  got=$(sed -n 's/.*, on \(.*\): generic and fixed differ on .*/\1/p' "$1" | tail -n 1)
+  case "$(printf '%s' "$got" | tr 'A-F' 'a-f')" in
+    "$(printf '%s' "$nm" | tr 'A-F' 'a-f') ("*", bus $bus)") return 0;;
+  esac
+  echo "  FAIL  $2: its last line names ${got:-no device}, not the stage's device ($nm, bus $bus)"
+  return 1
+}
 need hipcc gpu host-cc python mpmath
-stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (round 1's four and round 2's twelve, each red on its own check and green without it; with no plant the chunk crossings and the divide's route proof), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check at two depths, the certificate corpus's conformance test, device-test, hip-test with round 2's aug, indexed, depth and divsqrt legs, augmented_check, divsqrt_check and the formatOf sets, each leg's log naming its device, every device line the stage's one; HIP_FULL=1 adds the divide's chunk route; skipped by name without hipcc or a GPU" -- do_hip
+stage hip "the GPU backend on this host's GPU through hip:0, in a copy of host/ built with HIP=1: plants first (round 1's four and round 2's twelve, each red on its own check and green without it; with no plant the chunk crossings and the divide's route proof), then study GPU-A's corpora on sw, the GPU and the GPU resident, the same sha256, a bounded vector replay, seq_check at two depths, the certificate corpus's conformance test, device-test, hip-test with round 2's aug, indexed, depth and divsqrt legs, augmented_check, divsqrt_check and the formatOf sets, each leg's log naming its device, every device line the stage's one and its tier word generic; HIP_FULL=1 adds the divide's chunk route; skipped by name without hipcc or a GPU" -- do_hip
+
+# ---- the stage `hip-tier`: the fixed tier on every build (round 3's G3D-1)
+# Round 3 put a second implementation of the FMA class under hip:N: fp256's
+# and fp128's FMA, ADD, SUB and MUL in cft_run on fma256_fixed.h and
+# fma128_fixed.h (G3A, G3A2), and inside programs through the executor's
+# lane ALU, k_seq_fx and k_seq_fx128 (G3B), on a handle opened with
+# CFT_HIP_TIER=fixed. The default stays generic, libcft's own arithmetic,
+# until the overnight proof has passed on both vendors (Logan's answer 3 to
+# the round's plan), and `hip` above runs that default alone and keeps its
+# meaning. This stage runs the fixed tier on every build. It shares hip's
+# set-up (hip_setup and hip_plants_build: the same copy, builds, probe,
+# checks, corpora and sums, in directories of its own, with hip-fmadiff and
+# hip-progdiff built into both builds), then holds the fixed tier to the
+# generic tier, the software handle and the golden model, plants first:
+#   * the plants (HIP_TIER_PLANTS), each on its cheapest red, read as a
+#     number, its run's device line naming it, and GREEN without it on the
+#     same command: round 3's 27 - G3A's and G3A2's seven a format on the
+#     elementwise corpora under the tier and on hip-test's `fixed` leg,
+#     G3B's thirteen on its `progtier` leg, the cover plants and seqna-aug
+#     by the literal test's own sentence, the refuse plants by the route
+#     proof alone with the bits green - and beside them hip-fmadiff's own
+#     eight on its stream, G3B's lane plants on hip-progdiff and the rmm
+#     pair at the routines files' ties and on the referee's file, and the
+#     earlier rounds' program plants (seq-mask, seq-deposit) under the tier
+#     on the six corpora G3B named. A stray plant on the default build is
+#     refused by name, exit 2, by each tool; a refusal is never a red (an
+#     unknown name, a plant of the other format, exit 2 from any tool fails
+#     the stage, saying which). A plant that does not turn its check red
+#     fails the stage by name, and nothing runs after the plants;
+#   * the differential streams on the default build, bounded: hip-fmadiff
+#     (the two lanes the kernels call, on the device) and hip-progdiff (the
+#     same streams as program lanes on two handles, drawn on the host) for
+#     FMA, ADD, SUB and MUL at both formats on both streams, every lane
+#     green and the first chunk's sums the recorded ones (HIP_TIER_SUMS),
+#     so that a stream that changed under the stage is red by name; a
+#     failure here stops the stage, as the plants' does;
+#   * GPU-A's fifteen corpora under each tier, staged and resident, each
+#     output the software handle's sha256 and the routine corpora the
+#     golden model's (only the fp128 and fp256 ones can differ between the
+#     tiers; the rest are the fixed tier's controls: fp32, fp64 and every
+#     program with AUGADD or AUGERR stay on k_seq);
+#   * the referee, the arm that is not the generic tier: fma_edge_corpus.py's
+#     FMA hard classes at both formats, every expected value the golden
+#     model's, through hip-corpus under each tier, the output its .expect;
+#   * hip-test's `fixed` and `progtier` legs on the default build (on the
+#     plants' build with no plant they are the plants' controls, above,
+#     their route proofs read);
+#   * seq_check under the tier (`seq`'s command through hip:0 with
+#     CFT_HIP_TIER=fixed, the default depth), the golden model the
+#     authority: every program compared, 0 MISMATCH (VG3B's mutants of the
+#     route's AUGADD scan were red there alone);
+#   * its last lines: the tier words seen, the stage's seconds against its
+#     ceiling on this device (HIP_TIER_CEILINGS: a NOTE when over, never a
+#     FAIL) and the device.
+# Each leg's log names its device (hip_named; hip-fmadiff's by its own line,
+# hip_fxnamed) and its tier (hip_tier, or the leg's own line where it opens
+# both tiers itself). The certificate corpus under the tier is parcel
+# G3D-2's, and not this stage's until it lands (its place is marked below).
+# `hip-tier` is for `hip` alone: hip-nvcc and hip-source are two more builds
+# of the same code in the full census, and get no tier stage (the lead's
+# decision, 2026-11-25).
+do_hip_tier() {
+  local plat dev=${HIP_DEVICE:-0} root=${HIP_ROOT:-/opt/rocm} arch=${HIP_ARCH:-} \
+        tree="$RUNDIR/hip-tier-tree" ptree="$RUNDIR/hip-tier-tree-plants" L="$RUNDIR/hip-tier-logs" \
+        C="$RUNDIR/hip-tier-corpora" O="$RUNDIR/hip-tier-out" \
+        H P t0 ts rc=0 n f b line busl busd pl rd k c s h r g t e vendor what why named lg nd nf q \
+        tool st op fl want_in want_out got_in got_g got_f cel nm
+  local -a mk bad=() pt=()
+  local -A SW=() EXP=()
+  ts=$(date +%s)
+  hip_setup hip-fmadiff hip-progdiff || return 1
+
+  # ---- the referee's corpora: fma_edge_corpus.py, the FMA's hard classes,
+  # every expected value python/cft_golden's (never a kernel's); fp256's
+  # file follows --jobs, so --jobs 2 makes it the same on every host
+  t0=$(date +%s)
+  for f in fp256 fp128; do
+    hip_cmd "$L/gen-edge-$f.txt" "$PYBIN" -B "$ROOT/host/tests/fma_edge_corpus.py" "$C" \
+        --format $f --count "$HIP_TIER_EDGE" --jobs 2 \
+      || { echo "FAIL  fma_edge_corpus.py --format $f"; return 1; }
+    EXP[$f]=$(cut -c1-64 "$C/edge-$f.expect")
+  done
+  echo "hip-tier: the referee's corpora made in $(( $(date +%s) - t0 )) s: edge-fp256 and edge-fp128, $HIP_TIER_EDGE cases each, expect ${EXP[fp256]} and ${EXP[fp128]}"
+
+  # ---- the plants, before anything is believed
+  hip_plants_build hip-fmadiff hip-progdiff || return 1
+  for b in hip-test hip-corpus hip-fmadiff hip-progdiff; do
+    line=$(ldd "$P/$b" 2>&1 | grep -E 'libamdhip64|libcudart' | head -n 1)
+    if [ -n "$line" ]; then printf '  ldd    %-14s %s (the plants'"'"' build)\n' "$b" "$(echo $line)"
+    else echo "FAIL  ldd $P/$b names no GPU runtime (libamdhip64 or libcudart): a plant's red from it would not be the GPU's"; return 1; fi
+  done
+  while read -r pl rd f k <&3; do
+    [ -n "$pl" ] || continue
+    lg="$L/plant-$pl-$rd-$f${k:+-$k}.txt"
+    why=""; n=0; line=""
+    case $rd in
+      elem)       # an elementwise corpus under the tier. The referee's file runs
+                  # --sample (pass 1 on 4,096 of its cases, pass 2's five calls
+                  # on every case's d): a red there is a red of its whole run,
+                  # whose pass 1 holds every case's d
+        q=""; [ "${k#edge-}" != "$k" ] && q="--sample 4096:1"
+        what="hip-corpus hip:0 $k.bin${q:+ $q}, CFT_HIP_TIER=fixed"
+        hip_plant_run "$pl" "$lg" env CFT_HIP_INFO=1 CFT_HIP_TIER=fixed "$P/hip-corpus" hip:0 "$C/$k.bin" "$O/plant-$pl-$k.out" $q; rc=$?
+        nd=$(sed -n "s/.* \([0-9]*\) results and \([0-9]*\) flags differ.*/\1/p" "$lg" | head -n 1)
+        nf=$(sed -n "s/.* \([0-9]*\) results and \([0-9]*\) flags differ.*/\2/p" "$lg" | head -n 1)
+        g=$(grep -c "^pass 2: attribute .* differs from the corpus's expected d\$" "$lg")
+        n=$(( ${nd:-0} + ${nf:-0} + g ))
+        line="${nd:-no} results and ${nf:-no} flags differing from the corpus's expected values${q:+ in the sample, and $g pass-2 lines of a d differing from them (the first five are printed)}"
+        [ $rc -eq 1 ] || why="$why, exited $rc"
+        hip_tier "$lg" "plants, $pl" fixed >/dev/null || why="$why, and a device line says another tier than fixed";;
+      prog)       # a program corpus under the tier: its output's sha256 against the software handle's
+        what="hip-corpus hip:0 $k.bin, CFT_HIP_TIER=fixed"
+        hip_plant_run "$pl" "$lg" env CFT_HIP_INFO=1 CFT_HIP_TIER=fixed "$P/hip-corpus" hip:0 "$C/$k.bin" "$O/plant-$pl-$k.out"; rc=$?
+        h=$(hip_sum "$O/plant-$pl-$k.out")
+        [ -n "$h" ] && [ "$h" != "${SW[$k]}" ] && n=1
+        line="sha256 ${h:-none}, the software handle's ${SW[$k]}"
+        [ $rc -eq 0 ] || why="$why, exited $rc"
+        hip_tier "$lg" "plants, $pl" fixed >/dev/null || why="$why, and a device line says another tier than fixed";;
+      leg-fixed*|leg-progtier*)
+        t=${rd#leg-}; t=${t%%-*}
+        what="hip-test hip:0 -l $t -f $f"
+        hip_plant_run "$pl" "$lg" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l $t -f $f; rc=$?
+        r=$(hip_failed "$lg"); n=${r%%|*}; line=${r#*|}
+        [ -n "$r" ] || { n=0; line="no count of failed checks"; }
+        [ $rc -eq 1 ] || why="$why, exited $rc"
+        grep -q "^  a plant build; the route probe present; CFT_HIP_PLANT $pl; CFT_HIP_TIER of the caller unset\$" "$lg" \
+          || why="$why, and the leg's own line does not say a plant build with the probe, the plant and the caller's tier unset"
+        case $rd in
+          *-cover)    # every printed failure the branch's literal test, by its sentence
+            s=$(grep -c '^  FAIL: ' "$lg"); g=$(grep -c '^  FAIL: .*which it does not cover' "$lg")
+            [ "$s" -gt 0 ] && [ "$g" = "$s" ] || why="$why, and $g of its $s printed failures are the literal test's refusal (\"which it does not cover\")";;
+          *-route)    # the route proof alone, the bits green
+            s=$(grep -c '^  FAIL: ' "$lg"); g=$(grep -c "^  FAIL: .*the probe says kernel" "$lg")
+            [ "$s" -gt 0 ] && [ "$g" = "$s" ] || why="$why, and $g of its $s printed failures are route lines (\"the probe says kernel\")";;
+          *-sent)     # (e): the fixed handle's failed runs refused by the literal test's sentence, none without it
+            s=$(sed -n "s/^  (e) the refusals under CFT_HIP_PLANT=$pl: \([0-9]*\) failed runs of the fixed handle refused by the literal test's own sentence, \([0-9]*\) failed without it\$/\1 \2/p" "$lg")
+            [ -n "$s" ] && [ "${s% *}" -gt 0 ] && [ "${s#* }" = 0 ] || why="$why, and (e) does not say every failed run of the fixed handle was refused by the literal test's sentence (${s:-no line})";;
+          *-proute)   # (e): the route proof red, every other check green
+            s=$(sed -n 's/^  (e) the program route proof: .*: \([0-9]*\) not the kernel wanted; every other check of the leg: \([0-9]*\) failed$/\1 \2/p' "$lg")
+            [ -n "$s" ] && [ "${s% *}" -gt 0 ] && [ "${s#* }" = 0 ] || why="$why, and (e) does not say the route proof red with every other check green (${s:-no line})";;
+        esac;;
+      fx)         # hip-fmadiff's own plant, at 2^21 of the study stream (one chunk)
+        op=""; [ "$k" != fma ] && op="--op $k"
+        what="hip-fmadiff diff 2097152 20261110 $op --format $f"
+        hip_plant_run "$pl" "$lg" "$P/hip-fmadiff" diff 2097152 20261110 $op --format $f; rc=$?
+        n=$(sed -n 's/.*: generic and fixed differ on \([0-9]*\); .*/\1/p' "$lg" | tail -n 1)
+        line="${n:-no} lanes differing"; n=${n:-0}
+        [ $rc -eq 1 ] || why="$why, exited $rc"
+        grep -q "; plants PLANTS COMPILED IN, CFT_HIP_PLANT=$pl: RED\$" "$lg" || why="$why, and its last line does not name the plant"
+        hip_fxnamed "$lg" "plants, $pl" >/dev/null || why="$why, and its last line does not name the stage's device";;
+      pd|pd-route) # hip-progdiff on the plants' library, 2^18 lanes of the study stream
+        what="hip-progdiff diff 262144 1 --op $k --format $f --sw 4096"
+        hip_plant_run "$pl" "$lg" env CFT_HIP_INFO=1 "$P/hip-progdiff" diff 262144 1 --op $k --format $f --sw 4096; rc=$?
+        s=$(sed -n 's/.*: generic and fixed differ on \([0-9]*\) lanes (one, chain; staged, resident) and \([0-9]*\) run words; the software handle \([0-9]*\); .*; route \([0-9]*\) runs read, \([0-9]*\) not the kernel wanted; plants .*/\1 \2 \3 \4 \5/p' "$lg" | tail -n 1)
+        read -r nd nf g r e <<< "${s:-x x x x x}"
+        if [ "$rd" = pd ]; then
+          [[ $nd$nf$g =~ ^[0-9]+$ ]] && n=$(( nd + nf + g ))
+          line="$nd lanes and $nf run words differing, the software handle $g"
+        else
+          [[ $nd$nf$g$e =~ ^[0-9]+$ ]] && [ $(( nd + nf + g )) = 0 ] && n=$e
+          line="route $r runs read, $e not the kernel wanted; $nd lanes and $nf run words differing"
+          [[ $nd$nf$g =~ ^[0-9]+$ ]] && [ $(( nd + nf + g )) = 0 ] || why="$why, and its bits are not green"
+        fi
+        [ $rc -eq 1 ] || why="$why, exited $rc"
+        grep -q "; plants $pl: RED\$" "$lg" || why="$why, and its last line does not name the plant";;
+      *) why=", the stage's table names no reader $rd";;
+    esac
+    case $rd in fx) ;; *) grep -q "^cft hip: .*CFT_HIP_PLANT=$pl\$" "$lg" || why="$why, and no device line names the plant";; esac
+    if [ $rc -eq 2 ]; then
+      why="$why: a refusal, not a red - $(grep -m1 -iE 'refused|REFUSED|expected one of|is set, and this|acts on the' "$lg" | cut -c1-240)"
+    fi
+    if [ "${n:-0}" -gt 0 ] 2>/dev/null && [ -z "$why" ]; then
+      echo "  RED   plant $pl: $what - $line"
+      case $rd in
+        fx) grep -m1 '^  DIFF ' "$lg" | sed 's/^ */          the first: /';;
+        *) grep -m1 '^  FAIL: ' "$lg" | sed 's/^ */          the first: /';;
+      esac
+    else
+      bad+=("plant $pl did not turn its check red: $what - ${line:-no count}${why}")
+    fi
+    # a refuse plant's other side: the bits green under it, on its corpus
+    case $rd in
+      leg-fixed-route|leg-progtier-proute)
+        c=conf-$f; [ $rd = leg-progtier-proute ] && c=routines-$f
+        g="$L/plant-$pl-bits-$c.txt"
+        hip_plant_run "$pl" "$g" env CFT_HIP_INFO=1 CFT_HIP_TIER=fixed "$P/hip-corpus" hip:0 "$C/$c.bin" "$O/plant-$pl-bits.out"; rc=$?
+        h=$(hip_sum "$O/plant-$pl-bits.out")
+        if [ $rc -eq 0 ] && [ "$h" = "${SW[$c]}" ] && grep -q "^cft hip: .*CFT_HIP_PLANT=$pl\$" "$g"; then
+          echo "          the bits green under it: $c on hip:0, CFT_HIP_TIER=fixed, the software handle's sha256"
+        else
+          bad+=("plant $pl: its bits are not green under it ($c, CFT_HIP_TIER=fixed, exited $rc, sha256 ${h:-none}, the software handle's ${SW[$c]})")
+        fi;;
+    esac
+  done 3<<< "$HIP_TIER_PLANTS"
+  # the same commands on the plants' build with no plant: GREEN, so each red was its plant's
+  for e in "conf-fp256" "conf-fp128" "edge-fp256 --sample 4096:1" "edge-fp128 --sample 4096:1" \
+           "routines-fp64" "routines-fp256" "routines-fp128" "fuzz-fp64" "fuzz-fp256" "fuzz-fp128"; do
+    read -r c q <<< "$e"
+    g="$L/plant-none-$c.txt"
+    hip_cmd "$g" env CFT_HIP_INFO=1 CFT_HIP_TIER=fixed "$P/hip-corpus" hip:0 "$C/$c.bin" "$O/plant-none-$c.out" $q; rc=$?
+    case $c in
+      conf-*|edge-*) s=$(grep -m1 -oE "[0-9]+ results and [0-9]+ flags (differ|differing)" "$g")
+                     [ $rc -eq 0 ] && [ "${s%% *}" = 0 ] && grep -q " 0 results and 0 flags differ" "$g" \
+                       && { [ -z "$q" ] || grep -q "equal to the corpus's expected d" "$g"; } \
+                       || bad+=("the plants' build with no plant: $c${q:+ $q} under the tier is not green (exit $rc, ${s:-no count})");;
+      *) h=$(hip_sum "$O/plant-none-$c.out")
+         [ $rc -eq 0 ] && [ "$h" = "${SW[$c]}" ] || bad+=("the plants' build with no plant: $c under the tier is not the software handle's (exit $rc, sha256 ${h:-none})");;
+    esac
+    hip_tier "$g" "plants, no plant, $c" fixed || bad+=("plant-none-$c: a device line says another tier than fixed")
+  done
+  for e in "fixed fp256" "fixed fp128" "progtier fp256" "progtier fp128" "progtier fp32"; do
+    read -r t f <<< "$e"
+    g="$L/plant-none-$t-$f.txt"
+    hip_cmd "$g" env CFT_HIP_INFO=1 "$P/hip-test" hip:0 -l $t -f $f; rc=$?
+    r=$(hip_failed "$g"); n=${r%%|*}; line=${r#*|}
+    why=""
+    [ $rc -eq 0 ] && [ "$n" = 0 ] && [ "${line%% *}" -gt 0 ] 2>/dev/null || why=", exited $rc, ${line:-no count of checks}"
+    case $line in *", 0 NOT RUN") ;; *) why="$why, and NOT RUN in a plant build, which has the probe and fail-launch";; esac
+    if [ $t = fixed ]; then
+      s=$(sed -n "s/^  (f) the route proof: \([0-9]*\) calls' kernel read from the probe .*/\1/p" "$g")
+      [ "${s:-0}" -gt 0 ] || why="$why, and no route proof read"
+      s="the route proof read on ${s:-no} calls"
+    else
+      s=$(sed -n 's/^  (e) the program route proof: \([0-9]*\) runs. kernel read .*: \([0-9]*\) not the kernel wanted; every other check of the leg: \([0-9]*\) failed$/\1 \2 \3/p' "$g")
+      [ -n "$s" ] && [ "${s%% *}" -gt 0 ] && [ "$(echo $s | cut -d' ' -f2-)" = "0 0" ] || why="$why, and its route proof does not say every run the kernel wanted (${s:-no line})"
+      s="the route proof read on ${s%% *} runs, each the kernel wanted"
+    fi
+    if [ -z "$why" ]; then
+      echo "  GREEN no plant, hip-test hip:0 -l $t -f $f: $line; $s"
+    else
+      bad+=("the plants' build with no plant is not green on hip-test hip:0 -l $t -f $f$why")
+    fi
+  done
+  for e in "fp256 fma" "fp256 sub" "fp256 mul" "fp128 fma" "fp128 sub" "fp128 mul"; do
+    read -r f k <<< "$e"
+    op=""; [ "$k" != fma ] && op="--op $k"
+    g="$L/plant-none-fx-$f-$k.txt"
+    hip_cmd "$g" "$P/hip-fmadiff" diff 2097152 20261110 $op --format $f; rc=$?
+    if [ $rc -eq 0 ] && grep -q ': generic and fixed differ on 0; .*; plants PLANTS COMPILED IN, CFT_HIP_PLANT=none: GREEN$' "$g"; then
+      echo "  GREEN no plant, hip-fmadiff diff 2097152 $op --format $f, the plants' build: 0 lanes differing"
+    else
+      bad+=("the plants' build with no plant: hip-fmadiff --format $f $op is not green (exit $rc)")
+    fi
+    hip_fxnamed "$g" "plants, no plant, hip-fmadiff $f $k" || bad+=("plant-none-fx-$f-$k: its device is not the stage's")
+    g="$L/plant-none-pd-$f-$k.txt"
+    hip_cmd "$g" env CFT_HIP_INFO=1 "$P/hip-progdiff" diff 262144 1 --op $k --format $f --sw 4096; rc=$?
+    s=$(grep -oE 'route [0-9]+ runs read, [0-9]+ not the kernel wanted; plants none set: GREEN$' "$g")
+    if [ $rc -eq 0 ] && grep -q ': generic and fixed differ on 0 lanes (one, chain; staged, resident) and 0 run words; the software handle 0; ' "$g" \
+       && [ -n "$s" ] && [ "$(echo "$s" | cut -d' ' -f2)" -gt 0 ] && [ "$(echo "$s" | cut -d' ' -f5)" = 0 ]; then
+      echo "  GREEN no plant, hip-progdiff diff 262144 1 --op $k --format $f --sw 4096, the plants' build: 0 lanes differing, $(echo "$s" | sed 's/; plants.*//')"
+    else
+      bad+=("the plants' build with no plant: hip-progdiff --op $k --format $f is not green with its route read (exit $rc, ${s:-no route line})")
+    fi
+  done
+  # a stray plant on the default build: refused by name, exit 2, by every tool (VG3A's M5)
+  for e in "fixed-rmm fx" "fixed-cover fixed" "seqfx-cover progtier" "seqfx-rmm pd"; do
+    read -r pl t <<< "$e"
+    g="$L/plant-stray-$t.txt"
+    case $t in
+      fx) what="hip-fmadiff"
+          hip_plant_run "$pl" "$g" "$H/hip-fmadiff" diff 2097152 20261110; rc=$?
+          s="is set, and this hip-fmadiff is a default build, which has no plants";;
+      pd) what="hip-progdiff"
+          hip_plant_run "$pl" "$g" env CFT_HIP_INFO=1 "$H/hip-progdiff" diff 262144 1; rc=$?
+          s="is set, and this libcft is a default build (no cfth_plant_tier_probe), which has no plants";;
+      *)  what="hip-test -l $t"
+          hip_plant_run "$pl" "$g" env CFT_HIP_INFO=1 "$H/hip-test" hip:0 -l $t -f fp256; rc=$?
+          s="$t: REFUSED - CFT_HIP_PLANT=\"$pl\" is set, and this libcft is a default build";;
+    esac
+    if [ $rc -eq 2 ] && grep -qF -- "$s" "$g"; then
+      echo "  ok    a stray plant on the default build: CFT_HIP_PLANT=$pl through $what refused by name, exit 2"
+    else
+      bad+=("a stray CFT_HIP_PLANT=$pl on the default build: $what exited $rc, not 2 with its sentence (\"$s\")")
+    fi
+  done
+  # every libcft run above named the stage's device (hip-fmadiff's runs are
+  # held by their own line, hip_fxnamed; a refused stray plant ran nothing)
+  for f in "$L"/plant-*.txt; do
+    case $(basename "$f") in plant-*-fx-*|plant-stray-*) continue;; esac
+    hip_named "$f" "plants, $(basename "$f" .txt)" || bad+=("$(basename "$f" .txt): its device is not the stage's")
+  done
+  if [ ${#bad[@]} -gt 0 ]; then
+    printf 'FAIL  %s\n' "${bad[@]}"
+    echo "FAIL  the plants: a check a plant cannot turn red proves nothing, so no leg runs after them"
+    return 1
+  fi
+  echo "hip-tier: every plant RED, and GREEN without it"
+
+  # ---- the differential streams on the default build, held to the record
+  echo "== the differential streams (the default build): hip-fmadiff, $HIP_TIER_FMADIFF_N lanes a run at seed $HIP_TIER_FMADIFF_SEED; hip-progdiff, $HIP_TIER_PROGDIFF_N at seed $HIP_TIER_PROGDIFF_SEED"
+  while read -r tool f st op want_in want_out <&3; do
+    [ -n "$tool" ] || continue
+    q=""; [ $op != fma ] && q="--op $op"
+    g="$L/stream-$tool-$f-$st-$op.txt"
+    t0=$(date +%s)
+    if [ $tool = fmadiff ]; then
+      hip_cmd "$g" "$H/hip-fmadiff" diff "$HIP_TIER_FMADIFF_N" "$HIP_TIER_FMADIFF_SEED" $q --stream $st --format $f; rc=$?
+      line=$(grep -E '^diff --format .*: (GREEN|RED)$' "$g" | tail -n 1)
+      n=$(printf '%s\n' "$line" | sed -n 's/.*: generic and fixed differ on \([0-9]*\); .*/\1/p')
+      hip_fxnamed "$g" "stream $tool $f $st $op" || bad+=("stream hip-$tool $f $st $op: its device is not the stage's")
+    else
+      hip_cmd "$g" env CFT_HIP_INFO=1 "$H/hip-progdiff" diff "$HIP_TIER_PROGDIFF_N" "$HIP_TIER_PROGDIFF_SEED" --op $op --stream $st --format $f; rc=$?
+      line=$(grep -E '^progdiff --format .*: (GREEN|RED)$' "$g" | tail -n 1)
+      s=$(printf '%s\n' "$line" | sed -n 's/.*: generic and fixed differ on \([0-9]*\) lanes (one, chain; staged, resident) and \([0-9]*\) run words; the software handle \([0-9]*\); .*/\1 \2 \3/p')
+      n=x; [ -n "$s" ] && n=$(( $(echo $s | tr ' ' '+') ))
+      grep -qE '^  one   the fixed handle.s lanes against the stream.s fixed lane on the host \(deposit and five flags\): [1-9][0-9]* lanes, 0 differ$' "$g" \
+        || n="${n}, and the host lane check not green"
+      hip_named "$g" "stream $tool $f $st $op" || bad+=("stream hip-$tool $f $st $op: its device is not the stage's")
+      [ "$(hip_devlines "$g" | grep -cF '; tier generic, ')" = 1 ] && [ "$(hip_devlines "$g" | grep -cF '; tier fixed, ')" = 1 ] \
+        || bad+=("stream hip-$tool $f $st $op: its device lines are not one generic handle's and one fixed handle's")
+    fi
+    got_in=$(printf '%s\n' "$line" | sed -n 's/.* sha256 inputs \([0-9a-f]*\), generic \([0-9a-f]*\), fixed \([0-9a-f]*\);.*/\1/p')
+    got_g=$(printf '%s\n' "$line" | sed -n 's/.* sha256 inputs \([0-9a-f]*\), generic \([0-9a-f]*\), fixed \([0-9a-f]*\);.*/\2/p')
+    got_f=$(printf '%s\n' "$line" | sed -n 's/.* sha256 inputs \([0-9a-f]*\), generic \([0-9a-f]*\), fixed \([0-9a-f]*\);.*/\3/p')
+    why=""
+    [ $rc -eq 0 ] && [ "$n" = 0 ] && [ "${line##*: }" = GREEN ] || why="$why; exited $rc, ${n:-no count of} lanes differing"
+    [ "$got_in" = "$want_in" ] || why="$why; the first chunk's inputs ${got_in:-none}, not the recorded $want_in - not the stream on record"
+    [ "$got_g" = "$want_out" ] && [ "$got_f" = "$want_out" ] || why="$why; the first chunk's outputs generic ${got_g:-none} and fixed ${got_f:-none}, not the recorded $want_out"
+    if [ -z "$why" ]; then
+      echo "  ok    hip-$tool $f $st $op: 0 lanes differing, the first chunk the recorded sums (inputs ${want_in:0:16}..., generic = fixed ${want_out:0:16}...), $(( $(date +%s) - t0 )) s"
+    else
+      bad+=("the stream hip-$tool --format $f --stream $st --op $op${why}")
+    fi
+  done 3<<< "$HIP_TIER_SUMS"
+  if [ ${#bad[@]} -gt 0 ]; then
+    printf 'FAIL  %s\n' "${bad[@]}"
+    echo "FAIL  the streams: a tier that differs from the generic tier, or a stream that is not the one on record, so nothing runs after them"
+    return 1
+  fi
+
+  # ---- the corpora under both tiers: sw, hip:0 and hip:0 --resident, the same sha256
+  echo "== corpora (docs/studies/gpu-a) under each tier: hip:0 and hip:0 --resident against sw (and the golden model's where it has one)"
+  printf '%-15s %-64s %-9s %-9s %-9s %-9s %s\n' corpus sw "generic" resident "fixed" resident golden
+  for t in generic fixed; do : > "$L/corpora-$t.txt"; done
+  for c in $HIP_CORPORA; do
+    for t in generic fixed; do
+      { echo "\$ CFT_HIP_INFO=1 CFT_HIP_TIER=$t $H/hip-corpus hip:0 $C/$c.bin $O/$c.$t"
+        CFT_HIP_INFO=1 CFT_HIP_TIER=$t "$H/hip-corpus" hip:0 "$C/$c.bin" "$O/$c.$t" 2>&1; } > "$L/$t-$c.txt"; r=$?
+      { echo "\$ CFT_HIP_INFO=1 CFT_HIP_TIER=$t $H/hip-corpus hip:0 $C/$c.bin $O/$c.$t-res --resident"
+        CFT_HIP_INFO=1 CFT_HIP_TIER=$t "$H/hip-corpus" hip:0 "$C/$c.bin" "$O/$c.$t-res" --resident 2>&1; } > "$L/$t-res-$c.txt"; rc=$?
+      cat "$L/$t-$c.txt" "$L/$t-res-$c.txt" >> "$L/corpora-$t.txt"
+      h=$(hip_sum "$O/$c.$t"); s=$(hip_sum "$O/$c.$t-res")
+      [ $r -eq 0 ] && [ $rc -eq 0 ] && [ "$h" = "${SW[$c]}" ] && [ "$s" = "${SW[$c]}" ] \
+        || bad+=("$c under CFT_HIP_TIER=$t: hip:0 exited $r and --resident $rc; sha256 sw ${SW[$c]}, hip:0 ${h:-none}, resident ${s:-none}")
+      EXP[$c-$t]=$(hip_same "$h" "${SW[$c]}"); EXP[$c-$t-res]=$(hip_same "$s" "${SW[$c]}")
+    done
+    g="-"; [ -f "$C/$c.golden" ] && g=$(hip_sum "$C/$c.golden")
+    [ "$g" = "-" ] || [ "$g" = "${SW[$c]}" ] || bad+=("$c: the golden model's output $g is not the software handle's ${SW[$c]}")
+    printf '%-15s %-64s %-9s %-9s %-9s %-9s %s\n' "$c" "${SW[$c]}" "${EXP[$c-generic]}" "${EXP[$c-generic-res]}" \
+      "${EXP[$c-fixed]}" "${EXP[$c-fixed-res]}" "$( [ "$g" = - ] && echo - || hip_same "$g" "${SW[$c]}")"
+  done
+  cat "$L/corpora-generic.txt" "$L/corpora-fixed.txt"
+  for t in generic fixed; do
+    hip_named "$L/corpora-$t.txt" "corpora, $t" || bad+=("the corpora under CFT_HIP_TIER=$t: a run did not name the stage's device")
+    hip_tier "$L/corpora-$t.txt" "corpora, $t" $t || bad+=("the corpora under CFT_HIP_TIER=$t: a run's device line says another tier")
+  done
+
+  # ---- the referee: the golden model's expected values, under each tier
+  echo "== the referee: fma_edge_corpus.py's corpora through hip-corpus hip:0 under each tier, staged, against their .expect (the golden model's)"
+  for f in fp256 fp128; do
+    for t in generic fixed; do
+      g="$L/edge-$f-$t.txt"
+      t0=$(date +%s)
+      hip_cmd "$g" env CFT_HIP_INFO=1 CFT_HIP_TIER=$t "$H/hip-corpus" hip:0 "$C/edge-$f.bin" "$O/edge-$f.$t"; rc=$?
+      h=$(hip_sum "$O/edge-$f.$t")
+      if [ $rc -eq 0 ] && grep -q "against the corpus's expected values 0 results and 0 flags differ" "$g" && [ "$h" = "${EXP[$f]}" ]; then
+        echo "  ok    the referee edge-$f under CFT_HIP_TIER=$t: 0 results and 0 flags differ, sha256 its .expect ${EXP[$f]:0:16}... ($(( $(date +%s) - t0 )) s)"
+      else
+        bad+=("the referee edge-$f under CFT_HIP_TIER=$t: exit $rc, $(grep -m1 -oE "[0-9]+ results and [0-9]+ flags differ" "$g"), sha256 ${h:-none}, its .expect ${EXP[$f]}")
+      fi
+      hip_named "$g" "the referee, edge-$f $t" || bad+=("the referee edge-$f $t: it did not name the stage's device")
+      hip_tier "$g" "the referee, edge-$f $t" $t || bad+=("the referee edge-$f $t: its device line says another tier")
+    done
+  done
+
+  # ---- hip-test's fixed and progtier legs on the default build
+  echo "== hip-test hip:0 -l fixed, then -l progtier (the default build: each opens its own handles at each tier)"
+  for t in fixed progtier; do
+    g="$L/leg-$t.txt"
+    t0=$(date +%s)
+    hip_cmd "$g" env CFT_HIP_INFO=1 "$H/hip-test" hip:0 -l $t; rc=$?
+    line=$(grep -m1 '^[0-9]* checks, [0-9]* failed' "$g")
+    if [ $rc -eq 0 ] && [ "${line%% *}" -gt 0 ] 2>/dev/null && [ "$(echo "$line" | cut -d' ' -f3)" = 0 ] \
+       && grep -q '^  a default build; the route probe absent; CFT_HIP_PLANT unset; CFT_HIP_TIER of the caller unset$' "$g"; then
+      echo "  ok    hip-test -l $t: $line ($(( $(date +%s) - t0 )) s); the caller's CFT_HIP_TIER unset"
+      grep ': NOT RUN' "$g" | sed 's/^ */        /'
+    else
+      bad+=("hip-test hip:0 -l $t (the default build): exit $rc (${line:-no summary})$(grep -q 'CFT_HIP_TIER of the caller unset$' "$g" || echo ', and its line does not say the caller'"'"'s CFT_HIP_TIER unset')")
+    fi
+    hip_named "$g" "hip-test $t" || bad+=("hip-test $t: it did not name the stage's device")
+  done
+
+  # ---- seq_check under the tier: the golden model the authority
+  echo "== seq_check --device hip:0, CFT_HIP_TIER=fixed"
+  t0=$(date +%s)
+  f="$L/seq-fixed.txt"
+  (cd "$ROOT" && hip_cmd "$f" env CFT_HIP_INFO=1 CFT_HIP_TIER=fixed CFT_LIB="$H/$SHLIB_NAME" "$PYBIN" -B host/tests/seq_check.py \
+     --trials 250 --formats fp32 fp64 fp128 fp256 --device hip:0); rc=$?
+  if [ $rc -eq 0 ] && grep -q '^device hip:0: backend hip,' "$f" && ! grep -q 'MISMATCH' "$f" \
+     && grep -qx '  it publishes every bit cft.h defines' "$f" \
+     && grep -qx 'the device refused no program for a bit it lacks: every program was compared' "$f"; then
+    echo "  ok    seq_check through hip:0 under CFT_HIP_TIER=fixed, $(( $(date +%s) - t0 )) s: $(grep -m1 '^device hip:0: backend hip,' "$f")"
+    grep -E 'routine-corpus( \([a-z]+\))? programs compared' "$f" | sed 's/^ */        /'
+  else
+    bad+=("seq_check --device hip:0 under CFT_HIP_TIER=fixed: exit $rc, $(grep -c MISMATCH "$f") MISMATCH line(s)$(grep -q 'every program was compared' "$f" || echo ', and no line says every program was compared')")
+  fi
+  hip_named "$f" "seq_check, fixed" || bad+=("seq_check under the tier: it did not name the stage's device")
+  hip_tier "$f" "seq_check, fixed" fixed || bad+=("seq_check under the tier: its device line says another tier than fixed")
+
+  # ---- (the certificate corpus under the tier: parcel G3D-2's item 11, here when it lands)
+
+  if [ ${#bad[@]} -gt 0 ]; then
+    printf 'FAIL  %s\n' "${bad[@]}"
+    echo "device: $HIP_INFO"
+    return 1
+  fi
+  n=$(( $(date +%s) - ts ))
+  nm=${HIP_DEV%% (*}
+  cel=$(printf '%s\n' "$HIP_TIER_CEILINGS" | tr ';' '\n' | sed -n "s/^$nm=\([0-9]*\)\$/\1/p")
+  echo "hip-tier: every leg green on the device below; its device lines' tier words: $(cat "$L"/*.txt | grep -a '^cft hip: hip:0 = ' | grep -oE '; tier [a-z]+, ' | sort | uniq -c | sed -E 's/^ *([0-9]+) ; tier ([a-z]+), /\2 \1/' | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+  if [ -z "$cel" ]; then
+    echo "NOTE  hip-tier: $n s; no ceiling on record for $nm (HIP_TIER_CEILINGS, docs/VERIFICATION.md's row)"
+  elif [ "$n" -gt "$cel" ]; then
+    echo "NOTE  hip-tier: $n s, past its ceiling of $cel s on $nm (docs/VERIFICATION.md's row): a slow machine is not a wrong answer; re-measure the ceiling if a change moved it"
+  else
+    echo "hip-tier: $n s, within its ceiling of $cel s on $nm (docs/VERIFICATION.md's row)"
+  fi
+  echo "device: $HIP_INFO"
+}
+# The stage's tables. Its plants, each on its cheapest red (measured on both
+# GPUs at the base, docs/VALIDATION.md's G3D-1 entry): <plant> <reader>
+# <format> [<corpus or op>], the readers in do_hip_tier.
+HIP_TIER_PLANTS="
+fixed-rmm elem fp256 conf-fp256
+fixed-flag elem fp256 conf-fp256
+fixed-steer leg-fixed fp256
+fixed-mulsign leg-fixed fp256
+fixed-scalar leg-fixed fp256
+fixed-cover leg-fixed-cover fp256
+fixed-refuse leg-fixed-route fp256
+fixed128-rmm elem fp128 conf-fp128
+fixed128-flag elem fp128 conf-fp128
+fixed128-steer leg-fixed fp128
+fixed128-mulsign leg-fixed fp128
+fixed128-scalar leg-fixed fp128
+fixed128-cover leg-fixed-cover fp128
+fixed128-refuse leg-fixed-route fp128
+seqfx-rmm leg-progtier fp256
+seqfx-flag leg-progtier fp256
+seqfx-steer leg-progtier fp256
+seqfx-mulsign leg-progtier fp256
+seqfx-cover leg-progtier-sent fp128
+seqna-aug leg-progtier-sent fp32
+seqfx-refuse leg-progtier-proute fp256
+seqfx128-rmm leg-progtier fp128
+seqfx128-flag leg-progtier fp128
+seqfx128-steer leg-progtier fp128
+seqfx128-mulsign leg-progtier fp128
+seqfx128-cover leg-progtier-sent fp256
+seqfx128-refuse leg-progtier-proute fp128
+fixed-rmm fx fp256 fma
+fixed-flag fx fp256 fma
+fixed-steer fx fp256 sub
+fixed-mulsign fx fp256 mul
+fixed128-rmm fx fp128 fma
+fixed128-flag fx fp128 fma
+fixed128-steer fx fp128 sub
+fixed128-mulsign fx fp128 mul
+seqfx-rmm pd fp256 fma
+seqfx-flag pd fp256 fma
+seqfx-steer pd fp256 sub
+seqfx-mulsign pd fp256 mul
+seqfx-refuse pd-route fp256 fma
+seqfx128-rmm pd fp128 fma
+seqfx128-flag pd fp128 fma
+seqfx128-steer pd fp128 sub
+seqfx128-mulsign pd fp128 mul
+seqfx128-refuse pd-route fp128 fma
+seqfx-rmm prog fp256 routines-fp256
+seqfx128-rmm prog fp128 routines-fp128
+fixed-rmm elem fp256 edge-fp256
+fixed128-rmm elem fp128 edge-fp128
+seq-mask prog fp64 routines-fp64
+seq-mask prog fp256 routines-fp256
+seq-mask prog fp128 routines-fp128
+seq-deposit prog fp64 fuzz-fp64
+seq-deposit prog fp256 fuzz-fp256
+seq-deposit prog fp128 fuzz-fp128
+"
+# The streams' lanes a run (sized on both GPUs at the base: G3D-1's entry)
+# and seeds. hip-fmadiff's first chunk is min(N, 2^21) lanes and
+# hip-progdiff's min(N, 2^19), so these N give the chunks the sums below
+# were recorded on; hip-progdiff's seed is 1, G3B's, whose are its only sums
+# on record. The referee's cases a format.
+HIP_TIER_FMADIFF_N=67108864
+HIP_TIER_FMADIFF_SEED=20261110
+HIP_TIER_PROGDIFF_N=524288
+HIP_TIER_PROGDIFF_SEED=1
+HIP_TIER_EDGE=131250
+# The first chunk's sha256s on record, the same on both vendors: <tool>
+# <format> <stream> <op> <the inputs> <the output, generic = fixed>.
+# hip-fmadiff's: fp256's study stream GPU-A's (docs/studies/gpu-a/captured/
+# part2-extra.txt), its edge stream G3A's, fp128's G3A2's (docs/VALIDATION.md,
+# their entries); hip-progdiff's G3B's (its entry, "The program
+# differential"); every one reproduced at the base by G3D-1.
+HIP_TIER_SUMS="
+fmadiff fp256 study fma b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b 0bb5295edfc0754f893cd7bb5ce169175fdc3f9263271597f54d90ffcf03adc9
+fmadiff fp256 study add 21ae7619bd17863f2b7d4bd4ded47b8be1310bd24e033d464db4d46c18b9419e b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73
+fmadiff fp256 study sub 86ad800f077a685a202ca4469e6c7c36f445ccb34eec5802efe5e065296494ba b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73
+fmadiff fp256 study mul b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b c59668cd06e62d3066579bf173f9e36e4cb80c3315f0d6c4e40b3843eeac4c55
+fmadiff fp256 edge fma f79642a4244dea6a0239d854afda2f85c96bf96b56755f5ff552c46e027d3cec 164856ff7af28b95d1135a85cc976e9b27c5bffd0d45190264769f2a2dd828a8
+fmadiff fp256 edge add b5ce004f068949322c099b0394cae69e9b545d73344a97e60db43334f1097d3f f2bd1bfbcea4e1a59199dd362527204d273688393796b0ca41d02f32d41ca070
+fmadiff fp256 edge sub 3ea77a84c67c99331cc6956758b38d9b8dc624d95c0b09235d81fbbe98ab49b9 f2bd1bfbcea4e1a59199dd362527204d273688393796b0ca41d02f32d41ca070
+fmadiff fp256 edge mul f79642a4244dea6a0239d854afda2f85c96bf96b56755f5ff552c46e027d3cec 78369da118c7a6ce8e37e7d13864783d856a1d4c8b1a81180f986c112d97b13b
+fmadiff fp128 study fma 19f9e1a1c38af69f403964c9a5e9ecb03a805b6422abba623f51e8ec18a55281 cbea6f91d1973fc235187d54322c15dd63e7961e400c1d77b2ffe4d2a10218fc
+fmadiff fp128 study add 6c6a0602cea80e44b6c1bca41d43682fb9ee6e8c1fe9644b3811d942e7bc40fd 8033fe389c52a80ec2b8c4c9e6072c3a078229d114e8a8f22227505990066611
+fmadiff fp128 study sub be06221932c2add1a8b3f85bdac801437f1a8425a7a3a6a06aec2f8d757425ea 8033fe389c52a80ec2b8c4c9e6072c3a078229d114e8a8f22227505990066611
+fmadiff fp128 study mul 19f9e1a1c38af69f403964c9a5e9ecb03a805b6422abba623f51e8ec18a55281 dba8a2b2c7a8466376112bc4a95eff5746204e0adb67e8ad60d6c79c2a58b6e4
+fmadiff fp128 edge fma 7959679a4197eadec84b0ac66ff8f3ac8375e419a1d787216e3f7dfb6ea8c5a3 160ea435c932a0f301618e418c65907e893c40336087d23bfb3d1aabc2884f2c
+fmadiff fp128 edge add 54b69914979fbfbaebb95aec42c5dfa438a126f6114cf603f21840c5e563886c 9a9ace6810bc36162d4d860f26d1e870e7a1723d630371f295cb8ebe59571b53
+fmadiff fp128 edge sub fec40efa7fd3113acdf02b107f0da78cbc78246e205c7569edcda28a6dfe23fc 9a9ace6810bc36162d4d860f26d1e870e7a1723d630371f295cb8ebe59571b53
+fmadiff fp128 edge mul 7959679a4197eadec84b0ac66ff8f3ac8375e419a1d787216e3f7dfb6ea8c5a3 1c97ce88e345f1aba09c796eb8a9e248738f12edd12cf3a9dc5c8e2a639cf2f9
+progdiff fp256 study fma 56811b4b111b0f5a104d1fec5f7c5dc899875416e59134851ce9ea2393dbc331 4759cf91dd3144b95b8f9a508bb631c9b3184dea23e1d547cad50692b0c2ff7b
+progdiff fp256 study add e5382b6fda4b50938af06c266d5adae3d16126615e0fc93addb7979f5650714f 471c7909c9a1081ecc82b32cace3b11648fa5be5679dbc9ea1945406eecfa2e3
+progdiff fp256 study sub 51bb40ef7e0a6cb153276325ac72e7f4a4ea8923d65fd0dd0866bbed4c2dd959 6f696e6cf3c86ffb43089c663173152546011af45c123c9eec08ebb060637a72
+progdiff fp256 study mul 56811b4b111b0f5a104d1fec5f7c5dc899875416e59134851ce9ea2393dbc331 e2cd324c8ab01397885aa4099fcd9fbddb6351b2009199a271466160fb6d4375
+progdiff fp256 edge fma baa717128dbc36a44bdf3bbdadd1dbedee7cb335b66ec1db1353c3bad45dd6eb a4bcf7be20f23aeb9fe7dd86d43c08a91ce8a33c689688893ab5930a82c3b51e
+progdiff fp256 edge add 0a0599ce1388b86bbbb3ebcd47843994f557ce529229d4078f4c509c39c9d892 2e246758051cde7890ebd048fcac6905f63316466f1dc12970b20fa89afee4b9
+progdiff fp256 edge sub a7e92e8d646496c9b5bffd966cee7976c696914233cf9411a58d15e0d1a3eac3 7cc221ea18507688922d4f9f3dbce658a6832b0fdc1b0c06abb90e2ef5118937
+progdiff fp256 edge mul baa717128dbc36a44bdf3bbdadd1dbedee7cb335b66ec1db1353c3bad45dd6eb fd53f4798e68d5fbc799cebf6a6f2bc269dad6423aa787995745ad2cabe8a477
+progdiff fp128 study fma 3343ba173a3504c598e1cb178cd95d24c50159e183d24cb695abe8b0f7187d5d eabc49bcbc79c5bb41c28e74fe91647e4e8b2df13b59a302e052370f572f7b9a
+progdiff fp128 study add 4c00fb1e081bdb115993884d2f7ee02da569787049d81e6d78b9722dff8563c0 ae41133ba905b49a3d3b23027f2ac30a46ebb3435e400bf9e11c09ea0702606c
+progdiff fp128 study sub 07e7349e600858c47ac79a1639f0d6365e89e876aee630362ce68e493fb7ebb8 ad2020390e93b13204c76dfbd84be0a6a0f3b13b0c9a57b81754f9c9a97c1c6d
+progdiff fp128 study mul 3343ba173a3504c598e1cb178cd95d24c50159e183d24cb695abe8b0f7187d5d 0a103b64271247f14587b7f20318e5f5eeee6a9541de2e996dd4cb7c268bb642
+progdiff fp128 edge fma 26728df98926a6b4510a84886ab138b32162948af7890cc4b7c4670161fc2838 c1449166a75ce5eb9ac817c7c00b8a0f06050adca4a323b1f68b6408bfad0fe1
+progdiff fp128 edge add 937df6c4584b42e87e092723966fb6c1de3c3f228d726aa764cc18b215298123 d7f8435d7d5db3b645b8a8aab07112acb603d429d41ac1310f0d152c4ce756b5
+progdiff fp128 edge sub 0c81b277518a4ce3af2490336e8f40bcb96325beb37c2169394738287017bd23 aded6daaf1fbad2b594dd18072151e795e6b2ef8b02729c9145faa2201f491b7
+progdiff fp128 edge mul 26728df98926a6b4510a84886ab138b32162948af7890cc4b7c4670161fc2838 6dd6b90286c230f6d7ad112c424d1916e4229ce1f77363afd172fbed6bce62fe
+"
+# hip-tier's ceilings, a device's name (its CFT_HIP_INFO line's) = seconds:
+# docs/VERIFICATION.md's row, the next 100 s above the slower of two quiet
+# runs at the commit the row names. The stage prints its seconds against
+# its device's, a NOTE when over and never a FAIL; verify/test-hip-stage.sh
+# holds this line and the row to each other.
+HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=1100;AMD Radeon RX 7600=1200"
+need hipcc gpu host-cc python mpmath
+stage hip-tier "the GPU backend's fixed tier (CFT_HIP_TIER=fixed, round 3) on this host's GPU through hip:0, beside hip and sharing its set-up: plants first (round 3's 27, each on its cheapest red and green without it, the differentials' own, the earlier rounds' program plants under the tier, a stray plant refused by name), then the differential streams held to their recorded sums, GPU-A's corpora under each tier against sw, the golden referee under each tier, hip-test's fixed and progtier legs and seq_check under the tier, each leg's log naming its device and its tier, its seconds against its ceiling; skipped by name without hipcc or a GPU" -- do_hip_tier
 
 # The same stage on the two other ways to build the backend for NVIDIA
 # (plan decision 3; Logan, 2026-11-10: "install CUDA 13 and make the recipe

@@ -672,7 +672,7 @@ endif
 # with the tree's bigint.c, softfloat.c and sha256.c included and compiled
 # with libcft's own C flags, so the generic lane is libcft's cft_sf_compute;
 # -Wno-unknown-pragmas because gcc does not know the header's `#pragma
-# unroll`. Any HIP setting, any host. Not in `make test` (G3D's to wire).
+# unroll`. Any HIP setting, any host. In `make test` since round 3's G3D-1.
 # Round 3's G3B: it holds the executor's lane ALU (src/seq_alu_fixed.h)
 # too, which needs src/fma128_fixed.h beside src/fma256_fixed.h.
 fma256-test$(EXE): tests/fma256_test.c src/fma256_fixed.h tools/fx256_stream.h \
@@ -690,8 +690,8 @@ clean-fma256:
 
 # round 3's G3A2: fma256test's sibling at binary128 (tests/fma128_test.c),
 # src/fma128_fixed.h and tools/fx128_stream.h on a HOST, built the same way:
-# no GPU, no libcft.a, -Wno-unknown-pragmas. Any HIP setting, any host. Not
-# in `make test` (G3D's to wire, with fma256test). Round 3's G3B: it holds
+# no GPU, no libcft.a, -Wno-unknown-pragmas. Any HIP setting, any host. In
+# `make test`, with fma256test, since round 3's G3D-1. Round 3's G3B: it holds
 # fxalu128_compute (src/seq_alu_fixed.h), which needs src/fma256_fixed.h.
 fma128-test$(EXE): tests/fma128_test.c src/fma128_fixed.h tools/fx128_stream.h \
                    src/fma256_fixed.h src/seq_alu_fixed.h \
@@ -893,8 +893,12 @@ device-test$(EXE): tests/device_test.c libcft.a
 # one left from an earlier library tests that library (CLAUDE.md). Here
 # it cannot be, since $(TESTS) are prerequisites; the check is what
 # fails if that ever stops being true. buildidtest is the id itself,
-# regenerated and watched, in a scratch repository.
-test: all $(TESTS) buildidtest
+# regenerated and watched, in a scratch repository. fma256test and
+# fma128test (since round 3's G3D-1) are the GPU backend's fixed tier on
+# this host's CPU, no GPU and no libcft.a: its two FMA lanes and the
+# executor's lane ALU wrapper held to cft_sf_compute - the one check of
+# that arithmetic that runs where no GPU is.
+test: all $(TESTS) buildidtest fma256-test$(EXE) fma128-test$(EXE)
 	CFT_EXPECT_BUILD_ID="$$(GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print)" \
 		./api-test$(EXE)
 	./reduce-parts$(EXE)
@@ -906,6 +910,8 @@ test: all $(TESTS) buildidtest
 	@echo "C and Python reached the same library and got the same bits"
 	@rm -f .out-c.txt .out-py.txt
 	$(PYTHON) tests/loader_order_check.py
+	./fma256-test$(EXE)
+	./fma128-test$(EXE)
 
 # ====================================================================
 # profiles-check - the library compiled at every build profile and at
