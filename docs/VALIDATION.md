@@ -30509,4 +30509,11 @@ is the software handle's: what fails there is the device line that does not name
 - The new --gpu cases 18 and 19 were not shown red by a run: the red-first run was stopped at its deadline.
 - The entry's 3,287 log lines and 20 lines of `make -n` were 3,286 and 18 in the verifier's runs. Both are claims of identity, which held either way.
 
-**Before the push:** Not yet. The desktop's checks at this merge, and a short box gate (docs, innerskips, generated, libcft) after the weekend preflight.
+**Before the push,** added before the push:
+- **The desktop's checks,** MEASURED by the lead: at fbe10145, check_docs_index rc 0 ("stage counts agree: 57 total, 31 quick, 47 gate") and project_figures --check rc 0; the stage test's text cases 15 of 15, with case 13 reading 1,100 s and 1,300 s in both the runner and the row. At 37a588f8 (this merge with night 30's page data), `verify/run.sh --only docs,generated` PASS (docs 61 s, generated 131 s, the one Windows inner skip).
+- **The box gate,** MEASURED: box_gate_g3d1.sh at 37a588f8 on amd-arc-box, 2026-11-27 08:42:50 to 09:23:17, at nice 10. Its clone's checks held: HEAD, a clean status, the rtl tree, the merge's parents d38904af and ec91e356 two commits under the tip, G3D-1's markers and the earlier rounds', and the stage list (57 total, 31 quick, 47 gate). It ran wider than the four stages the line above first named:
+  - `--budget quick` (31 of 57 stages): PASS in 2,421 s, 24 ok and 7 skipped by name (buildargs and the six language bindings the box lacks), 0 inner skips;
+  - `--only hip,hip-tier,hip-nvcc,hip-source`: PASS in 2 s, each of the four skipped by name, since the box has no hipcc and no GPU;
+  - the clone's status was 0 after, and the gate's records' sums 30 of 30 OK on this desktop.
+- **Night 30's page data** (37a588f8) goes in the same push.
+- **This paragraph** is the one change after the gate. It is docs only, and docs and generated are run again before the push.
