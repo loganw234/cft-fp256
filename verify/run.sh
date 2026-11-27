@@ -3241,12 +3241,15 @@ HIP_TIER_FMADIFF_SEED=20261110
 HIP_TIER_PROGDIFF_N=524288
 HIP_TIER_PROGDIFF_SEED=1
 HIP_TIER_EDGE=131250
-# The first chunk's sha256s on record, the same on both vendors: <tool>
-# <format> <stream> <op> <the inputs> <the output, generic = fixed>.
-# hip-fmadiff's: fp256's study stream GPU-A's (docs/studies/gpu-a/captured/
-# part2-extra.txt), its edge stream G3A's, fp128's G3A2's (docs/VALIDATION.md,
-# their entries); hip-progdiff's G3B's (its entry, "The program
-# differential"); every one reproduced at the base by G3D-1.
+# The first chunk's sha256s, the same on both vendors: <tool> <format>
+# <stream> <op> <the inputs> <the output, generic = fixed>. Where each is on
+# record: hip-fmadiff's fp256 study stream in full in GPU-A's
+# docs/studies/gpu-a/captured/part2-extra.txt; its fp128 streams in full in
+# G3A2's entry of docs/VALIDATION.md; its fp256 edge stream (G3A's) and
+# hip-progdiff's (G3B's, "The program differential") there as 8- and 16-hex
+# prefixes only, in full in those parcels' run logs. G3D-1 reproduced every
+# one at the base, and the full digests here are its runs' (the lead's
+# wording at the merge, on verifier VG3D-1's note).
 HIP_TIER_SUMS="
 fmadiff fp256 study fma b07642724a9ebae30acb76fd0df3e7ca34f23397c62d9ee81b0b1f5a9d40918b 0bb5295edfc0754f893cd7bb5ce169175fdc3f9263271597f54d90ffcf03adc9
 fmadiff fp256 study add 21ae7619bd17863f2b7d4bd4ded47b8be1310bd24e033d464db4d46c18b9419e b2b0aa080494f8e9b51a0a10a1579c4b9f5b3fb69593618d12304396cc295f73
@@ -3286,7 +3289,7 @@ progdiff fp128 edge mul 26728df98926a6b4510a84886ab138b32162948af7890cc4b7c46701
 # runs at the commit the row names. The stage prints its seconds against
 # its device's, a NOTE when over and never a FAIL; verify/test-hip-stage.sh
 # holds this line and the row to each other.
-HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=1100;AMD Radeon RX 7600=1200"
+HIP_TIER_CEILINGS="NVIDIA GeForce RTX 5060 Ti=1100;AMD Radeon RX 7600=1300"
 need hipcc gpu host-cc python mpmath
 stage hip-tier "the GPU backend's fixed tier (CFT_HIP_TIER=fixed, round 3) on this host's GPU through hip:0, beside hip and sharing its set-up: plants first (round 3's 27, each on its cheapest red and green without it, the differentials' own, the earlier rounds' program plants under the tier, a stray plant refused by name), then the differential streams held to their recorded sums, GPU-A's corpora under each tier against sw, the golden referee under each tier, hip-test's fixed and progtier legs and seq_check under the tier, each leg's log naming its device and its tier, its seconds against its ceiling; skipped by name without hipcc or a GPU" -- do_hip_tier
 

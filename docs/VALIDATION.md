@@ -30471,3 +30471,42 @@ test ran red at the base on the RX 7600 alone (18 and 19 not reached by the dead
 alone. With a refuse plant's runs made without it, its bits check says "its bits are not green under it" beside a sha256 that
 is the software handle's: what fails there is the device line that does not name the plant, which the message does not say
 (the runner is left as the runs measured it).
+
+## 2026-11-27 - parcel G3D-1's merge, the lead's: the merge, verifier VG3D-1's checks, the ceilings set at the merge, and the known limits (the lead)
+
+**The merge** (branch merge-g3d1 on main d38904af, G3D-1's base): 0c5a22a2, `git merge --no-ff` of g3d1 at ec91e356. The merge's tree is ec91e356's.
+
+**Verified** by VG3D-1 (Sonnet) in one pass at ec91e356: no (a), no (b).
+
+**What VG3D-1 ran,** MEASURED by it in bundle clones of the tip, inside the lead's locks:
+- hip on both GPUs: PASS, with G2D's counts (16 RED, 9 GREEN, 360 ok, 106 device lines, 23 CHUNK lines) and all 123 tier words generic; 1,026 s on the RTX 5060 Ti and 1,678 s on the RX 7600.
+- hip-tier on both GPUs: PASS, 55 RED, 17 GREEN, 43 ok, 317 device lines; 1,059 s on the 5060 Ti; 1,228 s and 1,140 s on the RX 7600. The first started the instant its own hip run ended, and went past the 1,200 s G3D-1 had set (the stage printed its NOTE).
+- hip-tier with CFT_HIP_TIER=fixed exported, on the 5060 Ti: PASS, 1,084 s, its per-leg tier-word table identical to the run without.
+- Mutants, each by its own method, every one caught by name:
+  - the unset without each of the four new names;
+  - plant runs made without their plants, and a plant's check moved where it cannot reach;
+  - a library plant made inert, and the route probe's indexes swapped;
+  - another stream seed, and a recorded digit changed;
+  - five default legs forced to the fixed tier;
+  - seq_check under the tier, red under seqna-aug (297 MISMATCH) and seqfx-rmm (3).
+- The 24 names read reader by reader; the HIP=0 objects byte for byte (17 files); the counts in every file; check_docs_index naming only CLAUDE.md's two lines; sync.py --check, test_cert2, the stage test's text cases and test-inner-skips.
+
+**Not run by VG3D-1:**
+- the author's --gpu cases, its own mutants standing in their place;
+- `make test` whole (on this desktop the build-id test meets the /tmp trap), and on Linux;
+- the libcft stage;
+- four tier-word mutants (device-test, formatOf, corpora, refuse), whose calls it read.
+
+**The lead's changes at the merge** (this commit):
+- CLAUDE.md :9 and :10 now say "31 of 57" and "47 of 57" (the lead's lines: the brief's decision 4).
+- **hip-tier's ceiling on the RX 7600 is 1,300 s, from 1,200 s,** by the rule over every quiet run at the tip: G3D-1's 1,138 s and 1,145 s, and VG3D-1's 1,228 s and 1,140 s. The 5060 Ti's 1,100 s stands (1,067, 1,071, 1,059 and 1,084 s). The runner's constant and VERIFICATION.md's row move together, so the text case that holds them equal stays green.
+- The comment above HIP_TIER_SUMS is made exact (VG3D-1's note 2): VALIDATION holds G3A's fp256 edge sums and G3B's sums only as 8- and 16-hex prefixes, and the full digests are in those parcels' run logs and, for the fp256 study stream, in GPU-A's part2-extra.txt.
+
+**Known limits** (the lead's):
+- The RX 7600's times vary by about 12 % from run to run, unexplained (BELIEVED the machine's clock or thermal state; its governor is powersave). Its hip at the tip ran 1,764 s and 1,678 s, against the 1,800 s ceiling.
+- The ceilings are prose plus a NOTE: the stage enforces none.
+- hip-tier repeats hip's set-up, about 307 to 336 s on the 5060 Ti.
+- The new --gpu cases 18 and 19 were not shown red by a run: the red-first run was stopped at its deadline.
+- The entry's 3,287 log lines and 20 lines of `make -n` were 3,286 and 18 in the verifier's runs. Both are claims of identity, which held either way.
+
+**Before the push:** Not yet. The desktop's checks at this merge, and a short box gate (docs, innerskips, generated, libcft) after the weekend preflight.
