@@ -30085,7 +30085,9 @@ or getenv moved: `git diff --stat d38904af` lists verify/run.sh, verify/test-hip
 python/project_figures.py, README.md, docs/README.md, docs/VERIFICATION.md, docs/VALIDATION.md, docs/FIGURES.md and the
 verify-stages figure's three files. Brief: Data/runs/2026-11-11-gpu-backend/briefs/G3D-1.md; ledger: ledger/G3D-1.md.
 
-**The devices,** by their `CFT_HIP_INFO` lines (the default build at c8ee5d65; the RTX 4070 compiled for and never run):
+**The devices,** by their `CFT_HIP_INFO` lines (the default build at c8ee5d65, built for the device's own architecture alone;
+the RTX 4070, the display's GPU, never run: every 5060 Ti command carried `CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=1`):
 - `hip:0 = NVIDIA GeForce RTX 5060 Ti (sm_120, 36 multiprocessors, bus 0000:05:00.0, 16283 MiB), HIP platform nvidia, runtime
   12090, driver 13040; of 1 visible, CUDA_VISIBLE_DEVICES=1; this libcft: HIP_ARCH 120, stage 64 MiB, page 256 bytes, kernels
   40/40/64/40 registers and 4728/4208/16864/4160 bytes local a thread (run/level/seq/aug); tier generic, fixed kernels 134/59
@@ -30117,13 +30119,13 @@ the device, and plant runs' stderr written into the middle of their output's lin
 
 Run 2 on the 5060 Ti had the parcel's own `bash verify/run.sh --only libcft` (item 6's `make test`, mingw64) on this desktop
 beside its last five minutes, which WSL's load average cannot show; by the lead's word it is not a quiet run, and run 3 was
-made with nothing of the parcel's beside it. On the RX 7600 run 2 is about 12 per cent slower than run 1 in every phase, the
-CPU-bound ones included, with nothing else on the machine (`ps` at its start and after it: kernel workers, lemond idle), the
-CPU governor powersave (1.6 GHz between runs) and the card at 48 C after it: NOT EXPLAINED (BELIEVED the machine's clock or
-thermal state). **The ceilings, by the rule** (the next 100 s above the slower of two quiet runs): **1,200 s on the 5060 Ti**
-(runs 1 and 3) and **1,800 s on the RX 7600** (runs 1 and 2) - they were 1,000 s and 1,400 s, which seq_check's pow part
-(M3P) and fp32's (M3F2) had outgrown (the lead's 1,177 s and 1,549 s at 0c05ce52). docs/VERIFICATION.md's `hip` row carries
-them; they stay prose.
+made with nothing of the parcel's beside it. On the RX 7600 run 2 is about 12 per cent slower than run 1 in all, and slower
+in every phase of the table, the CPU-bound ones the most (the build 48 s against 22 s, the corpora 116 s against 75 s), with
+nothing else on the machine (`ps` at its start and after it: kernel workers, lemond idle), the CPU governor powersave (1.6
+GHz between runs) and the card at 48 C after it: NOT EXPLAINED (BELIEVED the machine's clock or thermal state). **The
+ceilings, by the rule** (the next 100 s above the slower of two quiet runs): **1,200 s on the 5060 Ti** (runs 1 and 3) and
+**1,800 s on the RX 7600** (runs 1 and 2) - they were 1,000 s and 1,400 s, which seq_check's pow part (M3P) and fp32's (M3F2)
+had outgrown (the lead's 1,177 s and 1,549 s at 0c05ce52). docs/VERIFICATION.md's `hip` row carries them; they stay prose.
 
 **The hazard, shown before the fix** (the 5060 Ti, the base's own default build, inside the lock): with `CFT_HIP_TIER=fixed`
 exported, `CFT_HIP_INFO=1 hip-corpus hip:0 conf-fp256.bin` - a default leg of the stage's own commands - printed "; tier
@@ -30157,7 +30159,9 @@ the only observer of `CFT_TRANSCEND_MINPREC`, whose bits cannot show it.
 **The tier word.** `hip_tier` (verify/run.sh, beside `hip_named`) holds every device line of a leg to "; tier <tier>, ".
 `hip` calls it with `generic` beside each of its eleven `hip_named` calls, and the shared set-up holds the device probe's
 line to it before any leg runs. Silent when it holds, so `hip`'s log is unchanged; red by name when not (cases 16 and 17
-below). Its cost in `hip`'s seconds is one grep a leg: nothing measurable.
+below). Its cost in `hip`'s seconds is one grep a leg: `hip` at c8ee5d65 took 1,148 s on the 5060 Ti (the base's runs 1,153,
+1,196 and 1,002 s) and 1,764 s on the RX 7600 (1,558 and 1,740 s) - no cost seen beyond each machine's own spread from run to
+run.
 
 **The extraction, and `hip` unchanged.** `do_hip`'s set-up - the unset, the platform and the device, the copy of host/ and
 its build, the device probe, hip-symcheck-plant and the `ldd` checks, the corpora and the software handle's sums - is now
@@ -30229,9 +30233,10 @@ hip-symcheck's symbol counts) and the device's name inside a message (scratch `t
 the lead's word was to measure first and propose one only past 1,100 and 1,200 s.
 
 **The 27 plants, each on its cheapest red** (item 0, the plants' build of the base's own stage run, on both GPUs; then the
-stage itself at c8ee5d65, both runs on both GPUs, every count the same as item 0's; every count READ from the run's own
-summary line, each run's device line naming the plant; seconds: the stage's run 1 at c8ee5d65, 5060 Ti / RX 7600, each the
-gap between its log's mtime and the log before it, so the first holds the `ldd` of the plants' four tools):
+stage itself at c8ee5d65, both runs on both GPUs, every count the same as item 0's where item 0 ran it (seqna-aug at fp32 on
+the RX 7600 alone); every count READ from the run's own summary line, each run's device line naming the plant; seconds: the
+stage's run 1 at c8ee5d65, 5060 Ti / RX 7600, each the gap between its log's mtime and the log before it, so the first holds
+the `ldd` of the plants' four tools):
 
 | plant (bit) | its cheapest red, and how it is judged | count | seconds | green without it (the same command) |
 |---|---|---|---|---|
@@ -30341,7 +30346,10 @@ desktop, mingw64 gcc 16.1, the base and the tip built in the same directory): `m
 verify/run.sh --only libcft`, c8ee5d65's host/ before its commit): PASS, nothing skipped, 1,211 s, its `make test` replaying
 the vectors (168 sets, 1,228,415 cases, all matching) and then running both, 1,871,941 checks in 5.6 s and 1,871,939 in 8.0
 s, 0 failed (beside the 5060 Ti's base run 2, so its seconds are no figure). CI runs that stage on Linux
-(.github/workflows/gates.yml's `--only` list), so `make test` there runs the two from now on.
+(.github/workflows/gates.yml's `--only` list), so `make test` there runs the two from now on. On Linux (WSL cft-gpu's gcc
+13.3, a clone of this branch's second commit, 4aa599fe, from its bundle) `make -C host fma256-test fma128-test` built both
+with no warning, and they ran 1,871,941 checks in 5.2 s and 1,871,939 in 7.4 s, 0 failed (beside the stage test's GPU run
+there, so no figure); `make test` whole was not run on a Linux host here.
 
 **The stage's own test** (verify/test-hip-stage.sh, run by hand, no stage runs it; its old cases' text unchanged). New with
 no GPU: (11) the GPU block's unset line names the ten, each one of cert2.ENVIRONMENT_NAMES (read from cert2.py: 24); copies
@@ -30363,7 +30371,28 @@ naming the plant logs whose lines say fixed (hip_tier on a leg); (18) the real r
 every device line of the stage's log tier generic; (19) hip-tier with its hip-fmadiff seed moved in a copy
 (HIP_TIER_FMADIFF_SEED=20261111) FAILS naming each of its sixteen streams by its first chunk, hip-progdiff's held, nothing
 after the streams. Red before green: the new test against the base's runner, cert2.py and VERIFICATION.md (a scratch tree):
-cases 1 to 4 and 10 ok, 11 to 14 red (7 of 15 failed).
+cases 1 to 4 and 10 ok, 11 to 14 red (7 of 15 failed). At the tip (4aa599fe): on this desktop `bash verify/test-hip-stage.sh`
+15 cases, 0 failed, 24 s; with `--gpu` on the RTX 5060 Ti (a bundle clone, scratch `replay_test.sh`, inside the lock,
+15:47:50 to 16:50:06) "test-hip-stage: 26 cases, 0 failed" in 3,736 s, rc 0, nothing left in /tmp - the text cases again
+(case 14 runs there, with `HIP_DEVICE=0`), the old five (5 69 s, 6 459 s, 7 427 s, 8 437 s, 9 414 s: the test's replacements
+still act on `hip` from inside the shared functions), 15 518 s ("FAIL plant fixed-rmm did not turn its check red" on
+conf-fp256, on hip-fmadiff and on the referee's sample, "FAIL plant fixed-refuse did not turn its check red" on the fixed leg
+and its bits check, nothing after the plants), 16 60 s ("FAIL the device probe (hip-test hip:0 -l open, no tier set by this
+stage) does not say tier generic", quoting the line), 17 394 s (18 plant logs named, "plants, plant-flip: 1 of its 1 device
+lines say another tier than generic"), 18 396 s (62 device lines, every one tier generic; the only FAIL lines drop-flag's,
+bypassed), and 19 558 s (sixteen "FAIL the stream hip-fmadiff ...; the first chunk's inputs ..., not the recorded ..." lines,
+none of hip-progdiff's, nothing after the streams). **Red first** (the RX 7600: c8ee5d65's test, `--gpu`, against d38904af's
+tree - a bundle clone with the test alone copied in - inside the lock from 15:36:47, the lead's deadline 17:14 for its
+session): the text cases 11 to 14 FAIL, as in the desktop's red run; 5 to 9 ok (55, 493, 491, 486 and 484 s: the base's
+runner has them); 15 FAIL in seconds ("--only names unknown stage 'hip-tier'", rc 2); 16 FAIL after the whole of the base's
+stage, about 27 minutes, which ran under the exported tier and PASSED (rc 0, "every leg green") with 106 of its 107 device
+lines saying `tier fixed` - the hazard, in the stage's own log, that no check of the base's reads (the 107th is one of the
+certificate leg's remakes, which name two distinct lines); 17 FAIL after the whole stage again (16:38 to 17:08): every plant
+run made under the fixed tier (26 of the plants' build's device lines `tier fixed`), every plant still red - hip's plants act
+at fp64 and in the divide, where the tier does not reach - and the stage PASSED; 18 started at 17:08 and was stopped at the
+deadline, 17:14, with its whole session (`pkill -s` by the test's PID), so **18 and 19 are not shown red by a run**: 18's
+hazard is item 0's and case 16's log above, and 19 cannot be made at the base, whose runner has no `HIP_TIER_FMADIFF_SEED`
+for the test's copy to move (the test stops at that marker).
 
 **The expected failures on this branch: CLAUDE.md's two count lines, and only they.** CLAUDE.md is the lead's and is not
 edited here; its lines 9 and 10 read "make verify-quick # ~20 min, 31 of 56 stages" and "make verify-gate # ~2 h quiet, 46 of
@@ -30376,7 +30405,15 @@ messages, all of the two lines. And `python -B python/project_figures.py --check
 states 56 where the data gives 57" and "claim gate-of-total: CLAUDE.md states 46 where the data gives 47", and calls the
 verify-stages sidecar and the gallery STALE: they were generated (`--write`, all fifteen figures) against a scratch copy of
 the tree with CLAUDE.md's two lines as the lead will make them, so that they are right after the merge's edit; generated on
-the branch as it stands they would carry the two claims' disagreement and go stale at that edit.
+the branch as it stands they would carry the two claims' disagreement and go stale at that edit. With the two lines made
+right in a scratch root - a clone of this branch's second commit (4aa599fe) from its bundle, CLAUDE.md's lines 9 and 10
+edited to "31 of 57" and "47 of 57" and nothing else - `python -B python/check_docs_index.py` passes (its 47 negative
+controls each caught by name), `python -B python/project_figures.py --check` passes (15 figures, every statement the record
+makes agrees, its 35 planted faults caught), and `bash verify/run.sh --only docs,generated` passes (docs 54 s, generated 98
+s; its one inner skip the Windows-only archive plant, a name with a backslash). In the worktree at that commit the same run
+FAILS both stages, each on the two lines alone: docs on check_docs_index's four messages above; generated on project_figures'
+two claims and two STALE files, and on project_packager's `--check`, whose scratch copy fails for the same project_figures
+check.
 
 **The hand runs the stage still does not hold** (G3C's table, briefs/G3C.md): the per-family corpora (G3C's splitter is
 scratch: the stage runs whole files, which hold every family); the route read case by case (G3C's `probecorpus`: the stage
@@ -30386,7 +30423,12 @@ families' rates (the stage times nothing but itself); the `__noinline__` lever; 
 +120 lines and a row of the corpora block), not built (unasked).
 
 **Every figure here, and the tree it was taken at** (every GPU run from a fresh clone of a bundle, the SHA and the content
-asserted apart, inside the lead's locks; the desktop's in this worktree):
+asserted apart, inside the lead's locks; the desktop's in this worktree). c8ee5d65 is this parcel's first commit on the base
+d38904af and differs from it in verify/run.sh, verify/test-hip-stage.sh, host/Makefile (the `make test` wiring alone),
+python/project_figures.py, README.md, docs/README.md, docs/VERIFICATION.md and the verify-stages figure's files; 4aa599fe,
+the second, in HIP_TIER_CEILINGS's two numbers, the corpora block's print, case 14's `HIP_DEVICE` and the docs (the two rows,
+this entry, the counts); the third, the tip, in this entry's last results and wording, two sentences of the `hip` row, and
+docs/README.md's counts.
 
 | figure | the tree | how |
 |---|---|---|
@@ -30425,4 +30467,7 @@ first varies from run to run, so two runs' logs are the same only once those lin
 from c8ee5d65's, where every figure of hip-tier was taken, in HIP_TIER_CEILINGS's two numbers (the NOTE becomes a line within
 the ceiling) and in the corpora block's print of its 60 runs' logs (330 lines, 60 device lines, 30 of each tier), so the
 tip's hip-tier log has 3,287 lines and 317 device lines where c8ee5d65's had 2,957 and 257. The GPU cases of the stage's own
-test ran red at the base on the RX 7600 alone and green at the tip on the 5060 Ti alone.
+test ran red at the base on the RX 7600 alone (18 and 19 not reached by the deadline) and green at the tip on the 5060 Ti
+alone. With a refuse plant's runs made without it, its bits check says "its bits are not green under it" beside a sha256 that
+is the software handle's: what fails there is the device line that does not name the plant, which the message does not say
+(the runner is left as the runs measured it).
